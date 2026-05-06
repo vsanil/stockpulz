@@ -1512,9 +1512,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 timeout=5,
             ).json()
             username = resp.get("result", {}).get("username", "")
-            bot_link = f"https://t.me/{username}?start=ref" if username else "https://t.me/Stockpulz?start=ref"
+            bot_link = f"https://t.me/{username}?start=ref" if username else "https://t.me/SanilStockBot?start=ref"
         except Exception:
-            bot_link = "https://t.me/Stockpulz?start=ref"
+            bot_link = "https://t.me/SanilStockBot?start=ref"
 
         return (
             f"📲 <b>Share Stockpulz with friends:</b>\n\n"
