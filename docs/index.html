@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Stockpulz — Daily Market Picks, Delivered</title>
   <meta name="description" content="Get curated stock and crypto picks every morning with entry prices, targets, and stop losses. Powered by AI, delivered via Telegram." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+  <meta property="og:title" content="Stockpulz — Daily Market Picks, Delivered" />
+  <meta property="og:description" content="AI-curated stock & crypto picks every morning with entry prices, targets, and stop losses. Delivered via Telegram." />
+  <meta property="og:url" content="https://stockpulz.com" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Stockpulz — Daily Market Picks, Delivered" />
+  <meta name="twitter:description" content="AI-curated stock & crypto picks every morning with entry prices, targets, and stop losses. Delivered via Telegram." />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -18,7 +26,6 @@
       --muted: #8892a4;
       --accent: #4f8ef7;
       --accent-dim: rgba(79,142,247,0.12);
-      --accent-glow: rgba(79,142,247,0.25);
       --green: #34d399;
       --green-dim: rgba(52,211,153,0.12);
       --amber: #fbbf24;
@@ -36,6 +43,7 @@
       color: var(--text);
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
     }
 
     a { color: inherit; text-decoration: none; }
@@ -50,7 +58,7 @@
       justify-content: space-between;
       padding: 0 2rem;
       height: 60px;
-      background: rgba(13,15,20,0.85);
+      background: rgba(13,15,20,0.88);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
     }
@@ -86,18 +94,68 @@
     }
     .nav-cta:hover { opacity: 0.88; }
 
+    /* TICKER STRIP */
+    .ticker-strip {
+      width: 100%;
+      overflow: hidden;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 9px 0;
+    }
+
+    .ticker-track {
+      display: flex;
+      gap: 0;
+      width: max-content;
+      animation: ticker-scroll 30s linear infinite;
+    }
+    .ticker-track:hover { animation-play-state: paused; }
+
+    @keyframes ticker-scroll {
+      0%   { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    .ticker-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 22px;
+      font-size: 12.5px;
+      white-space: nowrap;
+      border-right: 1px solid var(--border);
+    }
+
+    .ticker-sym { font-weight: 700; color: var(--text); }
+    .ticker-up   { color: var(--green); font-size: 11px; }
+    .ticker-down { color: var(--red);   font-size: 11px; }
+    .ticker-flat { color: var(--muted); font-size: 11px; }
+
     /* HERO */
     .hero {
       text-align: center;
-      padding: 100px 2rem 80px;
+      padding: 90px 2rem 80px;
       max-width: 780px;
       margin: 0 auto;
+      position: relative;
+    }
+
+    /* Subtle dot grid background */
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, rgba(255,255,255,0.045) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+      mask-image: radial-gradient(ellipse 80% 60% at 50% 50%, black 40%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 50%, black 40%, transparent 100%);
     }
 
     .hero-badge {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
+      gap: 8px;
       padding: 6px 14px;
       border-radius: 999px;
       border: 1px solid var(--border-bright);
@@ -105,9 +163,31 @@
       font-size: 13px;
       color: var(--muted);
       margin-bottom: 32px;
+      position: relative;
     }
 
-    .hero-badge span { color: var(--green); font-size: 8px; }
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      flex-shrink: 0;
+      position: relative;
+    }
+    .pulse-dot::after {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      background: var(--green);
+      opacity: 0.4;
+      animation: pulse 2s ease-out infinite;
+    }
+    @keyframes pulse {
+      0%   { transform: scale(1);   opacity: 0.4; }
+      70%  { transform: scale(2.2); opacity: 0; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
 
     .hero h1 {
       font-size: clamp(36px, 6vw, 62px);
@@ -115,7 +195,7 @@
       line-height: 1.12;
       letter-spacing: -1.5px;
       margin-bottom: 22px;
-      color: var(--text);
+      position: relative;
     }
 
     .hero h1 em {
@@ -132,6 +212,7 @@
       max-width: 540px;
       margin: 0 auto 40px;
       line-height: 1.7;
+      position: relative;
     }
 
     .hero-actions {
@@ -140,6 +221,7 @@
       align-items: center;
       gap: 14px;
       flex-wrap: wrap;
+      position: relative;
     }
 
     .btn-primary {
@@ -214,6 +296,15 @@
       line-height: 1.65;
     }
 
+    .tg-time {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     .tg-date {
       font-size: 12px;
       color: var(--muted);
@@ -272,6 +363,51 @@
     .stat-num { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
     .stat-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
 
+    /* SOCIAL PROOF */
+    .social-proof {
+      text-align: center;
+      margin: 28px auto 0;
+      max-width: 480px;
+      padding: 0 1.5rem;
+    }
+
+    .avatars {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 10px;
+    }
+
+    .avatar-circle {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 2px solid var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      margin-left: -8px;
+    }
+    .avatar-circle:first-child { margin-left: 0; }
+    .av1 { background: #4f8ef7; color: #fff; }
+    .av2 { background: #34d399; color: #065f46; }
+    .av3 { background: #fbbf24; color: #78350f; }
+    .av4 { background: #f87171; color: #7f1d1d; }
+    .av5 { background: #a78bfa; color: #3b0764; }
+
+    .social-text {
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .social-stars { color: var(--amber); font-size: 13px; letter-spacing: 1px; }
+
     /* FEATURES */
     .section {
       max-width: 960px;
@@ -307,8 +443,14 @@
 
     .features-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      grid-template-columns: repeat(3, 1fr);
       gap: 16px;
+    }
+    @media (max-width: 740px) {
+      .features-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 480px) {
+      .features-grid { grid-template-columns: 1fr; }
     }
 
     .feat-card {
@@ -330,12 +472,12 @@
       font-size: 20px;
       margin-bottom: 16px;
     }
-    .feat-icon.blue { background: var(--accent-dim); }
-    .feat-icon.green { background: var(--green-dim); }
-    .feat-icon.amber { background: var(--amber-dim); }
-    .feat-icon.red { background: rgba(248,113,113,0.1); }
+    .feat-icon.blue   { background: var(--accent-dim); }
+    .feat-icon.green  { background: var(--green-dim); }
+    .feat-icon.amber  { background: var(--amber-dim); }
+    .feat-icon.red    { background: rgba(248,113,113,0.1); }
     .feat-icon.purple { background: rgba(167,139,250,0.12); }
-    .feat-icon.teal { background: rgba(45,212,191,0.1); }
+    .feat-icon.teal   { background: rgba(45,212,191,0.1); }
 
     .feat-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
     .feat-card p { font-size: 14px; color: var(--muted); line-height: 1.65; }
@@ -353,7 +495,6 @@
     .how-step {
       background: var(--bg2);
       padding: 36px 28px;
-      position: relative;
     }
 
     .how-num {
@@ -414,14 +555,10 @@
       border: 1px solid;
     }
     .tag.green { color: var(--green); border-color: rgba(52,211,153,0.3); background: var(--green-dim); }
-    .tag.blue { color: var(--accent); border-color: rgba(79,142,247,0.3); background: var(--accent-dim); }
+    .tag.blue  { color: var(--accent); border-color: rgba(79,142,247,0.3); background: var(--accent-dim); }
     .tag.amber { color: var(--amber); border-color: rgba(251,191,36,0.3); background: var(--amber-dim); }
 
-    .sample-picks {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
+    .sample-picks { display: flex; flex-direction: column; gap: 10px; }
 
     .pick-row {
       display: flex;
@@ -431,14 +568,16 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 13px 16px;
+      transition: border-color 0.15s;
     }
+    .pick-row:hover { border-color: var(--border-bright); }
 
     .pick-left { display: flex; flex-direction: column; gap: 2px; }
-    .pick-sym { font-weight: 700; font-size: 15px; }
+    .pick-sym  { font-weight: 700; font-size: 15px; }
     .pick-name { font-size: 12px; color: var(--muted); }
     .pick-right { text-align: right; }
     .pick-target { font-size: 13px; font-weight: 600; color: var(--green); }
-    .pick-entry { font-size: 12px; color: var(--muted); }
+    .pick-entry  { font-size: 12px; color: var(--muted); }
 
     /* CTA */
     .cta-section {
@@ -447,6 +586,17 @@
       max-width: 600px;
       margin: 0 auto;
     }
+
+    .cta-social {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+
+    .cta-social-text { font-size: 14px; color: var(--muted); }
+    .cta-social-dot  { width: 4px; height: 4px; border-radius: 50%; background: var(--border-bright); }
 
     .cta-section h2 {
       font-size: clamp(28px, 5vw, 44px);
@@ -461,6 +611,12 @@
       margin-bottom: 36px;
     }
 
+    .cta-note {
+      margin-top: 18px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
     /* FOOTER */
     footer {
       border-top: 1px solid var(--border);
@@ -470,13 +626,28 @@
       color: var(--muted);
     }
 
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 12px;
+    }
+
+    .footer-links a {
+      color: var(--muted);
+      font-size: 13px;
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: var(--text); }
+
     footer span { color: var(--text); font-weight: 500; }
 
     .disclaimer {
       max-width: 600px;
       margin: 8px auto 0;
       font-size: 12px;
-      opacity: 0.6;
+      opacity: 0.5;
       line-height: 1.6;
     }
 
@@ -499,13 +670,54 @@
   <a href="https://t.me/Stockpulz?start=ref" class="nav-cta">Join Free</a>
 </nav>
 
+<!-- TICKER STRIP -->
+<div class="ticker-strip">
+  <div class="ticker-track">
+    <!-- First set -->
+    <div class="ticker-item"><span class="ticker-sym">NVDA</span><span class="ticker-up">▲ +3.2%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">AAPL</span><span class="ticker-up">▲ +1.4%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">MSFT</span><span class="ticker-up">▲ +2.1%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">BTC</span><span class="ticker-up">▲ +4.8%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">META</span><span class="ticker-up">▲ +1.9%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">ETH</span><span class="ticker-up">▲ +3.6%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">GOOGL</span><span class="ticker-down">▼ -0.8%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">SOL</span><span class="ticker-up">▲ +6.2%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">TSLA</span><span class="ticker-down">▼ -1.3%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">AMZN</span><span class="ticker-up">▲ +0.9%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">BNB</span><span class="ticker-up">▲ +2.4%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">AVAX</span><span class="ticker-up">▲ +5.1%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">AMD</span><span class="ticker-up">▲ +2.7%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">XRP</span><span class="ticker-flat">— 0.0%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">JPM</span><span class="ticker-up">▲ +1.1%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">LINK</span><span class="ticker-up">▲ +7.3%</span></div>
+    <!-- Duplicate for seamless loop -->
+    <div class="ticker-item"><span class="ticker-sym">NVDA</span><span class="ticker-up">▲ +3.2%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">AAPL</span><span class="ticker-up">▲ +1.4%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">MSFT</span><span class="ticker-up">▲ +2.1%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">BTC</span><span class="ticker-up">▲ +4.8%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">META</span><span class="ticker-up">▲ +1.9%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">ETH</span><span class="ticker-up">▲ +3.6%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">GOOGL</span><span class="ticker-down">▼ -0.8%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">SOL</span><span class="ticker-up">▲ +6.2%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">TSLA</span><span class="ticker-down">▼ -1.3%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">AMZN</span><span class="ticker-up">▲ +0.9%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">BNB</span><span class="ticker-up">▲ +2.4%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">AVAX</span><span class="ticker-up">▲ +5.1%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">AMD</span><span class="ticker-up">▲ +2.7%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">XRP</span><span class="ticker-flat">— 0.0%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">JPM</span><span class="ticker-up">▲ +1.1%</span></div>
+    <div class="ticker-item"><span class="ticker-sym">LINK</span><span class="ticker-up">▲ +7.3%</span></div>
+  </div>
+</div>
+
 <!-- HERO -->
 <section class="hero">
   <div class="hero-badge">
-    <span>●</span> Live daily picks · Stocks &amp; Crypto
+    <div class="pulse-dot"></div>
+    Live daily picks · Stocks &amp; Crypto
   </div>
   <h1>Your edge in the<br/><em>market, every morning</em></h1>
-  <p>Curated picks with entry prices, profit targets, and stop losses — delivered straight to your Telegram before the bell.</p>
+  <p>Curated picks with entry prices, profit targets, and stop losses — delivered straight to your Telegram before the opening bell.</p>
   <div class="hero-actions">
     <a href="https://t.me/Stockpulz?start=ref" class="btn-primary">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.28 13.398l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.868.16z"/></svg>
@@ -527,20 +739,24 @@
     </div>
     <div class="tg-body">
       <div class="tg-msg">
-        <div class="tg-date">Today's Picks · May 5</div>
+        <div class="tg-time">
+          <div class="pulse-dot" style="width:6px;height:6px;"></div>
+          Today · 9:30 AM ET
+        </div>
+        <div class="tg-date">Today's Picks · May 6</div>
 
         <div class="tg-section">Stocks — Short Term</div>
         <div class="tg-row">
           <div>
             <div class="tg-ticker">NVDA</div>
-            <div class="tg-detail">Entry $875 · Target $920</div>
+            <div class="tg-detail">Entry $875 · Target $920 · Stop $840</div>
           </div>
           <div class="tg-pct pos">+5.1%</div>
         </div>
         <div class="tg-row">
           <div>
             <div class="tg-ticker">MSFT</div>
-            <div class="tg-detail">Entry $418 · Target $445</div>
+            <div class="tg-detail">Entry $418 · Target $445 · Stop $400</div>
           </div>
           <div class="tg-pct pos">+6.5%</div>
         </div>
@@ -574,12 +790,27 @@
     <div class="stat-label">AM delivery daily</div>
   </div>
   <div class="stat">
-    <div class="stat-num" style="color: var(--green);">2–5</div>
-    <div class="stat-label">picks per day</div>
+    <div class="stat-num" style="color: var(--green);">5</div>
+    <div class="stat-label">picks every morning</div>
   </div>
   <div class="stat">
     <div class="stat-num" style="color: var(--amber);">Free</div>
     <div class="stat-label">invite-only access</div>
+  </div>
+</div>
+
+<!-- SOCIAL PROOF -->
+<div class="social-proof">
+  <div class="avatars">
+    <div class="avatar-circle av1">VS</div>
+    <div class="avatar-circle av2">AK</div>
+    <div class="avatar-circle av3">MR</div>
+    <div class="avatar-circle av4">JL</div>
+    <div class="avatar-circle av5">SP</div>
+  </div>
+  <div class="social-text">
+    <span class="social-stars">★★★★★</span>
+    Traders getting picks every morning
   </div>
 </div>
 
@@ -603,7 +834,7 @@
     <div class="feat-card">
       <div class="feat-icon green">✅</div>
       <h3>10:30 AM confirmation</h3>
-      <p>After market open, get a confirmation update with current prices versus entry levels so you know what to do with each pick.</p>
+      <p>After market open, get a live update comparing current prices to entry levels so you know exactly what to do.</p>
     </div>
     <div class="feat-card">
       <div class="feat-icon teal">📅</div>
@@ -613,12 +844,12 @@
     <div class="feat-card">
       <div class="feat-icon purple">🎮</div>
       <h3>Paper trading mode</h3>
-      <p>Follow picks in a simulated portfolio. Track P&amp;L without risking real money — great for building conviction.</p>
+      <p>Follow picks in a simulated portfolio. Track P&amp;L without risking real money — great for building conviction before going live.</p>
     </div>
     <div class="feat-card">
       <div class="feat-icon red">🚨</div>
       <h3>Instant alerts</h3>
-      <p>Admin broadcast feature delivers breaking market news and updates directly to all subscribers in real time.</p>
+      <p>Breaking market news and urgent updates delivered directly to all subscribers in real time — no delay, no noise.</p>
     </div>
   </div>
 </section>
@@ -634,19 +865,49 @@
       <div class="how-num">Step 01</div>
       <span class="how-icon">🔗</span>
       <h3>Request access</h3>
-      <p>Tap the invite link and send <code style="font-size:12px; background:rgba(255,255,255,0.07); padding:1px 5px; border-radius:4px;">/start</code> in Telegram. Your request is sent to the admin for approval.</p>
+      <p>Tap the invite link and send <code style="font-size:12px; background:rgba(255,255,255,0.07); padding:1px 5px; border-radius:4px;">/start</code> in Telegram. Your request goes straight to the admin.</p>
     </div>
     <div class="how-step">
       <div class="how-num">Step 02</div>
       <span class="how-icon">✅</span>
       <h3>Get approved</h3>
-      <p>Once approved, you instantly receive today's picks. No waiting until tomorrow — you're in from the moment access is granted.</p>
+      <p>Once approved, you instantly receive today's picks — no waiting until tomorrow. You're in from the moment access is granted.</p>
     </div>
     <div class="how-step">
       <div class="how-num">Step 03</div>
       <span class="how-icon">📬</span>
       <h3>Receive daily picks</h3>
       <p>Every morning at 9:30 AM, Stockpulz drops curated picks in your Telegram. Check the 10:30 AM confirmation and make your move.</p>
+    </div>
+    <div class="how-step" style="background: var(--bg3);">
+      <div class="how-num" style="color: var(--green);">10:30 AM · Live</div>
+      <div style="background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 13px 14px; margin-top: 6px;">
+        <div style="font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 0.6px; text-transform: uppercase; margin-bottom: 10px;">Confirmation Alert</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border);">
+          <div>
+            <div style="font-weight: 700; font-size: 13px;">NVDA</div>
+            <div style="font-size: 11px; color: var(--muted);">Entry $875 → Now $891</div>
+          </div>
+          <div style="font-size: 12px; font-weight: 700; color: var(--green);">✅ +1.8%</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border);">
+          <div>
+            <div style="font-weight: 700; font-size: 13px;">BTC</div>
+            <div style="font-size: 11px; color: var(--muted);">Entry $96,200 → Now $97,850</div>
+          </div>
+          <div style="font-size: 12px; font-weight: 700; color: var(--green);">✅ +1.7%</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0;">
+          <div>
+            <div style="font-weight: 700; font-size: 13px;">MSFT</div>
+            <div style="font-size: 11px; color: var(--muted);">Entry $418 → Now $414</div>
+          </div>
+          <div style="font-size: 12px; font-weight: 700; color: var(--amber);">⚠️ Watch</div>
+        </div>
+        <div style="margin-top: 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 8px;">
+          🔴 exit &nbsp;✅ hold &nbsp;⚠️ watch
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -673,7 +934,7 @@
           <span class="pick-name">Apple Inc.</span>
         </div>
         <div class="pick-right">
-          <div class="pick-target">Target $210</div>
+          <div class="pick-target">▲ Target $210</div>
           <div class="pick-entry">Entry $192 · Stop $184</div>
         </div>
       </div>
@@ -683,7 +944,7 @@
           <span class="pick-name">Ethereum</span>
         </div>
         <div class="pick-right">
-          <div class="pick-target">Target $2,150</div>
+          <div class="pick-target">▲ Target $2,150</div>
           <div class="pick-entry">Entry $1,950 · Stop $1,820</div>
         </div>
       </div>
@@ -693,7 +954,7 @@
           <span class="pick-name">Meta Platforms</span>
         </div>
         <div class="pick-right">
-          <div class="pick-target">Target $585</div>
+          <div class="pick-target">▲ Target $585</div>
           <div class="pick-entry">Entry $540 · Stop $515</div>
         </div>
       </div>
@@ -703,7 +964,7 @@
           <span class="pick-name">Solana</span>
         </div>
         <div class="pick-right">
-          <div class="pick-target">Target $162</div>
+          <div class="pick-target">▲ Target $162</div>
           <div class="pick-entry">Entry $148 · Stop $138</div>
         </div>
       </div>
@@ -713,16 +974,30 @@
 
 <!-- CTA -->
 <section class="cta-section">
+  <div class="cta-social">
+    <div class="avatars" style="margin-bottom:0;">
+      <div class="avatar-circle av1" style="width:24px;height:24px;font-size:9px;">VS</div>
+      <div class="avatar-circle av2" style="width:24px;height:24px;font-size:9px;">AK</div>
+      <div class="avatar-circle av3" style="width:24px;height:24px;font-size:9px;">MR</div>
+    </div>
+    <span class="cta-social-text">Join traders getting picks every morning</span>
+  </div>
   <h2>Start your first<br/>trading morning</h2>
-  <p>Join Stockpulz and get today's picks delivered before the market opens — completely free, invite-only.</p>
+  <p>Free, invite-only access. Your picks arrive before the market opens.</p>
   <a href="https://t.me/Stockpulz?start=ref" class="btn-primary" style="font-size: 17px; padding: 16px 36px;">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.28 13.398l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.868.16z"/></svg>
     Join Stockpulz on Telegram
   </a>
+  <div class="cta-note">Tap to open Telegram · Request access · Get today's picks instantly</div>
 </section>
 
 <!-- FOOTER -->
 <footer>
+  <div class="footer-links">
+    <a href="https://t.me/Stockpulz?start=ref">Telegram</a>
+    <a href="#features">Features</a>
+    <a href="#how-it-works">How it works</a>
+  </div>
   <div><span>Stockpulz</span> — Daily market picks, delivered.</div>
   <div class="disclaimer">This is not financial advice. All picks are for informational purposes only. Past performance does not guarantee future results. Invest at your own risk.</div>
 </footer>
