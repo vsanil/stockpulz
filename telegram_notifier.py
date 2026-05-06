@@ -248,7 +248,7 @@ def handle_incoming_command(message_text: str, chat_id: str | None = None) -> st
     if reply:
         # Append /help hint to every command response except /help itself and daily picks
         cmd = text.lstrip("/").split()[0].lower() if text else ""
-        if cmd not in ("help", "start", "today") and not reply.startswith("📋"):
+        if cmd not in ("help", "start", "today", "share") and not reply.startswith("📋"):
             reply = reply + "\n\n<i>📋 /help  ·  📲 /share</i>"
         send_message(reply, chat_id=chat_id)
     return reply
