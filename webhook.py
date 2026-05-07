@@ -9,6 +9,8 @@ Or call the /register endpoint manually.
 
 import os
 import sys
+import time
+import threading
 import requests
 from flask import Flask, request, jsonify
 
@@ -16,6 +18,32 @@ from config_manager import get_config, get_allowed_users
 from telegram_notifier import handle_incoming_command, handle_callback_query, set_webhook, send_typing_action, typing_until_done, send_message
 
 app = Flask(__name__)
+
+
+# ── Keep-alive (prevents Render free tier cold starts) ────────────────────────
+
+def _keep_alive_loop():
+    """
+    Ping /health every 14 minutes so Render doesn't spin down the service.
+    Render free tier idles after 15 minutes of inactivity — first request after
+    idle takes 15-20s. This keeps the process warm at zero extra cost.
+    Requires RENDER_EXTERNAL_URL env var (set automatically by Render).
+    """
+    url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+    if not url:
+        print("[webhook] RENDER_EXTERNAL_URL not set — keep-alive disabled.")
+        return
+    ping_url = f"{url}/health"
+    print(f"[webhook] Keep-alive started — pinging {ping_url} every 14 min.")
+    while True:
+        time.sleep(14 * 60)
+        try:
+            resp = requests.get(ping_url, timeout=10)
+            print(f"[webhook] Keep-alive ping → {resp.status_code}")
+        except Exception as exc:
+            print(f"[webhook] Keep-alive ping failed: {exc}")
+
+threading.Thread(target=_keep_alive_loop, daemon=True).start()
 
 
 # ── Telegram webhook receiver ─────────────────────────────────────────────────

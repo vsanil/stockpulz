@@ -360,7 +360,7 @@ def run_morning(config: dict, now_et: datetime):
         )
     except Exception as exc:
         print(f"[agent] Claude analysis failed: {exc}")
-        _alert("⚠ Agent error today. Claude analysis unavailable.", admin_only=True)
+        _alert(f"❌ <b>Morning run FAILED</b> — Claude analysis error:\n<code>{exc}</code>", admin_only=True)
         return
 
     # Attach macro context so the formatter can display it
@@ -380,6 +380,25 @@ def run_morning(config: dict, now_et: datetime):
     # Auto-logging bot picks caused /positions to show positions the user never placed.
 
     _send_morning_personalised(picks, config, label="8:00 AM Morning Briefing")
+
+    # ── Admin run summary ─────────────────────────────────────────────────────
+    try:
+        stocks  = picks.get("stocks", {})
+        crypto  = picks.get("crypto", {})
+        n_st    = len(stocks.get("short_term", []))
+        n_lt    = len(stocks.get("long_term",  []))
+        n_cst   = len(crypto.get("short_term", []))
+        n_clt   = len(crypto.get("long_term",  []))
+        n_users = len(_all_recipients())
+        _alert(
+            f"✅ <b>Morning run complete</b>\n"
+            f"Sent to {n_users} user(s)  ·  "
+            f"📈 {n_st} ST + {n_lt} LT stocks  ·  "
+            f"🪙 {n_cst} ST + {n_clt} LT crypto",
+            admin_only=True,
+        )
+    except Exception as exc:
+        print(f"[agent] Admin run summary failed (non-critical): {exc}")
 
 
 # ── Confirmation run ──────────────────────────────────────────────────────────
