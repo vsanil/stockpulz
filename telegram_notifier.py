@@ -51,6 +51,27 @@ def _is_admin(chat_id: str | None = None) -> bool:
     return str(resolved) == str(os.environ.get("TELEGRAM_CHAT_ID", ""))
 
 
+# Bot username never changes — cache after first fetch so /share doesn't
+# make a getMe API call on every tap.
+_bot_username_cache: str = ""
+
+
+def _get_bot_username() -> str:
+    """Return the bot's Telegram username, fetching once and caching for the process lifetime."""
+    global _bot_username_cache
+    if _bot_username_cache:
+        return _bot_username_cache
+    try:
+        resp = requests.get(
+            TELEGRAM_API.format(token=_bot_token(), method="getMe"),
+            timeout=5,
+        ).json()
+        _bot_username_cache = resp.get("result", {}).get("username", "") or "SanilStockBot"
+    except Exception:
+        _bot_username_cache = "SanilStockBot"
+    return _bot_username_cache
+
+
 # ── Admin invite token (HMAC-signed, time-limited) ───────────────────────────
 
 def _make_admin_invite_token() -> str:
@@ -1615,14 +1636,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
     # ── /share ───────────────────────────────────────────────────────────────
     if text == "SHARE":
-        try:
-            resp = requests.get(
-                TELEGRAM_API.format(token=_bot_token(), method="getMe"),
-                timeout=5,
-            ).json()
-            bot_username = resp.get("result", {}).get("username", "") or "SanilStockBot"
-        except Exception:
-            bot_username = "SanilStockBot"
+        bot_username = _get_bot_username()   # cached after first call — no API hit
 
         # Admin share → cryptographically signed token, auto-approves the clicker.
         # Regular user share → still requires admin approval (normal pending flow).
