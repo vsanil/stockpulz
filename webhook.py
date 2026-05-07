@@ -80,26 +80,22 @@ def webhook():
     # ── Access control ────────────────────────────────────────────────────────
     owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
     allowed = get_allowed_users()   # always includes owner
-    is_start = text.strip().lower() in ("/start", "start")
+
+    # Any /start message (plain or with deep-link param like /start adminref_xxx)
+    # must reach handle_incoming_command — it contains the HMAC verification logic
+    # for admin invite links. Matching on the prefix covers all variants.
+    text_lower = text.strip().lower()
+    is_start = text_lower.startswith("/start") or text_lower == "start"
 
     if chat_id not in allowed:
-        # Anyone can /start — it registers their interest and notifies the owner
         if is_start:
-            send_message(
-                "👋 <b>Welcome!</b> You've been added to the waitlist.\n\n"
-                "The owner will grant you access shortly.",
-                chat_id=chat_id,
-            )
-            if owner and owner != chat_id:
-                send_message(
-                    f"🔔 <b>Access request</b>\n"
-                    f"New user wants in: <code>{chat_id}</code>\n"
-                    f"To approve: /adduser {chat_id}",
-                    chat_id=owner,
-                )
+            # Let handle_incoming_command deal with it — it handles pending flow,
+            # admin invite auto-approval, and welcome messages.
+            with typing_until_done(chat_id):
+                handle_incoming_command(text, chat_id=chat_id)
         else:
             send_message(
-                "🔒 You don't have access yet. Send /start to join the waitlist.",
+                "🔒 You don't have access yet. Send /start to request access.",
                 chat_id=chat_id,
             )
         return jsonify({"status": "ok", "access": "denied"}), 200
