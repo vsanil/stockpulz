@@ -179,6 +179,7 @@ def format_daily_message(picks: dict, config: dict,
 
     lines = [
         f"<b>📊 Daily Picks — {today}  <i>· NYSE 9:30 AM ET</i></b>",
+        "",
         f"<i>{_esc(picks.get('daily_summary', ''))}</i>",
     ]
     if macro_line:
