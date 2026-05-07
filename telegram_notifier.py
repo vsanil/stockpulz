@@ -560,6 +560,23 @@ def handle_callback_query(callback_query: dict) -> None:
         send_message(f"🚫 <code>{rej_id}</code> rejected and removed from pending.", chat_id=chat_id)
         return
 
+    if action == "set_risk":
+        profile = parts[1] if len(parts) > 1 else ""
+        if profile not in ("conservative", "moderate", "aggressive"):
+            send_message("⚠️ Invalid risk profile.", chat_id=chat_id)
+            return
+        update_user_config(chat_id, "risk_profile", profile)
+        descriptions = {
+            "conservative": "Fewer picks, tighter stops, low-volatility sectors, reduced crypto.",
+            "moderate":     "Balanced approach — default settings.",
+            "aggressive":   "More picks, wider stops, all sectors, full crypto allocation.",
+        }
+        send_message(
+            f"✅ Risk profile → <b>{profile}</b>\n<i>{descriptions[profile]}</i>\nTakes effect tomorrow.",
+            chat_id=chat_id,
+        )
+        return
+
     if action == "buy":
         ticker     = parts[1] if len(parts) > 1 else ""
         price_raw  = parts[2] if len(parts) > 2 else ""
@@ -973,9 +990,30 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return _parse_and_execute(f"SET BUDGET {text}".strip(), original=f"/set_budget {text}", chat_id=chat_id)
 
     if command == "alert":
+        if step == 2:
+            # User replied with price (and optional direction)
+            ticker    = data.get("ticker", "")
+            direction = data.get("direction", "auto")
+            # Parse "above 900" / "below 800" / "900"
+            parts_p = text.strip().split()
+            if len(parts_p) >= 2 and parts_p[0].lower() in ("above", "below"):
+                direction = parts_p[0].lower()
+                price_str = parts_p[1]
+            else:
+                price_str = parts_p[0] if parts_p else ""
+            try:
+                from price_alert_manager import add_alert
+                return add_alert(chat_id, ticker, float(price_str.replace(",", "")), direction)
+            except (ValueError, IndexError):
+                save_pending_state(chat_id, "alert", step=2,
+                                   data={"ticker": ticker, "direction": direction})
+                return f"🤔 Didn't catch that — enter a price like <code>850</code> or <code>above 900</code>"
+        # Step 1: user replied with ticker
         return _parse_and_execute(f"ALERT {text}", original=f"/alert {text}", chat_id=chat_id)
 
     if command == "unalert":
+        if step == 1:
+            return _parse_and_execute(f"UNALERT {text}", original=f"/unalert {text}", chat_id=chat_id)
         return _parse_and_execute(f"UNALERT {text}", original=f"/unalert {text}", chat_id=chat_id)
 
     if command == "paper_buy":
@@ -1432,9 +1470,23 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             price_val = parsed.get("price")
             direction = parsed.get("direction") or "auto"
             if not ticker:
-                return "🤔 I couldn't identify the stock. Try: /alert NVDA below 800 or /alert Apple when it hits $200"
+                save_pending_state(chat_id, "alert", step=1)
+                send_inline_keyboard(
+                    "🔔 Which stock should I watch?\n<i>e.g. NVDA, Apple, BTC</i>",
+                    [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
             if price_val is None:
-                return f"🤔 Got <b>{ticker}</b> but what price should I alert you at?"
+                save_pending_state(chat_id, "alert", step=2,
+                                   data={"ticker": ticker, "direction": direction})
+                send_inline_keyboard(
+                    f"🔔 Got <b>{ticker}</b>. Alert me when it goes above or below what price?\n"
+                    f"<i>e.g. <code>850</code> or <code>above 900</code></i>",
+                    [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
             return add_alert(chat_id, ticker, float(price_val), direction)
 
     if text == "UNALERT":
@@ -1455,7 +1507,13 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             ticker = parsed.get("ticker")
             price  = parsed.get("price")
         if not ticker:
-            return "🤔 Which stock's alert should I remove? Try: /unalert NVDA or /unalert Apple"
+            save_pending_state(chat_id, "unalert", step=1)
+            send_inline_keyboard(
+                "🔕 Which stock's alert should I remove?\n<i>e.g. NVDA, Apple, BTC</i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
         return remove_alert(chat_id, ticker, price)
 
     # ── Paper trading ─────────────────────────────────────────────────────────
@@ -1632,7 +1690,16 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         raw     = text[len("SET RISK "):].strip().lower()
         profile = raw if raw in ("conservative", "moderate", "aggressive") else _nl_param("risk", raw).lower()
         if profile not in ("conservative", "moderate", "aggressive"):
-            profile = "moderate"
+            send_inline_keyboard(
+                "⚖️ Choose your risk profile:",
+                [[
+                    {"text": "🛡 Conservative", "callback_data": "set_risk|conservative"},
+                    {"text": "⚖️ Moderate",     "callback_data": "set_risk|moderate"},
+                    {"text": "🚀 Aggressive",   "callback_data": "set_risk|aggressive"},
+                ]],
+                chat_id=chat_id,
+            )
+            return ""
         update_user_config(chat_id, "risk_profile", profile)
         descriptions = {
             "conservative": "Fewer picks, tighter stops, low-volatility sectors, reduced crypto.",
