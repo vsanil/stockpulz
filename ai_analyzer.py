@@ -594,6 +594,133 @@ def analyze_with_claude(
         raise RuntimeError(f"Claude analysis failed: {exc2}") from exc2
 
 
+# ── Personalization helpers ───────────────────────────────────────────────────
+
+def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str = "moderate") -> dict:
+    """
+    Use Claude Haiku to write a one-line "why this fits YOUR portfolio" note per pick.
+
+    Args:
+        picks:          Claude's daily picks dict (stocks + crypto sections).
+        open_positions: List of user's open trade dicts from their trade log.
+        risk_profile:   "conservative" | "moderate" | "aggressive"
+
+    Returns:
+        dict mapping ticker/symbol → personalized one-line note (max 10 words).
+        Empty dict on failure (graceful degradation).
+    """
+    if not open_positions and risk_profile == "moderate":
+        return {}   # No context to personalize with — skip the Haiku call
+
+    stocks = picks.get("stocks", {})
+    crypto = picks.get("crypto", {})
+    all_picks = (
+        [p.get("ticker", "") for p in stocks.get("short_term", [])] +
+        [p.get("ticker", "") for p in stocks.get("long_term",  [])] +
+        [c.get("symbol", "") for c in crypto.get("short_term", [])] +
+        [c.get("symbol", "") for c in crypto.get("long_term",  [])]
+    )
+    all_picks = [t for t in all_picks if t]
+    if not all_picks:
+        return {}
+
+    pos_summary = []
+    for t in open_positions[:8]:   # cap at 8 to keep prompt short
+        ticker = t.get("ticker", "")
+        ret    = t.get("return_pct")
+        sector = t.get("sector", "")
+        if ticker:
+            ret_str = f" ({ret:+.1f}%)" if ret is not None else ""
+            pos_summary.append(f"{ticker}{ret_str}{' · ' + sector if sector else ''}")
+
+    pos_text = (", ".join(pos_summary)) if pos_summary else "no current positions"
+
+    system = (
+        "You are a personal portfolio advisor. For each stock/crypto ticker listed, "
+        "write ONE very short note (max 10 words) explaining how it fits this specific user's portfolio. "
+        "Be concrete and personal — reference their existing holdings or risk profile. "
+        "Avoid generic phrases like 'good for growth'. "
+        "Return ONLY valid JSON: {\"AAPL\": \"...\", \"BTC\": \"...\"}. No other text."
+    )
+    user_msg = (
+        f"User's current open positions: {pos_text}\n"
+        f"User's risk profile: {risk_profile}\n"
+        f"Today's picks to personalise: {', '.join(all_picks)}\n\n"
+        f"Return a JSON object with one short note per ticker."
+    )
+
+    try:
+        client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        raw = message.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw)
+        print(f"[ai_analyzer] Personalized notes generated for {list(result.keys())}")
+        return result if isinstance(result, dict) else {}
+    except Exception as exc:
+        print(f"[ai_analyzer] personalize_picks failed (non-critical): {exc}")
+        return {}
+
+
+def generate_trade_debrief(trade: dict) -> str:
+    """
+    Use Claude Haiku to write a 2-sentence debrief after a trade closes.
+
+    Args:
+        trade: Closed trade dict with keys: ticker, entry_price, closed_price,
+               return_pct, outcome ("target" | "stop" | "expired"), gain_usd.
+
+    Returns:
+        A 2-sentence educational debrief string, or "" on failure.
+    """
+    ticker     = trade.get("ticker", "")
+    entry      = trade.get("entry_price", "?")
+    exit_price = trade.get("closed_price", "?")
+    ret        = trade.get("return_pct", 0)
+    outcome    = trade.get("outcome", "")
+    gain       = trade.get("gain_usd", 0)
+
+    outcome_desc = {
+        "target":  "hit its profit target",
+        "stop":    "hit the stop-loss",
+        "expired": "expired before hitting target or stop",
+    }.get(outcome, "closed")
+
+    sign = "+" if ret >= 0 else ""
+
+    system = (
+        "You are a friendly trading coach. Write a 2-sentence post-trade debrief. "
+        "Sentence 1: what likely happened (market/technical reason). "
+        "Sentence 2: one actionable lesson for next time. "
+        "Keep it warm, direct, under 40 words total. No disclaimers."
+    )
+    user_msg = (
+        f"{ticker} {outcome_desc} at ${exit_price} (entry ${entry}). "
+        f"Return: {sign}{ret}% (${gain:+.2f}). Outcome: {outcome}."
+    )
+
+    try:
+        client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=120,
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        return message.content[0].text.strip()
+    except Exception as exc:
+        print(f"[ai_analyzer] generate_trade_debrief failed (non-critical): {exc}")
+        return ""
+
+
 # ── CLI test ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import pprint

@@ -1194,6 +1194,56 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         except Exception as exc:
             return f"⚠️ Could not fetch prices: {exc}"
 
+    if text == "COMMUNITY":
+        try:
+            from performance_tracker import build_community_stats
+            from config_manager import get_allowed_users, load_user_trade_log
+            users = get_allowed_users()
+            logs  = []
+            for uid in users:
+                try:
+                    logs.append(load_user_trade_log(uid))
+                except Exception:
+                    pass
+            stats = build_community_stats(logs)
+            if not stats or stats["total_trades"] == 0:
+                return (
+                    "📭 <b>StockPulz Community</b>\n\n"
+                    "Not enough closed trades yet to show community stats.\n"
+                    "Close your first trade via /sold to see results here."
+                )
+            alpha_str = ""
+            if stats.get("alpha") is not None:
+                sign = "+" if stats["alpha"] >= 0 else ""
+                alpha_str = f"\n<b>Alpha vs S&P:</b>  <b>{sign}{stats['alpha']}%</b>"
+            spy_str = ""
+            if stats.get("spy_return_30d") is not None:
+                s = stats["spy_return_30d"]
+                spy_str = f"\n<b>S&P 500 (30d):</b>  {'+' if s >= 0 else ''}{s}%"
+            best_str = worst_str = ""
+            if stats.get("best_pick"):
+                b, br = stats["best_pick"]
+                best_str = f"\n🏆 Best pick:   <b>{b}</b> {'+' if br >= 0 else ''}{br}%"
+            if stats.get("worst_pick"):
+                w, wr = stats["worst_pick"]
+                worst_str = f"\n💔 Worst pick:  <b>{w}</b> {'+' if wr >= 0 else ''}{wr}%"
+            streak_str = ""
+            if stats.get("hot_streak_users", 0) > 0:
+                streak_str = f"\n🔥 {stats['hot_streak_users']} user(s) on a 3+ win streak!"
+            return (
+                f"🌍 <b>StockPulz Community</b>\n\n"
+                f"<b>Users tracked:</b>  {stats['total_users']}\n"
+                f"<b>Closed trades:</b>  {stats['total_trades']}\n"
+                f"<b>Win rate:</b>  {stats['win_rate']}%  "
+                f"({stats['total_wins']}W / {stats['total_losses']}L)\n"
+                f"<b>Avg return/trade:</b>  {'+' if stats['avg_return'] >= 0 else ''}{stats['avg_return']}%"
+                f"{spy_str}{alpha_str}"
+                f"{best_str}{worst_str}{streak_str}\n\n"
+                f"<i>Based on actual closed trades by StockPulz users.</i>"
+            )
+        except Exception as exc:
+            return f"⚠️ Could not load community stats: {exc}"
+
     # ── Market regime ─────────────────────────────────────────────────────────
     if text == "REGIME":
         try:
@@ -1391,7 +1441,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n/watch  ·  /exclude"
             "\n/crypto  <i>(on/off — hide crypto from your picks)</i>\n"
             "\n<b>Market</b>"
-            "\n/regime  ·  /backtest\n"
+            "\n/regime  ·  /backtest"
+            "\n/community  <i>(StockPulz users vs S&P 500)</i>\n"
             "\n<b>Price Alerts</b>"
             "\n/alert  ·  /alerts  ·  /unalert\n"
             "\n<b>Paper Trading</b>"

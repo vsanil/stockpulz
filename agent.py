@@ -29,7 +29,7 @@ from trade_logger import check_and_close_trades, update_trailing_stops
 from price_alert_manager import check_all_alerts
 from screener import run_screener
 from crypto_screener import run_crypto_screener
-from ai_analyzer import analyze_with_claude
+from ai_analyzer import analyze_with_claude, personalize_picks, generate_trade_debrief
 from price_checker import get_current_prices
 from telegram_notifier import (
     format_daily_message, format_confirmation_message,
@@ -430,13 +430,20 @@ def run_confirmation():
             for trade in closed:
                 emoji = "✅" if trade["outcome"] == "target" else ("🔴" if trade["outcome"] == "stop" else "⏱")
                 sign  = "+" if trade["return_pct"] >= 0 else ""
-                send_message(
+                close_msg = (
                     f"{emoji} <b>{trade['ticker']}</b> {trade['outcome'].upper()} HIT "
                     f"@ <code>${trade['closed_price']}</code>  "
                     f"<b>{sign}{trade['return_pct']:.1f}%</b>  "
-                    f"(${trade['gain_usd']:+.2f})",
-                    chat_id=uid,
+                    f"(${trade['gain_usd']:+.2f})"
                 )
+                # Feature 2: post-trade debrief (Haiku — non-blocking, non-critical)
+                try:
+                    debrief = generate_trade_debrief(trade)
+                    if debrief:
+                        close_msg += f"\n\n📖 <i>{debrief}</i>"
+                except Exception as db_exc:
+                    print(f"[agent] Trade debrief failed (non-critical): {db_exc}")
+                send_message(close_msg, chat_id=uid)
         except Exception as exc:
             print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
 
@@ -561,13 +568,20 @@ def run_close_check():
             for trade in closed:
                 emoji = "✅" if trade["outcome"] == "target" else ("🔴" if trade["outcome"] == "stop" else "⏱")
                 sign  = "+" if trade["return_pct"] >= 0 else ""
-                send_message(
+                close_msg = (
                     f"{emoji} <b>{trade['ticker']}</b> {trade['outcome'].upper()} HIT "
                     f"@ <code>${trade['closed_price']}</code>  "
                     f"<b>{sign}{trade['return_pct']:.1f}%</b>  "
-                    f"(${trade['gain_usd']:+.2f})",
-                    chat_id=uid,
+                    f"(${trade['gain_usd']:+.2f})"
                 )
+                # Feature 2: post-trade debrief (Haiku)
+                try:
+                    debrief = generate_trade_debrief(trade)
+                    if debrief:
+                        close_msg += f"\n\n📖 <i>{debrief}</i>"
+                except Exception as db_exc:
+                    print(f"[agent] Trade debrief failed (non-critical): {db_exc}")
+                send_message(close_msg, chat_id=uid)
             if not closed:
                 print(f"[agent] 3:30 PM close check for {uid}: no trades hit.")
         except Exception as exc:
@@ -780,7 +794,8 @@ def _send_or_print(message: str, label: str = ""):
 def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""):
     """
     Send the morning briefing to all users, personalised per user's config.
-    Each user gets their own budget/pick_mode applied, but the same underlying picks.
+    Each user gets their own budget/pick_mode applied, the same underlying picks,
+    and a Haiku-generated personal note per pick explaining portfolio fit.
     """
     recipients = _all_recipients()
     print(f"[agent] Sending personalised {label} to {len(recipients)} user(s)...")
@@ -790,7 +805,19 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             if user_cfg.get("paused"):
                 print(f"[agent] Skipping {uid} — picks paused by user.")
                 continue
-            message  = format_daily_message(picks, user_cfg)
+
+            # ── Personalised notes (Feature 1) ────────────────────────────────
+            # Load user's open positions and ask Haiku why each pick fits their portfolio.
+            personal_notes: dict = {}
+            try:
+                log = load_user_trade_log(uid)
+                open_positions = log.get("open", [])
+                risk_profile   = user_cfg.get("risk_profile", "moderate")
+                personal_notes = personalize_picks(picks, open_positions, risk_profile)
+            except Exception as pn_exc:
+                print(f"[agent] personalize_picks failed for {uid} (non-critical): {pn_exc}")
+
+            message = format_daily_message(picks, user_cfg, personal_notes=personal_notes)
             if DRY_RUN:
                 print(f"\n{'=' * 60}\nDRY RUN — {label} for {uid}:\n{'=' * 60}\n{message}\n")
             else:

@@ -1,10 +1,11 @@
 """
-performance_tracker.py — Saturday weekly P&L recap.
+performance_tracker.py — Saturday weekly P&L recap + community benchmark.
 
 Loads this week's picks from the Gist, fetches current prices via yfinance
 (stocks) and CoinGecko (crypto), then computes compact performance stats.
 """
 
+import math
 import requests
 import yfinance as yf
 
@@ -148,4 +149,89 @@ def build_weekly_recap() -> dict | None:
         "stocks":       stats(stock_returns),
         "crypto":       stats(crypto_returns),
         "spy_return":   round(spy_return, 1) if spy_return is not None else None,
+    }
+
+
+def build_community_stats(user_trade_logs: list[dict]) -> dict | None:
+    """
+    Aggregate performance across all users' trade logs.
+    Used by /community command to show StockPulz vs market benchmark.
+
+    Args:
+        user_trade_logs: list of trade log dicts from load_user_trade_log() per user.
+
+    Returns dict:
+    {
+        "total_users":      3,
+        "total_trades":     42,
+        "win_rate":         68.4,
+        "avg_return":       2.3,
+        "total_wins":       29,
+        "total_losses":     13,
+        "spy_return_30d":   1.8,   # SPY 30-day return (benchmark)
+        "alpha":            0.5,   # avg_return - spy_return_30d / 30 * avg_hold_days (approx)
+        "best_pick":        ("NVDA", 12.4),
+        "worst_pick":       ("AAPL", -3.1),
+        "hot_streak_users": 1,     # users on a 3+ win streak
+    }
+    or None if no data.
+    """
+    all_closed = []
+    for log in user_trade_logs:
+        closed = log.get("closed", [])
+        for trade in closed:
+            if trade.get("return_pct") is not None:
+                all_closed.append(trade)
+
+    if not all_closed:
+        return None
+
+    # Fetch SPY 30-day return as benchmark
+    spy_return_30d = None
+    try:
+        hist = yf.Ticker("SPY").history(period="1mo")
+        if len(hist) >= 2:
+            spy_return_30d = round(
+                (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100, 1
+            )
+    except Exception as exc:
+        print(f"[performance_tracker] SPY 30d fetch failed: {exc}")
+
+    returns  = [float(t["return_pct"]) for t in all_closed]
+    wins     = [r for r in returns if r > 0]
+    losses   = [r for r in returns if r <= 0]
+    avg_ret  = round(sum(returns) / len(returns), 1) if returns else 0
+    win_rate = round(len(wins) / len(returns) * 100, 1) if returns else 0
+
+    best_trade  = max(all_closed, key=lambda t: float(t.get("return_pct", 0)), default=None)
+    worst_trade = min(all_closed, key=lambda t: float(t.get("return_pct", 0)), default=None)
+
+    # Count users on hot streak (≥3 consecutive wins in their most recent trades)
+    hot_streak_users = 0
+    for log in user_trade_logs:
+        recent = sorted(log.get("closed", []), key=lambda t: t.get("closed_date", ""), reverse=True)[:5]
+        streak = 0
+        for t in recent:
+            if float(t.get("return_pct", 0)) > 0:
+                streak += 1
+            else:
+                break
+        if streak >= 3:
+            hot_streak_users += 1
+
+    # Simple alpha: community avg return vs SPY (not annualised — just directional)
+    alpha = round(avg_ret - spy_return_30d, 1) if spy_return_30d is not None else None
+
+    return {
+        "total_users":      len(user_trade_logs),
+        "total_trades":     len(all_closed),
+        "win_rate":         win_rate,
+        "avg_return":       avg_ret,
+        "total_wins":       len(wins),
+        "total_losses":     len(losses),
+        "spy_return_30d":   spy_return_30d,
+        "alpha":            alpha,
+        "best_pick":        (best_trade["ticker"],  round(float(best_trade["return_pct"]),  1)) if best_trade  else None,
+        "worst_pick":       (worst_trade["ticker"], round(float(worst_trade["return_pct"]), 1)) if worst_trade else None,
+        "hot_streak_users": hot_streak_users,
     }

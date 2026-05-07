@@ -43,6 +43,15 @@ def _upside(entry, target) -> str:
         return ""
 
 
+def _conviction_badge(conviction: int) -> str:
+    """Return a subtle signal-strength label for high/low conviction picks."""
+    c = max(1, min(5, int(conviction or 3)))
+    if c == 5: return " <i>· Highest conviction</i>"
+    if c == 4: return " <i>· Strong setup</i>"
+    if c <= 2: return " <i>· Low conviction — small position</i>"
+    return ""   # 3 stars = no badge (default, not noteworthy)
+
+
 def _short_company(name: str, max_len: int = 22) -> str:
     """Trim long company names at a word boundary so lines stay compact."""
     if not name:
@@ -54,10 +63,70 @@ def _short_company(name: str, max_len: int = 22) -> str:
     return name if len(name) <= max_len else name[:max_len].rsplit(" ", 1)[0] + "…"
 
 
+# ── Macro narrative helper ────────────────────────────────────────────────────
+
+def _macro_narrative_line(m: dict) -> str:
+    """
+    Convert raw macro numbers into a brief conversational narrative line for Telegram.
+    Returns an empty string if no macro data is available.
+
+    Examples:
+      "📊 Market: SPY +1.2% · VIX 17 (calm) · 10Y 4.3%  →  ✅ Bullish backdrop"
+      "📊 Market: SPY -0.8% · VIX 23 (elevated) · 10Y 4.5%  →  ⚠️ Stay cautious"
+    """
+    if not m:
+        return ""
+
+    spy_pct = m.get("spy_pct")
+    vix     = m.get("vix")
+    tnx     = m.get("tnx_yield")
+
+    parts = []
+    if spy_pct is not None:
+        sign = "+" if spy_pct >= 0 else ""
+        parts.append(f"SPY {sign}{spy_pct}%")
+    if tnx is not None:
+        parts.append(f"10Y {tnx}%")
+    if vix is not None:
+        if vix < 15:   vix_desc = "calm"
+        elif vix < 20: vix_desc = "steady"
+        elif vix < 25: vix_desc = "elevated"
+        else:          vix_desc = "fearful"
+        parts.append(f"VIX {vix} ({vix_desc})")
+
+    if not parts:
+        return ""
+
+    # Overall sentiment suffix
+    sentiment = ""
+    if spy_pct is not None and vix is not None:
+        if spy_pct >= 0.5 and vix < 20:
+            sentiment = "→ ✅ Bullish backdrop"
+        elif spy_pct <= -0.5 and vix >= 20:
+            sentiment = "→ ⚠️ Risk-off — stay cautious"
+        elif vix >= 25:
+            sentiment = "→ 🔴 High fear — tighten stops"
+        elif spy_pct >= 0:
+            sentiment = "→ 🟡 Mild tailwind"
+        else:
+            sentiment = "→ 🟡 Mixed signals"
+
+    body = "  ·  ".join(parts)
+    full = f"{body}  {sentiment}".strip() if sentiment else body
+    return f"📊 <b>Market:</b> <i>{full}</i>"
+
+
 # ── Daily picks message (8 AM morning briefing) ───────────────────────────────
 
-def format_daily_message(picks: dict, config: dict) -> str:
-    """Build the formatted daily Telegram message from Claude picks (stocks + crypto)."""
+def format_daily_message(picks: dict, config: dict,
+                         personal_notes: dict | None = None) -> str:
+    """
+    Build the formatted daily Telegram message from Claude picks (stocks + crypto).
+
+    personal_notes (optional): dict mapping ticker/symbol → one-line personalised note.
+      e.g. {"AAPL": "Balances your tech-heavy portfolio with value", "BTC": "Complements your ETH long"}
+      When provided, each pick gets a 💡 line showing why this pick suits the user's portfolio.
+    """
     today         = date.today().strftime("%a %b %d, %Y")
     stock_budget  = config.get("stock_budget")
     crypto_budget = config.get("crypto_budget")
@@ -104,92 +173,106 @@ def format_daily_message(picks: dict, config: dict) -> str:
         cst_picks = cst_picks[:n_cst]
         clt_picks = clt_picks[:n_clt]
 
-    # Macro context line
-    macro_parts = []
+    # Macro context line — conversational narrative
     m = picks.get("macro_context", {})
-    if m.get("spy_pct") is not None:
-        sign = "+" if m["spy_pct"] >= 0 else ""
-        macro_parts.append(f"SPY {sign}{m['spy_pct']}%")
-    if m.get("tnx_yield") is not None:
-        macro_parts.append(f"10Y {m['tnx_yield']}%")
-    if m.get("vix") is not None:
-        macro_parts.append(f"VIX {m['vix']}")
-    macro_line = f"📉 <b>Macro:</b> {' · '.join(macro_parts)}" if macro_parts else ""
+    macro_line = _macro_narrative_line(m)
 
     lines = [
-        f"<b>📊 Daily Picks — {today}</b>",
+        f"<b>📊 Daily Picks — {today}  <i>· NYSE 9:30 AM ET</i></b>",
         f"<i>{_esc(picks.get('daily_summary', ''))}</i>",
     ]
     if macro_line:
         lines.append(macro_line)
 
-    def _pick_row_st(i, s):
+    def _pick_row_st(i, s, personal_note: str = ""):
         entry, target, stop = s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
-        earnings_tag = f"  🗓 {_esc(s['earnings_date'])}" if s.get("earnings_date") else ""
-        alloc = s.get("allocation")
-        alloc_str = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
+        earnings_tag  = f"  🗓 {_esc(s['earnings_date'])}" if s.get("earnings_date") else ""
+        alloc         = s.get("allocation")
+        alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
+        badge         = _conviction_badge(s.get("conviction", 3))
+        personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         return (
-            f"<b>{_esc(s.get('ticker'))}</b>  {_stars(s.get('conviction', 3))}  "
+            f"<b>{_esc(s.get('ticker'))}</b>  {_stars(s.get('conviction', 3))}{badge}  "
             f"<i>{_esc(_short_company(s.get('company', '')))}</i>{earnings_tag}\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}\n"
-            f"<i>{_esc(s.get('thesis'))}</i>"
+            f"<i>{_esc(s.get('thesis'))}</i>{personal_line}"
         )
 
-    def _pick_row_lt(i, s):
+    def _pick_row_lt(i, s, personal_note: str = ""):
         entry, target = s.get("entry_price"), s.get("target_price")
-        alloc = s.get("allocation")
-        alloc_str = f"  <code>${_p(alloc)}/mo</code>" if alloc is not None else ""
+        alloc         = s.get("allocation")
+        alloc_str     = f"  <code>${_p(alloc)}/mo</code>" if alloc is not None else ""
+        badge         = _conviction_badge(s.get("conviction", 3))
+        personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         return (
-            f"<b>{_esc(s.get('ticker'))}</b>  {_stars(s.get('conviction', 3))}  "
+            f"<b>{_esc(s.get('ticker'))}</b>  {_stars(s.get('conviction', 3))}{badge}  "
             f"<i>{_esc(_short_company(s.get('company', '')))}</i>\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>  ·  {_esc(s.get('horizon'))}{alloc_str}\n"
-            f"<i>{_esc(s.get('thesis'))}</i>"
+            f"<i>{_esc(s.get('thesis'))}</i>{personal_line}"
         )
 
-    def _pick_row_cst(i, c):
+    def _pick_row_cst(i, c, personal_note: str = ""):
         entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
-        alloc = c.get("allocation")
-        alloc_str = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
+        alloc         = c.get("allocation")
+        alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
+        badge         = _conviction_badge(c.get("conviction", 3))
+        personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         return (
-            f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}  "
+            f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}{badge}  "
             f"<i>{_esc(_short_company(c.get('name', '')))}</i>\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}\n"
-            f"<i>{_esc(c.get('thesis'))}</i>"
+            f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
         )
 
-    def _pick_row_clt(i, c):
+    def _pick_row_clt(i, c, personal_note: str = ""):
         entry, target = c.get("entry_price"), c.get("target_price")
-        alloc = c.get("allocation")
-        alloc_str = f"  <code>${_p(alloc)}/mo</code>" if alloc is not None else ""
+        alloc         = c.get("allocation")
+        alloc_str     = f"  <code>${_p(alloc)}/mo</code>" if alloc is not None else ""
+        badge         = _conviction_badge(c.get("conviction", 3))
+        personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         return (
-            f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}  "
+            f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}{badge}  "
             f"<i>{_esc(_short_company(c.get('name', '')))}</i>\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>  ·  {_esc(c.get('horizon'))}{alloc_str}\n"
-            f"<i>{_esc(c.get('thesis'))}</i>"
+            f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
         )
+
+    pn = personal_notes or {}   # ticker/symbol → personal note string
 
     if st_picks:
         budget_tag = f"  <code>${per_stock}/pick</code>" if per_stock else ""
-        body = "\n\n".join(_pick_row_st(i, s) for i, s in enumerate(st_picks, 1))
+        body = "\n\n".join(
+            _pick_row_st(i, s, pn.get(s.get("ticker", ""), ""))
+            for i, s in enumerate(st_picks, 1)
+        )
         lines += ["", f"<blockquote expandable>📈 <b>STOCK — SHORT TERM</b>{budget_tag}\n\n{body}</blockquote>"]
 
     if lt_picks:
         budget_tag = f"  <code>${per_stock}/pick</code>" if per_stock else ""
-        body = "\n\n".join(_pick_row_lt(i, s) for i, s in enumerate(lt_picks, 1))
+        body = "\n\n".join(
+            _pick_row_lt(i, s, pn.get(s.get("ticker", ""), ""))
+            for i, s in enumerate(lt_picks, 1)
+        )
         lines += ["", f"<blockquote expandable>🏦 <b>STOCK — LONG TERM</b>{budget_tag}\n\n{body}</blockquote>"]
 
     if cst_picks:
         budget_tag = f"  <code>${per_crypto}/pick</code>" if per_crypto else ""
-        body = "\n\n".join(_pick_row_cst(i, c) for i, c in enumerate(cst_picks, 1))
+        body = "\n\n".join(
+            _pick_row_cst(i, c, pn.get(c.get("symbol", ""), ""))
+            for i, c in enumerate(cst_picks, 1)
+        )
         lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO — SHORT TERM</b>{budget_tag}  ⚡ HIGH RISK\n\n{body}</blockquote>"]
 
     if clt_picks:
         budget_tag = f"  <code>${per_crypto}/pick</code>" if per_crypto else ""
-        body = "\n\n".join(_pick_row_clt(i, c) for i, c in enumerate(clt_picks, 1))
+        body = "\n\n".join(
+            _pick_row_clt(i, c, pn.get(c.get("symbol", ""), ""))
+            for i, c in enumerate(clt_picks, 1)
+        )
         lines += ["", f"<blockquote expandable>💎 <b>CRYPTO — LONG TERM</b>{budget_tag}\n\n{body}</blockquote>"]
 
     # Footer — sector diversity line
@@ -242,7 +325,7 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
     cst = crypto.get("short_term", [])
     clt = crypto.get("long_term", [])
 
-    lines = [f"<b>🕙 10:30 AM Check — {now}</b>"]
+    lines = [f"<b>🕙 10:30 AM ET Check — {now}</b>"]
 
     if st:
         lines += ["", "<b>📈 Short Term</b>"]
