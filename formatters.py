@@ -276,19 +276,27 @@ def format_daily_message(picks: dict, config: dict,
         )
         lines += ["", f"<blockquote expandable>💎 <b>CRYPTO — LONG TERM</b>{budget_tag}\n\n{body}</blockquote>"]
 
-    # Footer — sector diversity line
-    seen_sectors: set = set()
-    sector_list: list = []
+    # Footer — sector concentration warning (only shown when picks are concentrated)
+    sector_counts: dict = {}
+    total_picks = len(st_picks) + len(lt_picks)
     for p in st_picks + lt_picks:
         s = p.get("sector", "")
-        if s and s != "Unknown" and s not in seen_sectors:
-            sector_list.append(s)
-            seen_sectors.add(s)
-    sector_line = f"🏭 <i>Sectors: {_esc(', '.join(sector_list))}</i>" if sector_list else ""
+        if s and s != "Unknown":
+            sector_counts[s] = sector_counts.get(s, 0) + 1
+
+    concentration_line = ""
+    if sector_counts and total_picks >= 2:
+        top_sector, top_count = max(sector_counts.items(), key=lambda x: x[1])
+        pct = top_count / total_picks
+        if pct >= 0.6:   # 60%+ in one sector → warn
+            concentration_line = (
+                f"⚠️ <i>{top_count} of {total_picks} picks are {_esc(top_sector)} "
+                f"— consider sizing down to manage sector risk.</i>"
+            )
 
     lines += ["", "⚠️ <i>Not financial advice.</i>  📋 /help  ·  📲 /share"]
-    if sector_line:
-        lines.append(sector_line)
+    if concentration_line:
+        lines.append(concentration_line)
 
     return "\n".join(lines)
 
