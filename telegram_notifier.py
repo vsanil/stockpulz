@@ -193,7 +193,7 @@ def send_message(text: str, chat_id: str | None = None) -> bool:
 
 def send_inline_keyboard(text: str, buttons: list[list[dict]],
                          chat_id: str | None = None) -> bool:
-    """Send a message with an inline keyboard for user selection."""
+    """Send a message with an inline keyboard for user selection. Retries up to 3×."""
     token   = _bot_token()
     chat_id = chat_id or _chat_id()
     url     = TELEGRAM_API.format(token=token, method="sendMessage")
@@ -203,12 +203,17 @@ def send_inline_keyboard(text: str, buttons: list[list[dict]],
         "parse_mode":   "HTML",
         "reply_markup": {"inline_keyboard": buttons},
     }
-    try:
-        resp = requests.post(url, json=payload, timeout=15)
-        return resp.status_code == 200
-    except Exception as exc:
-        print(f"[telegram] send_inline_keyboard error: {exc}")
-        return False
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = requests.post(url, json=payload, timeout=15)
+            if resp.status_code == 200:
+                return True
+            print(f"[telegram] send_inline_keyboard attempt {attempt} failed: HTTP {resp.status_code}")
+        except Exception as exc:
+            print(f"[telegram] send_inline_keyboard attempt {attempt} exception: {exc}")
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY)
+    return False
 
 
 def send_typing_action(chat_id: str | None = None) -> None:
@@ -539,6 +544,20 @@ def handle_callback_query(callback_query: dict) -> None:
         # Reuse the /adduser logic
         reply = _parse_and_execute(f"ADDUSER {new_id}", original=f"/adduser {new_id}", chat_id=chat_id)
         send_message(reply or f"✅ {new_id} approved.", chat_id=chat_id)
+        return
+
+    if action == "reject_user":
+        rej_id = parts[1] if len(parts) > 1 else ""
+        if not rej_id:
+            send_message("⚠️ Could not read user ID from button.", chat_id=chat_id)
+            return
+        from config_manager import remove_pending_user
+        remove_pending_user(rej_id)
+        send_message(
+            f"❌ <b>Access denied.</b> Your request to join StockPulz was not approved.",
+            chat_id=rej_id,
+        )
+        send_message(f"🚫 <code>{rej_id}</code> rejected and removed from pending.", chat_id=chat_id)
         return
 
     if action == "buy":
@@ -982,6 +1001,9 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     if command == "users":
         return _parse_and_execute("USERS", original="/users", chat_id=chat_id)
+
+    if command == "pending":
+        return _parse_and_execute("PENDING", original="/pending", chat_id=chat_id)
 
     if command == "broadcast":
         return _parse_and_execute(f"BROADCAST {text}", original=f"/broadcast {text}", chat_id=chat_id)
@@ -1545,7 +1567,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n/settings  ·  /reset"
             "\n/help  ·  /share  <i>(invite link)</i>\n"
             "\n<b>Admin</b>"
-            "\n/users  ·  /adduser  ·  /removeuser"
+            "\n/users  ·  /adduser  ·  /removeuser  ·  /pending"
             "\n/broadcast  ·  /release  <i>(send updates to all users)</i>"
             "\n/admin_perf  <i>(all-user performance)</i>"
             "\n/bot_pause  ·  /bot_resume  <i>(global kill switch)</i>"
@@ -1741,8 +1763,12 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if owner:
             send_inline_keyboard(
                 admin_msg,
-                [[{"text": f"✅ Approve {_esc(first_name or chat_id)}",
-                   "callback_data": f"approve_user|{chat_id}"}]],
+                [[
+                    {"text": f"✅ Approve {_esc(first_name or chat_id)}",
+                     "callback_data": f"approve_user|{chat_id}"},
+                    {"text": "❌ Reject",
+                     "callback_data": f"reject_user|{chat_id}"},
+                ]],
                 chat_id=owner,
             )
         return (
@@ -1822,6 +1848,39 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             lines.append(f"• <code>{u}</code>{tag}")
         lines.append(f"\n<i>{len(users)} user(s) total</i>")
         return "\n".join(lines)
+
+    # ── /pending — show pending access requests with approve/reject buttons ───
+    if text == "PENDING":
+        if not _is_admin(chat_id):
+            return "🔒 Admin only."
+        pending = get_pending_users()
+        if not pending:
+            return "✅ <b>No pending access requests.</b>"
+        lines = [f"<b>⏳ Pending Requests ({len(pending)})</b>\n"]
+        for uid, info in pending.items():
+            name     = info.get("first_name", "")
+            uname    = info.get("username", "")
+            req_at   = info.get("requested_at", "")[:10]   # date only
+            name_str = _esc(name) if name else ""
+            uname_str = f"  @{_esc(uname)}" if uname else ""
+            lines.append(f"• <code>{uid}</code>  {name_str}{uname_str}  <i>{req_at}</i>")
+        lines.append("\nUse the buttons below to action each request, or tap the name to copy the ID.")
+        # Send one inline keyboard per pending user so each has its own buttons
+        header = "\n".join(lines)
+        send_message(header, chat_id=chat_id)
+        for uid, info in pending.items():
+            name = info.get("first_name", "") or uid
+            send_inline_keyboard(
+                f"<code>{uid}</code>  {_esc(info.get('first_name', '') or '')}",
+                [[
+                    {"text": f"✅ Approve {_esc(name)}",
+                     "callback_data": f"approve_user|{uid}"},
+                    {"text": "❌ Reject",
+                     "callback_data": f"reject_user|{uid}"},
+                ]],
+                chat_id=chat_id,
+            )
+        return ""   # already sent above
 
     # ── /admin_perf — aggregate performance across all users (admin-only) ─────
     if text == "ADMIN PERF":
