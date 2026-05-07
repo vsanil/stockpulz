@@ -178,7 +178,7 @@ def format_daily_message(picks: dict, config: dict,
     macro_line = _macro_narrative_line(m)
 
     lines = [
-        f"<b>📊 Daily Picks — {today}  <i>· NYSE 9:30 AM ET</i></b>",
+        f"<u><b>📊 Daily Picks — {today}  <i>· NYSE 9:30 AM ET</i></b></u>",
         "",
         f"<i>{_esc(picks.get('daily_summary', ''))}</i>",
     ]
@@ -336,7 +336,7 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
     cst = crypto.get("short_term", [])
     clt = crypto.get("long_term", [])
 
-    lines = [f"<b>🕙 10:30 AM ET Check — {now}</b>"]
+    lines = [f"<u><b>🕙 10:30 AM ET Check — {now}</b></u>"]
 
     if st:
         lines += ["", "<b>📈 Short Term</b>"]
@@ -397,7 +397,7 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
     show_stocks  = pick_mode in ("st", "lt", "both")   # always show stocks unless explicitly off
     show_crypto  = pick_mode in ("st", "lt", "both")
 
-    lines = [f"<b>📅 Week of {week_end} — Recap</b>", ""]
+    lines = [f"<u><b>📅 Week of {week_end} — Recap</b></u>", ""]
 
     stocks_stats = recap.get("stocks")
     crypto_stats = recap.get("crypto")
