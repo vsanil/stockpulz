@@ -2374,7 +2374,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
     if text.startswith("BOUGHT "):
         raw    = text[len("BOUGHT "):].strip()
-        parts  = raw.split()
+        _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT"}
+        parts  = [p for p in raw.split() if p.upper() not in _NOISE]
 
         # Detect natural-language params: more than 3 tokens, or non-numeric second token
         is_nl = len(parts) > 3 or (len(parts) >= 2 and not _is_number(parts[1]))
@@ -2411,7 +2412,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
     if text.startswith("SOLD "):
         raw   = text[len("SOLD "):].strip()
-        parts = raw.split()
+        _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT"}
+        parts = [p for p in raw.split() if p.upper() not in _NOISE]
 
         is_nl = len(parts) > 2 or (len(parts) >= 2 and not _is_number(parts[1]))
         if is_nl:
