@@ -24,6 +24,11 @@ import requests
 _gist_read_cache: dict[str, tuple[object, float]] = {}
 GIST_CACHE_TTL = 20   # seconds
 
+# In-memory pending state — no Gist needed, survives only for process lifetime.
+# Conversation state is transient; if the server restarts mid-conversation
+# the user simply retypes the command. 5-minute TTL per user.
+_PENDING_STATE_CACHE: dict[str, dict] = {}
+
 
 def _cache_get(filename: str):
     entry = _gist_read_cache.get(filename)
@@ -533,42 +538,34 @@ def _write_gist_file(filename: str, data: dict) -> None:
 def load_pending_state(chat_id: str) -> dict | None:
     """
     Load pending conversation state for a chat_id.
-    Returns None if not found or expired (60-second TTL).
+    Returns None if not found or expired (5-minute TTL).
+    Stored in-memory only — no Gist round-trip needed.
     """
-    from datetime import datetime
-    data  = _load_gist_file(PENDING_STATE_FILENAME) or {}
-    state = data.get(str(chat_id))
+    import time
+    state = _PENDING_STATE_CACHE.get(str(chat_id))
     if not state:
         return None
-    try:
-        if datetime.utcnow() > datetime.fromisoformat(state["expires_at"]):
-            clear_pending_state(chat_id)
-            return None
-    except Exception:
+    if time.time() > state.get("_expires_at", 0):
+        del _PENDING_STATE_CACHE[str(chat_id)]
         return None
     return state
 
 
 def save_pending_state(chat_id: str, command: str,
                        step: int = 1, data: dict | None = None) -> None:
-    """Save pending state for a chat_id with a 60-second expiry."""
-    from datetime import datetime, timedelta
-    all_states = _load_gist_file(PENDING_STATE_FILENAME) or {}
-    all_states[str(chat_id)] = {
+    """Save pending state for a chat_id in-memory with a 5-minute expiry."""
+    import time
+    _PENDING_STATE_CACHE[str(chat_id)] = {
         "command":    command,
         "step":       step,
         "data":       data or {},
-        "expires_at": (datetime.utcnow() + timedelta(seconds=60)).isoformat(),
+        "_expires_at": time.time() + 300,   # 5 minutes
     }
-    _write_gist_file(PENDING_STATE_FILENAME, all_states)
 
 
 def clear_pending_state(chat_id: str) -> None:
     """Remove pending state for a chat_id."""
-    all_states = _load_gist_file(PENDING_STATE_FILENAME) or {}
-    if str(chat_id) in all_states:
-        del all_states[str(chat_id)]
-        _write_gist_file(PENDING_STATE_FILENAME, all_states)
+    _PENDING_STATE_CACHE.pop(str(chat_id), None)
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────
