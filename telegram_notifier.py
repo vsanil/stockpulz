@@ -947,6 +947,7 @@ Available intents and their exact JSON format:
 {"intent": "pause"}
 {"intent": "resume"}
 {"intent": "status"}
+{"intent": "next"}
 {"intent": "settings"}
 {"intent": "today"}
 {"intent": "prices"}
@@ -966,6 +967,7 @@ Rules:
 - Map "change stop loss", "tighten/widen stop", "set target gain", "adjust thresholds" → set_thresholds with numeric values
 - Map "my settings", "show all settings", "full settings", "what are my settings" → settings
 - Map "status", "am I paused", "is bot running" → status
+- Map "when's my next message", "when is the next pick", "next update", "what time" → next
 - "stocks 200 crypto 50" → {"stock_budget": 200, "crypto_budget": 50}
 - "stock budget 150" → {"stock_budget": 150}
 - "clear budgets" → {"stock_budget": null, "crypto_budget": null}
@@ -1032,6 +1034,8 @@ Rules:
         return _parse_and_execute("RESUME", original=query, chat_id=chat_id)
     if intent == "status":
         return _parse_and_execute("STATUS", original=query, chat_id=chat_id)
+    if intent == "next":
+        return _parse_and_execute("NEXT", original=query, chat_id=chat_id)
     if intent == "settings":
         return _parse_and_execute("SETTINGS", original=query, chat_id=chat_id)
     if intent == "today":
@@ -1395,8 +1399,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n/paper_portfolio  ·  /paper_perf"
             "\n/paper_reset  ·  /paper_add_cash\n"
             "\n<b>Control</b>"
-            "\n/pause  ·  /resume  ·  /status  ·  /settings"
-            "\n/reset  ·  /help  ·  /share  <i>(invite link)</i>\n"
+            "\n/pause  ·  /resume  ·  /status  ·  /next"
+            "\n/settings  ·  /reset"
+            "\n/help  ·  /share  <i>(invite link)</i>\n"
             "\n<b>Admin</b>"
             "\n/users  ·  /adduser  ·  /removeuser"
             "\n/broadcast  ·  /release  <i>(send updates to all users)</i>"
@@ -1512,9 +1517,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 timeout=5,
             ).json()
             username = resp.get("result", {}).get("username", "")
-            bot_link = f"https://t.me/{username}?start=ref" if username else "https://t.me/StockPulz?start=ref"
+            bot_link = f"https://t.me/{username}?start=ref" if username else "https://t.me/SanilStockBot?start=ref"
         except Exception:
-            bot_link = "https://t.me/StockPulz?start=ref"
+            bot_link = "https://t.me/SanilStockBot?start=ref"
 
         return (
             f"📲 <b>Share StockPulz with friends:</b>\n\n"
@@ -1602,11 +1607,23 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 pass
         send_message(
             "✅ <b>You're in! Welcome to StockPulz.</b>\n\n"
-            "You'll receive daily AI-curated stock &amp; crypto picks every morning.\n\n"
-            "<b>Quick start:</b>\n"
-            "/today — today's picks\n"
-            "/help — all commands\n\n"
-            "<i>Questions? Just type naturally.</i>"
+            "Here's what happens from here:\n\n"
+            "📬 <b>8:30 AM ET</b> — morning picks land in this chat, before the market opens. "
+            "Each pick includes an entry price, profit target, and stop-loss.\n\n"
+            "🕙 <b>10:30 AM ET</b> — a live check compares current prices to your entries — hold, watch, or exit.\n\n"
+            "📅 <b>Weekends</b> — crypto picks + a weekly performance recap.\n\n"
+            "<b>Commands you'll use most:</b>\n"
+            "/today — today's picks (if market is open)\n"
+            "/bought AAPL — log a trade &amp; track it\n"
+            "/positions — open trades &amp; P&amp;L\n"
+            "/alert NVDA above 1000 — price alert\n"
+            "/settings — your preferences\n"
+            "/help — full command list\n\n"
+            "<b>Customise your picks:</b>\n"
+            "/crypto off — hide crypto if you only want stocks\n"
+            "/set_risk aggressive — adjust risk appetite\n"
+            "/set_budget stocks 200 — set per-trade budget\n\n"
+            "<i>You can also just type naturally — e.g. \"why was NVDA picked?\" or \"add Tesla to my watchlist\".</i>"
             + picks_msg,
             chat_id=new_id,
         )
@@ -1854,6 +1871,64 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             f"<i>For full settings: /settings</i>"
         )
 
+    if text == "NEXT":
+        from datetime import datetime, timedelta
+        import pytz
+        ET = pytz.timezone("America/New_York")
+        now = datetime.now(ET)
+        wd  = now.weekday()   # 0=Mon … 6=Sun
+        h, m = now.hour, now.minute
+
+        # Scheduled user-facing events (ET wall-clock), weekdays only unless noted
+        # (prescreener is silent — not shown)
+        schedule = [
+            # (name, emoji, hour, minute, weekdays_only)
+            ("Morning picks",        "📬", 8,  30, True),
+            ("10:30 AM confirmation","🕙", 10, 30, True),
+            ("3:30 PM close check",  "📊", 15, 30, True),
+        ]
+
+        def _minutes_until(target_h, target_m, weekdays_only):
+            """Return (minutes_until, delivery_datetime_ET)."""
+            candidate = now.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
+            days_ahead = 0
+            while True:
+                t = candidate + timedelta(days=days_ahead)
+                is_weekday = t.weekday() < 5
+                if t > now and (not weekdays_only or is_weekday):
+                    return int((t - now).total_seconds() / 60), t
+                days_ahead += 1
+                if days_ahead > 14:
+                    break
+            return None, None
+
+        lines = ["<b>⏰ Next Scheduled Messages</b>\n"]
+        upcoming = []
+        for name, emoji, eh, em, wdonly in schedule:
+            mins, dt = _minutes_until(eh, em, wdonly)
+            if mins is not None:
+                upcoming.append((mins, name, emoji, dt))
+
+        upcoming.sort(key=lambda x: x[0])
+
+        for i, (mins, name, emoji, dt) in enumerate(upcoming[:4]):
+            day_str = dt.strftime("%a") if dt.date() != now.date() else "Today"
+            time_str = dt.strftime("%-I:%M %p ET")
+            if mins < 60:
+                eta = f"{mins}m"
+            elif mins < 120:
+                eta = f"1h {mins % 60}m"
+            else:
+                eta = f"{mins // 60}h {mins % 60}m"
+            prefix = "→ " if i == 0 else "   "
+            lines.append(f"{prefix}{emoji} <b>{name}</b>  {day_str} {time_str}  <i>(in {eta})</i>")
+
+        # Weekend note
+        if wd >= 4 and h >= 15:   # Friday afternoon or weekend
+            lines.append("\n<i>Weekend: crypto picks arrive Saturday ~8 AM ET.</i>")
+
+        return "\n".join(lines)
+
     if text == "SETTINGS":
         global_cfg = get_config()
         user_cfg   = get_user_config(chat_id)
@@ -1861,20 +1936,46 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         ex  = user_cfg.get("excluded_sectors", [])
         sl_pct = user_cfg.get("stop_loss_pct")   or global_cfg.get("stop_loss_pct",   7)
         tg_pct = user_cfg.get("target_gain_pct") or global_cfg.get("target_gain_pct", 15)
-        sl_src = "" if user_cfg.get("stop_loss_pct")   else " (default)"
-        tg_src = "" if user_cfg.get("target_gain_pct") else " (default)"
+        sl_src = "" if user_cfg.get("stop_loss_pct")   else " ·default"
+        tg_src = "" if user_cfg.get("target_gain_pct") else " ·default"
+
+        # Risk emoji
+        risk = user_cfg.get("risk_profile", "moderate")
+        risk_emoji = {"conservative": "🛡", "moderate": "⚖️", "aggressive": "🔥"}.get(risk, "⚖️")
+
+        # Pick mode
+        mode = user_cfg.get("pick_mode", "both")
+        mode_label = {"st": "Short term only", "lt": "Long term only", "both": "Both"}.get(mode, mode)
+
+        # Status
+        paused      = user_cfg.get("paused", False)
+        show_crypto = user_cfg.get("show_crypto", True)
+
+        # Budget
+        sb = user_cfg.get("stock_budget")
+        cb = user_cfg.get("crypto_budget")
+        sb_str = f"${sb}/trade" if sb else "not set"
+        cb_str = f"${cb}/trade" if cb else "not set"
+
+        # Picks
+        ms = user_cfg.get("max_stock_picks")
+        mc = user_cfg.get("max_crypto_picks")
+
         return (
-            f"<b>⚙️ Your Settings</b>\n"
-            f"Risk profile:     {user_cfg.get('risk_profile', 'moderate')}\n"
-            f"Pick mode:        {user_cfg.get('pick_mode', 'both')}\n"
-            f"Stock budget:     {('$'+str(user_cfg.get('stock_budget'))) if user_cfg.get('stock_budget') else 'not set'}\n"
-            f"Crypto budget:    {('$'+str(user_cfg.get('crypto_budget'))) if user_cfg.get('crypto_budget') else 'not set'}\n"
-            f"Stock picks:      {user_cfg.get('max_stock_picks') or 'all'}\n"
-            f"Crypto picks:     {user_cfg.get('max_crypto_picks') or 'all'}\n"
-            f"Stop loss:        {sl_pct}%{sl_src}\n"
-            f"Target gain:      {tg_pct}%{tg_src}\n"
-            f"Watchlist:        {', '.join(wl) if wl else 'none'}\n"
-            f"Excluded sectors: {', '.join(ex) if ex else 'none'}"
+            f"<b>⚙️ Your Settings</b>\n\n"
+            f"{'⏸' if paused else '✅'} <b>Picks:</b> {'paused — /resume to restart' if paused else 'active'}\n"
+            f"{'⏸' if not show_crypto else '✅'} <b>Crypto:</b> {'hidden — /crypto on' if not show_crypto else 'shown  ·  /crypto off to hide'}\n\n"
+            f"{risk_emoji} <b>Risk:</b> {risk}  ·  /set_risk\n"
+            f"📊 <b>Mode:</b> {mode_label}  ·  /mode\n\n"
+            f"💰 <b>Stock budget:</b> {sb_str}  ·  /set_budget\n"
+            f"₿ <b>Crypto budget:</b> {cb_str}\n"
+            f"📈 <b>Stock picks:</b> {ms if ms else 'all'}  ·  /set_picks\n"
+            f"🪙 <b>Crypto picks:</b> {mc if mc else 'all'}\n\n"
+            f"🛑 <b>Stop loss:</b> {sl_pct}%{sl_src}  ·  /set_thresholds\n"
+            f"🎯 <b>Target gain:</b> {tg_pct}%{tg_src}\n\n"
+            f"👀 <b>Watchlist:</b> {', '.join(wl) if wl else 'none'}  ·  /watch\n"
+            f"🚫 <b>Excluded sectors:</b> {', '.join(ex) if ex else 'none'}  ·  /exclude\n\n"
+            f"<i>To reset everything: /reset</i>"
         )
 
     # Bare budget commands — prompt for the value
