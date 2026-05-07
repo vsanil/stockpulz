@@ -5,6 +5,8 @@ Replaces whatsapp.py. Uses Telegram Bot API via plain requests (no heavy SDK).
 
 import os
 import time
+import hmac
+import hashlib
 import threading
 import requests
 
@@ -47,6 +49,57 @@ def _is_admin(chat_id: str | None = None) -> bool:
     """Return True if the given chat_id (or env TELEGRAM_CHAT_ID) is the bot owner."""
     resolved = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
     return str(resolved) == str(os.environ.get("TELEGRAM_CHAT_ID", ""))
+
+
+# ── Admin invite token (HMAC-signed, time-limited) ───────────────────────────
+
+def _make_admin_invite_token() -> str:
+    """
+    Generate a signed, time-limited admin invite deep-link token.
+
+    Format: adminref_<unix_timestamp>_<hmac_16hex>
+    (underscores only — safe for Telegram ?start= param, max 64 chars)
+
+    The HMAC uses TELEGRAM_BOT_TOKEN as the secret, so only the server
+    that knows the bot token can produce or verify a valid token.
+    Tokens expire after ADMIN_INVITE_TTL_HOURS hours.
+    """
+    ts     = str(int(time.time()))
+    secret = os.environ.get("TELEGRAM_BOT_TOKEN", "fallback-secret").encode()
+    sig    = hmac.new(secret, ts.encode(), hashlib.sha256).hexdigest()[:16]
+    return f"adminref_{ts}_{sig}"
+
+
+ADMIN_INVITE_TTL_HOURS = 48   # link expires after 48 hours
+
+
+def _verify_admin_invite_token(token: str) -> bool:
+    """
+    Return True if token is a valid, unexpired admin invite token.
+    Any tampering (wrong signature or expired timestamp) returns False.
+    """
+    if not token.startswith("adminref_"):
+        return False
+    parts = token.split("_")
+    # Expected: ["adminref", "<ts>", "<sig>"]
+    if len(parts) != 3:
+        return False
+    _, ts_str, received_sig = parts
+    try:
+        ts = int(ts_str)
+    except ValueError:
+        return False
+    # Check expiry
+    if time.time() - ts > ADMIN_INVITE_TTL_HOURS * 3600:
+        print(f"[telegram] Admin invite token expired (age {int(time.time()-ts)}s).")
+        return False
+    # Verify HMAC — constant-time comparison prevents timing attacks
+    secret       = os.environ.get("TELEGRAM_BOT_TOKEN", "fallback-secret").encode()
+    expected_sig = hmac.new(secret, ts_str.encode(), hashlib.sha256).hexdigest()[:16]
+    if not hmac.compare_digest(expected_sig, received_sig):
+        print(f"[telegram] Admin invite token HMAC mismatch — possible forgery attempt.")
+        return False
+    return True
 
 
 # ── Core send ─────────────────────────────────────────────────────────────────
@@ -1571,11 +1624,11 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         except Exception:
             bot_username = "SanilStockBot"
 
-        # Admin share → auto-approve anyone who clicks the link.
+        # Admin share → cryptographically signed token, auto-approves the clicker.
         # Regular user share → still requires admin approval (normal pending flow).
         if _is_admin(chat_id):
-            deep_link = "admin_ref"
-            footer    = "<i>(Anyone who taps this link is automatically approved ✅)</i>"
+            deep_link = _make_admin_invite_token()   # signed + time-limited (48h)
+            footer    = "<i>(Anyone who taps this link is automatically approved ✅ — link valid 48 hours)</i>"
         else:
             deep_link = f"ref_{chat_id}"
             footer    = "<i>(Your friend will need admin approval — usually a few hours)</i>"
@@ -1596,7 +1649,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     if text == "START" or text.startswith("START "):
         # Parse deep link parameter (everything after "START ")
         deep_param = text[6:].strip() if text.startswith("START ") else ""
-        is_admin_invite = (deep_param == "admin_ref")
+        is_admin_invite = _verify_admin_invite_token(deep_param)
 
         # Known user — show welcome back
         if _is_admin(chat_id) or chat_id in get_allowed_users():
