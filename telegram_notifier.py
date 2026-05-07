@@ -1567,10 +1567,20 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 TELEGRAM_API.format(token=_bot_token(), method="getMe"),
                 timeout=5,
             ).json()
-            username = resp.get("result", {}).get("username", "")
-            bot_link = f"https://t.me/{username}?start=ref" if username else "https://t.me/SanilStockBot?start=ref"
+            bot_username = resp.get("result", {}).get("username", "") or "SanilStockBot"
         except Exception:
-            bot_link = "https://t.me/SanilStockBot?start=ref"
+            bot_username = "SanilStockBot"
+
+        # Admin share → auto-approve anyone who clicks the link.
+        # Regular user share → still requires admin approval (normal pending flow).
+        if _is_admin(chat_id):
+            deep_link = "admin_ref"
+            footer    = "<i>(Anyone who taps this link is automatically approved ✅)</i>"
+        else:
+            deep_link = f"ref_{chat_id}"
+            footer    = "<i>(Your friend will need admin approval — usually a few hours)</i>"
+
+        bot_link = f"https://t.me/{bot_username}?start={deep_link}"
 
         return (
             f"📲 <b>Share StockPulz with friends:</b>\n\n"
@@ -1579,11 +1589,15 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             f"🌐 Learn more: <a href=\"https://stockpulz.com\">stockpulz.com</a>\n\n"
             f"📱 Join on Telegram 👇\n"
             f"{bot_link}\n\n"
-            f"<i>(Tap the Telegram link to request access)</i>"
+            f"{footer}"
         )
 
-    # ── /start (also handles deep link: /start ref) ───────────────────────────
+    # ── /start (also handles deep links: /start admin_ref | /start ref_<id>) ───
     if text == "START" or text.startswith("START "):
+        # Parse deep link parameter (everything after "START ")
+        deep_param = text[6:].strip() if text.startswith("START ") else ""
+        is_admin_invite = (deep_param == "admin_ref")
+
         # Known user — show welcome back
         if _is_admin(chat_id) or chat_id in get_allowed_users():
             return (
@@ -1593,7 +1607,20 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 "/help — all commands\n\n"
                 "<i>Questions? Just type naturally.</i>"
             )
-        # Unknown user — add to pending and notify admin
+
+        # ── Admin invite link → auto-approve immediately ──────────────────────
+        if is_admin_invite:
+            reply = _parse_and_execute(f"ADDUSER {chat_id}", original=f"/adduser {chat_id}", chat_id=chat_id)
+            # ADDUSER sends a full welcome message to the new user — just confirm here
+            return (
+                "✅ <b>You're in! Welcome to StockPulz.</b>\n\n"
+                "You were auto-approved via an admin invite link.\n\n"
+                "/today — today's picks\n"
+                "/help — all commands\n\n"
+                "<i>Questions? Just type naturally — I understand plain English.</i>"
+            )
+
+        # ── Normal flow — add to pending, notify admin ────────────────────────
         pending = get_pending_users()
         if chat_id in pending:
             return (
@@ -1614,12 +1641,17 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         add_pending_user(chat_id, first_name=first_name, username=username)
         # Notify admin with a one-tap approve button
         owner = os.environ.get("TELEGRAM_CHAT_ID", "")
-        display = f"@{username}" if username else first_name or chat_id
+        # If referred by a user, mention who referred them
+        referrer_str = ""
+        if deep_param.startswith("ref_"):
+            referrer_id = deep_param[4:]
+            referrer_str = f"\nReferred by user: <code>{referrer_id}</code>"
         admin_msg = (
             f"🔔 <b>New access request</b>\n\n"
             f"Name: <b>{_esc(first_name)}</b>"
             + (f"  (@{_esc(username)})" if username else "") +
-            f"\nChat ID: <code>{chat_id}</code>\n\n"
+            f"\nChat ID: <code>{chat_id}</code>"
+            f"{referrer_str}\n\n"
             f"Tap to approve 👇"
         )
         if owner:
