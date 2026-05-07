@@ -979,6 +979,35 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return _parse_and_execute(f"UNALERT {text}", original=f"/unalert {text}", chat_id=chat_id)
 
     if command == "paper_buy":
+        if step == 2:
+            # User replied with price (or blank = live price)
+            from paper_trader import paper_buy
+            ticker = data.get("ticker", "")
+            shares = data.get("shares")
+            price_raw = text.strip() or None
+            price = float(price_raw) if price_raw else None
+            return paper_buy(ticker, shares, chat_id, price)
+        if step == 1:
+            # User replied with share count after we asked
+            ticker = data.get("ticker", "")
+            try:
+                shares = float(text.strip())
+            except ValueError:
+                save_pending_state(chat_id, "paper_buy", step=1, data={"ticker": ticker})
+                return f"🤔 How many shares? e.g. <code>5</code>"
+            # Now ask for price
+            from paper_trader import paper_buy
+            live = _fetch_live_price(ticker)
+            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+            save_pending_state(chat_id, "paper_buy", step=2,
+                               data={"ticker": ticker, "shares": shares})
+            send_inline_keyboard(
+                f"💰 At what price to simulate the buy for <b>{ticker}</b>?{live_hint}\n"
+                f"<i>Send blank to use live price</i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
         return _parse_and_execute(f"PAPER BUY {text}", original=f"/paper_buy {text}", chat_id=chat_id)
 
     if command == "paper_sell":
@@ -1456,13 +1485,24 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             shares = parsed.get("shares")
             price  = parsed.get("price")
         if not ticker:
-            # Re-save pending state so user can retry without re-typing /paper_buy
             save_pending_state(chat_id, "paper_buy")
             return "🤔 Which stock? Try: <code>Apple 10</code> or <code>AVY 2</code>"
         if not shares:
-            # Re-save pending state so user can retry
-            save_pending_state(chat_id, "paper_buy")
+            save_pending_state(chat_id, "paper_buy", step=1, data={"ticker": ticker})
             return f"🤔 How many shares of <b>{ticker}</b> to simulate buying?"
+        if price is None:
+            # Ask for entry price — important for paper trading accuracy
+            live = _fetch_live_price(ticker)
+            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+            save_pending_state(chat_id, "paper_buy", step=2,
+                               data={"ticker": ticker, "shares": shares})
+            send_inline_keyboard(
+                f"💰 At what price to simulate the buy for <b>{ticker}</b>?{live_hint}\n"
+                f"<i>Send blank to use live price</i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
         return paper_buy(ticker, shares, chat_id, price)
 
     if text in ("PAPER SELL",):
@@ -2403,7 +2443,21 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                                  buttons, chat_id=chat_id)
             return ""
 
-        return _execute_bought(candidates[0]["ticker"], price_raw, shares_raw, chat_id)
+        ticker = candidates[0]["ticker"]
+        if price_raw is None:
+            live = _fetch_live_price(ticker)
+            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+            save_pending_state(chat_id, "bought", step=2,
+                               data={"ticker": ticker, "shares": shares_raw})
+            send_inline_keyboard(
+                f"💰 At what price did you buy <b>{ticker}</b>?{live_hint}\n"
+                f"<i>Send blank to use live price</i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
+        return _execute_bought(ticker, price_raw, shares_raw, chat_id)
 
     # ── /sold [TICKER|name [price]] ──────────────────────────────────────────
     if text == "SOLD":
@@ -2437,7 +2491,20 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                                  buttons, chat_id=chat_id)
             return ""
 
-        return _execute_sold(candidates[0]["ticker"], price_raw, chat_id)
+        ticker = candidates[0]["ticker"]
+        if price_raw is None:
+            live = _fetch_live_price(ticker)
+            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+            save_pending_state(chat_id, "sold", step=2, data={"ticker": ticker})
+            send_inline_keyboard(
+                f"💰 At what price did you sell <b>{ticker}</b>?{live_hint}\n"
+                f"<i>Send blank to use live price</i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
+        return _execute_sold(ticker, price_raw, chat_id)
 
     # ── /history — date-wise transaction log ─────────────────────────────────
     if text == "HISTORY":
