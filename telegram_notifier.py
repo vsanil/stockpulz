@@ -1205,7 +1205,17 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if not picks:
             return "📭 No picks for today yet. Check back after 8 AM ET."
         config = {**get_config(), **get_user_config(chat_id)}
-        return format_daily_message(picks, config)
+        # Re-generate personal notes on demand (same Haiku call as morning send)
+        personal_notes: dict = {}
+        try:
+            from ai_analyzer import personalize_picks
+            log            = load_user_trade_log(chat_id)
+            open_positions = log.get("open", [])
+            risk_profile   = config.get("risk_profile", "moderate")
+            personal_notes = personalize_picks(picks, open_positions, risk_profile)
+        except Exception as pn_exc:
+            print(f"[telegram] /today personal notes failed (non-critical): {pn_exc}")
+        return format_daily_message(picks, config, personal_notes=personal_notes)
 
     if text == "EXPLAIN":
         _prompt_for_param("explain", chat_id)
@@ -1213,9 +1223,16 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
     if text.startswith("EXPLAIN "):
         # Preserve original casing for the query — strip the command prefix
-        raw = original.lstrip("/")
+        raw   = original.lstrip("/")
         query = raw.split(" ", 1)[1].strip() if " " in raw else raw
-        return _explain_pick(query)
+        # Fire in background — Haiku can take 2-4s; returning "" lets webhook
+        # respond instantly (200 OK) while the answer arrives a moment later.
+        send_message("💬 <i>Thinking…</i>", chat_id=chat_id)
+        def _explain_async():
+            reply = _explain_pick(query)
+            send_message(reply, chat_id=chat_id)
+        threading.Thread(target=_explain_async, daemon=True).start()
+        return None   # already sent "Thinking…", don't send a second message
 
     if text == "PERF":
         from trade_logger import get_performance_stats
