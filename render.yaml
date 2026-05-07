@@ -24,7 +24,7 @@ services:
   - type: cron
     name: stock-agent-prescreener
     runtime: python
-    schedule: "0 4 * * 1-5"        # Midnight ET (Mon–Fri) — pre-score 600 tickers silently
+    schedule: "0 3 * * 1-5"        # 11:00 PM ET / 10:00 PM CDT (Mon–Fri) — pre-score 600 tickers silently
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
     envVars:
@@ -47,7 +47,7 @@ services:
   - type: cron
     name: stock-agent-morning
     runtime: python
-    schedule: "0 12 * * 1-5"       # 8:00 AM ET (Mon–Fri) — morning briefing
+    schedule: "0 11 * * 1-5"       # 7:00 AM ET / 6:00 AM CDT (Mon–Fri) — morning briefing (arrives ~8:30 AM ET, 1 hour before open)
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
     envVars:
@@ -69,7 +69,7 @@ services:
   - type: cron
     name: stock-agent-confirmation
     runtime: python
-    schedule: "30 14 * * 1-5"      # 10:30 AM ET (Mon–Fri) — confirmation run
+    schedule: "30 14 * * 1-5"      # 10:30 AM ET / 9:30 AM CDT (Mon–Fri) — confirmation run (1 hour after open)
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
     envVars:
@@ -91,7 +91,7 @@ services:
   - type: cron
     name: stock-agent-eod
     runtime: python
-    schedule: "30 19 * * 1-5"      # 3:30 PM ET (Mon–Fri) — end-of-day check
+    schedule: "30 19 * * 1-5"      # 3:30 PM ET / 2:30 PM CDT (Mon–Fri) — end-of-day check (30 min before close)
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
     envVars:
@@ -113,7 +113,7 @@ services:
   - type: cron
     name: stock-agent-price-alerts
     runtime: python
-    schedule: "*/30 13-20 * * 1-5"  # Every 30 min, 9:30 AM–4 PM ET (Mon–Fri)
+    schedule: "*/30 13-20 * * 1-5"  # Every 30 min, 9:30 AM–4:00 PM ET / 8:30 AM–3:00 PM CDT (Mon–Fri)
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
     envVars:
