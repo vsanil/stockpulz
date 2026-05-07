@@ -311,13 +311,15 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
         pct   = (current - float(entry)) / float(entry) * 100
         arrow = "▲" if pct >= 0 else "▼"
         if stop and current <= float(stop):
-            badge = "🔴 STOP HIT"
-        elif target and pct >= (float(target) - float(entry)) / float(entry) * 100 * 0.5:
-            badge = "✅ On track"
-        elif pct < -2:
+            badge = "🔴 Stop hit — consider exit"
+        elif pct <= -2:
+            badge = "⚠️ Watch — pulling back"
+        elif pct < -1:
             badge = "⚠️ Watch"
+        elif pct >= 0.5:
+            badge = "✅ On track"
         else:
-            badge = "🟡 Neutral"
+            badge = "🟡 Flat — hold"
         return (f"   <b>{symbol}</b>  <code>${_p(entry)}</code> → <code>${_p(current)}</code> "
                 f"{arrow}{abs(pct):.1f}%  {badge}")
 
@@ -345,7 +347,7 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
         for c in clt:
             lines.append(price_line(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), None))
 
-    lines += ["", "🔴 exit  ✅ hold  ⚠️ watch  🟡 wait", "<i>⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share"]
+    lines += ["", "🔴 stop hit  ✅ on track  ⚠️ watch  🟡 flat", "<i>⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share"]
     return "\n".join(lines)
 
 
