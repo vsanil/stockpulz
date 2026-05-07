@@ -2,11 +2,12 @@
 crypto_screener.py — Crypto screener using CoinGecko free API (no key needed).
 
 Two-phase approach for reliable RSI + MA scoring:
-  Phase 1: Single bulk call → filter + basic scoring → top CANDIDATE_N coins
-  Phase 2: Individual market_chart calls for those candidates → full RSI/MA scoring
+  Phase 1: Bulk /coins/markets call (sparkline=False) → filter + rank → top CANDIDATE_N
+  Phase 2: Individual /coins/{id}/market_chart calls → full RSI/MA scoring
 
-If the bulk call already includes sparkline data, Phase 2 is skipped entirely.
-CoinGecko free tier: ~30 calls/min. Phase 2 adds ~15 calls with 0.5s delays = ~10s.
+Sparkline is explicitly disabled — it's a premium CoinGecko feature that causes
+rate-limit (429) errors on the free tier. Phase 2 individual calls (with 1.5s delay)
+are slow but reliable within free-tier limits (~10-30 req/min).
 """
 
 import time
@@ -14,10 +15,19 @@ import statistics
 import requests
 
 COINGECKO_BASE  = "https://api.coingecko.com/api/v3"
-MAX_COINS       = 100    # Fetched in the bulk call
-CANDIDATE_N     = 15     # Fetch individual price history for this many candidates
+MAX_COINS       = 50     # Reduced from 100 — smaller bulk call = less rate-limit risk
+CANDIDATE_N     = 10     # Fetch individual price history for this many candidates
 TOP_N           = 5      # Final picks returned per category
-HISTORY_DELAY   = 0.5    # Seconds between individual market_chart calls
+HISTORY_DELAY   = 1.5    # Seconds between individual market_chart calls (was 0.5 — too fast)
+
+# CoinGecko free tier: ~10-30 calls/min. Use a real User-Agent to avoid bot detection.
+_HEADERS = {
+    "User-Agent": "StockPulz/1.0 (personal trading assistant; contact vasanth.sanil@gmail.com)",
+    "Accept": "application/json",
+}
+
+# Retry config for rate-limited bulk calls
+_BULK_RETRY_DELAYS = [5, 15, 30, 60]  # seconds — 4 retries after first attempt
 
 # Min market cap filter — exclude micro-caps
 MIN_MARKET_CAP = 200_000_000   # $200M
@@ -36,40 +46,78 @@ EXCLUDE_IDS = {
 # ── CoinGecko API calls ───────────────────────────────────────────────────────
 
 def _get_top_coins(limit: int = MAX_COINS) -> list[dict]:
-    """Bulk fetch top coins by market cap. Requests sparkline but doesn't require it."""
+    """
+    Bulk fetch top coins by market cap with retry on rate-limit (429).
+
+    Sparkline is NOT requested — it's a premium CoinGecko feature that causes
+    429s on the free tier. We always use Phase 2 (individual market_chart calls)
+    for price history, which is more reliable.
+    """
     url = f"{COINGECKO_BASE}/coins/markets"
     params = {
         "vs_currency":            "usd",
         "order":                  "market_cap_desc",
         "per_page":               limit,
         "page":                   1,
-        "sparkline":              True,
+        "sparkline":              False,   # disabled — free tier rate-limit trigger
         "price_change_percentage": "24h,7d,30d",
     }
-    resp = requests.get(url, params=params, timeout=20)
-    resp.raise_for_status()
-    return resp.json()
+
+    last_exc = None
+    for attempt, delay in enumerate([0] + _BULK_RETRY_DELAYS, start=1):
+        if delay:
+            print(f"[crypto_screener] Bulk call retry {attempt}/5 — waiting {delay}s...")
+            time.sleep(delay)
+        try:
+            resp = requests.get(url, params=params, headers=_HEADERS, timeout=25)
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", delay or 30))
+                print(f"[crypto_screener] Rate limited (429) — waiting {retry_after}s...")
+                time.sleep(retry_after)
+                last_exc = Exception(f"CoinGecko rate limited (429)")
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            if not data:
+                print(f"[crypto_screener] Bulk call returned empty list (attempt {attempt}/5).")
+                last_exc = Exception("Empty response from CoinGecko bulk call")
+                continue
+            print(f"[crypto_screener] Bulk call OK — {len(data)} coins returned.")
+            return data
+        except Exception as exc:
+            print(f"[crypto_screener] Bulk call attempt {attempt}/5 failed: {exc}")
+            last_exc = exc
+
+    raise last_exc or Exception("CoinGecko bulk call failed after all retries")
 
 
 def _get_price_history(coin_id: str, days: int = 7) -> list[float]:
     """
     Fetch hourly price history for a single coin via /coins/{id}/market_chart.
     Returns a flat list of prices, or [] on failure.
-    This endpoint reliably returns data regardless of sparkline availability.
+    Retries once on 429 after the Retry-After header (or 30s default).
     """
-    try:
-        url  = f"{COINGECKO_BASE}/coins/{coin_id}/market_chart"
-        resp = requests.get(
-            url,
-            params={"vs_currency": "usd", "days": days, "interval": "hourly"},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        raw = resp.json().get("prices", [])
-        return [p[1] for p in raw]   # [[timestamp, price], ...] → [price, ...]
-    except Exception as exc:
-        print(f"[crypto_screener] Price history fetch failed for {coin_id}: {exc}")
-        return []
+    url = f"{COINGECKO_BASE}/coins/{coin_id}/market_chart"
+    for attempt in range(2):
+        try:
+            resp = requests.get(
+                url,
+                params={"vs_currency": "usd", "days": days, "interval": "hourly"},
+                headers=_HEADERS,
+                timeout=20,
+            )
+            if resp.status_code == 429:
+                wait = int(resp.headers.get("Retry-After", 30))
+                print(f"[crypto_screener] Rate limited on {coin_id} — waiting {wait}s...")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            raw = resp.json().get("prices", [])
+            return [p[1] for p in raw]   # [[timestamp, price], ...] → [price, ...]
+        except Exception as exc:
+            print(f"[crypto_screener] Price history fetch failed for {coin_id}: {exc}")
+            return []
+    return []
 
 
 # ── Technical indicators ──────────────────────────────────────────────────────
@@ -194,46 +242,35 @@ def run_crypto_screener() -> dict:
         and (c.get("market_cap") or 0) >= MIN_MARKET_CAP
     ]
 
-    has_sparkline = sum(1 for c in coins
-                        if (c.get("sparkline_in_7d") or {}).get("price"))
-    print(f"[crypto_screener] {len(coins)} coins after exclusions, "
-          f"{has_sparkline} with sparkline data.")
+    print(f"[crypto_screener] {len(coins)} coins after exclusions.")
 
-    # Phase 1: basic score on all coins (no price history needed)
+    # Phase 1: basic score on all coins using available market data (no price history yet)
     basic_scores = []
     for coin in coins:
-        prices    = (coin.get("sparkline_in_7d") or {}).get("price") or []
-        st_score, _ = _short_term_score(coin, prices)
-        lt_score, _ = _long_term_score(coin, prices)
+        st_score, _ = _short_term_score(coin, [])
+        lt_score, _ = _long_term_score(coin, [])
         basic_scores.append((coin, st_score, lt_score))
 
-    # Pick top CANDIDATE_N by combined score for price history fetch
-    combined = sorted(basic_scores, key=lambda x: x[1] + x[2], reverse=True)
+    # Pick top CANDIDATE_N by combined score for individual price history fetch
+    combined   = sorted(basic_scores, key=lambda x: x[1] + x[2], reverse=True)
     candidates = [c[0] for c in combined[:CANDIDATE_N]]
 
-    # Phase 2: fetch individual price history if sparkline was missing
-    needs_history = has_sparkline < len(candidates)
-    if needs_history:
-        print(f"[crypto_screener] Fetching price history for "
-              f"{len(candidates)} candidates (sparkline unavailable)...")
-        for coin in candidates:
-            existing = (coin.get("sparkline_in_7d") or {}).get("price") or []
-            if not existing:
-                prices = _get_price_history(coin["id"], days=7)
-                coin["_fetched_prices"] = prices
-                time.sleep(HISTORY_DELAY)
-    else:
-        print("[crypto_screener] Sparkline data present — skipping individual fetches.")
+    # Phase 2: fetch individual price history for each candidate
+    # (Sparkline is disabled in bulk call — free tier rate limits; individual calls are reliable)
+    print(f"[crypto_screener] Fetching price history for {len(candidates)} candidates...")
+    for coin in candidates:
+        prices = _get_price_history(coin["id"], days=7)
+        coin["_fetched_prices"] = prices
+        if not prices:
+            print(f"[crypto_screener] No price history for {coin['id']} — will score without it.")
+        time.sleep(HISTORY_DELAY)
 
     # Final scoring with full price data
     short_results = []
     long_results  = []
 
     for coin in candidates:
-        # Prefer fetched prices, then sparkline, then empty
-        prices = (coin.get("_fetched_prices")
-                  or (coin.get("sparkline_in_7d") or {}).get("price")
-                  or [])
+        prices = coin.get("_fetched_prices") or []
 
         symbol        = coin.get("symbol", "").upper()
         name          = coin.get("name", coin["id"])
