@@ -5,7 +5,41 @@ Falls back to hardcoded defaults if the Gist is unreachable.
 
 import os
 import json
+import time
 import requests
+
+# ── In-memory Gist read cache ─────────────────────────────────────────────────
+# Interactive webhook commands fire 3-5 Gist reads each (pending_state, config,
+# user_configs, allowed_users…). Without caching that's 1-2s of GitHub API latency
+# before any logic runs.
+#
+# Strategy: cache reads for GIST_CACHE_TTL seconds. Writes always:
+#   1. Go straight to GitHub (source of truth)
+#   2. Immediately invalidate the relevant cache key
+#
+# TTL is intentionally short (20s) — stale reads only matter if two commands
+# arrive within the window AND the first one changed data the second one reads.
+# In practice this is rare and recovers automatically on the next cache miss.
+
+_gist_read_cache: dict[str, tuple[object, float]] = {}
+GIST_CACHE_TTL = 20   # seconds
+
+
+def _cache_get(filename: str):
+    entry = _gist_read_cache.get(filename)
+    if entry:
+        data, ts = entry
+        if time.time() - ts < GIST_CACHE_TTL:
+            return data
+    return None
+
+
+def _cache_set(filename: str, data) -> None:
+    _gist_read_cache[filename] = (data, time.time())
+
+
+def _cache_invalidate(filename: str) -> None:
+    _gist_read_cache.pop(filename, None)
 
 # ── Default config ────────────────────────────────────────────────────────────
 # ── Global bot config (shared across all users) ───────────────────────────────
@@ -71,17 +105,19 @@ def _gist_id() -> str:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def get_config() -> dict:
-    """Fetch config.json from GitHub Gist. Falls back to DEFAULT_CONFIG on error."""
+    """Fetch config.json from Gist (cached). Falls back to DEFAULT_CONFIG on error."""
+    cached = _cache_get(GIST_FILENAME)
+    if cached is not None:
+        return {**DEFAULT_CONFIG, **cached}
     try:
         url = f"https://api.github.com/gists/{_gist_id()}"
         resp = requests.get(url, headers=_gist_headers(), timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        raw = data["files"][GIST_FILENAME]["content"]
+        raw    = data["files"][GIST_FILENAME]["content"]
         config = json.loads(raw)
-        # Merge with defaults so new keys are always present
-        merged = {**DEFAULT_CONFIG, **config}
-        return merged
+        _cache_set(GIST_FILENAME, config)
+        return {**DEFAULT_CONFIG, **config}
     except Exception as exc:
         print(f"[config_manager] WARNING: Could not fetch Gist config ({exc}). Using defaults.")
         return dict(DEFAULT_CONFIG)
@@ -454,13 +490,20 @@ def load_screener_cache() -> dict | None:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _write_config(config: dict) -> None:
-    """Write config dict to the Gist as config.json."""
-    _write_gist_file(GIST_FILENAME, config)
+    """Write config dict to the Gist as config.json (also invalidates cache)."""
+    _write_gist_file(GIST_FILENAME, config)   # _write_gist_file already invalidates
     print(f"[config_manager] Config updated: {config}")
 
 
 def _load_gist_file(filename: str) -> dict | None:
-    """Fetch and parse a JSON file from the Gist. Returns None on any error."""
+    """
+    Fetch and parse a JSON file from the Gist.
+    Checks in-memory cache first — saves a GitHub round-trip on cache hits.
+    Returns None on any error.
+    """
+    cached = _cache_get(filename)
+    if cached is not None:
+        return cached
     try:
         url  = f"https://api.github.com/gists/{_gist_id()}"
         resp = requests.get(url, headers=_gist_headers(), timeout=10)
@@ -468,14 +511,17 @@ def _load_gist_file(filename: str) -> dict | None:
         files = resp.json().get("files", {})
         if filename not in files:
             return None
-        return json.loads(files[filename]["content"])
+        result = json.loads(files[filename]["content"])
+        _cache_set(filename, result)
+        return result
     except Exception as exc:
         print(f"[config_manager] WARNING: Could not load {filename} ({exc}).")
         return None
 
 
 def _write_gist_file(filename: str, data: dict) -> None:
-    """Write any dict as a JSON file to the Gist."""
+    """Write any dict as a JSON file to the Gist. Always invalidates the cache."""
+    _cache_invalidate(filename)   # invalidate before write so stale data is never served
     url     = f"https://api.github.com/gists/{_gist_id()}"
     payload = {"files": {filename: {"content": json.dumps(data, indent=2)}}}
     resp    = requests.patch(url, headers=_gist_headers(), json=payload, timeout=10)
