@@ -1437,14 +1437,17 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     if text.startswith("PAPER BUY "):
         from paper_trader import paper_buy
         raw   = text[10:].strip()
-        parts = raw.split()
+        # Strip noise words so "AVY 2 STOCKS" → ["AVY", "2"]
+        _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "WORTH"}
+        parts = [p for p in raw.split() if p.upper() not in _NOISE]
         ticker, shares, price = None, None, None
         # Strict parse: AAPL 10  |  AAPL 182.50 10
         try:
             if len(parts) == 2 and _is_number(parts[1]):
                 ticker, shares = parts[0].upper(), float(parts[1])
-            elif len(parts) == 3 and _is_number(parts[1]) and _is_number(parts[2]):
-                ticker, price, shares = parts[0].upper(), float(parts[1]), float(parts[2])
+            elif len(parts) >= 3 and _is_number(parts[-1]) and _is_number(parts[-2]):
+                # e.g. AAPL 182.50 10 — price then shares
+                ticker, price, shares = parts[0].upper(), float(parts[-2]), float(parts[-1])
             else:
                 raise ValueError("needs NL parse")
         except (ValueError, IndexError):
@@ -1453,8 +1456,12 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             shares = parsed.get("shares")
             price  = parsed.get("price")
         if not ticker:
-            return "🤔 Which stock? Try: /paper_buy Apple 10 or /paper_buy 5 shares of Tesla"
+            # Re-save pending state so user can retry without re-typing /paper_buy
+            save_pending_state(chat_id, "paper_buy")
+            return "🤔 Which stock? Try: <code>Apple 10</code> or <code>AVY 2</code>"
         if not shares:
+            # Re-save pending state so user can retry
+            save_pending_state(chat_id, "paper_buy")
             return f"🤔 How many shares of <b>{ticker}</b> to simulate buying?"
         return paper_buy(ticker, shares, chat_id, price)
 
@@ -1465,7 +1472,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     if text.startswith("PAPER SELL "):
         from paper_trader import paper_sell
         raw   = text[11:].strip()
-        parts = raw.split()
+        _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF"}
+        parts = [p for p in raw.split() if p.upper() not in _NOISE]
         ticker, shares, price = None, None, None
         # Strict parse: AAPL  |  AAPL 5  |  AAPL 197.10 5
         try:
@@ -1481,7 +1489,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             shares = parsed.get("shares")
             price  = parsed.get("price")
         if not ticker:
-            return "🤔 Which stock to simulate selling? Try: /paper_sell Apple or /paper_sell AAPL 5 shares"
+            save_pending_state(chat_id, "paper_sell")
+            return "🤔 Which stock to simulate selling? Try: <code>Apple</code> or <code>AVY 5</code>"
         return paper_sell(ticker, chat_id, shares, price)
 
     if text == "PAPER PORTFOLIO":
