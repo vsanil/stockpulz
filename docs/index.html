@@ -979,7 +979,7 @@
           <div class="pulse-dot" style="width:6px;height:6px;"></div>
           Today · 8:30 AM ET · Pre-market
         </div>
-        <div class="tg-date">📊 Daily Picks — May 7</div>
+        <div class="tg-date" id="tg-date">📊 Daily Picks — May 7</div>
 
         <div class="tg-section">Stocks — Short Term</div>
         <div class="tg-row">
@@ -1271,6 +1271,12 @@
 </footer>
 
 <script>
+  // Live date in preview card
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now = new Date();
+  document.getElementById('tg-date').textContent =
+    `📊 Daily Picks — ${months[now.getMonth()]} ${now.getDate()}`;
+
   // Intersection Observer — fade in elements as they scroll into view
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
