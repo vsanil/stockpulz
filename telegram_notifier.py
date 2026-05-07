@@ -560,6 +560,28 @@ def handle_callback_query(callback_query: dict) -> None:
         send_message(f"🚫 <code>{rej_id}</code> rejected and removed from pending.", chat_id=chat_id)
         return
 
+    if action == "set_budget":
+        bucket = parts[1] if len(parts) > 1 else ""
+        amount_str = parts[2] if len(parts) > 2 else ""
+        try:
+            amount = float(amount_str)
+        except ValueError:
+            send_message("⚠️ Could not read amount.", chat_id=chat_id)
+            return
+        updates = {}
+        if bucket in ("stocks", "both"):
+            updates["stock_budget"] = amount
+        if bucket in ("crypto", "both"):
+            updates["crypto_budget"] = amount
+        if updates:
+            update_user_config_multi(chat_id, updates)
+            parts_str = "  ·  ".join(
+                f"{'Stocks' if k == 'stock_budget' else 'Crypto'} → <b>${int(amount)}</b>"
+                for k in updates
+            )
+            send_message(f"✅ Budget updated: {parts_str}", chat_id=chat_id)
+        return
+
     if action == "set_risk":
         profile = parts[1] if len(parts) > 1 else ""
         if profile not in ("conservative", "moderate", "aggressive"):
@@ -989,6 +1011,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "set_budget":
         return _parse_and_execute(f"SET BUDGET {text}".strip(), original=f"/set_budget {text}", chat_id=chat_id)
 
+
     if command == "alert":
         if step == 2:
             # User replied with price (and optional direction)
@@ -1052,7 +1075,18 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return _parse_and_execute(f"PAPER SELL {text}", original=f"/paper_sell {text}", chat_id=chat_id)
 
     if command == "paper_add_cash":
-        return _parse_and_execute(f"PAPER ADD CASH {text}", original=f"/paper_add_cash {text}", chat_id=chat_id)
+        from paper_trader import paper_add_cash
+        raw = text.strip().replace(",", "")
+        amount = None
+        try:
+            amount = float(raw[:-1]) * 1000 if raw.lower().endswith("k") else float(raw)
+        except ValueError:
+            parsed = _nl_parse_trade("paper_reset", raw)
+            amount = parsed.get("price")
+        if not amount:
+            save_pending_state(chat_id, "paper_add_cash")
+            return "🤔 How much? e.g. <code>5000</code> or <code>10k</code>"
+        return paper_add_cash(amount, chat_id)
 
     if command == "start":
         return _parse_and_execute("START", original="/start", chat_id=chat_id)
@@ -1610,7 +1644,14 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             parsed = _nl_parse_trade("paper_reset", raw)   # reuse reset schema (price = amount)
             amount = parsed.get("price")
         if not amount:
-            return "🤔 How much to add? Try: /paper_add_cash 5000 or /paper_add_cash 10k"
+            save_pending_state(chat_id, "paper_add_cash")
+            send_inline_keyboard(
+                "💵 <b>How much cash to add to your paper account?</b>\n"
+                "<i>e.g. <code>5000</code> or <code>10k</code></i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
         return paper_add_cash(amount, chat_id)
 
     if text == "PAPER RESET" or text.startswith("PAPER RESET "):
@@ -2360,19 +2401,27 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             parsed = _nl_parse_trade("paper_reset", raw)   # reuse schema (price = amount)
             amount = parsed.get("price")
             if amount:
-                # If no bucket specified, ask which
-                return (
-                    "🤔 Which bucket?\n"
-                    f"/set_budget stocks {int(amount)}\n"
-                    f"/set_budget crypto {int(amount)}\n"
-                    f"/set_budget stocks {int(amount)} crypto {int(amount)}"
+                # Amount given but no bucket — ask via buttons
+                a = int(amount)
+                send_inline_keyboard(
+                    f"💰 Apply <b>${a}</b> budget to which picks?",
+                    [[
+                        {"text": f"📈 Stocks ${a}",      "callback_data": f"set_budget|stocks|{a}"},
+                        {"text": f"🪙 Crypto ${a}",      "callback_data": f"set_budget|crypto|{a}"},
+                        {"text": f"Both ${a}",           "callback_data": f"set_budget|both|{a}"},
+                    ]],
+                    chat_id=chat_id,
                 )
-            return (
-                "🤔 I didn't catch that. Try:\n"
-                "/set_budget stocks 200 crypto 50\n"
-                "/set_budget stocks 150\n"
-                "/set_budget off"
+                return ""
+            # Nothing parseable — prompt from scratch
+            save_pending_state(chat_id, "set_budget")
+            send_inline_keyboard(
+                "💰 <b>Set your per-trade budget</b>\n"
+                "<i>e.g. <code>stocks 200 crypto 50</code> or <code>stocks 150</code></i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
             )
+            return ""
 
         config = update_user_config_multi(chat_id, updates)
         global_cfg = get_config()
