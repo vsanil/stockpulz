@@ -241,3 +241,56 @@ def paper_reset(chat_id: str, starting_cash: float | None = None) -> str:
     amount  = starting_cash if starting_cash is not None else current.get("starting_cash", 10_000.0)
     save_user_paper(chat_id, {"positions": [], "history": [], "starting_cash": amount, "cash": amount})
     return f"🔄 Paper portfolio reset. Starting cash: <b>${amount:,.2f}</b>"
+
+
+def paper_cancel(ticker: str, chat_id: str) -> str:
+    """Remove a paper position without recording it as a sale (undo an accidental paper_buy)."""
+    ticker  = ticker.upper()
+    data    = load_user_paper(chat_id)
+    positions = data.get("positions", [])
+    match   = next((p for p in positions if p["ticker"] == ticker), None)
+    if not match:
+        return f"⚠️ No paper position found for <b>{ticker}</b>."
+    # Refund the cash
+    cost         = float(match.get("entry_price", 0)) * float(match.get("shares", 0))
+    data["cash"] = round(data.get("cash", 0) + cost, 2)
+    data["positions"] = [p for p in positions if p["ticker"] != ticker]
+    save_user_paper(chat_id, data)
+    return (
+        f"🗑 <b>Paper position removed: {ticker}</b>\n"
+        f"<code>${cost:,.2f}</code> refunded to your paper cash.\n"
+        f"<i>Not counted as a sale — use /paper_sell to record a simulated trade.</i>"
+    )
+
+
+def paper_edit(ticker: str, chat_id: str, new_price: float | None = None,
+               new_shares: float | None = None) -> str:
+    """Edit entry price or shares on an existing paper position."""
+    ticker    = ticker.upper()
+    data      = load_user_paper(chat_id)
+    positions = data.get("positions", [])
+    match     = next((p for p in positions if p["ticker"] == ticker), None)
+    if not match:
+        return f"⚠️ No paper position found for <b>{ticker}</b>."
+
+    old_price  = float(match.get("entry_price", 0))
+    old_shares = float(match.get("shares", 0))
+    old_cost   = old_price * old_shares
+
+    if new_price is not None:
+        match["entry_price"] = round(new_price, 4)
+    if new_shares is not None:
+        match["shares"] = round(new_shares, 6)
+
+    new_cost     = float(match["entry_price"]) * float(match["shares"])
+    cash_delta   = old_cost - new_cost          # positive = cash returned, negative = cash used
+    data["cash"] = round(data.get("cash", 0) + cash_delta, 2)
+    save_user_paper(chat_id, data)
+
+    changes = []
+    if new_price  is not None: changes.append(f"price → <code>${new_price}</code>")
+    if new_shares is not None: changes.append(f"shares → <code>{new_shares}</code>")
+    return (
+        f"✏️ <b>Paper {ticker} updated:</b> {', '.join(changes)}\n"
+        f"Cash adjusted by <code>{'+' if cash_delta >= 0 else ''}{cash_delta:,.2f}</code>"
+    )

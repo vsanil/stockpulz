@@ -462,6 +462,45 @@ def update_trailing_stops(current_prices: dict, chat_id: str,
     return newly_closed
 
 
+def edit_trade(ticker: str, chat_id: str,
+               new_price: float | None = None,
+               new_shares: float | None = None) -> dict | None:
+    """
+    Edit entry_price and/or shares on an open trade.
+    Recomputes allocation and target/stop prices proportionally.
+    Returns updated trade dict, or None if ticker not found in open positions.
+    """
+    log   = load_user_trade_log(chat_id)
+    match = None
+    for t in log["open"]:
+        if t["ticker"] == ticker.upper():
+            match = t
+            break
+    if not match:
+        return None
+
+    if new_price is not None:
+        old_entry = float(match.get("entry_price", new_price))
+        ratio     = new_price / old_entry if old_entry else 1
+        match["entry_price"] = round(new_price, 4)
+        # Rescale target and stop proportionally
+        if match.get("target_price"):
+            match["target_price"] = round(float(match["target_price"]) * ratio, 4)
+        if match.get("stop_loss"):
+            match["stop_loss"] = round(float(match["stop_loss"]) * ratio, 4)
+
+    if new_shares is not None:
+        match["shares"]     = round(new_shares, 6)
+        match["allocation"] = round(float(match.get("entry_price", 0)) * new_shares, 2)
+    elif new_price is not None and match.get("shares"):
+        match["allocation"] = round(new_price * float(match["shares"]), 2)
+
+    save_user_trade_log(chat_id, log)
+    print(f"[trade_logger] Edited open {ticker.upper()} for {chat_id}: "
+          f"price={match.get('entry_price')} shares={match.get('shares')}")
+    return match
+
+
 def get_weekly_closed_trades(chat_id: str) -> list[dict]:
     """Return trades closed this calendar week (Mon–today) for a specific user."""
     from datetime import timedelta
