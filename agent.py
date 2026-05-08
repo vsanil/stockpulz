@@ -31,10 +31,10 @@ from screener import run_screener
 from crypto_screener import run_crypto_screener
 from ai_analyzer import analyze_with_claude, personalize_picks, generate_trade_debrief
 from price_checker import get_current_prices
-from telegram_notifier import (
-    format_daily_message, format_confirmation_message,
-    format_weekly_recap_message, send_message,
+from formatters import (
+    format_daily_message, format_confirmation_message, format_weekly_recap_message,
 )
+from telegram_api import send_message
 
 ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
