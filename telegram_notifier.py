@@ -671,45 +671,11 @@ def handle_callback_query(callback_query: dict) -> None:
         result = _execute_sold(ticker, price_raw or None, chat_id, shares_sold=None)
         send_message(result, chat_id=chat_id)
 
-    elif action == "edit_trade_start":
-        ticker     = parts[1] if len(parts) > 1 else ""
-        price_raw  = parts[2] if len(parts) > 2 else ""
-        shares_raw = parts[3] if len(parts) > 3 else ""
-        if price_raw:
-            from trade_logger import edit_trade
-            updated = edit_trade(ticker, chat_id,
-                                 new_price=float(price_raw),
-                                 new_shares=float(shares_raw) if shares_raw else None)
-            if updated:
-                send_message(
-                    f"✅ <b>{ticker} updated</b>\n"
-                    f"Entry: <code>${_p(updated['entry_price'])}</code>\n"
-                    f"Target: <code>${_p(updated.get('target_price'))}</code>  "
-                    f"Stop: <code>${_p(updated.get('stop_loss'))}</code>",
-                    chat_id=chat_id,
-                )
-        else:
-            save_pending_state(chat_id, "edit", step=2, data={"ticker": ticker})
-            send_inline_keyboard(
-                f"✏️ New entry price for <b>{ticker}</b>?",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-
     elif action == "paper_cancel_pos":
         ticker = parts[1] if len(parts) > 1 else ""
         from paper_trader import paper_cancel
         result = paper_cancel(ticker, chat_id)
         send_message(result, chat_id=chat_id)
-
-    elif action == "paper_edit_start":
-        ticker = parts[1] if len(parts) > 1 else ""
-        save_pending_state(chat_id, "paper_edit", step=2, data={"ticker": ticker})
-        send_inline_keyboard(
-            f"✏️ New entry price for paper <b>{ticker}</b>?",
-            [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-            chat_id=chat_id,
-        )
 
     elif action == "toggle_setting":
         key      = parts[1] if len(parts) > 1 else ""
@@ -1206,49 +1172,6 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             return ""
 
         return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_raw)
-
-    # ── /edit — fix entry price on open real trade ────────────────────────────
-    if command == "edit":
-        if step == 2:
-            from trade_logger import edit_trade
-            ticker    = data.get("ticker", "")
-            price_raw = text.strip()
-            try:
-                new_price = float(price_raw.replace(",", ""))
-            except ValueError:
-                parsed = _nl_parse_trade("bought", price_raw)
-                new_price = parsed.get("price")
-            if not new_price:
-                save_pending_state(chat_id, "edit", step=2, data=data)
-                return "🤔 Didn't catch that — enter a price like <code>182.50</code>"
-            updated = edit_trade(ticker, chat_id, new_price=new_price)
-            if not updated:
-                return f"⚠️ No open position found for <b>{ticker}</b>."
-            return (
-                f"✅ <b>{ticker} updated</b>\n"
-                f"Entry: <code>${_p(updated['entry_price'])}</code>\n"
-                f"Target: <code>${_p(updated.get('target_price'))}</code>  "
-                f"Stop: <code>${_p(updated.get('stop_loss'))}</code>\n"
-                f"<i>Target &amp; stop rescaled proportionally.</i>"
-            )
-        return _parse_and_execute(f"EDIT {text}", original=f"/edit {text}", chat_id=chat_id)
-
-    # ── /paper_edit — fix entry on a paper position ───────────────────────────
-    if command == "paper_edit":
-        if step == 2:
-            from paper_trader import paper_edit
-            ticker    = data.get("ticker", "")
-            price_raw = text.strip()
-            try:
-                new_price = float(price_raw.replace(",", ""))
-            except ValueError:
-                parsed = _nl_parse_trade("paper_buy", price_raw)
-                new_price = parsed.get("price")
-            if not new_price:
-                save_pending_state(chat_id, "paper_edit", step=2, data=data)
-                return "🤔 Didn't catch that — enter a price like <code>182.50</code>"
-            return paper_edit(ticker, chat_id, new_price=new_price)
-        return _parse_and_execute(f"PAPER EDIT {text}", original=f"/paper_edit {text}", chat_id=chat_id)
 
     # ── Single-step param commands ────────────────────────────────────────────
     if command == "history":
@@ -3050,69 +2973,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
         return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_raw)
 
-    # ── /edit — fix entry price (and optionally shares) on an open real trade ─
-    if text == "EDIT":
-        log         = load_user_trade_log(chat_id)
-        open_trades = log.get("open", [])
-        if not open_trades:
-            return "📭 No open trades to edit."
-        buttons = []
-        for t in sorted(open_trades, key=lambda x: x.get("opened_date", ""), reverse=True):
-            label = f"✏️ {t['ticker']}  entry ${_p(t.get('entry_price'))}  · {t.get('opened_date','')}"
-            buttons.append([{"text": label, "callback_data": f"edit_trade_start|{t['ticker']}"}])
-        send_inline_keyboard(
-            "✏️ <b>Which trade to edit?</b>\n<i>You can fix the entry price or share count.</i>",
-            buttons, chat_id=chat_id,
-        )
-        return ""
-
-    if text.startswith("EDIT "):
-        from trade_logger import edit_trade
-        raw    = text[5:].strip()
-        _NOISE = {"STOCKS", "SHARES", "UNITS", "AT", "PRICE", "TO", "FROM"}
-        parts  = [p for p in raw.split() if p.upper() not in _NOISE]
-        # Expect: TICKER NEW_PRICE [NEW_SHARES]  e.g. "AAPL 182.50" or "AAPL 182.50 5"
-        name_raw   = parts[0] if parts else None
-        price_raw  = parts[1] if len(parts) >= 2 and _is_number(parts[1]) else None
-        shares_raw = parts[2] if len(parts) >= 3 and _is_number(parts[2]) else None
-
-        if not name_raw:
-            return "🤔 Try: <code>/edit AAPL 182.50</code> or <code>/edit Apple 182.50 5</code>"
-
-        candidates = _resolve_ticker_candidates(name_raw)
-        if len(candidates) > 1:
-            price_enc  = price_raw  or ""
-            shares_enc = shares_raw or ""
-            buttons = [[{"text": f"{c['ticker']} — {c['name']}",
-                         "callback_data": f"edit_trade_start|{c['ticker']}|{price_enc}|{shares_enc}"}]
-                       for c in candidates]
-            send_inline_keyboard(f"🔍 Which stock?", buttons, chat_id=chat_id)
-            return ""
-
-        ticker = candidates[0]["ticker"]
-        if price_raw is None:
-            save_pending_state(chat_id, "edit", step=2, data={"ticker": ticker})
-            send_inline_keyboard(
-                f"✏️ New entry price for <b>{ticker}</b>?",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
-
-        updated = edit_trade(ticker, chat_id,
-                             new_price=float(price_raw),
-                             new_shares=float(shares_raw) if shares_raw else None)
-        if not updated:
-            return f"⚠️ No open position found for <b>{ticker}</b>."
-        shares_str = f"  · {updated['shares']} shares" if updated.get("shares") else ""
-        return (
-            f"✅ <b>{ticker} updated</b>\n"
-            f"Entry: <code>${_p(updated['entry_price'])}</code>{shares_str}\n"
-            f"Target: <code>${_p(updated.get('target_price'))}</code>  "
-            f"Stop: <code>${_p(updated.get('stop_loss'))}</code>\n"
-            f"<i>Target &amp; stop rescaled proportionally.</i>"
-        )
-
     # ── /paper_cancel — remove a paper position without recording a sale ──────
     if text == "PAPER CANCEL":
         from paper_trader import paper_cancel
@@ -3142,51 +3002,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             return ""
         ticker = candidates[0]["ticker"]
         return paper_cancel(ticker, chat_id)
-
-    # ── /paper_edit — fix entry price or shares on a paper position ───────────
-    if text == "PAPER EDIT":
-        data      = load_user_paper(chat_id)
-        positions = data.get("positions", [])
-        if not positions:
-            return "📭 No paper positions to edit."
-        buttons = [[{"text": f"✏️ {p['ticker']}  ${_p(p.get('entry_price'))}  · {p.get('shares')} shares",
-                     "callback_data": f"paper_edit_start|{p['ticker']}"}]
-                   for p in positions]
-        send_inline_keyboard(
-            "✏️ <b>Which paper position to edit?</b>",
-            buttons, chat_id=chat_id,
-        )
-        return ""
-
-    if text.startswith("PAPER EDIT "):
-        from paper_trader import paper_edit
-        raw    = text[11:].strip()
-        _NOISE = {"STOCKS", "SHARES", "UNITS", "AT", "PRICE", "TO", "FROM"}
-        parts  = [p for p in raw.split() if p.upper() not in _NOISE]
-        name_raw   = parts[0] if parts else None
-        price_raw  = parts[1] if len(parts) >= 2 and _is_number(parts[1]) else None
-        shares_raw = parts[2] if len(parts) >= 3 and _is_number(parts[2]) else None
-        if not name_raw:
-            return "🤔 Try: <code>/paper_edit AAPL 182.50</code>"
-        candidates = _resolve_ticker_candidates(name_raw)
-        if len(candidates) > 1:
-            buttons = [[{"text": f"{c['ticker']} — {c['name']}",
-                         "callback_data": f"paper_edit_start|{c['ticker']}"}]
-                       for c in candidates]
-            send_inline_keyboard(f"🔍 Which stock?", buttons, chat_id=chat_id)
-            return ""
-        ticker = candidates[0]["ticker"]
-        if price_raw is None:
-            save_pending_state(chat_id, "paper_edit", step=2, data={"ticker": ticker})
-            send_inline_keyboard(
-                f"✏️ New entry price for paper <b>{ticker}</b>?",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
-        return paper_edit(ticker, chat_id,
-                          new_price=float(price_raw),
-                          new_shares=float(shares_raw) if shares_raw else None)
 
     # ── /history — date-wise transaction log ─────────────────────────────────
     if text == "HISTORY":

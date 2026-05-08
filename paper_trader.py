@@ -263,34 +263,3 @@ def paper_cancel(ticker: str, chat_id: str) -> str:
     )
 
 
-def paper_edit(ticker: str, chat_id: str, new_price: float | None = None,
-               new_shares: float | None = None) -> str:
-    """Edit entry price or shares on an existing paper position."""
-    ticker    = ticker.upper()
-    data      = load_user_paper(chat_id)
-    positions = data.get("positions", [])
-    match     = next((p for p in positions if p["ticker"] == ticker), None)
-    if not match:
-        return f"⚠️ No paper position found for <b>{ticker}</b>."
-
-    old_price  = float(match.get("entry_price", 0))
-    old_shares = float(match.get("shares", 0))
-    old_cost   = old_price * old_shares
-
-    if new_price is not None:
-        match["entry_price"] = round(new_price, 4)
-    if new_shares is not None:
-        match["shares"] = round(new_shares, 6)
-
-    new_cost     = float(match["entry_price"]) * float(match["shares"])
-    cash_delta   = old_cost - new_cost          # positive = cash returned, negative = cash used
-    data["cash"] = round(data.get("cash", 0) + cash_delta, 2)
-    save_user_paper(chat_id, data)
-
-    changes = []
-    if new_price  is not None: changes.append(f"price → <code>${new_price}</code>")
-    if new_shares is not None: changes.append(f"shares → <code>{new_shares}</code>")
-    return (
-        f"✏️ <b>Paper {ticker} updated:</b> {', '.join(changes)}\n"
-        f"Cash adjusted by <code>{'+' if cash_delta >= 0 else ''}{cash_delta:,.2f}</code>"
-    )
