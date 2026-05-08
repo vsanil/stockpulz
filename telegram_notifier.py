@@ -721,6 +721,47 @@ def handle_callback_query(callback_query: dict) -> None:
                 chat_id=chat_id,
             )
 
+    elif action == "paper_hist_rm_confirm":
+        from paper_trader import paper_history as get_paper_history
+        idx_str = parts[1] if len(parts) > 1 else ""
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            send_message("⚠️ Invalid trade index.", chat_id=chat_id)
+            return
+        history = get_paper_history(chat_id)
+        if idx < 0 or idx >= len(history):
+            send_message("⚠️ Trade not found — the list may have changed.", chat_id=chat_id)
+            return
+        t        = history[idx]
+        gain_pct = t.get("gain_pct", 0)
+        gain     = t.get("gain", 0)
+        sign     = "+" if gain >= 0 else ""
+        proceeds = round(float(t.get("sell_price", 0)) * float(t.get("shares", 0)), 2)
+        send_inline_keyboard(
+            f"⚠️ <b>Reverse this paper trade?</b>\n\n"
+            f"<b>{t['ticker']}</b>  {t.get('shares')} shares  "
+            f"sold @ <code>${_p(t.get('sell_price'))}</code>  {sign}{gain_pct:.1f}%\n"
+            f"Closed: {t.get('closed_date', '')}\n\n"
+            f"<i>Proceeds (${proceeds:,.2f}) will be deducted and shares restored to your position.</i>",
+            [[
+                {"text": "✅ Yes, reverse it", "callback_data": f"paper_hist_rm_do|{idx}"},
+                {"text": "❌ No, keep it",     "callback_data": "cancel_abort"},
+            ]],
+            chat_id=chat_id,
+        )
+
+    elif action == "paper_hist_rm_do":
+        from paper_trader import paper_remove_history
+        idx_str = parts[1] if len(parts) > 1 else ""
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            send_message("⚠️ Invalid trade index.", chat_id=chat_id)
+            return
+        result = paper_remove_history(chat_id, idx)
+        send_message(result, chat_id=chat_id)
+
     elif action in ("cancel", "cancel_auto"):
         from trade_logger import cancel_trade, reopen_trade
         ticker = parts[1] if len(parts) > 1 else ""
@@ -3003,6 +3044,53 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         ticker = candidates[0]["ticker"]
         return paper_cancel(ticker, chat_id)
 
+    # ── /paper_history — closed paper trades with remove buttons ────────────
+    if text == "PAPER HISTORY":
+        from paper_trader import paper_history as get_paper_history
+        history = get_paper_history(chat_id)
+
+        if not history:
+            return (
+                "📄 <b>Paper Trade History</b>\n\n"
+                "No closed paper trades yet.\n"
+                "Use /paper_sell to close a position."
+            )
+
+        lines = ["📄 <b>PAPER TRADE HISTORY</b>\n"]
+        for t in history:
+            gain_pct = t.get("gain_pct", 0)
+            gain     = t.get("gain", 0)
+            sign     = "+" if gain >= 0 else ""
+            emoji    = "✅" if gain >= 0 else "❌"
+            shares   = t.get("shares", "")
+            lines.append(
+                f"{emoji} <b>{t['ticker']}</b>  {shares} shares\n"
+                f"   Buy <code>${_p(t.get('buy_price'))}</code> → "
+                f"Sell <code>${_p(t.get('sell_price'))}</code>  "
+                f"<b>{sign}{gain_pct:.1f}%</b>  (${gain:+.2f})\n"
+                f"   📅 {t.get('closed_date', '')}"
+            )
+
+        send_message("\n\n".join([lines[0]] + lines[1:]), chat_id=chat_id)
+
+        # 🗑 one button per history entry
+        buttons = []
+        for idx, t in enumerate(history):
+            gain_pct = t.get("gain_pct", 0)
+            sign     = "+" if gain_pct >= 0 else ""
+            buttons.append([{
+                "text":          f"🗑 {t['ticker']}  {sign}{gain_pct:.1f}%  · {t.get('closed_date', '')}",
+                "callback_data": f"paper_hist_rm_confirm|{idx}",
+            }])
+
+        send_inline_keyboard(
+            "🗑 <b>Remove a paper trade?</b>\n"
+            "<i>Proceeds will be refunded and shares restored.</i>",
+            buttons,
+            chat_id=chat_id,
+        )
+        return ""
+
     # ── /history — date-wise transaction log ─────────────────────────────────
     if text == "HISTORY":
         log         = load_user_trade_log(chat_id)
@@ -3023,6 +3111,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 "shares": t.get("shares"),
                 "status": "OPEN",
                 "ret":    None,
+                "etype":  "open",
             })
         for t in closed:
             # Buy event
@@ -3034,6 +3123,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 "shares": t.get("shares"),
                 "status": "CLOSED",
                 "ret":    None,
+                "etype":  "closed_buy",
             })
             # Sell event
             outcome_icon = {"target": "🎯", "stop": "🛑", "trailing_stop": "🔒",
@@ -3047,6 +3137,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 "shares": t.get("shares"),
                 "status": outcome_icon,
                 "ret":    ret,
+                "etype":  "closed_sell",
             })
 
         # Sort most recent first
@@ -3076,7 +3167,39 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                     f"{e['status']}{ret_str}"
                 )
 
-        return "\n".join(lines)
+        send_message("\n".join(lines), chat_id=chat_id)
+
+        # Build 🗑 remove buttons — one per unique removable entry
+        buttons = []
+        seen_open   = set()
+        seen_closed = set()
+        for e in events:
+            ticker = e["ticker"]
+            if e["etype"] == "open" and ticker not in seen_open:
+                seen_open.add(ticker)
+                price_label = f"${_p(e['price'])}" if e["price"] else "—"
+                buttons.append([{
+                    "text":          f"🗑 {ticker}  buy @ {price_label}",
+                    "callback_data": f"cancel_auto|{ticker}",
+                }])
+            elif e["etype"] == "closed_sell" and ticker not in seen_closed:
+                seen_closed.add(ticker)
+                price_label = f"${_p(e['price'])}" if e["price"] else "—"
+                ret_val     = e["ret"] or 0
+                sign        = "+" if ret_val >= 0 else ""
+                buttons.append([{
+                    "text":          f"🗑 {ticker}  sold @ {price_label}  {sign}{ret_val}%",
+                    "callback_data": f"cancel_auto|{ticker}",
+                }])
+
+        if buttons:
+            send_inline_keyboard(
+                "🗑 <b>Remove a trade entry?</b>\n"
+                "<i>Confirmation required before any change is made.</i>",
+                buttons,
+                chat_id=chat_id,
+            )
+        return ""
 
     # ── /cancel — undo accidental /bought or /sold ───────────────────────────
     if text == "CANCEL":
