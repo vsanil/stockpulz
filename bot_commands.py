@@ -13,6 +13,7 @@ import hashlib
 from telegram_api import (
     send_message, send_inline_keyboard, send_typing_action,
     typing_until_done, answer_callback_query, _bot_token, _chat_id,
+    _get_bot_username,
 )
 from config_manager import (
     get_config, update_config,
@@ -54,26 +55,6 @@ def _is_admin(chat_id: str | None = None) -> bool:
     resolved = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
     return str(resolved) == str(os.environ.get("TELEGRAM_CHAT_ID", ""))
 
-
-# Bot username never changes — cache after first fetch so /share doesn't
-# make a getMe API call on every tap.
-_bot_username_cache: str = ""
-
-
-def _get_bot_username() -> str:
-    """Return the bot's Telegram username, fetching once and caching for the process lifetime."""
-    global _bot_username_cache
-    if _bot_username_cache:
-        return _bot_username_cache
-    try:
-        resp = requests.get(
-            TELEGRAM_API.format(token=_bot_token(), method="getMe"),
-            timeout=5,
-        ).json()
-        _bot_username_cache = resp.get("result", {}).get("username", "") or "SanilStockBot"
-    except Exception:
-        _bot_username_cache = "SanilStockBot"
-    return _bot_username_cache
 
 
 # ── Admin invite token (HMAC-signed, time-limited) ───────────────────────────
@@ -2441,7 +2422,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
     # ── /share ───────────────────────────────────────────────────────────────
     if text == "SHARE":
-        bot_username = _get_bot_username()   # cached after first call — no API hit
+        bot_username = _get_bot_username()
+        if not bot_username:
+            return "⚠️ Could not fetch bot username — try again in a moment."
 
         # Admin share → cryptographically signed token, auto-approves the clicker.
         # Regular user share → still requires admin approval (normal pending flow).
@@ -2458,7 +2441,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             f"📲 <b>Share StockPulz with friends:</b>\n\n"
             f"Hey! I'm using StockPulz — a personal AI stock advisor that sends daily stock &amp; crypto picks, "
             f"price alerts, and weekly performance recaps.\n\n"
-            f"🌐 Learn more: <a href=\"https://stockpulz.com\">stockpulz.com</a>\n\n"
             f"📱 Join on Telegram 👇\n"
             f"{bot_link}\n\n"
             f"{footer}"

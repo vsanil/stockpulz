@@ -168,6 +168,26 @@ def answer_callback_query(callback_query_id: str, text: str = "") -> None:
         pass
 
 
+# Bot username never changes — cache after first fetch
+_bot_username_cache: str = ""
+
+
+def _get_bot_username() -> str:
+    """Return the bot's Telegram username, fetching once and caching for the process lifetime."""
+    global _bot_username_cache
+    if _bot_username_cache:
+        return _bot_username_cache
+    try:
+        resp = requests.get(
+            TELEGRAM_API.format(token=_bot_token(), method="getMe"),
+            timeout=5,
+        ).json()
+        _bot_username_cache = resp.get("result", {}).get("username", "") or ""
+    except Exception:
+        pass
+    return _bot_username_cache
+
+
 def set_webhook(webhook_url: str) -> bool:
     """Register a Telegram webhook URL (call once after deploying to Render)."""
     token = _bot_token()
