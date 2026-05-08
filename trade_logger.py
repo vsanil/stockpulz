@@ -258,10 +258,14 @@ def manual_open_trade(ticker: str, bought_price: float, chat_id: str,
     return trade
 
 
-def manual_close_trade(ticker: str, sold_price: float, chat_id: str) -> dict | None:
+def manual_close_trade(ticker: str, sold_price: float, chat_id: str,
+                       shares_sold: float | None = None) -> dict | None:
     """
-    Log that the user sold a position. Finds the open trade, closes it,
-    computes P&L. Returns closed trade dict, or None if ticker not found.
+    Log that the user sold a position (full or partial).
+    - shares_sold=None  → close the entire position
+    - shares_sold=N     → partial close: reduce open shares, log closed portion
+
+    Returns closed trade dict (with partial=True when applicable), or None if not found.
     """
     today = date.today().isoformat()
     log   = load_user_trade_log(chat_id)
@@ -277,15 +281,40 @@ def manual_close_trade(ticker: str, sold_price: float, chat_id: str) -> dict | N
     if not match:
         return None
 
-    entry      = float(match.get("entry_price") or sold_price)
-    allocation = float(match.get("allocation") or 0)
-    shares     = match.get("shares")
+    entry          = float(match.get("entry_price") or sold_price)
+    total_shares   = match.get("shares")
+    total_alloc    = float(match.get("allocation") or 0)
+
+    # Infer total_shares from allocation if needed
+    if total_shares is None and total_alloc and entry:
+        total_shares = total_alloc / entry
+
+    # Determine how many shares are being sold
+    if shares_sold is None or total_shares is None:
+        # Full close
+        sold_shares  = total_shares
+        closed_alloc = total_alloc
+        partial      = False
+        log["open"]  = remaining          # remove from open
+    else:
+        sold_shares  = min(float(shares_sold), float(total_shares))
+        frac         = sold_shares / float(total_shares)
+        closed_alloc = round(total_alloc * frac, 2) if total_alloc else round(entry * sold_shares, 2)
+        partial      = sold_shares < float(total_shares)
+        if partial:
+            # Keep the remaining shares in open
+            leftover_shares = round(float(total_shares) - sold_shares, 6)
+            leftover_alloc  = round(total_alloc - closed_alloc, 2) if total_alloc else round(entry * leftover_shares, 2)
+            updated = {**match, "shares": leftover_shares, "allocation": leftover_alloc}
+            log["open"] = remaining + [updated]
+        else:
+            log["open"] = remaining       # full close
+
+    if not closed_alloc and sold_shares:
+        closed_alloc = round(entry * float(sold_shares), 2)
+
     return_pct = (sold_price - entry) / entry * 100
-
-    if allocation == 0 and shares:
-        allocation = entry * float(shares)
-
-    gain_usd = round(allocation * return_pct / 100, 2)
+    gain_usd   = round(closed_alloc * return_pct / 100, 2)
 
     closed = {
         **match,
@@ -294,11 +323,14 @@ def manual_close_trade(ticker: str, sold_price: float, chat_id: str) -> dict | N
         "outcome":      "manual",
         "return_pct":   round(return_pct, 2),
         "gain_usd":     gain_usd,
+        "shares":       round(float(sold_shares), 6) if sold_shares else match.get("shares"),
+        "allocation":   closed_alloc,
+        "partial":      partial,
     }
-    log["open"]   = remaining
     log["closed"].append(closed)
     save_user_trade_log(chat_id, log)
-    print(f"[trade_logger] Manually closed {ticker.upper()} @ ${sold_price} ({return_pct:+.1f}%) for {chat_id}")
+    tag = " (partial)" if partial else ""
+    print(f"[trade_logger] Manually closed {ticker.upper()} @ ${sold_price} ({return_pct:+.1f}%){tag} for {chat_id}")
     return closed
 
 

@@ -657,6 +657,14 @@ def handle_callback_query(callback_query: dict) -> None:
         result = _execute_bought(ticker, price_raw or None, None, chat_id)
         send_message(result, chat_id=chat_id)
 
+    elif action == "sold_all":
+        # User tapped "All shares" — full position close
+        ticker    = parts[1] if len(parts) > 1 else ""
+        price_raw = parts[2] if len(parts) > 2 else ""
+        clear_pending_state(chat_id)
+        result = _execute_sold(ticker, price_raw or None, chat_id, shares_sold=None)
+        send_message(result, chat_id=chat_id)
+
     elif action == "cancel_abort":
         send_message("👍 No changes made.", chat_id=chat_id)
 
@@ -742,15 +750,17 @@ def handle_callback_query(callback_query: dict) -> None:
                 return
 
     elif action == "sell":
-        ticker    = parts[1] if len(parts) > 1 else ""
-        price_raw = parts[2] if len(parts) > 2 else ""
+        ticker     = parts[1] if len(parts) > 1 else ""
+        price_raw  = parts[2] if len(parts) > 2 else ""
+        shares_raw = parts[3] if len(parts) > 3 else ""
 
         price = float(price_raw) if price_raw else _fetch_live_price(ticker)
         if not price:
             send_message(f"⚠️ Could not fetch price for <b>{ticker}</b>. Try: <code>/sold {ticker} 197.10</code>", chat_id=chat_id)
             return
 
-        closed = manual_close_trade(ticker, price, chat_id)
+        shares_sold = float(shares_raw) if shares_raw else None
+        closed = manual_close_trade(ticker, price, chat_id, shares_sold=shares_sold)
         if not closed:
             send_message(f"⚠️ No open position found for <b>{ticker}</b>. Use /positions to see open trades.", chat_id=chat_id)
             return
@@ -760,11 +770,13 @@ def handle_callback_query(callback_query: dict) -> None:
         emoji = "✅" if ret >= 0 else "🔴"
         sign  = "+" if ret >= 0 else ""
         gsign = "+" if gain >= 0 else ""
+        partial_note = "  <i>· partial sell, position still open</i>" if closed.get("partial") else ""
+        shares_str   = f"  · {closed['shares']} shares" if closed.get("shares") else ""
         send_message(
-            f"{emoji} <b>Closed: {ticker}</b>\n"
+            f"{emoji} <b>{'Partial sell' if closed.get('partial') else 'Closed'}: {ticker}</b>\n"
             f"Entry:  <code>${closed['entry_price']}</code>\n"
-            f"Exit:   <code>${closed['closed_price']}</code>\n"
-            f"Return: <b>{sign}{ret}%</b>  P&amp;L: <code>{gsign}${abs(gain):.2f}</code>\n"
+            f"Exit:   <code>${closed['closed_price']}</code>{shares_str}\n"
+            f"Return: <b>{sign}{ret}%</b>  P&amp;L: <code>{gsign}${abs(gain):.2f}</code>{partial_note}\n"
             f"<i>Saved to trade history.</i>",
             chat_id=chat_id,
         )
@@ -893,7 +905,7 @@ def _execute_bought(ticker: str, price_raw, shares_raw, chat_id: str) -> str:
     )
 
 
-def _execute_sold(ticker: str, price_raw, chat_id: str) -> str:
+def _execute_sold(ticker: str, price_raw, chat_id: str, shares_sold=None) -> str:
     from trade_logger import manual_close_trade
     price: float | None = None
     if price_raw:
@@ -907,7 +919,14 @@ def _execute_sold(ticker: str, price_raw, chat_id: str) -> str:
         return (f"⚠️ Could not fetch price for <b>{ticker}</b>. "
                 f"Reply with the price, e.g. <code>197.10</code>")
 
-    closed = manual_close_trade(ticker, price, chat_id)
+    shares_float = None
+    if shares_sold is not None:
+        try:
+            shares_float = float(str(shares_sold).strip())
+        except (ValueError, TypeError):
+            shares_float = None
+
+    closed = manual_close_trade(ticker, price, chat_id, shares_sold=shares_float)
     if not closed:
         return f"⚠️ No open position found for <b>{ticker}</b>. Use /portfolio to see open trades."
 
@@ -916,11 +935,13 @@ def _execute_sold(ticker: str, price_raw, chat_id: str) -> str:
     emoji = "✅" if ret >= 0 else "🔴"
     sign  = "+" if ret >= 0 else ""
     gsign = "+" if gain >= 0 else ""
+    partial_note = "  <i>· partial sell, position still open</i>" if closed.get("partial") else ""
+    shares_str   = f"  · {closed['shares']} shares" if closed.get("shares") else ""
     return (
-        f"{emoji} <b>Closed: {ticker}</b>\n"
+        f"{emoji} <b>{'Partial sell' if closed.get('partial') else 'Closed'}: {ticker}</b>\n"
         f"Entry:  <code>${closed['entry_price']}</code>\n"
-        f"Exit:   <code>${closed['closed_price']}</code>\n"
-        f"Return: <b>{sign}{ret}%</b>  P&amp;L: <code>{gsign}${abs(gain):.2f}</code>\n"
+        f"Exit:   <code>${closed['closed_price']}</code>{shares_str}\n"
+        f"Return: <b>{sign}{ret}%</b>  P&amp;L: <code>{gsign}${abs(gain):.2f}</code>{partial_note}\n"
         f"<i>Saved to trade history.</i>"
     )
 
@@ -1031,23 +1052,55 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     # ── /sold multi-step ──────────────────────────────────────────────────────
     if command == "sold":
+        if step == 3:
+            # User replied with quantity (or blank = sell all)
+            ticker    = data.get("ticker", "")
+            price_raw = data.get("price")
+            raw       = text.strip()
+            shares_sold = None
+            if raw:
+                try:
+                    shares_sold = float(raw.replace(",", ""))
+                except ValueError:
+                    parsed_q = _nl_parse_trade("sold", raw)
+                    shares_sold = parsed_q.get("shares")
+            return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_sold)
+
         if step == 2:
+            # User replied with price — now ask for quantity
             ticker    = data.get("ticker", "")
             price_raw = text.strip() or None
-            return _execute_sold(ticker, price_raw, chat_id)
+            # NL fallback for price
+            if price_raw:
+                try:
+                    float(price_raw.replace(",", ""))
+                except ValueError:
+                    parsed_p = _nl_parse_trade("sold", price_raw)
+                    price_raw = str(parsed_p["price"]) if parsed_p.get("price") else None
+            save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
+            send_inline_keyboard(
+                f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
+                f"<i>Send blank to sell your full position</i>",
+                [[{"text": "⏭ All shares", "callback_data": f"sold_all|{ticker}|{price_raw or ''}"},
+                  {"text": "❌ Cancel",     "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
 
         parts     = text.strip().split()
         name_raw  = parts[0] if parts else ""
         price_raw = parts[1] if len(parts) >= 2 else None
+        shares_raw = parts[2] if len(parts) >= 3 else None
 
         if not name_raw:
             return "⚠️ Please tell me which stock you sold."
 
         candidates = _resolve_ticker_candidates(name_raw)
         if len(candidates) > 1:
-            price_enc = price_raw or ""
+            price_enc  = price_raw  or ""
+            shares_enc = shares_raw or ""
             buttons = [[{"text": f"{c['ticker']} — {c['name']}",
-                         "callback_data": f"sell|{c['ticker']}|{price_enc}"}]
+                         "callback_data": f"sell|{c['ticker']}|{price_enc}|{shares_enc}"}]
                        for c in candidates]
             send_inline_keyboard(f"🔍 Which stock did you mean?", buttons, chat_id=chat_id)
             return ""
@@ -1063,7 +1116,18 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             )
             return ""
 
-        return _execute_sold(ticker, price_raw, chat_id)
+        if shares_raw is None:
+            save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
+            send_inline_keyboard(
+                f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
+                f"<i>Send blank to sell your full position</i>",
+                [[{"text": "⏭ All shares", "callback_data": f"sold_all|{ticker}|{price_raw}"},
+                  {"text": "❌ Cancel",     "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
+        return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_raw)
 
     # ── Single-step param commands ────────────────────────────────────────────
     if command == "history":
@@ -2811,23 +2875,26 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT"}
         parts = [p for p in raw.split() if p.upper() not in _NOISE]
 
-        is_nl = len(parts) > 2 or (len(parts) >= 2 and not _is_number(parts[1]))
+        is_nl = len(parts) > 3 or (len(parts) >= 2 and not _is_number(parts[1]))
         if is_nl:
-            parsed    = _nl_parse_trade("sold", raw)
-            name_raw  = parsed.get("ticker") or (parts[0] if parts else None)
-            price_raw = str(parsed["price"]) if parsed.get("price") is not None else None
+            parsed     = _nl_parse_trade("sold", raw)
+            name_raw   = parsed.get("ticker") or (parts[0] if parts else None)
+            price_raw  = str(parsed["price"])  if parsed.get("price")  is not None else None
+            shares_raw = str(parsed["shares"]) if parsed.get("shares") is not None else None
         else:
-            name_raw  = parts[0] if parts else None
-            price_raw = parts[1] if len(parts) >= 2 else None
+            name_raw   = parts[0] if parts else None
+            price_raw  = parts[1] if len(parts) >= 2 else None
+            shares_raw = parts[2] if len(parts) >= 3 else None
 
         if not name_raw:
             return "🤔 I couldn't identify a stock. Try: /sold Apple 197.10 or /sold AAPL at $197"
 
         candidates = _resolve_ticker_candidates(name_raw)
         if len(candidates) > 1:
-            price_enc = price_raw or ""
+            price_enc  = price_raw  or ""
+            shares_enc = shares_raw or ""
             buttons = [[{"text": f"{c['ticker']} — {c['name']}",
-                         "callback_data": f"sell|{c['ticker']}|{price_enc}"}]
+                         "callback_data": f"sell|{c['ticker']}|{price_enc}|{shares_enc}"}]
                        for c in candidates]
             send_inline_keyboard(f"🔍 Which stock did you mean by <b>{_esc(name_raw)}</b>?",
                                  buttons, chat_id=chat_id)
@@ -2846,7 +2913,18 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             )
             return ""
 
-        return _execute_sold(ticker, price_raw, chat_id)
+        if shares_raw is None:
+            save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
+            send_inline_keyboard(
+                f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
+                f"<i>Send blank to sell your full position</i>",
+                [[{"text": "⏭ All shares", "callback_data": f"sold_all|{ticker}|{price_raw}"},
+                  {"text": "❌ Cancel",     "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
+        return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_raw)
 
     # ── /history — date-wise transaction log ─────────────────────────────────
     if text == "HISTORY":
