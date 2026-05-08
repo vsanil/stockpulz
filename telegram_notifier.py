@@ -1041,12 +1041,26 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     if command == "paper_buy":
         if step == 2:
-            # User replied with price (or blank = live price)
             from paper_trader import paper_buy
             ticker = data.get("ticker", "")
             shares = data.get("shares")
             price_raw = text.strip() or None
-            price = float(price_raw) if price_raw else None
+            price = None
+            if price_raw:
+                try:
+                    price = float(price_raw.replace(",", ""))
+                except ValueError:
+                    # NL reply like "87.5 each" or "at 83 dollars" — extract price
+                    parsed_p = _nl_parse_trade("paper_buy", price_raw)
+                    price = parsed_p.get("price")
+                    # Also grab ticker/shares if user gave a full sentence like "Evrg 5 at 83.5"
+                    if not ticker and parsed_p.get("ticker"):
+                        ticker = parsed_p["ticker"]
+                    if not shares and parsed_p.get("shares"):
+                        shares = parsed_p["shares"]
+            if not ticker:
+                save_pending_state(chat_id, "paper_buy")
+                return "🤔 Which stock? Try: <code>EVRG 5</code>"
             return paper_buy(ticker, shares, chat_id, price)
         if step == 1:
             # User replied with share count after we asked
@@ -1133,6 +1147,11 @@ def _handle_natural_language(query: str, chat_id: str | None = None) -> str:
 Parse the user's natural language message into a JSON command. Return ONLY valid JSON — no text before or after.
 
 Available intents and their exact JSON format:
+{"intent": "bought",     "ticker": "AAPL", "price": 182.50, "shares": 10}  — price/shares optional
+{"intent": "sold",       "ticker": "AAPL", "price": 197.10, "shares": null} — shares optional
+{"intent": "paper_buy",  "ticker": "AAPL", "price": 182.50, "shares": 10}  — price/shares optional
+{"intent": "paper_sell", "ticker": "AAPL", "price": 197.10, "shares": null} — shares optional
+{"intent": "alert",      "ticker": "NVDA", "price": 800.0, "direction": "above|below|auto"}
 {"intent": "set_risk",    "value": "conservative|moderate|aggressive"}
 {"intent": "watch",       "tickers": ["NVDA", "TSLA"]}
 {"intent": "watch_clear"}
@@ -1154,6 +1173,11 @@ Available intents and their exact JSON format:
 {"intent": "unknown"}
 
 Rules:
+- "bought/buy/purchased/got X shares/stocks" → bought intent with ticker resolved to uppercase symbol
+- "sold/sell/sold off X" → sold intent
+- "paper buy/simulate buying/paper trade" → paper_buy intent
+- "paper sell/simulate selling" → paper_sell intent
+- "alert me when/notify when/set alert" → alert intent
 - Map "aggressive/risky/bold" → set_risk aggressive
 - Map "conservative/safe/careful" → set_risk conservative
 - Map "add X to watchlist/watch X" → watch with tickers in uppercase
@@ -1168,6 +1192,7 @@ Rules:
 - "stocks 200 crypto 50" → {"stock_budget": 200, "crypto_budget": 50}
 - "stock budget 150" → {"stock_budget": 150}
 - "clear budgets" → {"stock_budget": null, "crypto_budget": null}
+- Always resolve company names to uppercase ticker symbols (Apple→AAPL, Nvidia→NVDA, Evergy→EVRG)
 - If the message is a question about picks, use explain
 - If truly unclear, use unknown"""
 
@@ -1188,6 +1213,54 @@ Rules:
 
     intent = parsed.get("intent", "unknown")
     print(f"[telegram] NL intent: {intent} from: {query!r}")
+
+    if intent == "bought":
+        ticker = parsed.get("ticker") or ""
+        price  = parsed.get("price")
+        shares = parsed.get("shares")
+        if not ticker:
+            return _parse_and_execute("BOUGHT", original="/bought", chat_id=chat_id)
+        price_str  = str(price)  if price  is not None else ""
+        shares_str = str(shares) if shares is not None else ""
+        cmd = f"BOUGHT {ticker} {price_str} {shares_str}".strip()
+        return _parse_and_execute(cmd, original=query, chat_id=chat_id)
+
+    if intent == "sold":
+        ticker = parsed.get("ticker") or ""
+        price  = parsed.get("price")
+        if not ticker:
+            return _parse_and_execute("SOLD", original="/sold", chat_id=chat_id)
+        price_str = str(price) if price is not None else ""
+        cmd = f"SOLD {ticker} {price_str}".strip()
+        return _parse_and_execute(cmd, original=query, chat_id=chat_id)
+
+    if intent == "paper_buy":
+        ticker = parsed.get("ticker") or ""
+        price  = parsed.get("price")
+        shares = parsed.get("shares")
+        if not ticker:
+            return _parse_and_execute("PAPER BUY", original="/paper_buy", chat_id=chat_id)
+        price_str  = str(price)  if price  is not None else ""
+        shares_str = str(shares) if shares is not None else ""
+        cmd = f"PAPER BUY {ticker} {price_str} {shares_str}".strip()
+        return _parse_and_execute(cmd, original=query, chat_id=chat_id)
+
+    if intent == "paper_sell":
+        ticker = parsed.get("ticker") or ""
+        price  = parsed.get("price")
+        if not ticker:
+            return _parse_and_execute("PAPER SELL", original="/paper_sell", chat_id=chat_id)
+        price_str = str(price) if price is not None else ""
+        cmd = f"PAPER SELL {ticker} {price_str}".strip()
+        return _parse_and_execute(cmd, original=query, chat_id=chat_id)
+
+    if intent == "alert":
+        ticker    = parsed.get("ticker") or ""
+        price     = parsed.get("price")
+        direction = parsed.get("direction") or "auto"
+        if not ticker or price is None:
+            return _parse_and_execute("ALERT", original="/alert", chat_id=chat_id)
+        return _parse_and_execute(f"ALERT {ticker} {direction} {price}", original=query, chat_id=chat_id)
 
     if intent == "set_risk":
         return _parse_and_execute(f"SET RISK {parsed.get('value','moderate').upper()}", original=query, chat_id=chat_id)
