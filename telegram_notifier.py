@@ -33,6 +33,12 @@ def _is_number(s: str) -> bool:
     except (ValueError, AttributeError):
         return False
 
+
+def _track_position_sizes(chat_id: str) -> bool:
+    """Return True if user has opted in to position-size tracking (shares/quantity questions)."""
+    from config_manager import get_user_config
+    return bool(get_user_config(str(chat_id)).get("track_position_sizes", False))
+
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 MAX_MESSAGE_LENGTH = 4096   # Telegram limit (much larger than WhatsApp)
 MAX_RETRIES = 3
@@ -665,6 +671,21 @@ def handle_callback_query(callback_query: dict) -> None:
         result = _execute_sold(ticker, price_raw or None, chat_id, shares_sold=None)
         send_message(result, chat_id=chat_id)
 
+    elif action == "toggle_setting":
+        key      = parts[1] if len(parts) > 1 else ""
+        cur_val  = bool(get_user_config(chat_id).get(key, False))
+        new_val  = not cur_val
+        update_user_config(chat_id, key, new_val)
+        labels = {"track_position_sizes": ("Position size tracking", "on — bot will ask shares/quantity", "off — just log ticker + price")}
+        label, on_desc, off_desc = labels.get(key, (key, "enabled", "disabled"))
+        desc = on_desc if new_val else off_desc
+        send_message(
+            f"✅ <b>{label}:</b> {desc}",
+            chat_id=chat_id,
+        )
+        # Refresh the settings panel
+        _send_settings_panel(chat_id)
+
     elif action == "cancel_abort":
         send_message("👍 No changes made.", chat_id=chat_id)
 
@@ -846,6 +867,21 @@ def _prompt_for_param(command: str, chat_id: str) -> None:
     )
 
 
+def _send_settings_panel(chat_id: str) -> None:
+    """Send the /settings panel with toggle buttons for each user preference."""
+    cfg     = get_user_config(chat_id)
+    track   = bool(cfg.get("track_position_sizes", False))
+    t_icon  = "✅" if track else "⬜"
+    send_inline_keyboard(
+        "<b>⚙️ Settings</b>\n\n"
+        f"{t_icon} <b>Position size tracking</b>\n"
+        f"<i>When on, /bought and /sold will ask for share quantity so your P&amp;L reflects exact dollar amounts.</i>",
+        [[{"text": f"{t_icon} Position size tracking — {'on' if track else 'off'}",
+           "callback_data": f"toggle_setting|track_position_sizes"}]],
+        chat_id=chat_id,
+    )
+
+
 # ── Extracted buy/sell execution (shared by direct + conversational paths) ────
 
 def _execute_bought(ticker: str, price_raw, shares_raw, chat_id: str) -> str:
@@ -963,7 +999,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     # ── /bought multi-step ────────────────────────────────────────────────────
     if command == "bought":
         if step == 3:
-            # User is replying with quantity (or blank = skip)
+            # User is replying with quantity (only reached when track_position_sizes=on)
             ticker    = data.get("ticker", "")
             price_raw = data.get("price")
             raw       = text.strip()
@@ -980,8 +1016,6 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             # User is replying with a price (or blank = live price)
             ticker    = data.get("ticker", "")
             price_raw = text.strip() or None
-            # Resolve price — if NL, extract it
-            resolved_price = None
             if price_raw:
                 try:
                     resolved_price = float(price_raw.replace(",", ""))
@@ -990,19 +1024,23 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
                     parsed_p = _nl_parse_trade("bought", price_raw)
                     resolved_price = parsed_p.get("price")
                     price_raw = str(resolved_price) if resolved_price else None
-            # Now ask for quantity
-            save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
-            live = _fetch_live_price(ticker) if not resolved_price else None
-            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
-            price_display = f"<code>${_p(resolved_price)}</code>" if resolved_price else f"live price{live_hint}"
-            send_inline_keyboard(
-                f"📦 How many shares of <b>{ticker}</b> did you buy at {price_display}?\n"
-                f"<i>Send blank to skip</i>",
-                [[{"text": "⏭ Skip", "callback_data": f"bought_skip_qty|{ticker}|{price_raw or ''}"},
-                  {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
+            else:
+                resolved_price = None
+            # Ask for quantity only if user opted in
+            if _track_position_sizes(chat_id):
+                save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
+                live = _fetch_live_price(ticker) if not resolved_price else None
+                live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+                price_display = f"<code>${_p(resolved_price)}</code>" if resolved_price else f"live price{live_hint}"
+                send_inline_keyboard(
+                    f"📦 How many shares of <b>{ticker}</b> did you buy at {price_display}?\n"
+                    f"<i>Send blank to skip</i>",
+                    [[{"text": "⏭ Skip", "callback_data": f"bought_skip_qty|{ticker}|{price_raw or ''}"},
+                      {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
+            return _execute_bought(ticker, price_raw, None, chat_id)
 
         # Step 1: parse "apple" / "AAPL 182.50" / "AAPL 182.50 5"
         parts      = text.strip().split()
@@ -1026,7 +1064,6 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
         ticker = candidates[0]["ticker"]
         if price_raw is None:
-            # Need price — go to step 2
             save_pending_state(chat_id, "bought", step=2, data={"ticker": ticker})
             send_inline_keyboard(
                 f"Got it — <b>{ticker}</b>. At what price did you buy?\n"
@@ -1036,8 +1073,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             )
             return ""
 
-        if shares_raw is None:
-            # Have ticker + price, ask for quantity
+        if shares_raw is None and _track_position_sizes(chat_id):
             save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
             send_inline_keyboard(
                 f"📦 How many shares of <b>{ticker}</b> did you buy?\n"
@@ -1053,7 +1089,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     # ── /sold multi-step ──────────────────────────────────────────────────────
     if command == "sold":
         if step == 3:
-            # User replied with quantity (or blank = sell all)
+            # User replied with quantity (only reached when track_position_sizes=on)
             ticker    = data.get("ticker", "")
             price_raw = data.get("price")
             raw       = text.strip()
@@ -1067,29 +1103,31 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_sold)
 
         if step == 2:
-            # User replied with price — now ask for quantity
+            # User replied with price
             ticker    = data.get("ticker", "")
             price_raw = text.strip() or None
-            # NL fallback for price
             if price_raw:
                 try:
                     float(price_raw.replace(",", ""))
                 except ValueError:
                     parsed_p = _nl_parse_trade("sold", price_raw)
                     price_raw = str(parsed_p["price"]) if parsed_p.get("price") else None
-            save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
-            send_inline_keyboard(
-                f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
-                f"<i>Send blank to sell your full position</i>",
-                [[{"text": "⏭ All shares", "callback_data": f"sold_all|{ticker}|{price_raw or ''}"},
-                  {"text": "❌ Cancel",     "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
+            # Ask for quantity only if user opted in
+            if _track_position_sizes(chat_id):
+                save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
+                send_inline_keyboard(
+                    f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
+                    f"<i>Send blank to sell your full position</i>",
+                    [[{"text": "⏭ All shares", "callback_data": f"sold_all|{ticker}|{price_raw or ''}"},
+                      {"text": "❌ Cancel",     "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
+            return _execute_sold(ticker, price_raw, chat_id, shares_sold=None)
 
-        parts     = text.strip().split()
-        name_raw  = parts[0] if parts else ""
-        price_raw = parts[1] if len(parts) >= 2 else None
+        parts      = text.strip().split()
+        name_raw   = parts[0] if parts else ""
+        price_raw  = parts[1] if len(parts) >= 2 else None
         shares_raw = parts[2] if len(parts) >= 3 else None
 
         if not name_raw:
@@ -1116,7 +1154,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             )
             return ""
 
-        if shares_raw is None:
+        if shares_raw is None and _track_position_sizes(chat_id):
             save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
             send_inline_keyboard(
                 f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
@@ -2639,6 +2677,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             f"🚫 <b>Excluded sectors:</b> {', '.join(ex) if ex else 'none'}  ·  /exclude\n\n"
             f"<i>To reset everything: /reset</i>"
         )
+        # Append the interactive toggles panel right after the text block
+        _send_settings_panel(chat_id)
+        return ""
 
     # Bare budget commands — prompt for the value
     # ── /set_budget ───────────────────────────────────────────────────────────
@@ -2852,7 +2893,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             )
             return ""
 
-        if shares_raw is None:
+        if shares_raw is None and _track_position_sizes(chat_id):
             save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
             send_inline_keyboard(
                 f"📦 How many shares of <b>{ticker}</b> did you buy?\n"
@@ -2913,7 +2954,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             )
             return ""
 
-        if shares_raw is None:
+        if shares_raw is None and _track_position_sizes(chat_id):
             save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
             send_inline_keyboard(
                 f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
