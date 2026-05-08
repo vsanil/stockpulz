@@ -243,6 +243,68 @@ def paper_reset(chat_id: str, starting_cash: float | None = None) -> str:
     return f"🔄 Paper portfolio reset. Starting cash: <b>${amount:,.2f}</b>"
 
 
+def paper_history(chat_id: str) -> list[dict]:
+    """Return all closed paper trades (history list)."""
+    return load_user_paper(chat_id).get("history", [])
+
+
+def paper_remove_history(chat_id: str, idx: int) -> str:
+    """
+    Remove a history entry by index and fully reverse the transaction:
+    - Deduct proceeds from cash
+    - Restore shares to the position (recreate if fully sold)
+    Returns a confirmation message.
+    """
+    data    = load_user_paper(chat_id)
+    history = data.get("history", [])
+
+    if idx < 0 or idx >= len(history):
+        return "⚠️ Trade not found — it may have already been removed."
+
+    entry      = history[idx]
+    ticker     = entry["ticker"]
+    shares     = float(entry.get("shares", 0))
+    sell_price = float(entry.get("sell_price", 0))
+    buy_price  = float(entry.get("buy_price", 0))
+    proceeds   = round(sell_price * shares, 2)
+
+    # Deduct proceeds from cash (reverse the sale)
+    data["cash"] = round(data.get("cash", 0) - proceeds, 2)
+
+    # Restore shares to position
+    positions = data.get("positions", [])
+    existing  = next((p for p in positions if p["ticker"] == ticker), None)
+    if existing:
+        total_shares    = round(existing["shares"] + shares, 6)
+        total_cost      = existing["avg_price"] * existing["shares"] + buy_price * shares
+        existing["avg_price"]  = round(total_cost / total_shares, 4)
+        existing["shares"]     = total_shares
+        existing["cost_basis"] = round(existing["avg_price"] * total_shares, 2)
+    else:
+        positions.append({
+            "ticker":     ticker,
+            "shares":     shares,
+            "avg_price":  buy_price,
+            "cost_basis": round(buy_price * shares, 2),
+            "entry_date": entry.get("closed_date", ""),
+        })
+    data["positions"] = positions
+
+    # Remove the history entry
+    data["history"] = [h for i, h in enumerate(history) if i != idx]
+    save_user_paper(chat_id, data)
+
+    gain     = entry.get("gain", 0)
+    gain_pct = entry.get("gain_pct", 0)
+    sign     = "+" if gain >= 0 else ""
+    return (
+        f"↩️ <b>Paper trade reversed: {ticker}</b>\n"
+        f"{shares} shares @ <code>${sell_price}</code> removed from history\n"
+        f"Proceeds <code>${proceeds:,.2f}</code> deducted · shares restored\n"
+        f"<i>P&amp;L ({sign}{gain_pct}%) no longer counted.</i>"
+    )
+
+
 def paper_cancel(ticker: str, chat_id: str) -> str:
     """Remove a paper position without recording it as a sale (undo an accidental paper_buy)."""
     ticker  = ticker.upper()
