@@ -649,6 +649,14 @@ def handle_callback_query(callback_query: dict) -> None:
             chat_id=chat_id,
         )
 
+    elif action == "bought_skip_qty":
+        # User tapped "Skip" on the quantity step — log without shares
+        ticker    = parts[1] if len(parts) > 1 else ""
+        price_raw = parts[2] if len(parts) > 2 else ""
+        clear_pending_state(chat_id)
+        result = _execute_bought(ticker, price_raw or None, None, chat_id)
+        send_message(result, chat_id=chat_id)
+
     elif action == "cancel_abort":
         send_message("👍 No changes made.", chat_id=chat_id)
 
@@ -933,17 +941,52 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     # ── /bought multi-step ────────────────────────────────────────────────────
     if command == "bought":
-        if step == 2:
-            # User is replying with a price (or blank = live price)
-            ticker     = data.get("ticker", "")
-            shares_raw = data.get("shares")
-            price_raw  = text.strip() or None
+        if step == 3:
+            # User is replying with quantity (or blank = skip)
+            ticker    = data.get("ticker", "")
+            price_raw = data.get("price")
+            raw       = text.strip()
+            shares_raw = None
+            if raw:
+                try:
+                    shares_raw = float(raw.replace(",", ""))
+                except ValueError:
+                    parsed_q = _nl_parse_trade("bought", raw)
+                    shares_raw = parsed_q.get("shares")
             return _execute_bought(ticker, price_raw, shares_raw, chat_id)
 
+        if step == 2:
+            # User is replying with a price (or blank = live price)
+            ticker    = data.get("ticker", "")
+            price_raw = text.strip() or None
+            # Resolve price — if NL, extract it
+            resolved_price = None
+            if price_raw:
+                try:
+                    resolved_price = float(price_raw.replace(",", ""))
+                    price_raw = str(resolved_price)
+                except ValueError:
+                    parsed_p = _nl_parse_trade("bought", price_raw)
+                    resolved_price = parsed_p.get("price")
+                    price_raw = str(resolved_price) if resolved_price else None
+            # Now ask for quantity
+            save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
+            live = _fetch_live_price(ticker) if not resolved_price else None
+            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+            price_display = f"<code>${_p(resolved_price)}</code>" if resolved_price else f"live price{live_hint}"
+            send_inline_keyboard(
+                f"📦 How many shares of <b>{ticker}</b> did you buy at {price_display}?\n"
+                f"<i>Send blank to skip</i>",
+                [[{"text": "⏭ Skip", "callback_data": f"bought_skip_qty|{ticker}|{price_raw or ''}"},
+                  {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
         # Step 1: parse "apple" / "AAPL 182.50" / "AAPL 182.50 5"
-        parts     = text.strip().split()
-        name_raw  = parts[0] if parts else ""
-        price_raw = parts[1] if len(parts) >= 2 else None
+        parts      = text.strip().split()
+        name_raw   = parts[0] if parts else ""
+        price_raw  = parts[1] if len(parts) >= 2 else None
         shares_raw = parts[2] if len(parts) >= 3 else None
 
         if not name_raw:
@@ -968,6 +1011,18 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
                 f"Got it — <b>{ticker}</b>. At what price did you buy?\n"
                 f"<i>Send blank to use live price</i>",
                 [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
+        if shares_raw is None:
+            # Have ticker + price, ask for quantity
+            save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
+            send_inline_keyboard(
+                f"📦 How many shares of <b>{ticker}</b> did you buy?\n"
+                f"<i>Send blank to skip</i>",
+                [[{"text": "⏭ Skip", "callback_data": f"bought_skip_qty|{ticker}|{price_raw}"},
+                  {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
                 chat_id=chat_id,
             )
             return ""
@@ -2724,11 +2779,22 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             live = _fetch_live_price(ticker)
             live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
             save_pending_state(chat_id, "bought", step=2,
-                               data={"ticker": ticker, "shares": shares_raw})
+                               data={"ticker": ticker})
             send_inline_keyboard(
                 f"💰 At what price did you buy <b>{ticker}</b>?{live_hint}\n"
                 f"<i>Send blank to use live price</i>",
                 [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
+        if shares_raw is None:
+            save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
+            send_inline_keyboard(
+                f"📦 How many shares of <b>{ticker}</b> did you buy?\n"
+                f"<i>Send blank to skip</i>",
+                [[{"text": "⏭ Skip", "callback_data": f"bought_skip_qty|{ticker}|{price_raw}"},
+                  {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
                 chat_id=chat_id,
             )
             return ""
