@@ -2345,7 +2345,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 [[
                     {"text": "🛡 Conservative", "callback_data": "set_risk|conservative"},
                     {"text": "⚖️ Moderate",     "callback_data": "set_risk|moderate"},
-                    {"text": "🚀 Aggressive",   "callback_data": "set_risk|aggressive"},
+                    {"text": "🔥 Aggressive",   "callback_data": "set_risk|aggressive"},
                 ]],
                 chat_id=chat_id,
             )
