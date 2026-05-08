@@ -313,8 +313,9 @@ def paper_cancel(ticker: str, chat_id: str) -> str:
     match   = next((p for p in positions if p["ticker"] == ticker), None)
     if not match:
         return f"⚠️ No paper position found for <b>{ticker}</b>."
-    # Refund the cash
-    cost         = float(match.get("entry_price", 0)) * float(match.get("shares", 0))
+    # Refund the cash — use stored cost_basis, fall back to avg_price × shares
+    cost         = float(match.get("cost_basis") or
+                         float(match.get("avg_price", 0)) * float(match.get("shares", 0)))
     data["cash"] = round(data.get("cash", 0) + cost, 2)
     data["positions"] = [p for p in positions if p["ticker"] != ticker]
     save_user_paper(chat_id, data)
