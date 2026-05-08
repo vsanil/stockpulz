@@ -11,7 +11,7 @@ import threading
 import requests
 
 from config_manager import (
-    get_config, update_config, update_config_multi,
+    get_config, update_config,
     get_user_config, update_user_config, update_user_config_multi, reset_user_config,
     load_picks,
     load_pending_state, save_pending_state, clear_pending_state,
@@ -20,8 +20,8 @@ from config_manager import (
     get_allowed_users,
 )
 from formatters import (
-    _esc, _stars, _p, _upside, _short_company,
-    format_daily_message, format_confirmation_message, format_weekly_recap_message,
+    _esc, _p,
+    format_daily_message, format_confirmation_message,
 )
 
 
