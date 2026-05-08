@@ -683,11 +683,138 @@ def handle_callback_query(callback_query: dict) -> None:
         labels = {"track_position_sizes": ("Position size tracking", "on — bot will ask shares/quantity", "off — just log ticker + price")}
         label, on_desc, off_desc = labels.get(key, (key, "enabled", "disabled"))
         desc = on_desc if new_val else off_desc
-        send_message(
-            f"✅ <b>{label}:</b> {desc}",
+        send_message(f"✅ <b>{label}:</b> {desc}", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+
+    elif action == "settings_toggle":
+        # Instant toggle for pause / show_crypto
+        key = parts[1] if len(parts) > 1 else ""
+        cfg = get_user_config(chat_id)
+        if key == "paused":
+            new_val = not bool(cfg.get("paused", False))
+            update_user_config(chat_id, "paused", new_val)
+            send_message("⏸ Picks paused." if new_val else "▶️ Picks resumed.", chat_id=chat_id)
+        elif key == "show_crypto":
+            new_val = not bool(cfg.get("show_crypto", True))
+            update_user_config(chat_id, "show_crypto", new_val)
+            send_message("🔕 Crypto hidden from picks." if not new_val else "🔔 Crypto shown in picks.", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+
+    elif action == "settings_open":
+        # Show a choice picker for risk, mode, or pick counts
+        sub = parts[1] if len(parts) > 1 else ""
+        if sub == "risk":
+            send_inline_keyboard(
+                "⚖️ <b>Choose risk level:</b>",
+                [[
+                    {"text": "🛡 Conservative", "callback_data": "settings_risk|conservative"},
+                    {"text": "⚖️ Moderate",     "callback_data": "settings_risk|moderate"},
+                    {"text": "🔥 Aggressive",   "callback_data": "settings_risk|aggressive"},
+                ]],
+                chat_id=chat_id,
+            )
+        elif sub == "mode":
+            send_inline_keyboard(
+                "📊 <b>Which picks to receive?</b>",
+                [[
+                    {"text": "📈 ST only",  "callback_data": "settings_mode|st"},
+                    {"text": "📊 LT only",  "callback_data": "settings_mode|lt"},
+                    {"text": "✅ Both",     "callback_data": "settings_mode|both"},
+                ]],
+                chat_id=chat_id,
+            )
+        elif sub == "picks_stock":
+            send_inline_keyboard(
+                "📈 <b>Max stock picks per day?</b>",
+                [[
+                    {"text": "2", "callback_data": "settings_picks|stock|2"},
+                    {"text": "3", "callback_data": "settings_picks|stock|3"},
+                    {"text": "4", "callback_data": "settings_picks|stock|4"},
+                    {"text": "5", "callback_data": "settings_picks|stock|5"},
+                    {"text": "All", "callback_data": "settings_picks|stock|0"},
+                ]],
+                chat_id=chat_id,
+            )
+        elif sub == "picks_crypto":
+            send_inline_keyboard(
+                "🪙 <b>Max crypto picks per day?</b>",
+                [[
+                    {"text": "1", "callback_data": "settings_picks|crypto|1"},
+                    {"text": "2", "callback_data": "settings_picks|crypto|2"},
+                    {"text": "3", "callback_data": "settings_picks|crypto|3"},
+                    {"text": "All", "callback_data": "settings_picks|crypto|0"},
+                ]],
+                chat_id=chat_id,
+            )
+
+    elif action == "settings_risk":
+        profile = parts[1] if len(parts) > 1 else ""
+        if profile in ("conservative", "moderate", "aggressive"):
+            update_user_config(chat_id, "risk_profile", profile)
+            descs = {
+                "conservative": "Fewer picks, tighter stops, low-volatility sectors.",
+                "moderate":     "Balanced approach — default settings.",
+                "aggressive":   "More picks, wider stops, all sectors.",
+            }
+            send_message(f"✅ Risk → <b>{profile}</b>  <i>{descs[profile]}</i>", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+
+    elif action == "settings_mode":
+        mode = parts[1] if len(parts) > 1 else ""
+        labels = {"st": "Short term only", "lt": "Long term only", "both": "Both"}
+        if mode in labels:
+            update_user_config(chat_id, "pick_mode", mode)
+            send_message(f"✅ Pick mode → <b>{labels[mode]}</b>", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+
+    elif action == "settings_picks":
+        bucket = parts[1] if len(parts) > 1 else ""
+        val_str = parts[2] if len(parts) > 2 else "0"
+        try:
+            val = int(val_str)
+        except ValueError:
+            val = 0
+        key = "max_stock_picks" if bucket == "stock" else "max_crypto_picks"
+        update_user_config(chat_id, key, val if val > 0 else None)
+        label = f"{val}" if val > 0 else "all"
+        kind  = "stock" if bucket == "stock" else "crypto"
+        send_message(f"✅ Max {kind} picks → <b>{label}</b>", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+
+    elif action == "settings_prompt":
+        # Start a pending state and ask for typed input
+        sub = parts[1] if len(parts) > 1 else ""
+        prompts = {
+            "budget_stock":  ("settings_budget_stock",  "💰 <b>Stock budget per trade?</b>\n<i>e.g. <code>200</code> or <code>off</code> to clear</i>"),
+            "budget_crypto": ("settings_budget_crypto", "₿ <b>Crypto budget per trade?</b>\n<i>e.g. <code>50</code> or <code>off</code> to clear</i>"),
+            "stop":          ("settings_stop",          "🛑 <b>Stop loss %?</b>\n<i>e.g. <code>7</code> for 7%</i>"),
+            "target":        ("settings_target",        "🎯 <b>Target gain %?</b>\n<i>e.g. <code>15</code> for 15%</i>"),
+            "watchlist":     ("watch",                  "👀 <b>Watchlist tickers?</b>\n<i>e.g. <code>TSLA MSFT NVDA</code>  ·  blank to clear</i>"),
+            "exclude":       ("exclude",                "🚫 <b>Sectors to exclude?</b>\n<i>e.g. <code>Energy Utilities</code>  ·  blank to clear</i>"),
+        }
+        if sub in prompts:
+            cmd, prompt_text = prompts[sub]
+            save_pending_state(chat_id, cmd)
+            send_inline_keyboard(
+                prompt_text,
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+
+    elif action == "settings_reset_ask":
+        send_inline_keyboard(
+            "⚠️ <b>Reset all your settings?</b>\n"
+            "<i>Risk, mode, budgets, thresholds, watchlist, excluded sectors — all wiped.</i>",
+            [[
+                {"text": "✅ Yes, reset",  "callback_data": "settings_reset_do"},
+                {"text": "❌ No, cancel", "callback_data": "cancel_abort"},
+            ]],
             chat_id=chat_id,
         )
-        # Refresh the settings panel
+
+    elif action == "settings_reset_do":
+        reset_user_config(chat_id)
+        send_message("🔄 Settings reset to defaults.", chat_id=chat_id)
         _send_settings_panel(chat_id)
 
     elif action == "cancel_abort":
@@ -913,18 +1040,92 @@ def _prompt_for_param(command: str, chat_id: str) -> None:
 
 
 def _send_settings_panel(chat_id: str) -> None:
-    """Send the /settings panel with toggle buttons for each user preference."""
-    cfg     = get_user_config(chat_id)
-    track   = bool(cfg.get("track_position_sizes", False))
-    t_icon  = "✅" if track else "⬜"
-    send_inline_keyboard(
-        "<b>⚙️ Settings</b>\n\n"
-        f"{t_icon} <b>Position size tracking</b>\n"
-        f"<i>When on, /bought and /sold will ask for share quantity so your P&amp;L reflects exact dollar amounts.</i>",
-        [[{"text": f"{t_icon} Position size tracking — {'on' if track else 'off'}",
-           "callback_data": f"toggle_setting|track_position_sizes"}]],
-        chat_id=chat_id,
+    """Send the full interactive /settings panel with buttons for every preference."""
+    cfg        = get_user_config(chat_id)
+    global_cfg = get_config()
+
+    # Values
+    paused      = bool(cfg.get("paused", False))
+    show_crypto = bool(cfg.get("show_crypto", True))
+    track       = bool(cfg.get("track_position_sizes", False))
+    risk        = cfg.get("risk_profile", "moderate")
+    mode        = cfg.get("pick_mode", "both")
+    sb          = cfg.get("stock_budget")
+    cb          = cfg.get("crypto_budget")
+    ms          = cfg.get("max_stock_picks")
+    mc          = cfg.get("max_crypto_picks")
+    sl_pct      = cfg.get("stop_loss_pct")   or global_cfg.get("stop_loss_pct",   7)
+    tg_pct      = cfg.get("target_gain_pct") or global_cfg.get("target_gain_pct", 15)
+    wl          = cfg.get("watchlist", [])
+    ex          = cfg.get("excluded_sectors", [])
+
+    # Labels
+    risk_emoji  = {"conservative": "🛡", "moderate": "⚖️", "aggressive": "🔥"}.get(risk, "⚖️")
+    mode_label  = {"st": "ST only", "lt": "LT only", "both": "Both"}.get(mode, mode)
+    sb_label    = f"${int(sb)}" if sb else "not set"
+    cb_label    = f"${int(cb)}" if cb else "not set"
+    ms_label    = str(ms) if ms else "all"
+    mc_label    = str(mc) if mc else "all"
+    wl_label    = ", ".join(wl[:3]) + ("…" if len(wl) > 3 else "") if wl else "none"
+    ex_label    = ", ".join(ex[:2]) + ("…" if len(ex) > 2 else "") if ex else "none"
+
+    text = (
+        "<b>⚙️ Settings</b>  —  tap any button to change\n\n"
+        f"{'⏸' if paused else '✅'} Picks {'paused' if paused else 'active'}   "
+        f"{'🔕' if not show_crypto else '🔔'} Crypto {'hidden' if not show_crypto else 'shown'}\n"
+        f"{risk_emoji} Risk: <b>{risk}</b>   📊 Mode: <b>{mode_label}</b>\n"
+        f"💰 Stock budget: <b>{sb_label}</b>   ₿ Crypto: <b>{cb_label}</b>\n"
+        f"📈 Stock picks: <b>{ms_label}</b>   🪙 Crypto picks: <b>{mc_label}</b>\n"
+        f"🛑 Stop loss: <b>{sl_pct}%</b>   🎯 Target: <b>{tg_pct}%</b>\n"
+        f"{'✅' if track else '⬜'} Position tracking: <b>{'on' if track else 'off'}</b>\n"
+        f"👀 Watchlist: <b>{wl_label}</b>   🚫 Excluded: <b>{ex_label}</b>"
     )
+
+    buttons = [
+        # Row 1: toggles
+        [
+            {"text": "⏸ Pause" if not paused else "▶️ Resume",
+             "callback_data": "settings_toggle|paused"},
+            {"text": "🔕 Hide crypto" if show_crypto else "🔔 Show crypto",
+             "callback_data": "settings_toggle|show_crypto"},
+        ],
+        # Row 2: risk + mode (open pickers)
+        [
+            {"text": f"{risk_emoji} Risk: {risk}",     "callback_data": "settings_open|risk"},
+            {"text": f"📊 Mode: {mode_label}",          "callback_data": "settings_open|mode"},
+        ],
+        # Row 3: budgets (prompt)
+        [
+            {"text": f"💰 Stock budget: {sb_label}",   "callback_data": "settings_prompt|budget_stock"},
+            {"text": f"₿ Crypto budget: {cb_label}",   "callback_data": "settings_prompt|budget_crypto"},
+        ],
+        # Row 4: pick counts (open pickers)
+        [
+            {"text": f"📈 Stock picks: {ms_label}",    "callback_data": "settings_open|picks_stock"},
+            {"text": f"🪙 Crypto picks: {mc_label}",   "callback_data": "settings_open|picks_crypto"},
+        ],
+        # Row 5: thresholds (prompt)
+        [
+            {"text": f"🛑 Stop loss: {sl_pct}%",       "callback_data": "settings_prompt|stop"},
+            {"text": f"🎯 Target gain: {tg_pct}%",     "callback_data": "settings_prompt|target"},
+        ],
+        # Row 6: watchlist + exclude (prompt)
+        [
+            {"text": f"👀 Watchlist: {wl_label}",      "callback_data": "settings_prompt|watchlist"},
+            {"text": f"🚫 Exclude: {ex_label}",        "callback_data": "settings_prompt|exclude"},
+        ],
+        # Row 7: position tracking toggle
+        [
+            {"text": f"{'✅' if track else '⬜'} Position tracking: {'on' if track else 'off'}",
+             "callback_data": "toggle_setting|track_position_sizes"},
+        ],
+        # Row 8: reset
+        [
+            {"text": "🔄 Reset all settings", "callback_data": "settings_reset_ask"},
+        ],
+    ]
+
+    send_inline_keyboard(text, buttons, chat_id=chat_id)
 
 
 # ── Extracted buy/sell execution (shared by direct + conversational paths) ────
@@ -1234,6 +1435,57 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "set_budget":
         return _parse_and_execute(f"SET BUDGET {text}".strip(), original=f"/set_budget {text}", chat_id=chat_id)
 
+    if command == "settings_budget_stock":
+        raw = text.strip().lower()
+        if raw in ("off", "0", "none", "clear", ""):
+            update_user_config(chat_id, "stock_budget", None)
+            send_message("✅ Stock budget cleared.", chat_id=chat_id)
+        else:
+            try:
+                val = float(raw.replace(",", "").rstrip("k")) * (1000 if raw.endswith("k") else 1)
+                update_user_config(chat_id, "stock_budget", val)
+                send_message(f"✅ Stock budget → <b>${int(val)}/trade</b>", chat_id=chat_id)
+            except ValueError:
+                send_message("⚠️ Couldn't parse that. Try a number like <code>200</code>.", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+        return ""
+
+    if command == "settings_budget_crypto":
+        raw = text.strip().lower()
+        if raw in ("off", "0", "none", "clear", ""):
+            update_user_config(chat_id, "crypto_budget", None)
+            send_message("✅ Crypto budget cleared.", chat_id=chat_id)
+        else:
+            try:
+                val = float(raw.replace(",", "").rstrip("k")) * (1000 if raw.endswith("k") else 1)
+                update_user_config(chat_id, "crypto_budget", val)
+                send_message(f"✅ Crypto budget → <b>${int(val)}/trade</b>", chat_id=chat_id)
+            except ValueError:
+                send_message("⚠️ Couldn't parse that. Try a number like <code>50</code>.", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+        return ""
+
+    if command == "settings_stop":
+        raw = text.strip().replace("%", "")
+        try:
+            val = float(raw)
+            update_user_config(chat_id, "stop_loss_pct", val)
+            send_message(f"✅ Stop loss → <b>{val}%</b>", chat_id=chat_id)
+        except ValueError:
+            send_message("⚠️ Couldn't parse that. Try a number like <code>7</code>.", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+        return ""
+
+    if command == "settings_target":
+        raw = text.strip().replace("%", "")
+        try:
+            val = float(raw)
+            update_user_config(chat_id, "target_gain_pct", val)
+            send_message(f"✅ Target gain → <b>{val}%</b>", chat_id=chat_id)
+        except ValueError:
+            send_message("⚠️ Couldn't parse that. Try a number like <code>15</code>.", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+        return ""
 
     if command == "alert":
         if step == 2:
@@ -2675,54 +2927,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         return "\n".join(lines)
 
     if text == "SETTINGS":
-        global_cfg = get_config()
-        user_cfg   = get_user_config(chat_id)
-        wl  = user_cfg.get("watchlist", [])
-        ex  = user_cfg.get("excluded_sectors", [])
-        sl_pct = user_cfg.get("stop_loss_pct")   or global_cfg.get("stop_loss_pct",   7)
-        tg_pct = user_cfg.get("target_gain_pct") or global_cfg.get("target_gain_pct", 15)
-        sl_src = "" if user_cfg.get("stop_loss_pct")   else " ·default"
-        tg_src = "" if user_cfg.get("target_gain_pct") else " ·default"
-
-        # Risk emoji
-        risk = user_cfg.get("risk_profile", "moderate")
-        risk_emoji = {"conservative": "🛡", "moderate": "⚖️", "aggressive": "🔥"}.get(risk, "⚖️")
-
-        # Pick mode
-        mode = user_cfg.get("pick_mode", "both")
-        mode_label = {"st": "Short term only", "lt": "Long term only", "both": "Both"}.get(mode, mode)
-
-        # Status
-        paused      = user_cfg.get("paused", False)
-        show_crypto = user_cfg.get("show_crypto", True)
-
-        # Budget
-        sb = user_cfg.get("stock_budget")
-        cb = user_cfg.get("crypto_budget")
-        sb_str = f"${sb}/trade" if sb else "not set"
-        cb_str = f"${cb}/trade" if cb else "not set"
-
-        # Picks
-        ms = user_cfg.get("max_stock_picks")
-        mc = user_cfg.get("max_crypto_picks")
-
-        return (
-            f"<b>⚙️ Your Settings</b>\n\n"
-            f"{'⏸' if paused else '✅'} <b>Picks:</b> {'paused — /resume to restart' if paused else 'active'}\n"
-            f"{'⏸' if not show_crypto else '✅'} <b>Crypto:</b> {'hidden — /crypto on' if not show_crypto else 'shown  ·  /crypto off to hide'}\n\n"
-            f"{risk_emoji} <b>Risk:</b> {risk}  ·  /set_risk\n"
-            f"📊 <b>Mode:</b> {mode_label}  ·  /mode\n\n"
-            f"💰 <b>Stock budget:</b> {sb_str}  ·  /set_budget\n"
-            f"₿ <b>Crypto budget:</b> {cb_str}\n"
-            f"📈 <b>Stock picks:</b> {ms if ms else 'all'}  ·  /set_picks\n"
-            f"🪙 <b>Crypto picks:</b> {mc if mc else 'all'}\n\n"
-            f"🛑 <b>Stop loss:</b> {sl_pct}%{sl_src}  ·  /set_thresholds\n"
-            f"🎯 <b>Target gain:</b> {tg_pct}%{tg_src}\n\n"
-            f"👀 <b>Watchlist:</b> {', '.join(wl) if wl else 'none'}  ·  /watch\n"
-            f"🚫 <b>Excluded sectors:</b> {', '.join(ex) if ex else 'none'}  ·  /exclude\n\n"
-            f"<i>To reset everything: /reset</i>"
-        )
-        # Append the interactive toggles panel right after the text block
         _send_settings_panel(chat_id)
         return ""
 
