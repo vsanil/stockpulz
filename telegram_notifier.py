@@ -761,6 +761,27 @@ def handle_callback_query(callback_query: dict) -> None:
             chat_id=chat_id,
         )
 
+    elif action == "psell":
+        # Disambiguation button for paper_sell — ticker chosen, now ask for shares
+        ticker     = parts[1] if len(parts) > 1 else ""
+        shares_raw = parts[2] if len(parts) > 2 else ""
+        if shares_raw:
+            from paper_trader import paper_sell
+            try:
+                shares = float(shares_raw)
+            except ValueError:
+                shares = None
+            result = paper_sell(ticker, chat_id, shares, None)
+            send_message(result, chat_id=chat_id)
+        else:
+            save_pending_state(chat_id, "paper_sell", step=2, data={"ticker": ticker})
+            send_inline_keyboard(
+                f"📄 How many shares of <b>{ticker}</b> to simulate selling?\n"
+                f"<i>Send blank to sell your full position</i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+
 
 # ── Prompts for param commands ────────────────────────────────────────────────
 
@@ -1086,6 +1107,56 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return _parse_and_execute(f"PAPER BUY {text}", original=f"/paper_buy {text}", chat_id=chat_id)
 
     if command == "paper_sell":
+        if step == 2:
+            # User replied with share count (optional — blank = sell all)
+            from paper_trader import paper_sell
+            ticker    = data.get("ticker", "")
+            price_raw = data.get("price")
+            shares    = None
+            raw       = text.strip()
+            if raw:
+                try:
+                    shares = float(raw.replace(",", ""))
+                except ValueError:
+                    parsed_s = _nl_parse_trade("paper_sell", raw)
+                    shares   = parsed_s.get("shares")
+            return paper_sell(ticker, chat_id, shares, price_raw)
+
+        if step == 1:
+            # User replied with ticker (and optionally shares)
+            parts      = text.strip().split()
+            name_raw   = parts[0] if parts else ""
+            shares_raw = parts[1] if len(parts) >= 2 and _is_number(parts[1]) else None
+
+            if not name_raw:
+                return "⚠️ Please tell me which stock to sell."
+
+            candidates = _resolve_ticker_candidates(name_raw)
+            if len(candidates) > 1:
+                shares_enc = shares_raw or ""
+                buttons = [[{"text": f"{c['ticker']} — {c['name']}",
+                             "callback_data": f"psell|{c['ticker']}|{shares_enc}"}]
+                           for c in candidates]
+                send_inline_keyboard(
+                    f"🔍 Which stock did you mean by <b>{_esc(name_raw)}</b>?",
+                    buttons, chat_id=chat_id)
+                return ""
+
+            ticker = candidates[0]["ticker"]
+            if shares_raw is None:
+                save_pending_state(chat_id, "paper_sell", step=2, data={"ticker": ticker})
+                send_inline_keyboard(
+                    f"📄 How many shares of <b>{ticker}</b> to simulate selling?\n"
+                    f"<i>Send blank to sell your full position</i>",
+                    [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
+
+            from paper_trader import paper_sell
+            return paper_sell(ticker, chat_id, float(shares_raw), None)
+
+        # Fallback (step=0 / unexpected)
         return _parse_and_execute(f"PAPER SELL {text}", original=f"/paper_sell {text}", chat_id=chat_id)
 
     if command == "paper_add_cash":
@@ -1694,8 +1765,24 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             shares = parsed.get("shares")
             price  = parsed.get("price")
         if not ticker:
-            save_pending_state(chat_id, "paper_sell")
-            return "🤔 Which stock to simulate selling? Try: <code>Apple</code> or <code>AVY 5</code>"
+            save_pending_state(chat_id, "paper_sell", step=1)
+            send_inline_keyboard(
+                "📄 <b>Paper sell — which position?</b>\n"
+                "<i>e.g.</i> <code>Apple</code> or <code>AVY 5</code>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+        # Ticker resolved — ask for shares if missing
+        if shares is None:
+            save_pending_state(chat_id, "paper_sell", step=2, data={"ticker": ticker, "price": price})
+            send_inline_keyboard(
+                f"📄 How many shares of <b>{ticker}</b> to simulate selling?\n"
+                f"<i>Send blank to sell your full position</i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
         return paper_sell(ticker, chat_id, shares, price)
 
     if text == "PAPER PORTFOLIO":
