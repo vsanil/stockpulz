@@ -203,15 +203,70 @@ def _explain_pick(query: str) -> str:
             "Focus on: why this pick was chosen today, key risk to watch, and one thing "
             "to monitor. Do NOT give general financial advice disclaimers."
         )
+        user_msg = f"{context}\n\nUser question: {query}"
     else:
-        context = f"Today's picks:\n{json.dumps([p for _, p in all_picks], indent=2)}"
-        system  = (
-            "You are a friendly financial analyst. Answer questions about today's stock and "
-            "crypto picks in plain English — no jargon, 3-5 sentences max. "
-            "If the question is about something not in today's picks, say so briefly."
-        )
+        # Not in today's picks — fetch live info via yfinance and answer generally
+        import yfinance as yf
+        import re
 
-    user_msg = f"{context}\n\nUser question: {query}"
+        # Try to extract a ticker from the query
+        ticker_match = re.search(r'\b([A-Z]{1,5})\b', query.upper())
+        # Also try common name→ticker mappings
+        name_map = {
+            "NVIDIA": "NVDA", "NVDIA": "NVDA", "NVIDEA": "NVDA",
+            "APPLE": "AAPL", "MICROSOFT": "MSFT", "AMAZON": "AMZN",
+            "GOOGLE": "GOOGL", "ALPHABET": "GOOGL", "META": "META",
+            "TESLA": "TSLA", "NETFLIX": "NFLX", "BITCOIN": "BTC-USD",
+            "ETHEREUM": "ETH-USD", "SOLANA": "SOL-USD",
+        }
+        guessed_ticker = None
+        for name, sym in name_map.items():
+            if name in query.upper():
+                guessed_ticker = sym
+                break
+        if not guessed_ticker and ticker_match:
+            guessed_ticker = ticker_match.group(1)
+
+        live_context = ""
+        if guessed_ticker:
+            try:
+                t    = yf.Ticker(guessed_ticker)
+                info = t.info or {}
+                fi   = t.fast_info
+                hist = t.history(period="5d")
+                price     = getattr(fi, "last_price", None) or info.get("regularMarketPrice")
+                prev_close= getattr(fi, "previous_close", None) or info.get("previousClose")
+                mkt_cap   = info.get("marketCap")
+                pe        = info.get("trailingPE")
+                summary   = info.get("longBusinessSummary", "")[:400]
+                chg_pct   = ((price - prev_close) / prev_close * 100) if price and prev_close else None
+                chg_str   = f"{chg_pct:+.2f}% today" if chg_pct is not None else ""
+                cap_str   = f"${mkt_cap/1e9:.0f}B market cap" if mkt_cap else ""
+                pe_str    = f"P/E {pe:.1f}" if pe else ""
+                live_context = (
+                    f"Ticker: {guessed_ticker}\n"
+                    f"Price: ${price:.2f} {chg_str}\n"
+                    f"{cap_str}  {pe_str}\n"
+                    f"About: {summary}\n"
+                    f"5-day close prices: {[round(float(x),2) for x in hist['Close'].tail(5).tolist()]}\n"
+                )
+            except Exception as exc:
+                live_context = f"Could not fetch live data for {guessed_ticker}: {exc}\n"
+
+        picks_summary = ", ".join(
+            (p.get("ticker") or p.get("symbol", "")) for _, p in all_picks
+        )
+        context = (
+            f"Today's picks: {picks_summary}\n\n"
+            f"Live market data for the queried stock:\n{live_context}"
+        )
+        system  = (
+            "You are a friendly financial analyst assistant. Answer the user's question "
+            "using the live market data provided. Be concise (3-5 sentences), use plain "
+            "English, mention the current price and what's driving the move if relevant. "
+            "Do NOT give disclaimers. Do NOT suggest they ask about today's picks."
+        )
+        user_msg = f"{context}\n\nUser question: {query}"
 
     try:
         client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -476,6 +531,91 @@ def handle_callback_query(callback_query: dict) -> None:
             f"<i>I'll track this and alert you at target/stop.</i>",
             chat_id=chat_id,
         )
+
+    elif action == "sold_bulk":
+        payload = "|".join(parts[1:])
+        entries = payload.split(",")
+        results = []
+        for entry in entries:
+            ep = entry.split("|")
+            if len(ep) == 2:
+                ticker, price = ep[0].strip(), ep[1].strip()
+                r = _execute_sold(ticker, price, chat_id)
+                results.append(r)
+        clear_pending_state(chat_id)
+        send_message("\n\n".join(results), chat_id=chat_id)
+
+    elif action == "bought_bulk":
+        # Log multiple positions at live price — format: "bought_bulk|MSFT|416.0,BNB|652.0,BTC|80000"
+        payload = "|".join(parts[1:])   # rejoin since ticker/price pairs use |
+        entries = payload.split(",")
+        results = []
+        for entry in entries:
+            ep = entry.split("|")
+            if len(ep) == 2:
+                ticker, price = ep[0].strip(), ep[1].strip()
+                r = _execute_bought(ticker, price, None, chat_id)
+                results.append(r)
+        clear_pending_state(chat_id)
+        send_message("\n\n".join(results), chat_id=chat_id)
+
+    elif action == "bought_confirm":
+        ticker     = parts[1] if len(parts) > 1 else ""
+        price_raw  = parts[2] if len(parts) > 2 else ""
+        shares_raw = parts[3] if len(parts) > 3 else None
+        clear_pending_state(chat_id)
+        result = _execute_bought(ticker, price_raw or None, shares_raw or None, chat_id)
+        send_message(result, chat_id=chat_id)
+
+    elif action == "sold_confirm":
+        ticker     = parts[1] if len(parts) > 1 else ""
+        price_raw  = parts[2] if len(parts) > 2 else ""
+        shares_raw = parts[3] if len(parts) > 3 else None
+        clear_pending_state(chat_id)
+        result = _execute_sold(ticker, price_raw or None, chat_id, shares_sold=shares_raw or None)
+        send_message(result, chat_id=chat_id)
+
+    elif action == "pbuy_confirm":
+        # Confirm paper buy — format: pbuy_confirm|TICKER|price|shares
+        ticker     = parts[1] if len(parts) > 1 else ""
+        price_raw  = parts[2] if len(parts) > 2 else ""
+        shares_raw = parts[3] if len(parts) > 3 else ""
+        price  = float(price_raw)  if price_raw  else None
+        shares = float(shares_raw) if shares_raw else 1.0
+        clear_pending_state(chat_id)
+        from paper_trader import paper_buy as _pb
+        result = _pb(ticker, shares, chat_id, price)
+        send_message(result, chat_id=chat_id)
+
+    elif action == "pbuy":
+        # Ticker disambiguation for paper_buy — format: pbuy|TICKER|shares_or_empty
+        ticker     = parts[1] if len(parts) > 1 else ""
+        shares_raw = parts[2] if len(parts) > 2 else ""
+        if ticker:
+            if shares_raw and _is_number(shares_raw):
+                shares = float(shares_raw)
+                live   = _fetch_live_price(ticker)
+                price  = live
+                shares_str = f"  ·  <b>{shares} shares</b>"
+                total_str  = f"  ·  total <code>${float(price or 0) * shares:,.2f}</code>" if price else ""
+                price_str  = f"<code>${_p(price)}</code>" if price else "<i>live price</i>"
+                send_inline_keyboard(
+                    f"📄 <b>Confirm paper buy?</b>\n"
+                    f"<b>{ticker}</b>{shares_str}  @  {price_str}{total_str}\n"
+                    f"<i>Tap ✅ to simulate, or type correct details to adjust.</i>",
+                    [[{"text": "✅ Confirm", "callback_data": f"pbuy_confirm|{ticker}|{price or ''}|{shares}"},
+                      {"text": "❌ Cancel",  "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+            else:
+                live = _fetch_live_price(ticker)
+                live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+                save_pending_state(chat_id, "paper_buy", step=1, data={"ticker": ticker})
+                send_inline_keyboard(
+                    f"📄 How many shares of <b>{ticker}</b> to simulate buying?{live_hint}",
+                    [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
 
     elif action == "bought_skip_qty":
         # User tapped "Skip" on the quantity step — log without shares
@@ -798,24 +938,46 @@ def handle_callback_query(callback_query: dict) -> None:
             chat_id=chat_id,
         )
 
+    elif action == "psell_confirm":
+        # Confirm paper sell — format: psell_confirm|TICKER|price_or_empty|shares_or_empty
+        ticker     = parts[1] if len(parts) > 1 else ""
+        price_raw  = parts[2] if len(parts) > 2 else ""
+        shares_raw = parts[3] if len(parts) > 3 else ""
+        price  = float(price_raw)  if price_raw  else None
+        shares = float(shares_raw) if shares_raw else None
+        clear_pending_state(chat_id)
+        from paper_trader import paper_sell as _ps
+        result = _ps(ticker, chat_id, shares, price)
+        send_message(result, chat_id=chat_id)
+
+    elif action == "psell_bulk":
+        # Sell multiple paper positions at live price — format: psell_bulk|TICKER,TICKER,...
+        payload = "|".join(parts[1:])
+        tickers = [t.strip() for t in payload.split(",") if t.strip()]
+        from paper_trader import paper_sell as _ps
+        results = []
+        for t in tickers:
+            r = _ps(t, chat_id, None, None)
+            results.append(r)
+        clear_pending_state(chat_id)
+        send_message("\n\n".join(results), chat_id=chat_id)
+
     elif action == "psell":
-        # Disambiguation button for paper_sell — ticker chosen, now ask for shares
+        # Disambiguation button for paper_sell — ticker chosen, show confirmation
         ticker     = parts[1] if len(parts) > 1 else ""
         shares_raw = parts[2] if len(parts) > 2 else ""
-        if shares_raw:
-            from paper_trader import paper_sell
-            try:
-                shares = float(shares_raw)
-            except ValueError:
-                shares = None
-            result = paper_sell(ticker, chat_id, shares, None)
-            send_message(result, chat_id=chat_id)
-        else:
-            save_pending_state(chat_id, "paper_sell", step=2, data={"ticker": ticker})
+        if ticker:
+            shares = float(shares_raw) if shares_raw and _is_number(shares_raw) else None
+            live   = _fetch_live_price(ticker)
+            price  = live
+            shares_str = f"  ·  <b>{shares} shares</b>" if shares else "  ·  full position"
+            price_str  = f"<code>${_p(price)}</code>" if price else "<i>live price</i>"
             send_inline_keyboard(
-                f"📄 How many shares of <b>{ticker}</b> to simulate selling?\n"
-                f"<i>Send blank to sell your full position</i>",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                f"📄 <b>Confirm paper sell?</b>\n"
+                f"<b>{ticker}</b>{shares_str}  @  {price_str}\n"
+                f"<i>Tap ✅ to simulate, or type correct details to adjust.</i>",
+                [[{"text": "✅ Confirm", "callback_data": f"psell_confirm|{ticker}|{price or ''}|{shares_raw}"},
+                  {"text": "❌ Cancel",  "callback_data": f"cancel_pending|{chat_id}"}]],
                 chat_id=chat_id,
             )
 
@@ -1362,15 +1524,38 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
                 return "🤔 Which stock? Try: <code>EVRG 5</code>"
             return paper_buy(ticker, shares, chat_id, price)
         if step == 1:
-            # User replied with share count after we asked
-            ticker = data.get("ticker", "")
-            try:
-                shares = float(text.strip())
-            except ValueError:
+            import re as _re
+            ticker  = data.get("ticker", "")
+            tickers = data.get("tickers", [])  # multi-ticker list
+
+            if tickers:
+                # Multi-ticker: parse share counts from "2 and 5" or "2 5"
+                nums = [float(n) for n in _re.findall(r'\d+(?:\.\d+)?', text.replace(",", ""))]
+                if len(nums) < len(tickers):
+                    save_pending_state(chat_id, "paper_buy", step=1, data={"tickers": tickers})
+                    names_str = ", ".join(f"<b>{t}</b>" for t in tickers)
+                    return (f"🤔 Please enter {len(tickers)} share counts (one per ticker).\n"
+                            f"e.g. <code>{' '.join(['1'] * len(tickers))}</code>")
+                # Execute all at live prices
+                from paper_trader import paper_buy as _pb
+                results = []
+                for i, t in enumerate(tickers):
+                    r = _pb(t, nums[i], chat_id, None)
+                    results.append(r)
+                clear_pending_state(chat_id)
+                send_message("\n\n".join(results), chat_id=chat_id)
+                return ""
+
+            # Single ticker — extract first number from reply
+            nums = [float(n) for n in _re.findall(r'\d+(?:\.\d+)?', text.replace(",", ""))]
+            shares = nums[0] if nums else None
+            if not shares:
+                parsed_s = _nl_parse_trade("paper_buy", text)
+                shares = parsed_s.get("shares")
+            if not shares:
                 save_pending_state(chat_id, "paper_buy", step=1, data={"ticker": ticker})
                 return f"🤔 How many shares? e.g. <code>5</code>"
-            # Now ask for price
-            from paper_trader import paper_buy
+            # Ask for price
             live = _fetch_live_price(ticker)
             live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
             save_pending_state(chat_id, "paper_buy", step=2,
@@ -1833,7 +2018,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     if text == "COMMUNITY":
         try:
             from performance_tracker import build_community_stats
-            from config_manager import get_allowed_users, load_user_trade_log
             users = get_allowed_users()
             logs  = []
             for uid in users:
@@ -1978,70 +2162,151 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         return ""
 
     if text.startswith("PAPER BUY "):
-        from paper_trader import paper_buy
-        raw   = text[10:].strip()
-        # Strip noise words so "AVY 2 STOCKS" → ["AVY", "2"]
-        _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "WORTH"}
-        parts = [p for p in raw.split() if p.upper() not in _NOISE]
-        ticker, shares, price = None, None, None
-        # Strict parse: AAPL 10  |  AAPL 182.50 10
-        try:
-            if len(parts) == 2 and _is_number(parts[1]):
-                ticker, shares = parts[0].upper(), float(parts[1])
-            elif len(parts) >= 3 and _is_number(parts[-1]) and _is_number(parts[-2]):
-                # e.g. AAPL 182.50 10 — price then shares
-                ticker, price, shares = parts[0].upper(), float(parts[-2]), float(parts[-1])
-            else:
-                raise ValueError("needs NL parse")
-        except (ValueError, IndexError):
-            parsed = _nl_parse_trade("paper_buy", raw)
-            ticker = parsed.get("ticker")
-            shares = parsed.get("shares")
-            price  = parsed.get("price")
+        import re as _re
+        raw = text[10:].strip()
+
+        _MULTI_NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT",
+                        "DOLLARS", "DOLLAR", "USD", "EACH", "FOR", "BUY", "PAPER",
+                        "SOME", "ALL", "MY", "A", "AN", "THE", "I", "WE"}
+
+        # ── Multi-ticker: "jpm and msft" or "apple, google" ─────────────────
+        raw_names = [t.strip().strip(".,;") for t in _re.split(r",|\band\b", raw, flags=_re.IGNORECASE)]
+        raw_names = [n for n in raw_names if n and not _is_number(n) and n.upper() not in _MULTI_NOISE]
+        if len(raw_names) >= 2:
+            resolved = []
+            for name in raw_names:
+                cands = _resolve_ticker_candidates(name)
+                if cands:
+                    resolved.append(cands[0])
+            if resolved:
+                lines = ["📄 <b>Paper buy — live prices:</b>\n"]
+                tickers = []
+                for r in resolved:
+                    live = _fetch_live_price(r["ticker"])
+                    price_str = f"<code>${_p(live)}</code>" if live else "<i>price unavailable</i>"
+                    lines.append(f"  • <b>{r['ticker']}</b> {price_str}")
+                    tickers.append(r["ticker"])
+                save_pending_state(chat_id, "paper_buy", step=1, data={"tickers": tickers})
+                send_inline_keyboard(
+                    "\n".join(lines) + f"\n\n<i>How many shares of each? e.g. <code>2 5</code></i>",
+                    [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
+
+        # ── Single ticker — NL parse ─────────────────────────────────────────
+        parsed = _nl_parse_trade("paper_buy", raw)
+        ticker = parsed.get("ticker")
+        shares = parsed.get("shares")
+        price  = parsed.get("price")
+
+        # Fallback: first non-numeric, non-noise word
+        if not ticker:
+            tokens = [p.strip(".,;") for p in raw.split() if p.strip(".,;").upper() not in _MULTI_NOISE]
+            ticker_raw = next((p for p in tokens if not _is_number(p)), None)
+            if ticker_raw:
+                cands = _resolve_ticker_candidates(ticker_raw)
+                if cands:
+                    ticker = cands[0]["ticker"]
+
         if not ticker:
             save_pending_state(chat_id, "paper_buy")
             return "🤔 Which stock? Try: <code>Apple 10</code> or <code>AVY 2</code>"
-        if not shares:
-            save_pending_state(chat_id, "paper_buy", step=1, data={"ticker": ticker})
-            return f"🤔 How many shares of <b>{ticker}</b> to simulate buying?"
-        if price is None:
-            # Ask for entry price — important for paper trading accuracy
+
+        # Disambiguate if needed
+        candidates = _resolve_ticker_candidates(ticker)
+        if len(candidates) > 1:
+            shares_enc = str(shares) if shares is not None else ""
+            buttons = [[{"text": f"{c['ticker']} — {c['name']}",
+                         "callback_data": f"pbuy|{c['ticker']}|{shares_enc}"}]
+                       for c in candidates]
+            send_inline_keyboard(f"🔍 Which stock did you mean by <b>{_esc(ticker)}</b>?",
+                                 buttons, chat_id=chat_id)
+            return ""
+        if candidates:
+            ticker = candidates[0]["ticker"]
+
+        # Ask for shares if missing
+        if shares is None:
             live = _fetch_live_price(ticker)
             live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
-            save_pending_state(chat_id, "paper_buy", step=2,
-                               data={"ticker": ticker, "shares": shares})
+            save_pending_state(chat_id, "paper_buy", step=1, data={"ticker": ticker})
             send_inline_keyboard(
-                f"💰 At what price to simulate the buy for <b>{ticker}</b>?{live_hint}\n"
-                f"<i>Send blank to use live price</i>",
+                f"📄 How many shares of <b>{ticker}</b> to simulate buying?{live_hint}",
                 [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
                 chat_id=chat_id,
             )
             return ""
-        return paper_buy(ticker, shares, chat_id, price)
+
+        # Have ticker + shares — fetch price if needed and show confirmation
+        if price is None:
+            price = _fetch_live_price(ticker)
+
+        shares_str = f"  ·  <b>{shares} shares</b>"
+        total_str  = f"  ·  total <code>${float(price or 0) * float(shares):,.2f}</code>" if price else ""
+        price_str  = f"<code>${_p(price)}</code>" if price else "<i>live price</i>"
+        send_inline_keyboard(
+            f"📄 <b>Confirm paper buy?</b>\n"
+            f"<b>{ticker}</b>{shares_str}  @  {price_str}{total_str}\n"
+            f"<i>Tap ✅ to simulate, or type correct details to adjust.</i>",
+            [[{"text": "✅ Confirm", "callback_data": f"pbuy_confirm|{ticker}|{price or ''}|{shares}"},
+              {"text": "❌ Cancel",  "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return ""
 
     if text in ("PAPER SELL",):
         _prompt_for_param("paper_sell", chat_id)
         return ""
 
     if text.startswith("PAPER SELL "):
-        from paper_trader import paper_sell
-        raw   = text[11:].strip()
-        _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF"}
-        parts = [p for p in raw.split() if p.upper() not in _NOISE]
-        ticker, shares, price = None, None, None
-        # Strict parse: AAPL  |  AAPL 5  |  AAPL 197.10 5
-        try:
-            if parts and len(parts[0]) <= 5 and parts[0].isalpha():
-                ticker = parts[0].upper()
-                shares = float(parts[1]) if len(parts) >= 2 and _is_number(parts[1]) else None
-                price  = float(parts[2]) if len(parts) >= 3 and _is_number(parts[2]) else None
-            else:
-                raise ValueError("needs NL parse")
-        except (ValueError, IndexError):
-            parsed = _nl_parse_trade("paper_sell", raw)
-            ticker = parsed.get("ticker")
-            shares = parsed.get("shares")
-            price  = parsed.get("price")
+        import re as _re
+        raw = text[11:].strip()
+
+        _MULTI_NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT",
+                        "DOLLARS", "DOLLAR", "USD", "EACH", "FOR", "SELL", "PAPER",
+                        "SOME", "ALL", "MY", "A", "AN", "THE", "I", "WE"}
+
+        # ── Multi-ticker: "microsoft and btc" ───────────────────────────────
+        raw_names = [t.strip().strip(".,;") for t in _re.split(r",|\band\b", raw, flags=_re.IGNORECASE)]
+        raw_names = [n for n in raw_names if n and not _is_number(n) and n.upper() not in _MULTI_NOISE]
+        if len(raw_names) >= 2:
+            resolved = []
+            for name in raw_names:
+                cands = _resolve_ticker_candidates(name)
+                if cands:
+                    resolved.append(cands[0])
+            if resolved:
+                lines = ["📄 <b>Simulate selling full positions at live price?</b>\n"]
+                tickers_enc = []
+                for r in resolved:
+                    live = _fetch_live_price(r["ticker"])
+                    price_str = f"<code>${_p(live)}</code>" if live else "<i>price unavailable</i>"
+                    lines.append(f"  • <b>{r['ticker']}</b> {price_str}")
+                    tickers_enc.append(r["ticker"])
+                send_inline_keyboard(
+                    "\n".join(lines),
+                    [[{"text": "✅ Sell all", "callback_data": f"psell_bulk|{','.join(tickers_enc)}"},
+                      {"text": "❌ Cancel",  "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
+
+        # ── Single ticker — NL parse ─────────────────────────────────────────
+        parsed = _nl_parse_trade("paper_sell", raw)
+        ticker = parsed.get("ticker")
+        shares = parsed.get("shares")
+        price  = parsed.get("price")
+
+        # Fallback: first non-numeric, non-noise word
+        if not ticker:
+            tokens = [p.strip(".,;") for p in raw.split() if p.strip(".,;").upper() not in _MULTI_NOISE]
+            ticker_raw = next((p for p in tokens if not _is_number(p)), None)
+            if ticker_raw:
+                cands = _resolve_ticker_candidates(ticker_raw)
+                if cands:
+                    ticker = cands[0]["ticker"]
+
         if not ticker:
             save_pending_state(chat_id, "paper_sell", step=1)
             send_inline_keyboard(
@@ -2051,17 +2316,35 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 chat_id=chat_id,
             )
             return ""
-        # Ticker resolved — ask for shares if missing
-        if shares is None:
-            save_pending_state(chat_id, "paper_sell", step=2, data={"ticker": ticker, "price": price})
-            send_inline_keyboard(
-                f"📄 How many shares of <b>{ticker}</b> to simulate selling?\n"
-                f"<i>Send blank to sell your full position</i>",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
+
+        # Disambiguate if needed
+        candidates = _resolve_ticker_candidates(ticker)
+        if len(candidates) > 1:
+            shares_enc = str(shares) if shares is not None else ""
+            buttons = [[{"text": f"{c['ticker']} — {c['name']}",
+                         "callback_data": f"psell|{c['ticker']}|{shares_enc}"}]
+                       for c in candidates]
+            send_inline_keyboard(f"🔍 Which stock did you mean by <b>{_esc(ticker)}</b>?",
+                                 buttons, chat_id=chat_id)
             return ""
-        return paper_sell(ticker, chat_id, shares, price)
+        if candidates:
+            ticker = candidates[0]["ticker"]
+
+        # Show confirmation — shares optional (blank = sell full position)
+        if price is None:
+            price = _fetch_live_price(ticker)
+        shares_str = f"  ·  <b>{shares} shares</b>" if shares else "  ·  full position"
+        price_str  = f"<code>${_p(price)}</code>" if price else "<i>live price</i>"
+        shares_enc = str(shares) if shares else ""
+        send_inline_keyboard(
+            f"📄 <b>Confirm paper sell?</b>\n"
+            f"<b>{ticker}</b>{shares_str}  @  {price_str}\n"
+            f"<i>Tap ✅ to simulate, or type correct details to adjust.</i>",
+            [[{"text": "✅ Confirm", "callback_data": f"psell_confirm|{ticker}|{price or ''}|{shares_enc}"},
+              {"text": "❌ Cancel",  "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return ""
 
     if text == "PAPER PORTFOLIO":
         from paper_trader import paper_portfolio
@@ -2284,8 +2567,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             f"📲 <b>Share StockPulz with friends:</b>\n\n"
             f"Hey! I'm using StockPulz — a personal AI stock advisor that sends daily stock &amp; crypto picks, "
             f"price alerts, and weekly performance recaps.\n\n"
+            f'🌐 Learn more: <a href="https://stockpulz.com/">stockpulz.com</a>\n\n'
             f"📱 Join on Telegram 👇\n"
-            f"{bot_link}\n\n"
+            f'<a href="{bot_link}">{bot_link}</a>\n\n'
             f"{footer}"
         )
 
@@ -2918,24 +3202,51 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         return ""
 
     if text.startswith("BOUGHT "):
-        raw    = text[len("BOUGHT "):].strip()
-        _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT"}
-        parts  = [p for p in raw.split() if p.upper() not in _NOISE]
+        import re as _re
+        raw = text[len("BOUGHT "):].strip()
 
-        # Detect natural-language params: more than 3 tokens, or non-numeric second token
-        is_nl = len(parts) > 3 or (len(parts) >= 2 and not _is_number(parts[1]))
-        if is_nl:
-            parsed = _nl_parse_trade("bought", raw)
-            name_raw   = parsed.get("ticker") or (parts[0] if parts else None)
-            price_raw  = str(parsed["price"])  if parsed.get("price")  is not None else None
-            shares_raw = str(parsed["shares"]) if parsed.get("shares") is not None else None
-        else:
-            name_raw   = parts[0] if parts else None
-            price_raw  = parts[1] if len(parts) >= 2 else None
-            shares_raw = parts[2] if len(parts) >= 3 else None
+        # ── Multi-ticker: "microsoft, bnb and btc" ────────────────────────────
+        _MULTI_NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT",
+                        "DOLLARS", "DOLLAR", "USD", "EACH", "FOR", "BOUGHT", "BUY",
+                        "SOME", "ALL", "MY", "A", "AN", "THE", "I", "WE"}
+        raw_names = [t.strip().strip(".,;") for t in _re.split(r",|\band\b", raw, flags=_re.IGNORECASE)]
+        raw_names = [n for n in raw_names if n and not _is_number(n) and n.upper() not in _MULTI_NOISE]
+        if len(raw_names) >= 2:
+            resolved = []
+            for name in raw_names:
+                cands = _resolve_ticker_candidates(name)
+                if cands:
+                    resolved.append(cands[0])
+            if resolved:
+                lines = ["🛒 <b>Log these positions at live price?</b>\n"]
+                confirm_parts = []
+                for r in resolved:
+                    live = _fetch_live_price(r["ticker"])
+                    price_str = f"<code>${_p(live)}</code>" if live else "<i>price unavailable</i>"
+                    lines.append(f"  • <b>{r['ticker']}</b> {price_str}")
+                    if live:
+                        confirm_parts.append(f"{r['ticker']}|{live}")
+                send_inline_keyboard(
+                    "\n".join(lines),
+                    [[{"text": "✅ Log all at live price", "callback_data": f"bought_bulk|{','.join(confirm_parts)}"},
+                      {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
+
+        # ── Single ticker — always use NL parser ─────────────────────────────
+        parsed     = _nl_parse_trade("bought", raw)
+        name_raw   = (parsed.get("ticker") or "").strip(".,;") or None
+        price_raw  = str(parsed["price"])  if parsed.get("price")  is not None else None
+        shares_raw = str(parsed["shares"]) if parsed.get("shares") is not None else None
+
+        # Last-resort fallback: first non-numeric, non-noise word
+        if not name_raw:
+            tokens = [p.strip(".,;") for p in raw.split() if p.strip(".,;").upper() not in _MULTI_NOISE]
+            name_raw = next((p for p in tokens if not _is_number(p)), None)
 
         if not name_raw:
-            return "🤔 I couldn't identify a stock. Try: /bought Apple 182.50 or /bought 10 AAPL shares at $182.50"
+            return "🤔 I couldn't identify a stock. Try: <code>/bought Apple</code> or <code>/bought AAPL 182.50 5</code>"
 
         candidates = _resolve_ticker_candidates(name_raw)
         if len(candidates) > 1:
@@ -2949,31 +3260,36 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             return ""
 
         ticker = candidates[0]["ticker"]
+
+        # If no price from NL, use live price and confirm
         if price_raw is None:
             live = _fetch_live_price(ticker)
-            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
-            save_pending_state(chat_id, "bought", step=2,
-                               data={"ticker": ticker})
-            send_inline_keyboard(
-                f"💰 At what price did you buy <b>{ticker}</b>?{live_hint}\n"
-                f"<i>Send blank to use live price</i>",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
+            if live:
+                price_raw = str(live)
+            else:
+                live_hint = ""
+                save_pending_state(chat_id, "bought", step=2, data={"ticker": ticker})
+                send_inline_keyboard(
+                    f"💰 At what price did you buy <b>{ticker}</b>?\n<i>Send blank to use live price</i>",
+                    [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
 
-        if shares_raw is None and _track_position_sizes(chat_id):
-            save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
-            send_inline_keyboard(
-                f"📦 How many shares of <b>{ticker}</b> did you buy?\n"
-                f"<i>Send blank to skip</i>",
-                [[{"text": "⏭ Skip", "callback_data": f"bought_skip_qty|{ticker}|{price_raw}"},
-                  {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
-
-        return _execute_bought(ticker, price_raw, shares_raw, chat_id)
+        # Always confirm so user can verify what was understood
+        price_f    = float(price_raw)
+        shares_enc = shares_raw or ""
+        total_str  = f"  ·  total <code>${price_f * float(shares_raw):,.2f}</code>" if shares_raw else ""
+        shares_str = f"  ·  <b>{shares_raw} shares</b>" if shares_raw else ""
+        send_inline_keyboard(
+            f"🛒 <b>Confirm buy?</b>\n"
+            f"<b>{ticker}</b>{shares_str}  @  <code>${_p(price_raw)}</code>/share{total_str}\n"
+            f"<i>Tap ✅ to log, or type the correct details to adjust.</i>",
+            [[{"text": "✅ Confirm", "callback_data": f"bought_confirm|{ticker}|{price_raw}|{shares_enc}"},
+              {"text": "❌ Cancel",  "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return ""
 
     # ── /sold [TICKER|name [price]] ──────────────────────────────────────────
     if text == "SOLD":
@@ -2981,20 +3297,47 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         return ""
 
     if text.startswith("SOLD "):
-        raw   = text[len("SOLD "):].strip()
-        _NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT"}
-        parts = [p for p in raw.split() if p.upper() not in _NOISE]
+        import re as _re
+        raw = text[len("SOLD "):].strip()
 
-        is_nl = len(parts) > 3 or (len(parts) >= 2 and not _is_number(parts[1]))
-        if is_nl:
-            parsed     = _nl_parse_trade("sold", raw)
-            name_raw   = parsed.get("ticker") or (parts[0] if parts else None)
-            price_raw  = str(parsed["price"])  if parsed.get("price")  is not None else None
-            shares_raw = str(parsed["shares"]) if parsed.get("shares") is not None else None
-        else:
-            name_raw   = parts[0] if parts else None
-            price_raw  = parts[1] if len(parts) >= 2 else None
-            shares_raw = parts[2] if len(parts) >= 3 else None
+        # ── Multi-ticker: "microsoft and btc" / "apple, tesla" ───────────────
+        _MULTI_NOISE = {"STOCKS", "SHARES", "UNITS", "COINS", "TOKENS", "OF", "AT",
+                        "DOLLARS", "DOLLAR", "USD", "EACH", "FOR", "SOLD", "SELL",
+                        "SOME", "ALL", "MY", "A", "AN", "THE", "I", "WE"}
+        raw_names = [t.strip().strip(".,;") for t in _re.split(r",|\band\b", raw, flags=_re.IGNORECASE)]
+        raw_names = [n for n in raw_names if n and not _is_number(n) and n.upper() not in _MULTI_NOISE]
+        if len(raw_names) >= 2:
+            resolved = []
+            for name in raw_names:
+                cands = _resolve_ticker_candidates(name)
+                if cands:
+                    resolved.append(cands[0])
+            if resolved:
+                lines = ["💸 <b>Close these positions at live price?</b>\n"]
+                confirm_parts = []
+                for r in resolved:
+                    live = _fetch_live_price(r["ticker"])
+                    price_str = f"<code>${_p(live)}</code>" if live else "<i>price unavailable</i>"
+                    lines.append(f"  • <b>{r['ticker']}</b> {price_str}")
+                    if live:
+                        confirm_parts.append(f"{r['ticker']}|{live}")
+                send_inline_keyboard(
+                    "\n".join(lines),
+                    [[{"text": "✅ Close all at live price", "callback_data": f"sold_bulk|{','.join(confirm_parts)}"},
+                      {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
+
+        # ── Single ticker — always use NL parser ─────────────────────────────
+        parsed     = _nl_parse_trade("sold", raw)
+        name_raw   = (parsed.get("ticker") or "").strip(".,;") or None
+        price_raw  = str(parsed["price"])  if parsed.get("price")  is not None else None
+        shares_raw = str(parsed["shares"]) if parsed.get("shares") is not None else None
+
+        if not name_raw:
+            tokens = [p.strip(".,;") for p in raw.split() if p.strip(".,;").upper() not in _MULTI_NOISE]
+            name_raw = next((p for p in tokens if not _is_number(p)), None)
 
         if not name_raw:
             return "🤔 I couldn't identify a stock. Try: /sold Apple 197.10 or /sold AAPL at $197"
@@ -3011,30 +3354,33 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             return ""
 
         ticker = candidates[0]["ticker"]
+
+        # Use live price if not specified
         if price_raw is None:
             live = _fetch_live_price(ticker)
-            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
-            save_pending_state(chat_id, "sold", step=2, data={"ticker": ticker})
-            send_inline_keyboard(
-                f"💰 At what price did you sell <b>{ticker}</b>?{live_hint}\n"
-                f"<i>Send blank to use live price</i>",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
+            if live:
+                price_raw = str(live)
+            else:
+                save_pending_state(chat_id, "sold", step=2, data={"ticker": ticker})
+                send_inline_keyboard(
+                    f"💰 At what price did you sell <b>{ticker}</b>?\n<i>Send blank to use live price</i>",
+                    [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
 
-        if shares_raw is None and _track_position_sizes(chat_id):
-            save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
-            send_inline_keyboard(
-                f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
-                f"<i>Send blank to sell your full position</i>",
-                [[{"text": "⏭ All shares", "callback_data": f"sold_all|{ticker}|{price_raw}"},
-                  {"text": "❌ Cancel",     "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
-
-        return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_raw)
+        # Always confirm
+        shares_enc = shares_raw or ""
+        shares_str = f"  ·  <b>{shares_raw} shares</b>" if shares_raw else "  ·  full position"
+        send_inline_keyboard(
+            f"💸 <b>Confirm sell?</b>\n"
+            f"<b>{ticker}</b>{shares_str}  @  <code>${_p(price_raw)}</code>\n"
+            f"<i>Tap ✅ to log, or type the correct details to adjust.</i>",
+            [[{"text": "✅ Confirm", "callback_data": f"sold_confirm|{ticker}|{price_raw}|{shares_enc}"},
+              {"text": "❌ Cancel",  "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return ""
 
     # ── /paper_cancel — remove a paper position without recording a sale ──────
     if text == "PAPER CANCEL":
@@ -3225,28 +3571,30 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
     # ── /cancel — undo accidental /bought or /sold ───────────────────────────
     if text == "CANCEL":
-        # Show recent transactions as tappable buttons instead of prompting for ticker
-        log         = load_user_trade_log(chat_id)
-        open_trades = log.get("open", [])
-        closed      = log.get("closed", [])
+        try:
+            log         = load_user_trade_log(chat_id)
+            open_trades = log.get("open", [])
+            closed      = log.get("closed", [])
+        except Exception:
+            open_trades, closed = [], []
 
         if not open_trades and not closed:
             return "📭 No trades to cancel."
 
-        # Build button list: all open buys + last 5 closed sells, sorted by date
+        # Telegram button text limit is 64 chars — keep labels short
         buttons = []
         for t in sorted(open_trades, key=lambda x: x.get("opened_date", ""), reverse=True):
-            label = (f"🟢 BUY  {t['ticker']}  ${_p(t.get('entry_price'))}  "
-                     f"· {t.get('opened_date', '')}")
-            buttons.append([{"text": label, "callback_data": f"cancel_auto|{t['ticker']}"}])
+            date_short = (t.get("opened_date", "") or "")[:10]
+            label = f"🟢 BUY {t['ticker']} ${_p(t.get('entry_price'))} · {date_short}"
+            buttons.append([{"text": label[:64], "callback_data": f"cancel_auto|{t['ticker']}"}])
 
         recent_closed = sorted(closed, key=lambda x: x.get("closed_date", ""), reverse=True)[:5]
         for t in recent_closed:
-            ret  = t.get("return_pct", 0)
-            sign = "+" if ret >= 0 else ""
-            label = (f"🔴 SELL  {t['ticker']}  ${_p(t.get('closed_price'))}  "
-                     f"{sign}{ret}%  · {t.get('closed_date', '')}")
-            buttons.append([{"text": label, "callback_data": f"cancel_auto|{t['ticker']}"}])
+            ret        = t.get("return_pct", 0)
+            sign       = "+" if (ret or 0) >= 0 else ""
+            date_short = (t.get("closed_date", "") or "")[:10]
+            label = f"🔴 SELL {t['ticker']} ${_p(t.get('closed_price'))} {sign}{ret}% · {date_short}"
+            buttons.append([{"text": label[:64], "callback_data": f"cancel_auto|{t['ticker']}"}])
 
         if not buttons:
             return "📭 No trades to cancel."
@@ -3342,18 +3690,22 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
         # Fetch current prices for all tickers
         tickers_list = [t["ticker"] for t in open_trades]
-        try:
-            raw = yf.download(
-                " ".join(tickers_list), period="1d", interval="1m",
-                progress=False, auto_adjust=True,
-            )
-            if hasattr(raw["Close"], "iloc"):
-                prices = {t: float(raw["Close"][t].dropna().iloc[-1])
-                          for t in tickers_list if t in raw["Close"].columns}
-            else:
-                prices = {tickers_list[0]: float(raw["Close"].dropna().iloc[-1])}
-        except Exception:
-            prices = {}
+        prices = {}
+        for ticker in tickers_list:
+            try:
+                info  = yf.Ticker(ticker).fast_info
+                price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
+                if price:
+                    prices[ticker] = round(float(price), 2)
+                    continue
+            except Exception:
+                pass
+            try:
+                hist = yf.Ticker(ticker).history(period="1d", interval="1m")
+                if not hist.empty:
+                    prices[ticker] = round(float(hist["Close"].iloc[-1]), 2)
+            except Exception:
+                pass
 
         # Build position summaries + get AI guidance in one Haiku call
         position_data = []
