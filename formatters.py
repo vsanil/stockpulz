@@ -7,7 +7,8 @@ any other module that needs to build a message string.
 """
 
 import html
-from datetime import date
+from datetime import date, datetime
+import pytz
 
 
 # ── Shared text helpers ───────────────────────────────────────────────────────
@@ -301,14 +302,16 @@ def format_daily_message(picks: dict, config: dict,
     return "\n".join(lines)
 
 
-# ── Confirmation message (10:30 AM run) ──────────────────────────────────────
+# ── Confirmation message ──────────────────────────────────────────────────────
 
 def format_confirmation_message(picks: dict, current_prices: dict) -> str:
     """
-    Build the 10:30 AM check-in message.
+    Build the live prices check message.
     Compares entry prices from morning picks to current live prices.
     """
-    now    = date.today().strftime("%a %b %d")
+    et     = pytz.timezone("America/New_York")
+    now_et = datetime.now(et)
+    now    = now_et.strftime("%a %b %d · %I:%M %p ET").replace(" 0", " ")
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
 
@@ -336,7 +339,7 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
     cst = crypto.get("short_term", [])
     clt = crypto.get("long_term", [])
 
-    lines = [f"<u><b>🕙 10:30 AM ET Check — {now}</b></u>"]
+    lines = [f"<u><b>📊 Live Prices — {now}</b></u>"]
 
     if st:
         lines += ["", "<b>📈 Short Term</b>"]
