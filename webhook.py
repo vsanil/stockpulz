@@ -91,8 +91,12 @@ def webhook():
         if is_start:
             # Let handle_incoming_command deal with it — it handles pending flow,
             # admin invite auto-approval, and welcome messages.
+            try:
             with typing_until_done(chat_id):
                 handle_incoming_command(text, chat_id=chat_id)
+        except Exception as exc:
+            print(f"[webhook] Error handling /start for {chat_id}: {exc}")
+            send_message("⚠️ Something went wrong — please try again.", chat_id=chat_id)
         else:
             send_message(
                 "🔒 You don't have access yet. Send /start to request access.",
@@ -100,8 +104,14 @@ def webhook():
             )
         return jsonify({"status": "ok", "access": "denied"}), 200
 
-    with typing_until_done(chat_id):
-        reply = handle_incoming_command(text, chat_id=chat_id)
+    try:
+        with typing_until_done(chat_id):
+            reply = handle_incoming_command(text, chat_id=chat_id)
+    except Exception as exc:
+        print(f"[webhook] Error handling {text!r}: {exc}")
+        send_message("⚠️ Something went wrong — please try again.", chat_id=chat_id)
+        return jsonify({"status": "error", "detail": str(exc)}), 200
+
     if reply:
         pass   # handle_incoming_command already sent via send_message for inline flows
     return jsonify({"status": "ok", "reply": reply}), 200
