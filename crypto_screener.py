@@ -284,21 +284,11 @@ def run_crypto_screener() -> dict:
             "score": st_score, **st_metrics,
         })
 
-        lt_score, lt_metrics = _long_term_score(coin, prices)
-        long_results.append({
-            "id": coin["id"], "symbol": symbol, "name": name,
-            "current_price": current_price,
-            "market_cap": coin.get("market_cap"),
-            "score": lt_score, **lt_metrics,
-        })
-
     short_top = sorted(short_results, key=lambda x: x["score"], reverse=True)[:TOP_N]
-    long_top  = sorted(long_results,  key=lambda x: x["score"], reverse=True)[:TOP_N]
 
     print(f"[crypto_screener] Top short-term: {[c['symbol'] for c in short_top]}")
-    print(f"[crypto_screener] Top long-term:  {[c['symbol'] for c in long_top]}")
 
-    return {"short_term": short_top, "long_term": long_top}
+    return {"short_term": short_top}
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────

@@ -105,6 +105,7 @@ def run_backtest(universe: list[str] | None = None) -> dict:
             period=f"{LOOKBACK_DAYS + FORWARD_HOLD_DAYS + 30}d",
             auto_adjust=True,
             progress=False,
+            threads=False,
         )
         close_df  = data["Close"] if "Close" in data else data.xs("Close", axis=1, level=0)
         volume_df = data["Volume"] if "Volume" in data else data.xs("Volume", axis=1, level=0)

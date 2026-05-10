@@ -224,8 +224,7 @@ def _build_crypto_candidates(crypto_results: dict) -> list[dict]:
     candidates = []
 
     all_picks = (
-        [("short_term", c) for c in crypto_results.get("short_term", [])] +
-        [("long_term",  c) for c in crypto_results.get("long_term",  [])]
+        [("short_term", c) for c in crypto_results.get("short_term", [])]
     )
 
     for category, coin in all_picks:
@@ -430,10 +429,7 @@ CRYPTO:
 {"  Long-term: Keep best " + str(config.get('max_crypto_long_picks', 2)) + " crypto (hold 6-24 months)" if show_lt else ""}
 {crypto_alloc_note}
 
-CRYPTO DEDUPLICATION RULE (HARD RULE — ZERO EXCEPTIONS):
-  - Each crypto symbol may appear in AT MOST ONE category (short_term OR long_term, NEVER both).
-  - If a coin scores well in both categories, place it only in the category where it scores highest.
-  - Fill the other slot with the next-best coin that does NOT already appear in any category.
+CRYPTO RULE: Each crypto symbol may appear AT MOST ONCE in short_term. No duplicates.
 
 {regime_block}
 
@@ -503,20 +499,6 @@ Return this exact JSON structure:
         "conviction": 3,
         "thesis": "one sentence why, max 15 words",
         "risk": "one sentence risk, max 10 words"
-      }}
-    ],
-    "long_term": [
-      {{
-        "id": "ethereum",
-        "symbol": "ETH",
-        "name": "Ethereum",
-        "action": "BUY",
-        "entry_price": 3200,
-        "target_price": 5000,
-        "allocation": 15.00,
-        "conviction": 4,
-        "thesis": "one sentence why, max 15 words",
-        "horizon": "12-18 months"
       }}
     ]
   }},
@@ -617,8 +599,7 @@ def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str
     all_picks = (
         [p.get("ticker", "") for p in stocks.get("short_term", [])] +
         [p.get("ticker", "") for p in stocks.get("long_term",  [])] +
-        [c.get("symbol", "") for c in crypto.get("short_term", [])] +
-        [c.get("symbol", "") for c in crypto.get("long_term",  [])]
+        [c.get("symbol", "") for c in crypto.get("short_term", [])]
     )
     all_picks = [t for t in all_picks if t]
     if not all_picks:
