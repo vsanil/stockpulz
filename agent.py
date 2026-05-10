@@ -387,14 +387,13 @@ def run_morning(config: dict, now_et: datetime):
         crypto  = picks.get("crypto", {})
         n_st    = len(stocks.get("short_term", []))
         n_lt    = len(stocks.get("long_term",  []))
-        n_cst   = len(crypto.get("short_term", []))
-        n_clt   = len(crypto.get("long_term",  []))
+        n_crypto = len(crypto.get("short_term", [])) + len(crypto.get("long_term", []))
         n_users = len(_all_recipients())
         _alert(
             f"✅ <b>Morning run complete</b>\n"
             f"Sent to {n_users} user(s)  ·  "
             f"📈 {n_st} ST + {n_lt} LT stocks  ·  "
-            f"🪙 {n_cst} ST + {n_clt} LT crypto",
+            f"🪙 {n_crypto} crypto",
             admin_only=True,
         )
     except Exception as exc:

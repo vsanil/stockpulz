@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Commands — StockPulz</title>
+  <meta name="description" content="Complete reference for all StockPulz Telegram bot commands — picks, alerts, portfolio, paper trading, settings, and more." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:     #080a0f;
+      --bg2:    #0f1117;
+      --bg3:    #161b26;
+      --bg4:    #1c2233;
+      --border: rgba(255,255,255,0.07);
+      --border2: rgba(255,255,255,0.12);
+      --border3: rgba(255,255,255,0.18);
+      --text:   #eef0f5;
+      --muted:  #7c8899;
+      --muted2: #a0aab8;
+      --accent: #4f8ef7;
+      --accent2:#6aa3ff;
+      --accent-dim: rgba(79,142,247,0.12);
+      --green:  #34d399;
+      --green2: #6ee7b7;
+      --green-dim: rgba(52,211,153,0.10);
+      --amber:  #fbbf24;
+      --amber-dim: rgba(251,191,36,0.09);
+      --red:    #f87171;
+      --red-dim: rgba(248,113,113,0.10);
+      --purple: #a78bfa;
+      --purple-dim: rgba(167,139,250,0.10);
+      --teal:   #2dd4bf;
+      --teal-dim: rgba(45,212,191,0.10);
+      --radius: 14px;
+      --radius-lg: 20px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ── FADE IN ── */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity 0.55s ease, transform 0.55s ease;
+    }
+    .fade-in.visible { opacity: 1; transform: translateY(0); }
+    .fade-in.delay-1 { transition-delay: 0.07s; }
+    .fade-in.delay-2 { transition-delay: 0.14s; }
+    .fade-in.delay-3 { transition-delay: 0.21s; }
+
+    /* ── NAV ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 62px;
+      background: rgba(8,10,15,0.82);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+    }
+
+    .nav-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, #4f8ef7 0%, #34d399 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      box-shadow: 0 0 14px rgba(79,142,247,0.4);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 28px;
+      align-items: center;
+    }
+    .nav-links a {
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-links a.active { color: var(--text); }
+
+    @media (max-width: 600px) { .nav-links { display: none; } }
+
+    .nav-cta {
+      padding: 9px 22px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 9px;
+      font-size: 14px;
+      font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 2px 14px rgba(79,142,247,0.35);
+    }
+    .nav-cta:hover { opacity: 0.92; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(79,142,247,0.45); }
+
+    /* ── PAGE HERO ── */
+    .page-hero {
+      text-align: center;
+      padding: 72px 2rem 56px;
+      max-width: 680px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    .page-hero::before {
+      content: '';
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 280px;
+      background: radial-gradient(ellipse at center, rgba(79,142,247,0.10) 0%, rgba(52,211,153,0.05) 45%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .page-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(79,142,247,0.22);
+      border-radius: 100px;
+      padding: 6px 16px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--accent2);
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      margin-bottom: 22px;
+    }
+
+    .page-hero h1 {
+      font-size: clamp(30px, 5vw, 46px);
+      font-weight: 800;
+      letter-spacing: -1.3px;
+      line-height: 1.08;
+      margin-bottom: 16px;
+    }
+
+    .page-hero p {
+      font-size: 17px;
+      color: var(--muted2);
+      max-width: 520px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    /* ── SEARCH BAR ── */
+    .search-wrap {
+      max-width: 540px;
+      margin: 36px auto 0;
+      position: relative;
+    }
+
+    .search-wrap svg {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      opacity: 0.38;
+      pointer-events: none;
+    }
+
+    #cmd-search {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      border-radius: 12px;
+      padding: 13px 16px 13px 44px;
+      font-family: inherit;
+      font-size: 15px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    #cmd-search::placeholder { color: var(--muted); }
+    #cmd-search:focus {
+      border-color: rgba(79,142,247,0.5);
+      box-shadow: 0 0 0 3px rgba(79,142,247,0.10);
+    }
+
+    /* ── CATEGORY PILLS ── */
+    .cat-pills {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 28px 2rem 0;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .cat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 16px;
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--border2);
+      background: var(--bg3);
+      color: var(--muted2);
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .cat-pill:hover { border-color: var(--border3); color: var(--text); }
+    .cat-pill.active { background: var(--accent-dim); border-color: rgba(79,142,247,0.35); color: var(--accent2); }
+
+    /* ── MAIN LAYOUT ── */
+    .commands-wrap {
+      max-width: 900px;
+      margin: 48px auto 80px;
+      padding: 0 2rem;
+    }
+
+    /* ── CATEGORY SECTION ── */
+    .cat-section {
+      margin-bottom: 52px;
+    }
+
+    .cat-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cat-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      flex-shrink: 0;
+    }
+    .cat-icon.blue   { background: var(--accent-dim); }
+    .cat-icon.green  { background: var(--green-dim); }
+    .cat-icon.amber  { background: var(--amber-dim); }
+    .cat-icon.purple { background: var(--purple-dim); }
+    .cat-icon.teal   { background: var(--teal-dim); }
+    .cat-icon.red    { background: var(--red-dim); }
+
+    .cat-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .cat-count {
+      margin-left: auto;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 2px 10px;
+    }
+
+    /* ── COMMAND CARD ── */
+    .cmd-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .cmd-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .cmd-card:hover { border-color: var(--border2); }
+
+    .cmd-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 16px 18px;
+      cursor: pointer;
+    }
+
+    .cmd-pill {
+      font-family: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 7px;
+      background: var(--bg4);
+      border: 1px solid var(--border2);
+      color: var(--accent2);
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .cmd-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .cmd-name {
+      font-size: 14.5px;
+      font-weight: 600;
+      margin-bottom: 3px;
+      letter-spacing: -0.2px;
+    }
+
+    .cmd-desc {
+      font-size: 13.5px;
+      color: var(--muted2);
+      line-height: 1.5;
+    }
+
+    .cmd-chevron {
+      flex-shrink: 0;
+      color: var(--muted);
+      margin-top: 3px;
+      transition: transform 0.2s;
+    }
+    .cmd-card.open .cmd-chevron { transform: rotate(180deg); }
+
+    /* ── EXPANDED DETAIL ── */
+    .cmd-detail {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding: 16px 18px 18px;
+      background: var(--bg);
+    }
+    .cmd-card.open .cmd-detail { display: block; }
+
+    .detail-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      margin-top: 16px;
+    }
+    .detail-label:first-child { margin-top: 0; }
+
+    .detail-text {
+      font-size: 13.5px;
+      color: var(--muted2);
+      line-height: 1.65;
+    }
+
+    .example-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .example-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .ex-cmd {
+      font-family: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
+      font-size: 12.5px;
+      color: var(--accent2);
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      padding: 3px 9px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .ex-note {
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.5;
+      padding-top: 2px;
+    }
+
+    .tip-box {
+      display: flex;
+      gap: 10px;
+      background: var(--amber-dim);
+      border: 1px solid rgba(251,191,36,0.18);
+      border-radius: 9px;
+      padding: 10px 13px;
+      font-size: 12.5px;
+      color: var(--muted2);
+      line-height: 1.55;
+    }
+    .tip-box .tip-icon { flex-shrink: 0; }
+
+    /* ── NO RESULTS ── */
+    #no-results {
+      display: none;
+      text-align: center;
+      padding: 64px 0;
+      color: var(--muted);
+    }
+    #no-results .nr-emoji { font-size: 38px; margin-bottom: 14px; }
+    #no-results p { font-size: 15px; }
+
+    /* ── CTA STRIP ── */
+    .cta-strip {
+      background: linear-gradient(135deg, rgba(79,142,247,0.12) 0%, rgba(52,211,153,0.07) 100%);
+      border: 1px solid rgba(79,142,247,0.18);
+      border-radius: var(--radius-lg);
+      padding: 36px 40px;
+      text-align: center;
+      max-width: 640px;
+      margin: 0 auto 80px;
+    }
+
+    .cta-strip h3 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 10px;
+    }
+
+    .cta-strip p {
+      font-size: 15px;
+      color: var(--muted2);
+      margin-bottom: 24px;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 13px 30px;
+      border-radius: 11px;
+      box-shadow: 0 2px 14px rgba(79,142,247,0.38);
+      transition: opacity 0.15s, transform 0.1s, box-shadow 0.2s;
+    }
+    .btn-primary:hover { opacity: 0.92; transform: translateY(-1px); box-shadow: 0 4px 22px rgba(79,142,247,0.48); }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 2rem;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .footer-links a {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: var(--text); }
+
+    footer .brand { color: var(--text); font-weight: 700; }
+
+    .disclaimer {
+      max-width: 580px;
+      margin: 10px auto 0;
+      font-size: 11.5px;
+      opacity: 0.45;
+      line-height: 1.65;
+    }
+
+    /* ── HIDDEN CLASS (search) ── */
+    .cmd-card.hidden { display: none; }
+    .cat-section.hidden { display: none; }
+
+    @media (max-width: 600px) {
+      .page-hero { padding: 52px 1.5rem 40px; }
+      .commands-wrap { padding: 0 1.25rem; }
+      .cta-strip { padding: 28px 24px; }
+      .cmd-main { gap: 10px; padding: 14px 14px; }
+      .cmd-detail { padding: 14px 14px 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="/" class="nav-brand">
+    <div class="nav-logo">📈</div>
+    StockPulz
+  </a>
+  <div class="nav-links">
+    <a href="/#features">Features</a>
+    <a href="/#how-it-works">How it works</a>
+    <a href="/commands" class="active">Commands</a>
+  </div>
+  <a href="https://t.me/SanilStockBot?start=ref" class="nav-cta">Join Free →</a>
+</nav>
+
+<!-- HERO -->
+<div class="page-hero fade-in">
+  <div class="page-badge">📋 Reference</div>
+  <h1>Bot Commands</h1>
+  <p>Every command available in the StockPulz Telegram bot — with examples and tips.</p>
+  <div class="search-wrap fade-in delay-1">
+    <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" color="white">
+      <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+    </svg>
+    <input id="cmd-search" type="text" placeholder="Search commands…" autocomplete="off" spellcheck="false" />
+  </div>
+</div>
+
+<!-- CATEGORY PILLS -->
+<div class="cat-pills fade-in delay-2">
+  <span class="cat-pill active" data-cat="all">All commands</span>
+  <span class="cat-pill" data-cat="picks">📊 Daily Picks</span>
+  <span class="cat-pill" data-cat="alerts">🔔 Alerts</span>
+  <span class="cat-pill" data-cat="watchlist">👁 Watchlist</span>
+  <span class="cat-pill" data-cat="portfolio">📋 Portfolio</span>
+  <span class="cat-pill" data-cat="paper">🧪 Paper Trading</span>
+  <span class="cat-pill" data-cat="settings">⚙️ Settings</span>
+  <span class="cat-pill" data-cat="community">🏆 Community</span>
+</div>
+
+<!-- COMMANDS -->
+<div class="commands-wrap">
+  <div id="no-results">
+    <div class="nr-emoji">🔍</div>
+    <p>No commands match your search.</p>
+  </div>
+
+  <!-- ── DAILY PICKS ── -->
+  <div class="cat-section fade-in" data-cat="picks">
+    <div class="cat-header">
+      <div class="cat-icon blue">📊</div>
+      <div class="cat-title">Daily Picks</div>
+      <div class="cat-count">3 commands</div>
+    </div>
+    <div class="cmd-list">
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/picks</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Today's curated picks</div>
+            <div class="cmd-desc">Get the current day's stock and crypto picks with entry price, profit target, and stop loss.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">A fresh list of short-term stock picks and crypto picks (if enabled), each with an entry zone, profit target, and stop-loss level. Arrives automatically every morning before market open — use this command any time to pull it on-demand.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/picks</span>
+              <span class="ex-note">Shows today's picks</span>
+            </div>
+          </div>
+          <div class="detail-label" style="margin-top:14px;">Tip</div>
+          <div class="tip-box">
+            <span class="tip-icon">💡</span>
+            Crypto picks only appear if crypto is toggled on. Use <code style="font-size:12px;color:var(--accent2);">/crypto on</code> to enable them.
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/weekly</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Weekly performance recap</div>
+            <div class="cmd-desc">See how the week's picks performed — win/loss stats, best and worst picks, and a market outlook.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">A ranked list of the week's picks sorted by performance, a win rate summary, and a brief forward-looking market note for the coming week. Sent automatically every weekend, or pull it any time with this command.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/weekly</span>
+              <span class="ex-note">Shows this week's recap</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/regime</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Market regime snapshot</div>
+            <div class="cmd-desc">See the current market environment — bull, bear, or neutral — based on VIX and momentum signals.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">A one-line summary of the current market regime (BULL / BEAR / NEUTRAL), the live VIX reading, a momentum indicator, and a brief context note. Useful for understanding the broader backdrop before acting on any pick.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/regime</span>
+              <span class="ex-note">Shows current market regime + VIX</span>
+            </div>
+          </div>
+          <div class="detail-label" style="margin-top:14px;">Tip</div>
+          <div class="tip-box">
+            <span class="tip-icon">💡</span>
+            In a BEAR regime, picks are more conservative. The bot adjusts stop-loss levels automatically based on regime.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── PRICE ALERTS ── -->
+  <div class="cat-section fade-in" data-cat="alerts">
+    <div class="cat-header">
+      <div class="cat-icon red">🔔</div>
+      <div class="cat-title">Price Alerts</div>
+      <div class="cat-count">3 commands</div>
+    </div>
+    <div class="cmd-list">
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/alert</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Set a price alert</div>
+            <div class="cmd-desc">Get notified the moment a stock or crypto hits your target price.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">How to use</div>
+          <div class="detail-text">Type the command, then describe the alert in natural language or use a ticker directly. The bot understands company names and will confirm the ticker before setting the alert.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/alert NVDA 1000</span>
+              <span class="ex-note">Alert when NVDA hits $1,000</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/alert BTC 100000</span>
+              <span class="ex-note">Alert when Bitcoin hits $100k</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/alert</span>
+              <span class="ex-note">Bot will ask for ticker and price</span>
+            </div>
+          </div>
+          <div class="detail-label" style="margin-top:14px;">Tip</div>
+          <div class="tip-box">
+            <span class="tip-icon">💡</span>
+            You can say company names like "Apple" or "Nvidia" — the bot will look up the right ticker automatically.
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/alerts</span>
+          <div class="cmd-info">
+            <div class="cmd-name">View active alerts</div>
+            <div class="cmd-desc">See all your currently active price alerts in one place.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">A list of every alert you've set, showing the ticker, your target price, and the current price so you can see how close each one is.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/alerts</span>
+              <span class="ex-note">Shows all active alerts with current prices</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/unalert</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Remove an alert</div>
+            <div class="cmd-desc">Cancel a price alert you no longer need.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">How to use</div>
+          <div class="detail-text">Tap /unalert and the bot will show your active alerts as tappable buttons. Select the one you want to remove.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/unalert</span>
+              <span class="ex-note">Shows a list to pick from and remove</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/unalert NVDA</span>
+              <span class="ex-note">Remove alert for NVDA directly</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── WATCHLIST ── -->
+  <div class="cat-section fade-in" data-cat="watchlist">
+    <div class="cat-header">
+      <div class="cat-icon teal">👁</div>
+      <div class="cat-title">Watchlist</div>
+      <div class="cat-count">3 commands</div>
+    </div>
+    <div class="cmd-list">
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/watchlist</span>
+          <div class="cmd-info">
+            <div class="cmd-name">View your watchlist</div>
+            <div class="cmd-desc">See all tickers you're watching, with current prices and daily changes.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">A live snapshot of every ticker on your watchlist — current price, day's change, and percentage move. Great for a quick morning scan before deciding which picks to act on.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/watchlist</span>
+              <span class="ex-note">Shows all watched tickers with live prices</span>
+            </div>
+          </div>
+          <div class="detail-label" style="margin-top:14px;">Tip</div>
+          <div class="tip-box">
+            <span class="tip-icon">💡</span>
+            The watchlist is different from alerts — it doesn't notify you, it's just a quick-view snapshot you pull on demand.
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/watch</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Add to watchlist</div>
+            <div class="cmd-desc">Add a stock or crypto ticker to your personal watchlist.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/watch AAPL</span>
+              <span class="ex-note">Add Apple to watchlist</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/watch ETH</span>
+              <span class="ex-note">Add Ethereum to watchlist</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/watch</span>
+              <span class="ex-note">Bot will ask which ticker to add</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/unwatch</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Remove from watchlist</div>
+            <div class="cmd-desc">Remove a ticker you no longer want to track.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/unwatch AAPL</span>
+              <span class="ex-note">Remove Apple from watchlist</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/unwatch</span>
+              <span class="ex-note">Shows tappable list to remove from</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── PORTFOLIO ── -->
+  <div class="cat-section fade-in" data-cat="portfolio">
+    <div class="cat-header">
+      <div class="cat-icon purple">📋</div>
+      <div class="cat-title">Portfolio</div>
+      <div class="cat-count">4 commands</div>
+    </div>
+    <div class="cmd-list">
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/bought</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Log a buy trade</div>
+            <div class="cmd-desc">Record a real trade in your portfolio using natural language.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">How to use</div>
+          <div class="detail-text">Just describe the trade naturally — the bot understands plain English and will confirm before logging. You can say "10 shares of NVDA at $950" or just "NVDA 10 950".</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/bought 10 NVDA at 950</span>
+              <span class="ex-note">Log 10 shares of NVDA at $950</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/bought 0.5 BTC at 97000</span>
+              <span class="ex-note">Log 0.5 Bitcoin at $97,000</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/bought</span>
+              <span class="ex-note">Bot will ask for trade details</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/sold</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Log a sell trade</div>
+            <div class="cmd-desc">Record a sale and automatically calculate your realized P&L.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">How to use</div>
+          <div class="detail-text">Same natural-language format as /bought. The bot will match the sale to an existing open position and show you the realized gain or loss.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/sold 10 NVDA at 1010</span>
+              <span class="ex-note">Closes NVDA position, shows P&L</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/sold AAPL 5 at 225</span>
+              <span class="ex-note">Partial sell — closes 5 of your shares</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/positions</span>
+          <div class="cmd-info">
+            <div class="cmd-name">View open positions</div>
+            <div class="cmd-desc">See all your current holdings with live P&L and stop-loss status.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">Each open position shows ticker, quantity, average entry price, current price, unrealized P&L in dollars and percent, and whether the stop-loss level has been breached.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/positions</span>
+              <span class="ex-note">Shows all open positions with live P&L</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/history</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Trade history</div>
+            <div class="cmd-desc">Review all your closed trades and their realized returns.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">A log of all your completed trades — ticker, buy date, sell date, quantity, entry price, exit price, and realized P&L. Useful for tracking your actual vs. expected performance over time.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/history</span>
+              <span class="ex-note">Shows recent closed trades</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── PAPER TRADING ── -->
+  <div class="cat-section fade-in" data-cat="paper">
+    <div class="cat-header">
+      <div class="cat-icon green">🧪</div>
+      <div class="cat-title">Paper Trading</div>
+      <div class="cat-count">5 commands</div>
+    </div>
+    <div class="cmd-list">
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/paper</span>
+          <div class="cmd-info">
+            <div class="cmd-name">View paper portfolio</div>
+            <div class="cmd-desc">Check your simulated portfolio — positions, P&L, and total returns, all risk-free.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">Paper trading lets you test the bot's picks without risking real money. Your paper portfolio tracks simulated buys and sells with live prices, so results reflect real market conditions.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/paper</span>
+              <span class="ex-note">Shows simulated portfolio summary</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/paper_buy</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Simulate a buy</div>
+            <div class="cmd-desc">Place a paper trade buy using natural language — no real money involved.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/paper_buy 10 NVDA at 950</span>
+              <span class="ex-note">Simulate buying 10 NVDA at $950</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/paper_buy</span>
+              <span class="ex-note">Bot will walk you through it</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/paper_sell</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Simulate a sell</div>
+            <div class="cmd-desc">Close a simulated position and see your hypothetical P&L.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/paper_sell 10 NVDA at 1010</span>
+              <span class="ex-note">Simulate selling 10 NVDA at $1,010</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/paper_sell</span>
+              <span class="ex-note">Bot shows your paper positions to choose from</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/paper_cancel</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Cancel a pending paper trade</div>
+            <div class="cmd-desc">Cancel a paper trade that's been queued but not yet confirmed.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/paper_cancel</span>
+              <span class="ex-note">Cancels any pending paper order</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/paper_reset</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Reset paper portfolio</div>
+            <div class="cmd-desc">Clear your entire simulated portfolio and start fresh with a clean slate.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What happens</div>
+          <div class="detail-text">All simulated positions and trade history are cleared. Your real portfolio is not affected. The bot will ask you to confirm before resetting.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/paper_reset</span>
+              <span class="ex-note">Prompts confirmation, then resets paper portfolio</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── SETTINGS ── -->
+  <div class="cat-section fade-in" data-cat="settings">
+    <div class="cat-header">
+      <div class="cat-icon amber">⚙️</div>
+      <div class="cat-title">Settings</div>
+      <div class="cat-count">4 commands</div>
+    </div>
+    <div class="cmd-list">
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/crypto</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Toggle crypto picks</div>
+            <div class="cmd-desc">Turn crypto picks on or off in your daily morning message.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">How to use</div>
+          <div class="detail-text">By default, crypto picks are included in your morning picks. Toggle them off if you only want stock picks, or back on any time.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/crypto on</span>
+              <span class="ex-note">Enable crypto in daily picks</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/crypto off</span>
+              <span class="ex-note">Remove crypto from daily picks</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/crypto</span>
+              <span class="ex-note">Shows current setting</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/timezone</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Set your timezone</div>
+            <div class="cmd-desc">Choose your local timezone so daily picks and alerts arrive at the right time.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/timezone</span>
+              <span class="ex-note">Bot shows a list of timezones to choose from</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/timezone EST</span>
+              <span class="ex-note">Set to US Eastern Time</span>
+            </div>
+            <div class="example-row">
+              <span class="ex-cmd">/timezone IST</span>
+              <span class="ex-note">Set to India Standard Time</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/help</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Command list</div>
+            <div class="cmd-desc">Show all available commands directly in the Telegram chat.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">A quick-reference list of every command grouped by category, with brief descriptions. Tap any command in the list to run it directly. Includes a link back to this page for detailed examples.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/help</span>
+              <span class="ex-note">Shows the full command menu in chat</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/reset</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Reset all settings</div>
+            <div class="cmd-desc">Restore all your preferences to their defaults. Requires confirmation.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What gets reset</div>
+          <div class="detail-text">Timezone, crypto toggle, and all other preferences revert to defaults. Your portfolio and trade history are not affected. The bot will ask for confirmation before proceeding.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/reset</span>
+              <span class="ex-note">Shows confirmation prompt before resetting</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── COMMUNITY ── -->
+  <div class="cat-section fade-in" data-cat="community">
+    <div class="cat-header">
+      <div class="cat-icon blue">🏆</div>
+      <div class="cat-title">Community</div>
+      <div class="cat-count">1 command</div>
+    </div>
+    <div class="cmd-list">
+
+      <div class="cmd-card">
+        <div class="cmd-main" onclick="toggleCard(this)">
+          <span class="cmd-pill">/community</span>
+          <div class="cmd-info">
+            <div class="cmd-name">Community stats</div>
+            <div class="cmd-desc">See how the community is doing — top picks, member count, and overall win rate.</div>
+          </div>
+          <svg class="cmd-chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="cmd-detail">
+          <div class="detail-label">What you get</div>
+          <div class="detail-text">A snapshot of the group's collective performance — total active members, the bot's overall win rate across all picks, top-performing picks recently, and a leaderboard of the most active traders in the community.</div>
+          <div class="detail-label">Examples</div>
+          <div class="example-list">
+            <div class="example-row">
+              <span class="ex-cmd">/community</span>
+              <span class="ex-note">Shows member count, win rate, top picks</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- NO RESULTS -->
+  <div id="no-results">
+    <div class="nr-emoji">🔍</div>
+    <p>No commands match your search.</p>
+  </div>
+
+  <!-- CTA -->
+  <div class="cta-strip fade-in">
+    <h3>Ready to get started?</h3>
+    <p>Picks arrive every morning before the market opens. Free, invite-only access.</p>
+    <a href="https://t.me/SanilStockBot?start=ref" class="btn-primary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.28 13.398l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.868.16z"/></svg>
+      Join StockPulz on Telegram
+    </a>
+  </div>
+
+</div><!-- /commands-wrap -->
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-links">
+    <a href="https://t.me/SanilStockBot?start=ref">Telegram</a>
+    <a href="/#features">Features</a>
+    <a href="/#how-it-works">How it works</a>
+    <a href="/commands">Commands</a>
+  </div>
+  <div><span class="brand">StockPulz</span> — Daily market picks, delivered.</div>
+  <div class="disclaimer">Not financial advice. All picks are for informational purposes only. Past performance does not guarantee future results. Trading involves risk — invest only what you can afford to lose.</div>
+</footer>
+
+<script>
+  // ── FADE IN ON SCROLL ──
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.06 });
+  document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+
+  // ── TOGGLE CARD ──
+  function toggleCard(header) {
+    const card = header.closest('.cmd-card');
+    card.classList.toggle('open');
+  }
+
+  // ── CATEGORY FILTER ──
+  const pills = document.querySelectorAll('.cat-pill');
+  pills.forEach(pill => {
+    pill.addEventListener('click', () => {
+      pills.forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      const cat = pill.dataset.cat;
+
+      document.querySelectorAll('.cat-section').forEach(section => {
+        if (cat === 'all' || section.dataset.cat === cat) {
+          section.classList.remove('hidden');
+        } else {
+          section.classList.add('hidden');
+        }
+      });
+
+      // Clear search when switching category
+      document.getElementById('cmd-search').value = '';
+      document.querySelectorAll('.cmd-card').forEach(c => c.classList.remove('hidden'));
+      document.getElementById('no-results').style.display = 'none';
+    });
+  });
+
+  // ── SEARCH ──
+  const searchInput = document.getElementById('cmd-search');
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+
+    // Reset category pills
+    pills.forEach(p => p.classList.remove('active'));
+    document.querySelector('[data-cat="all"]').classList.add('active');
+    document.querySelectorAll('.cat-section').forEach(s => s.classList.remove('hidden'));
+
+    if (!q) {
+      document.querySelectorAll('.cmd-card').forEach(c => c.classList.remove('hidden'));
+      document.querySelectorAll('.cat-section').forEach(s => s.classList.remove('hidden'));
+      document.getElementById('no-results').style.display = 'none';
+      return;
+    }
+
+    let anyVisible = false;
+
+    document.querySelectorAll('.cat-section').forEach(section => {
+      let sectionHasMatch = false;
+      section.querySelectorAll('.cmd-card').forEach(card => {
+        const text = card.textContent.toLowerCase();
+        if (text.includes(q)) {
+          card.classList.remove('hidden');
+          sectionHasMatch = true;
+          anyVisible = true;
+        } else {
+          card.classList.add('hidden');
+        }
+      });
+      if (!sectionHasMatch) {
+        section.classList.add('hidden');
+      } else {
+        section.classList.remove('hidden');
+      }
+    });
+
+    document.getElementById('no-results').style.display = anyVisible ? 'none' : 'block';
+  });
+</script>
+
+</body>
+</html>
