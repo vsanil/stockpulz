@@ -147,8 +147,19 @@ def format_daily_message(picks: dict, config: dict,
     crypto    = picks.get("crypto", {})
     st_picks  = stocks.get("short_term", []) if show_st else []
     lt_picks  = stocks.get("long_term", [])  if show_lt else []
-    # Merge ST + LT crypto into one flat list (no split shown to users)
-    cst_picks = (crypto.get("short_term", []) + crypto.get("long_term", [])) if show_crypto else []
+    # Merge ST + LT crypto — tag LT picks, deduplicate by symbol (ST wins)
+    if show_crypto:
+        _cst = crypto.get("short_term", [])
+        _clt = [{**c, "_lt": True} for c in crypto.get("long_term", [])]
+        _seen: set = set()
+        cst_picks = []
+        for c in _cst + _clt:
+            sym = c.get("symbol", "")
+            if sym not in _seen:
+                _seen.add(sym)
+                cst_picks.append(c)
+    else:
+        cst_picks = []
 
     # Apply per-user pick caps
     max_s = config.get("max_stock_picks")
@@ -209,15 +220,18 @@ def format_daily_message(picks: dict, config: dict,
 
     def _pick_row_cst(i, c, personal_note: str = ""):
         entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
+        is_lt         = c.get("_lt", False)
         alloc         = c.get("allocation")
         alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
         badge         = _conviction_badge(c.get("conviction", 3))
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
+        lt_label      = "  <i>· long-term</i>" if is_lt else ""
+        stop_str      = f"  ·  stop <code>${_p(stop)}</code>" if not is_lt else ""
         return (
             f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}{badge}  "
-            f"<i>{_esc(_short_company(c.get('name', '')))}</i>\n"
+            f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}\n"
+            f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}\n"
             f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
         )
 
