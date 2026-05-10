@@ -2500,7 +2500,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         msg = (
             "📋 <b>StockPulz Commands</b>\n"
             "\n<b>📈 Daily</b>"
-            "\n/today — AI stock &amp; crypto picks for today"
+            "\n/today — Today's stock &amp; crypto picks"
             "\n/prices — Live prices for today's picks"
             "\n/perf — Your portfolio performance vs S&amp;P 500"
             "\n/explain — Ask any market question\n"
@@ -2698,7 +2698,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if _is_admin(chat_id) or chat_id in get_allowed_users():
             return (
                 "👋 <b>Welcome back to StockPulz!</b>\n\n"
-                "/today — AI stock &amp; crypto picks for today\n"
+                "/today — Today's stock &amp; crypto picks\n"
                 "/positions — open trades with live P&amp;L\n"
                 "/settings — your preferences\n"
                 "/help — all commands with descriptions\n\n"
@@ -2713,7 +2713,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 "✅ <b>You're in! Welcome to StockPulz.</b>\n\n"
                 "You were auto-approved via an admin invite link.\n\n"
                 "Here's how to get started:\n"
-                "/today — see today's AI stock &amp; crypto picks\n"
+                "/today — Today's stock &amp; crypto picks\n"
                 "/settings — set your risk level, budget &amp; preferences\n"
                 "/help — all commands with descriptions\n\n"
                 "📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>"
