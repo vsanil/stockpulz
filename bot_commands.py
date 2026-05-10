@@ -2541,8 +2541,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             msg += (
                 "\n<b>🔑 Admin</b>"
                 "\n/users — List all allowed users"
-                "\n/adduser — Approve a new user"
-                "\n/removeuser — Revoke access"
                 "\n/pending — Users awaiting approval"
                 "\n/broadcast — Send a message to all users"
                 "\n/release — Send a release note to all users"

@@ -147,7 +147,8 @@ def format_daily_message(picks: dict, config: dict,
     crypto    = picks.get("crypto", {})
     st_picks  = stocks.get("short_term", []) if show_st else []
     lt_picks  = stocks.get("long_term", [])  if show_lt else []
-    cst_picks = crypto.get("short_term", []) if show_crypto else []
+    # Merge ST + LT crypto into one flat list (no split shown to users)
+    cst_picks = (crypto.get("short_term", []) + crypto.get("long_term", [])) if show_crypto else []
 
     # Apply per-user pick caps
     max_s = config.get("max_stock_picks")
@@ -244,7 +245,7 @@ def format_daily_message(picks: dict, config: dict,
             _pick_row_cst(i, c, pn.get(c.get("symbol", ""), ""))
             for i, c in enumerate(cst_picks, 1)
         )
-        lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO — SHORT TERM</b>{budget_tag}  ⚡ HIGH RISK\n\n{body}</blockquote>"]
+        lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO</b>{budget_tag}  ⚡ HIGH RISK\n\n{body}</blockquote>"]
 
     # Footer — sector concentration warning (only shown when picks are concentrated)
     sector_counts: dict = {}
