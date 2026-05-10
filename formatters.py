@@ -147,8 +147,7 @@ def format_daily_message(picks: dict, config: dict,
     crypto    = picks.get("crypto", {})
     st_picks  = stocks.get("short_term", []) if show_st else []
     lt_picks  = stocks.get("long_term", [])  if show_lt else []
-    cst_picks = crypto.get("short_term", []) if (show_st and show_crypto) else []
-    clt_picks = crypto.get("long_term", [])  if (show_lt and show_crypto) else []
+    cst_picks = crypto.get("short_term", []) if show_crypto else []
 
     # Apply per-user pick caps
     max_s = config.get("max_stock_picks")
@@ -164,15 +163,7 @@ def format_daily_message(picks: dict, config: dict,
         st_picks = st_picks[:n_st]
         lt_picks = lt_picks[:n_lt]
     if max_c is not None and max_c > 0:
-        if show_st and show_lt:
-            n_cst = max(1, round(max_c * 0.5))
-            n_clt = max(0, max_c - n_cst)
-        elif show_st:
-            n_cst, n_clt = max_c, 0
-        else:
-            n_cst, n_clt = 0, max_c
-        cst_picks = cst_picks[:n_cst]
-        clt_picks = clt_picks[:n_clt]
+        cst_picks = cst_picks[:max_c]
 
     # Macro context line — conversational narrative
     m = picks.get("macro_context", {})
@@ -229,20 +220,6 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
         )
 
-    def _pick_row_clt(i, c, personal_note: str = ""):
-        entry, target = c.get("entry_price"), c.get("target_price")
-        alloc         = c.get("allocation")
-        alloc_str     = f"  <code>${_p(alloc)}/mo</code>" if alloc is not None else ""
-        badge         = _conviction_badge(c.get("conviction", 3))
-        personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
-        return (
-            f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}{badge}  "
-            f"<i>{_esc(_short_company(c.get('name', '')))}</i>\n"
-            f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>  ·  {_esc(c.get('horizon'))}{alloc_str}\n"
-            f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
-        )
-
     pn = personal_notes or {}   # ticker/symbol → personal note string
 
     if st_picks:
@@ -268,14 +245,6 @@ def format_daily_message(picks: dict, config: dict,
             for i, c in enumerate(cst_picks, 1)
         )
         lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO — SHORT TERM</b>{budget_tag}  ⚡ HIGH RISK\n\n{body}</blockquote>"]
-
-    if clt_picks:
-        budget_tag = f"  <code>${per_crypto}/pick</code>" if per_crypto else ""
-        body = "\n\n".join(
-            _pick_row_clt(i, c, pn.get(c.get("symbol", ""), ""))
-            for i, c in enumerate(clt_picks, 1)
-        )
-        lines += ["", f"<blockquote expandable>💎 <b>CRYPTO — LONG TERM</b>{budget_tag}\n\n{body}</blockquote>"]
 
     # Footer — sector concentration warning (only shown when picks are concentrated)
     sector_counts: dict = {}
@@ -337,7 +306,6 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
     st  = stocks.get("short_term", [])
     lt  = stocks.get("long_term", [])
     cst = crypto.get("short_term", [])
-    clt = crypto.get("long_term", [])
 
     lines = [f"<u><b>📊 Live Prices — {now}</b></u>"]
 
@@ -350,13 +318,9 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
         for s in lt:
             lines.append(price_line(s.get("ticker", ""), s.get("entry_price"), s.get("target_price"), None))
     if cst:
-        lines += ["", "<b>🪙 Crypto Short Term</b>"]
+        lines += ["", "<b>🪙 Crypto</b>"]
         for c in cst:
             lines.append(price_line(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")))
-    if clt:
-        lines += ["", "<b>💎 Crypto Long Term</b>"]
-        for c in clt:
-            lines.append(price_line(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), None))
 
     lines += ["", "🔴 stop hit  ✅ on track  ⚠️ watch  🟡 flat", "<i>⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share"]
     return "\n".join(lines)

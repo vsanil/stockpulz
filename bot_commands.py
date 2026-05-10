@@ -24,6 +24,7 @@ from config_manager import (
     load_picks,
     load_pending_state, save_pending_state, clear_pending_state,
     load_user_trade_log,
+    load_user_paper,
     get_pending_users, add_pending_user, remove_pending_user,
     get_allowed_users,
 )
@@ -367,6 +368,22 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
         print(f"[telegram] _resolve_ticker_candidates failed: {exc}")
 
     return [{"ticker": raw.upper(), "name": raw.upper()}]
+
+
+def _send_release_broadcast(notes: str, admin_chat_id: str) -> str:
+    """Broadcast a release note to all users and return a confirmation string."""
+    from datetime import date as _date
+    today = _date.today().strftime("%b %d, %Y")
+    msg = (
+        f"🚀 <b>StockPulz — What's New</b>  <i>({today})</i>\n\n"
+        f"{_esc(notes)}\n\n"
+        f"<i>Questions? Just ask the bot.</i>"
+    )
+    sent = 0
+    for uid in get_allowed_users():
+        if send_message(msg, chat_id=uid):
+            sent += 1
+    return f"✅ Release note sent to {sent} user(s)."
 
 
 def _fetch_live_price(ticker: str) -> float | None:
@@ -781,6 +798,35 @@ def handle_callback_query(callback_query: dict) -> None:
         send_message("🔄 Settings reset to defaults.", chat_id=chat_id)
         _send_settings_panel(chat_id)
 
+    elif action == "reset_confirm":
+        return _parse_and_execute("RESET CONFIRM", original="/reset", chat_id=chat_id)
+
+    elif action == "release_send":
+        note_id = parts[1] if len(parts) > 1 else ""
+        from release_tracker import get_pending_notes, mark_note_sent
+        note = next((n for n in get_pending_notes() if n["id"] == note_id), None)
+        if not note:
+            send_message("⚠️ Release note not found — may have already been sent.", chat_id=chat_id)
+            return
+        result = _send_release_broadcast(note["summary"], chat_id)
+        mark_note_sent(note_id, note["summary"])
+        send_message(result, chat_id=chat_id)
+
+    elif action == "release_edit":
+        note_id = parts[1] if len(parts) > 1 else ""
+        save_pending_state(chat_id, "release", step=1, data={"note_id": note_id})
+        send_inline_keyboard(
+            "✏️ <b>Edit the release note</b>\n\nType your updated message — it will be sent to all users:",
+            [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+
+    elif action == "release_skip":
+        note_id = parts[1] if len(parts) > 1 else ""
+        from release_tracker import mark_note_skipped
+        mark_note_skipped(note_id)
+        send_message("⏭ Release note skipped.", chat_id=chat_id)
+
     elif action == "cancel_abort":
         send_message("👍 No changes made.", chat_id=chat_id)
 
@@ -1011,6 +1057,10 @@ _PARAM_PROMPTS: dict[str, str] = {
                   "<i>e.g.</i>  <code>AAPL 10</code>  ·  <code>AAPL 182.50 10</code>"),
     "paper_sell":("📄 <b>Paper sell — which position?</b>\n"
                   "<i>e.g.</i>  <code>AAPL</code>  ·  <code>AAPL 5</code>  (partial sell)"),
+    "broadcast": ("📢 <b>Type your message to broadcast to all users:</b>\n"
+                  "<i>e.g.</i>  <code>Picks will be delayed today — back tomorrow at 8:30 AM ET</code>"),
+    "release":   ("🚀 <b>Type your release note to send to all users:</b>\n"
+                  "<i>e.g.</i>  <code>New feature: price alerts now support crypto!</code>"),
 }
 
 
@@ -1247,7 +1297,13 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         if step == 2:
             # User is replying with a price (or blank = live price)
             ticker    = data.get("ticker", "")
-            price_raw = text.strip() or None
+            raw_text  = text.strip()
+            # Treat "market price", "live", "current price", "now" etc. as live price
+            _LIVE_PHRASES = {"market", "market price", "live", "live price", "current",
+                             "current price", "now", "today", "spot", "spot price"}
+            if raw_text.lower() in _LIVE_PHRASES:
+                raw_text = ""
+            price_raw = raw_text or None
             if price_raw:
                 try:
                     resolved_price = float(price_raw.replace(",", ""))
@@ -1336,8 +1392,13 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
         if step == 2:
             # User replied with price
-            ticker    = data.get("ticker", "")
-            price_raw = text.strip() or None
+            ticker   = data.get("ticker", "")
+            raw_text = text.strip()
+            _LIVE_PHRASES = {"market", "market price", "live", "live price", "current",
+                             "current price", "now", "today", "spot", "spot price"}
+            if raw_text.lower() in _LIVE_PHRASES:
+                raw_text = ""
+            price_raw = raw_text or None
             if price_raw:
                 try:
                     float(price_raw.replace(",", ""))
@@ -1520,8 +1581,8 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
                     if not shares and parsed_p.get("shares"):
                         shares = parsed_p["shares"]
             if not ticker:
-                save_pending_state(chat_id, "paper_buy")
-                return "🤔 Which stock? Try: <code>EVRG 5</code>"
+                # Stale state — restart cleanly
+                return _parse_and_execute("PAPER BUY", original="/paper_buy", chat_id=chat_id)
             return paper_buy(ticker, shares, chat_id, price)
         if step == 1:
             import re as _re
@@ -1548,13 +1609,16 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
             # Single ticker — extract first number from reply
             nums = [float(n) for n in _re.findall(r'\d+(?:\.\d+)?', text.replace(",", ""))]
-            shares = nums[0] if nums else None
-            if not shares:
-                parsed_s = _nl_parse_trade("paper_buy", text)
-                shares = parsed_s.get("shares")
-            if not shares:
-                save_pending_state(chat_id, "paper_buy", step=1, data={"ticker": ticker})
-                return f"🤔 How many shares? e.g. <code>5</code>"
+
+            # No numbers in reply → user probably typed a ticker/company name, restart flow
+            if not nums:
+                return _parse_and_execute(f"PAPER BUY {text}", original=f"/paper_buy {text}", chat_id=chat_id)
+
+            shares = nums[0]
+            # Also refresh ticker if empty (stale state) by re-routing
+            if not ticker:
+                return _parse_and_execute(f"PAPER BUY {text}", original=f"/paper_buy {text}", chat_id=chat_id)
+
             # Ask for price
             live = _fetch_live_price(ticker)
             live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
@@ -1575,14 +1639,21 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             from paper_trader import paper_sell
             ticker    = data.get("ticker", "")
             price_raw = data.get("price")
-            shares    = None
-            raw       = text.strip()
+
+            # Stale state with no ticker — restart cleanly
+            if not ticker:
+                return _parse_and_execute("PAPER SELL", original="/paper_sell", chat_id=chat_id)
+
+            shares = None
+            raw    = text.strip()
             if raw:
-                try:
-                    shares = float(raw.replace(",", ""))
-                except ValueError:
-                    parsed_s = _nl_parse_trade("paper_sell", raw)
-                    shares   = parsed_s.get("shares")
+                import re as _re
+                nums = [float(n) for n in _re.findall(r'\d+(?:\.\d+)?', raw.replace(",", ""))]
+                if nums:
+                    shares = nums[0]
+                else:
+                    # No numbers — user may have typed a company name by mistake, restart
+                    return _parse_and_execute(f"PAPER SELL {raw}", original=f"/paper_sell {raw}", chat_id=chat_id)
             return paper_sell(ticker, chat_id, shares, price_raw)
 
         if step == 1:
@@ -1658,6 +1729,14 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return _parse_and_execute(f"BROADCAST {text}", original=f"/broadcast {text}", chat_id=chat_id)
 
     if command == "release":
+        # step=1: admin typed the edited release note text
+        if step == 1:
+            note_id = data.get("note_id", "")
+            from release_tracker import mark_note_sent
+            result = _send_release_broadcast(text, chat_id)
+            if note_id:
+                mark_note_sent(note_id, text)
+            return result
         return _parse_and_execute(f"RELEASE {text}", original=f"/release {text}", chat_id=chat_id)
 
     return _handle_natural_language(text)
@@ -1899,11 +1978,18 @@ Extract the required fields and return ONLY valid JSON — no text before or aft
 Target schema: {schema}
 
 Rules:
-- ticker: resolve company names to uppercase ticker symbols (Apple→AAPL, Nvidia→NVDA, Tesla→TSLA, etc.)
-  If you cannot confidently identify the ticker, return null.
-- price: extract any dollar amount mentioned. Strip "$", "dollars", "USD". Return as float or null.
-- shares: extract share count or quantity. Words like "10 shares", "10 stocks", "10 units" → 10. Return as float or null.
+- ticker: resolve company names and misspellings to uppercase ticker symbols
+  (Apple→AAPL, Nvidia/Nvidea/NVDA→NVDA, Tesla→TSLA, Costco→COST, Microsoft→MSFT, etc.)
+  Make your best guess for close misspellings and phonetic matches.
+  Only return null if you have absolutely no idea what stock/crypto is being referenced.
+- shares: a number followed by "stock", "stocks", "share", "shares", "unit", "units", "coin", "coins" → that number is shares.
+  Examples: "2 stocks" → shares=2, "10 shares of apple" → shares=10, "bought 5 units" → shares=5.
+  NEVER put a shares count into the price field.
+- price: a dollar amount (has "$", "dollars", "USD", "at", "for", "@", or is clearly a market price like 182.50).
+  Examples: "$182.50" → price=182.50, "at 65000" → price=65000, "for 3200 dollars" → price=3200.
+  If the only number in the input is paired with "stocks/shares/units", it is shares, NOT price.
 - direction: "below"/"under"/"drops below"/"falls to" → "below". "above"/"over"/"crosses"/"hits"/"reaches" → "above". Default → "auto".
+- Words like "today", "yesterday", "this morning" are time references — ignore them.
 - If a field is not mentioned, return null (do not guess).
 - Return ONLY the JSON object, nothing else."""
 
@@ -2112,7 +2198,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             if not ticker:
                 save_pending_state(chat_id, "alert", step=1)
                 send_inline_keyboard(
-                    "🔔 Which stock should I watch?\n<i>e.g. NVDA, Apple, BTC</i>",
+                    "🔔 Couldn't find that ticker — please use the symbol directly\n"
+                    "<i>e.g. <code>NVDA</code>, <code>AAPL</code>, <code>BTC</code></i>",
                     [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
                     chat_id=chat_id,
                 )
@@ -2409,34 +2496,64 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         return None  # webhook already got its "200 OK" — no second message from here
 
     if text in ("HELP", "START"):
-        return (
-            "📋 <b>Commands</b>\n"
-            "\n<b>Daily</b>"
-            "\n/today  ·  /prices  ·  /perf"
-            "\n/explain &lt;question&gt;\n"
-            "\n<b>My Trades</b>"
-            "\n/bought  ·  /sold  ·  /cancel"
-            "\n/positions  ·  /history\n"
-            "\n<b>Paper Trading</b>"
-            "\n/paper_buy  ·  /paper_sell  ·  /paper_cancel"
-            "\n/paper_portfolio  ·  /paper_perf  ·  /paper_history"
-            "\n/paper_reset  ·  /paper_add_cash\n"
-            "\n<b>Price Alerts</b>"
-            "\n/alert  ·  /alerts  ·  /unalert\n"
-            "\n<b>Market</b>"
-            "\n/regime  ·  /backtest"
-            "\n/community  <i>(StockPulz users vs S&P 500)</i>\n"
-            "\n<b>Settings</b>"
-            "\n/settings  <i>(all preferences in one place)</i>"
-            "\n/pause  ·  /resume  ·  /status  ·  /next"
-            "\n/reset  ·  /share  <i>(invite link)</i>\n"
-            "\n<b>Admin</b>"
-            "\n/users  ·  /adduser  ·  /removeuser  ·  /pending"
-            "\n/broadcast  ·  /release  <i>(send updates to all users)</i>"
-            "\n/admin_perf  <i>(all-user performance)</i>"
-            "\n/bot_pause  ·  /bot_resume  <i>(global kill switch)</i>"
-            "\n/bot_crypto_on  ·  /bot_crypto_off  <i>(global crypto toggle)</i>"
+        is_admin = _is_admin(chat_id)
+        msg = (
+            "📋 <b>StockPulz Commands</b>\n"
+            "\n<b>📈 Daily</b>"
+            "\n/today — AI stock &amp; crypto picks for today"
+            "\n/prices — Live prices for today's picks"
+            "\n/perf — Your portfolio performance vs S&amp;P 500"
+            "\n/explain — Ask any market question\n"
+            "\n<b>💼 My Trades</b>"
+            "\n/bought — Log a buy trade"
+            "\n/sold — Log a sell &amp; close a position"
+            "\n/cancel — Cancel a pending trade log"
+            "\n/positions — Open trades with live P&amp;L"
+            "\n/history — Closed trade history\n"
+            "\n<b>🧪 Paper Trading</b>"
+            "\n/paper_buy — Simulate a buy (no real money)"
+            "\n/paper_sell — Simulate a sell"
+            "\n/paper_cancel — Cancel a pending paper trade"
+            "\n/paper_portfolio — Your virtual portfolio &amp; cash"
+            "\n/paper_perf — Paper trading performance vs SPY"
+            "\n/paper_history — All past paper trades"
+            "\n/paper_reset — Reset portfolio to $10,000"
+            "\n/paper_add_cash — Add cash to your paper account\n"
+            "\n<b>🔔 Price Alerts</b>"
+            "\n/alert — Set a price alert (e.g. NVDA above 1000)"
+            "\n/alerts — View all your active alerts"
+            "\n/unalert — Remove an alert\n"
+            "\n<b>🌍 Market</b>"
+            "\n/regime — Current market conditions (Bull/Bear/Caution)"
+            "\n/backtest — How the strategy performed historically"
+            "\n/community — All StockPulz users vs S&amp;P 500\n"
+            "\n<b>⚙️ Settings</b>"
+            "\n/settings — All preferences in one place"
+            "\n/watch — Always include these tickers in picks"
+            "\n/pause — Pause daily pick notifications"
+            "\n/resume — Resume notifications"
+            "\n/status — Check your notification status"
+            "\n/next — When's the next scheduled pick"
+            "\n/reset — Reset all your settings"
+            "\n/share — Get your invite link\n"
         )
+        if is_admin:
+            msg += (
+                "\n<b>🔑 Admin</b>"
+                "\n/users — List all allowed users"
+                "\n/adduser — Approve a new user"
+                "\n/removeuser — Revoke access"
+                "\n/pending — Users awaiting approval"
+                "\n/broadcast — Send a message to all users"
+                "\n/release — Send a release note to all users"
+                "\n/admin_perf — Performance across all users"
+                "\n/bot_pause · /bot_resume — Global kill switch"
+                "\n/bot_crypto_on · /bot_crypto_off — Toggle crypto\n"
+            )
+        msg += (
+            "\n📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>"
+        )
+        return msg
 
     # /set_risk conservative | moderate | aggressive  (or natural language)
     if text == "SET RISK":
@@ -2583,10 +2700,11 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if _is_admin(chat_id) or chat_id in get_allowed_users():
             return (
                 "👋 <b>Welcome back to StockPulz!</b>\n\n"
-                "/today — today's picks\n"
-                "/positions — your open trades\n"
-                "/help — all commands\n\n"
-                "<i>Questions? Just type naturally.</i>"
+                "/today — AI stock &amp; crypto picks for today\n"
+                "/positions — open trades with live P&amp;L\n"
+                "/settings — your preferences\n"
+                "/help — all commands with descriptions\n\n"
+                "📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>"
             )
 
         # ── Admin invite link → auto-approve immediately ──────────────────────
@@ -2596,9 +2714,11 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             return (
                 "✅ <b>You're in! Welcome to StockPulz.</b>\n\n"
                 "You were auto-approved via an admin invite link.\n\n"
-                "/today — today's picks\n"
-                "/help — all commands\n\n"
-                "<i>Questions? Just type naturally — I understand plain English.</i>"
+                "Here's how to get started:\n"
+                "/today — see today's AI stock &amp; crypto picks\n"
+                "/settings — set your risk level, budget &amp; preferences\n"
+                "/help — all commands with descriptions\n\n"
+                "📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>"
             )
 
         # ── Normal flow — add to pending, notify admin ────────────────────────
@@ -2649,8 +2769,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         return (
             "👋 <b>Welcome to StockPulz!</b>\n\n"
             "Your access request has been sent to the admin.\n"
-            "You'll receive a notification as soon as you're approved — usually within a few hours.\n\n"
-            "<i>StockPulz sends daily AI-curated stock &amp; crypto picks, price alerts, and weekly performance recaps.</i>"
+            "You'll be notified as soon as you're approved — usually within a few hours.\n\n"
+            "<i>StockPulz delivers daily AI-curated stock &amp; crypto picks, price alerts, and weekly performance recaps.</i>\n\n"
+            "📖 <a href=\"https://stockpulz.com\">Learn more at stockpulz.com →</a>"
         )
 
     # ── Admin: user management ────────────────────────────────────────────────
@@ -2714,7 +2835,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     if text == "USERS":
         if not _is_admin(chat_id):
             return "🔒 Admin only."
-        from config_manager import get_allowed_users
         users = get_allowed_users()
         owner = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
         lines = ["<b>👥 Allowed Users</b>\n"]
@@ -2762,7 +2882,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if not _is_admin(chat_id):
             return "🔒 Admin only."
         from trade_logger import get_performance_stats
-        from config_manager import get_allowed_users
         users = get_allowed_users()
         lines = ["<b>👥 All-User Performance</b>\n"]
         for uid in users:
@@ -2837,7 +2956,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         body = text[len("BROADCAST "):].strip()
         if not body:
             return "Usage: /broadcast Your message here"
-        from config_manager import get_allowed_users
         recipients = [u for u in get_allowed_users() if u != chat_id]
         msg = f"📢 <b>StockPulz Update</b>\n\n{_esc(body)}"
         sent = 0
@@ -2850,25 +2968,42 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     if text == "RELEASE" or text.startswith("RELEASE "):
         if not _is_admin(chat_id):
             return "🔒 Admin only."
-        if text == "RELEASE":
-            _prompt_for_param("release", chat_id)
+
+        # /release with custom text → broadcast directly (override flow)
+        if text.startswith("RELEASE "):
+            notes = text[len("RELEASE "):].strip()
+            if notes:
+                return _send_release_broadcast(notes, chat_id)
+
+        # /release alone → show pending AI-generated note(s)
+        from release_tracker import get_pending_notes
+        pending = get_pending_notes()
+        if not pending:
+            send_inline_keyboard(
+                "📢 <b>No pending release notes.</b>\n\n"
+                "A note is auto-generated after each <code>git push</code>.\n"
+                "Or type your own: <code>/release Your message here</code>",
+                [[{"text": "❌ Close", "callback_data": "cancel_abort"}]],
+                chat_id=chat_id,
+            )
             return ""
-        notes = text[len("RELEASE "):].strip()
-        if not notes:
-            return "Usage: /release What's new in this update"
-        from datetime import date as _date
-        today = _date.today().strftime("%b %d, %Y")
-        msg = (
-            f"🚀 <b>StockPulz — What's New</b>  <i>({today})</i>\n\n"
-            f"{_esc(notes)}\n\n"
-            f"<i>Questions? Just ask the bot.</i>"
+
+        # Show the latest pending note
+        note = pending[-1]
+        note_id = note["id"]
+        summary = note["summary"]
+        send_inline_keyboard(
+            f"📢 <b>Pending release note</b>\n\n"
+            f"{_esc(summary)}\n\n"
+            f"<i>Send this to all users, edit it, or skip.</i>",
+            [[
+                {"text": "📤 Send to all",  "callback_data": f"release_send|{note_id}"},
+                {"text": "✏️ Edit",         "callback_data": f"release_edit|{note_id}"},
+                {"text": "⏭ Skip",          "callback_data": f"release_skip|{note_id}"},
+            ]],
+            chat_id=chat_id,
         )
-        from config_manager import get_allowed_users
-        sent = 0
-        for uid in get_allowed_users():
-            if send_message(msg, chat_id=uid):
-                sent += 1
-        return f"✅ Release note sent to {sent} user(s)."
+        return ""
 
     # ── /set_thresholds (per-user stop loss & target gain) ────────────────────
     if text == "SET THRESHOLDS":
@@ -2945,6 +3080,18 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         )
 
     if text == "RESET":
+        send_inline_keyboard(
+            "⚠️ <b>Reset all your settings?</b>\n"
+            "<i>Risk, mode, budgets, watchlist, stop loss, target gain — all wiped back to defaults.</i>",
+            [[
+                {"text": "✅ Yes, reset",  "callback_data": "reset_confirm"},
+                {"text": "❌ Cancel",      "callback_data": "cancel_abort"},
+            ]],
+            chat_id=chat_id,
+        )
+        return ""
+
+    if text == "RESET CONFIRM":
         reset_user_config(chat_id)
         global_cfg = get_config()
         sl = global_cfg.get("stop_loss_pct", 7)
@@ -3261,13 +3408,27 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
         ticker = candidates[0]["ticker"]
 
-        # If no price from NL, use live price and confirm
+        # ── Price sanity check ────────────────────────────────────────────────
+        # If the parsed price is way below the live price (>80% off), the number
+        # is almost certainly a share count that the NL parser misidentified.
+        # Swap it: treat parsed price as shares, use live price instead.
+        live = _fetch_live_price(ticker)
+        if price_raw is not None and live:
+            try:
+                price_f_check = float(price_raw)
+                if price_f_check > 0 and price_f_check < live * 0.20:
+                    # Looks like a share count, not a price
+                    if shares_raw is None:
+                        shares_raw = price_raw
+                    price_raw = str(live)
+            except (ValueError, TypeError):
+                pass
+
+        # If still no price, use live price
         if price_raw is None:
-            live = _fetch_live_price(ticker)
             if live:
                 price_raw = str(live)
             else:
-                live_hint = ""
                 save_pending_state(chat_id, "bought", step=2, data={"ticker": ticker})
                 send_inline_keyboard(
                     f"💰 At what price did you buy <b>{ticker}</b>?\n<i>Send blank to use live price</i>",
@@ -3355,9 +3516,20 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
         ticker = candidates[0]["ticker"]
 
+        # ── Price sanity check ────────────────────────────────────────────────
+        live = _fetch_live_price(ticker)
+        if price_raw is not None and live:
+            try:
+                price_f_check = float(price_raw)
+                if price_f_check > 0 and price_f_check < live * 0.20:
+                    if shares_raw is None:
+                        shares_raw = price_raw
+                    price_raw = str(live)
+            except (ValueError, TypeError):
+                pass
+
         # Use live price if not specified
         if price_raw is None:
-            live = _fetch_live_price(ticker)
             if live:
                 price_raw = str(live)
             else:
