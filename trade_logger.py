@@ -462,6 +462,72 @@ def update_trailing_stops(current_prices: dict, chat_id: str,
     return newly_closed
 
 
+def add_holding(ticker: str, chat_id: str, picks: dict | None = None) -> tuple[dict, bool]:
+    """
+    Add a ticker to a user's portfolio (no price/qty needed).
+    Uses today's pick levels for target/stop alerts if available.
+    Returns (trade_dict, already_existed).
+    """
+    today  = date.today().isoformat()
+    log    = load_user_trade_log(chat_id)
+    ticker = ticker.upper()
+
+    # Already watching — don't duplicate
+    for t in log["open"]:
+        if t["ticker"] == ticker:
+            return t, True
+
+    # Look up pick levels from today's picks
+    entry = target = stop = None
+    asset_type = "stock"
+    if picks:
+        all_picks = (
+            picks.get("stocks", {}).get("short_term", []) +
+            picks.get("stocks", {}).get("long_term",  []) +
+            picks.get("crypto", {}).get("short_term", []) +
+            picks.get("crypto", {}).get("long_term",  [])
+        )
+        for p in all_picks:
+            sym = (p.get("ticker") or p.get("symbol", "")).upper()
+            if sym == ticker:
+                entry  = p.get("entry_price")
+                target = p.get("target_price")
+                stop   = p.get("stop_loss")
+                if p.get("symbol"):   # crypto picks use "symbol" key
+                    asset_type = "crypto"
+                break
+
+    trade = {
+        "ticker":       ticker,
+        "asset_type":   asset_type,
+        "entry_price":  entry,
+        "target_price": target,
+        "stop_loss":    stop,
+        "opened_date":  today,
+        "manual":       True,
+    }
+    log["open"].append(trade)
+    save_user_trade_log(chat_id, log)
+    print(f"[trade_logger] Added holding: {ticker} for {chat_id}")
+    return trade, False
+
+
+def remove_holding(ticker: str, chat_id: str) -> bool:
+    """
+    Remove a ticker from a user's portfolio.
+    Returns True if found and removed, False if not in portfolio.
+    """
+    log    = load_user_trade_log(chat_id)
+    ticker = ticker.upper()
+    before = len(log["open"])
+    log["open"] = [t for t in log["open"] if t["ticker"] != ticker]
+    if len(log["open"]) < before:
+        save_user_trade_log(chat_id, log)
+        print(f"[trade_logger] Removed holding: {ticker} for {chat_id}")
+        return True
+    return False
+
+
 def get_weekly_closed_trades(chat_id: str) -> list[dict]:
     """Return trades closed this calendar week (Mon–today) for a specific user."""
     from datetime import timedelta

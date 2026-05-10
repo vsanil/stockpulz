@@ -500,54 +500,18 @@ def handle_callback_query(callback_query: dict) -> None:
         return
 
     if action == "buy":
-        ticker     = parts[1] if len(parts) > 1 else ""
-        price_raw  = parts[2] if len(parts) > 2 else ""
-        shares_raw = parts[3] if len(parts) > 3 else ""
-
-        price = float(price_raw) if price_raw else _fetch_live_price(ticker)
-        if not price:
-            send_message(f"⚠️ Could not fetch price for <b>{ticker}</b>. Try: <code>/bought {ticker} 182.50</code>", chat_id=chat_id)
+        ticker = parts[1] if len(parts) > 1 else ""
+        if not ticker:
             return
+        reply = _execute_bought(ticker, chat_id)
+        send_message(reply, chat_id=chat_id)
 
-        shares = float(shares_raw) if shares_raw else None
-
-        # Pull target/stop from today's picks
-        target = stop = None
-        picks  = load_picks()
-        if picks:
-            all_st = (picks.get("stocks", {}).get("short_term", []) +
-                      picks.get("crypto", {}).get("short_term", []))
-            for p in all_st:
-                sym = p.get("ticker") or p.get("symbol", "")
-                if sym.upper() == ticker:
-                    target = p.get("target_price")
-                    stop   = p.get("stop_loss")
-                    break
-
-        asset_type = "crypto" if ticker in _CRYPTO_SYMBOLS else "stock"
-
-        # Resolve per-user thresholds for callback-path buys
-        _ucfg   = get_user_config(chat_id)
-        _gcfg   = get_config()
-        _sl_pct = float(_ucfg.get("stop_loss_pct")   or _gcfg.get("stop_loss_pct",   7.0))
-        _tg_pct = float(_ucfg.get("target_gain_pct") or _gcfg.get("target_gain_pct", 15.0))
-
-        trade = manual_open_trade(ticker, price, chat_id, asset_type=asset_type,
-                                  shares=shares, target_price=target, stop_loss=stop,
-                                  stop_loss_pct=_sl_pct, target_gain_pct=_tg_pct)
-
-        alloc_str  = f"  · <code>${trade['allocation']:.2f}</code> deployed" if trade.get("allocation") else ""
-        shares_str = f"  · {shares} shares" if shares else ""
-        send_message(
-            f"✅ <b>Logged: bought {ticker}</b>\n"
-            f"Entry:  <code>${trade['entry_price']}</code>{shares_str}{alloc_str}\n"
-            f"Target: <code>${trade['target_price']}</code>  "
-            f"<i>(+{((trade['target_price']/trade['entry_price'])-1)*100:.1f}%)</i>\n"
-            f"Stop:   <code>${trade['stop_loss']}</code>  "
-            f"<i>({((trade['stop_loss']/trade['entry_price'])-1)*100:.1f}%)</i>\n"
-            f"<i>I'll track this and alert you at target/stop.</i>",
-            chat_id=chat_id,
-        )
+    elif action == "confirm_sell":
+        ticker = parts[1] if len(parts) > 1 else ""
+        if not ticker:
+            return
+        reply = _execute_sold(ticker, chat_id)
+        send_message(reply, chat_id=chat_id)
 
     elif action == "sold_bulk":
         payload = "|".join(parts[1:])
@@ -1166,102 +1130,40 @@ def _send_settings_panel(chat_id: str) -> None:
 
 # ── Extracted buy/sell execution (shared by direct + conversational paths) ────
 
-def _execute_bought(ticker: str, price_raw, shares_raw, chat_id: str) -> str:
-    from trade_logger import manual_open_trade
-    # Resolve per-user thresholds (fall back to global defaults)
-    _user_cfg   = get_user_config(chat_id)
-    _global_cfg = get_config()
-    _sl_pct  = float(_user_cfg.get("stop_loss_pct")   or _global_cfg.get("stop_loss_pct",   7.0))
-    _tg_pct  = float(_user_cfg.get("target_gain_pct") or _global_cfg.get("target_gain_pct", 15.0))
-    price: float | None = None
-    if price_raw:
-        try:
-            price = float(str(price_raw).strip())
-        except ValueError:
-            pass
-    if price is None:
-        price = _fetch_live_price(ticker)
-    if price is None:
-        return (f"⚠️ Could not fetch price for <b>{ticker}</b>. "
-                f"Reply with the price, e.g. <code>182.50</code>")
+def _execute_bought(ticker: str, chat_id: str) -> str:
+    """Add ticker to user's portfolio. No price or quantity needed."""
+    from trade_logger import add_holding
+    picks = load_picks()
+    trade, existed = add_holding(ticker, chat_id, picks=picks)
 
-    shares: float | None = None
-    if shares_raw:
-        try:
-            shares = float(str(shares_raw).strip())
-        except (ValueError, TypeError):
-            pass
+    if existed:
+        return f"📌 <b>{ticker}</b> is already in your portfolio — I'm watching it."
 
-    target = stop = None
-    picks  = load_picks()
-    if picks:
-        all_st = (picks.get("stocks", {}).get("short_term", []) +
-                  picks.get("crypto", {}).get("short_term", []))
-        for p in all_st:
-            sym = p.get("ticker") or p.get("symbol", "")
-            if sym.upper() == ticker:
-                target = p.get("target_price")
-                stop   = p.get("stop_loss")
-                break
+    target = trade.get("target_price")
+    stop   = trade.get("stop_loss")
+    entry  = trade.get("entry_price")
 
-    asset_type = "crypto" if ticker in _CRYPTO_SYMBOLS else "stock"
-
-    trade = manual_open_trade(ticker, price, chat_id, asset_type=asset_type,
-                              shares=shares, target_price=target, stop_loss=stop,
-                              stop_loss_pct=_sl_pct, target_gain_pct=_tg_pct)
-
-    alloc_str  = f"  · <code>${trade['allocation']:.2f}</code> deployed" if trade.get("allocation") else ""
-    shares_str = f"  · {shares} shares" if shares else ""
-    return (
-        f"✅ <b>Logged: bought {ticker}</b>\n"
-        f"Entry:  <code>${trade['entry_price']}</code>{shares_str}{alloc_str}\n"
-        f"Target: <code>${trade['target_price']}</code>  "
-        f"<i>(+{((trade['target_price']/trade['entry_price'])-1)*100:.1f}%)</i>\n"
-        f"Stop:   <code>${trade['stop_loss']}</code>  "
-        f"<i>({((trade['stop_loss']/trade['entry_price'])-1)*100:.1f}%)</i>\n"
-        f"<i>I'll check this at 10:30 AM and 3:30 PM and alert if target/stop is hit.</i>"
-    )
+    lines = [f"✅ <b>{ticker}</b> added to your portfolio."]
+    if entry and target and stop:
+        lines.append(
+            f"Pick levels — entry <code>${_p(entry)}</code>  "
+            f"· target <code>${_p(target)}</code>  "
+            f"· stop <code>${_p(stop)}</code>"
+        )
+        lines.append("<i>I'll alert you if the price hits the target or stop.</i>")
+    else:
+        lines.append("<i>Not in today's picks — I'll watch the price for you.</i>")
+    return "\n".join(lines)
 
 
-def _execute_sold(ticker: str, price_raw, chat_id: str, shares_sold=None) -> str:
-    from trade_logger import manual_close_trade
-    price: float | None = None
-    if price_raw:
-        try:
-            price = float(str(price_raw).strip())
-        except ValueError:
-            pass
-    if price is None:
-        price = _fetch_live_price(ticker)
-    if price is None:
-        return (f"⚠️ Could not fetch price for <b>{ticker}</b>. "
-                f"Reply with the price, e.g. <code>197.10</code>")
+def _execute_sold(ticker: str, chat_id: str) -> str:
+    """Remove ticker from user's portfolio."""
+    from trade_logger import remove_holding
+    removed = remove_holding(ticker, chat_id)
+    if not removed:
+        return f"⚠️ <b>{ticker}</b> is not in your portfolio."
+    return f"✅ <b>{ticker}</b> removed from your portfolio."
 
-    shares_float = None
-    if shares_sold is not None:
-        try:
-            shares_float = float(str(shares_sold).strip())
-        except (ValueError, TypeError):
-            shares_float = None
-
-    closed = manual_close_trade(ticker, price, chat_id, shares_sold=shares_float)
-    if not closed:
-        return f"⚠️ No open position found for <b>{ticker}</b>. Use /portfolio to see open trades."
-
-    ret   = closed["return_pct"]
-    gain  = closed["gain_usd"]
-    emoji = "✅" if ret >= 0 else "🔴"
-    sign  = "+" if ret >= 0 else ""
-    gsign = "+" if gain >= 0 else ""
-    partial_note = "  <i>· partial sell, position still open</i>" if closed.get("partial") else ""
-    shares_str   = f"  · {closed['shares']} shares" if closed.get("shares") else ""
-    return (
-        f"{emoji} <b>{'Partial sell' if closed.get('partial') else 'Closed'}: {ticker}</b>\n"
-        f"Entry:  <code>${closed['entry_price']}</code>\n"
-        f"Exit:   <code>${closed['closed_price']}</code>{shares_str}\n"
-        f"Return: <b>{sign}{ret}%</b>  P&amp;L: <code>{gsign}${abs(gain):.2f}</code>{partial_note}\n"
-        f"<i>Saved to trade history.</i>"
-    )
 
 
 # ── Pending reply handler ─────────────────────────────────────────────────────
@@ -1278,187 +1180,47 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     # State already consumed — always clear it first
     clear_pending_state(chat_id)
 
-    # ── /bought multi-step ────────────────────────────────────────────────────
+    # ── /bought ───────────────────────────────────────────────────────────────
     if command == "bought":
-        if step == 3:
-            # User is replying with quantity (only reached when track_position_sizes=on)
-            ticker    = data.get("ticker", "")
-            price_raw = data.get("price")
-            raw       = text.strip()
-            shares_raw = None
-            if raw:
-                try:
-                    shares_raw = float(raw.replace(",", ""))
-                except ValueError:
-                    parsed_q = _nl_parse_trade("bought", raw)
-                    shares_raw = parsed_q.get("shares")
-            return _execute_bought(ticker, price_raw, shares_raw, chat_id)
-
-        if step == 2:
-            # User is replying with a price (or blank = live price)
-            ticker    = data.get("ticker", "")
-            raw_text  = text.strip()
-            # Treat "market price", "live", "current price", "now" etc. as live price
-            _LIVE_PHRASES = {"market", "market price", "live", "live price", "current",
-                             "current price", "now", "today", "spot", "spot price"}
-            if raw_text.lower() in _LIVE_PHRASES:
-                raw_text = ""
-            price_raw = raw_text or None
-            if price_raw:
-                try:
-                    resolved_price = float(price_raw.replace(",", ""))
-                    price_raw = str(resolved_price)
-                except ValueError:
-                    parsed_p = _nl_parse_trade("bought", price_raw)
-                    resolved_price = parsed_p.get("price")
-                    price_raw = str(resolved_price) if resolved_price else None
-            else:
-                resolved_price = None
-            # Ask for quantity only if user opted in
-            if _track_position_sizes(chat_id):
-                save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
-                live = _fetch_live_price(ticker) if not resolved_price else None
-                live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
-                price_display = f"<code>${_p(resolved_price)}</code>" if resolved_price else f"live price{live_hint}"
-                send_inline_keyboard(
-                    f"📦 How many shares of <b>{ticker}</b> did you buy at {price_display}?\n"
-                    f"<i>Send blank to skip</i>",
-                    [[{"text": "⏭ Skip", "callback_data": f"bought_skip_qty|{ticker}|{price_raw or ''}"},
-                      {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                    chat_id=chat_id,
-                )
-                return ""
-            return _execute_bought(ticker, price_raw, None, chat_id)
-
-        # Step 1: parse "apple" / "AAPL 182.50" / "AAPL 182.50 5"
-        parts      = text.strip().split()
-        name_raw   = parts[0] if parts else ""
-        price_raw  = parts[1] if len(parts) >= 2 else None
-        shares_raw = parts[2] if len(parts) >= 3 else None
-
+        # Just need the ticker — no price or quantity
+        name_raw = text.strip().split()[0] if text.strip() else ""
         if not name_raw:
-            return "⚠️ Please tell me which stock you bought."
+            return "⚠️ Please tell me which stock or crypto you bought."
 
         candidates = _resolve_ticker_candidates(name_raw)
         if len(candidates) > 1:
-            price_enc  = price_raw  or ""
-            shares_enc = shares_raw or ""
             buttons = [[{"text": f"{c['ticker']} — {c['name']}",
-                         "callback_data": f"buy|{c['ticker']}|{price_enc}|{shares_enc}"}]
+                         "callback_data": f"buy|{c['ticker']}"}]
                        for c in candidates]
-            send_inline_keyboard(f"🔍 Which stock did you mean by <b>{_esc(name_raw)}</b>?",
+            send_inline_keyboard(f"🔍 Which one did you mean by <b>{_esc(name_raw)}</b>?",
                                  buttons, chat_id=chat_id)
             return ""
 
-        ticker = candidates[0]["ticker"]
-        if price_raw is None:
-            save_pending_state(chat_id, "bought", step=2, data={"ticker": ticker})
-            send_inline_keyboard(
-                f"Got it — <b>{ticker}</b>. At what price did you buy?\n"
-                f"<i>Send blank to use live price</i>",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
+        return _execute_bought(candidates[0]["ticker"], chat_id)
 
-        if shares_raw is None and _track_position_sizes(chat_id):
-            save_pending_state(chat_id, "bought", step=3, data={"ticker": ticker, "price": price_raw})
-            send_inline_keyboard(
-                f"📦 How many shares of <b>{ticker}</b> did you buy?\n"
-                f"<i>Send blank to skip</i>",
-                [[{"text": "⏭ Skip", "callback_data": f"bought_skip_qty|{ticker}|{price_raw}"},
-                  {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
-
-        return _execute_bought(ticker, price_raw, shares_raw, chat_id)
-
-    # ── /sold multi-step ──────────────────────────────────────────────────────
+    # ── /sold ─────────────────────────────────────────────────────────────────
     if command == "sold":
-        if step == 3:
-            # User replied with quantity (only reached when track_position_sizes=on)
-            ticker    = data.get("ticker", "")
-            price_raw = data.get("price")
-            raw       = text.strip()
-            shares_sold = None
-            if raw:
-                try:
-                    shares_sold = float(raw.replace(",", ""))
-                except ValueError:
-                    parsed_q = _nl_parse_trade("sold", raw)
-                    shares_sold = parsed_q.get("shares")
-            return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_sold)
-
-        if step == 2:
-            # User replied with price
-            ticker   = data.get("ticker", "")
-            raw_text = text.strip()
-            _LIVE_PHRASES = {"market", "market price", "live", "live price", "current",
-                             "current price", "now", "today", "spot", "spot price"}
-            if raw_text.lower() in _LIVE_PHRASES:
-                raw_text = ""
-            price_raw = raw_text or None
-            if price_raw:
-                try:
-                    float(price_raw.replace(",", ""))
-                except ValueError:
-                    parsed_p = _nl_parse_trade("sold", price_raw)
-                    price_raw = str(parsed_p["price"]) if parsed_p.get("price") else None
-            # Ask for quantity only if user opted in
-            if _track_position_sizes(chat_id):
-                save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
-                send_inline_keyboard(
-                    f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
-                    f"<i>Send blank to sell your full position</i>",
-                    [[{"text": "⏭ All shares", "callback_data": f"sold_all|{ticker}|{price_raw or ''}"},
-                      {"text": "❌ Cancel",     "callback_data": f"cancel_pending|{chat_id}"}]],
-                    chat_id=chat_id,
-                )
-                return ""
-            return _execute_sold(ticker, price_raw, chat_id, shares_sold=None)
-
-        parts      = text.strip().split()
-        name_raw   = parts[0] if parts else ""
-        price_raw  = parts[1] if len(parts) >= 2 else None
-        shares_raw = parts[2] if len(parts) >= 3 else None
-
+        # Just need the ticker — confirm before removing
+        name_raw = text.strip().split()[0] if text.strip() else ""
         if not name_raw:
-            return "⚠️ Please tell me which stock you sold."
+            return "⚠️ Please tell me which stock or crypto you sold."
 
         candidates = _resolve_ticker_candidates(name_raw)
         if len(candidates) > 1:
-            price_enc  = price_raw  or ""
-            shares_enc = shares_raw or ""
             buttons = [[{"text": f"{c['ticker']} — {c['name']}",
-                         "callback_data": f"sell|{c['ticker']}|{price_enc}|{shares_enc}"}]
+                         "callback_data": f"confirm_sell|{c['ticker']}"}]
                        for c in candidates]
-            send_inline_keyboard(f"🔍 Which stock did you mean?", buttons, chat_id=chat_id)
+            send_inline_keyboard(f"🔍 Which one did you sell?", buttons, chat_id=chat_id)
             return ""
 
         ticker = candidates[0]["ticker"]
-        if price_raw is None:
-            save_pending_state(chat_id, "sold", step=2, data={"ticker": ticker})
-            send_inline_keyboard(
-                f"Got it — <b>{ticker}</b>. At what price did you sell?\n"
-                f"<i>Send blank to use live price</i>",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
-
-        if shares_raw is None and _track_position_sizes(chat_id):
-            save_pending_state(chat_id, "sold", step=3, data={"ticker": ticker, "price": price_raw})
-            send_inline_keyboard(
-                f"📦 How many shares of <b>{ticker}</b> did you sell?\n"
-                f"<i>Send blank to sell your full position</i>",
-                [[{"text": "⏭ All shares", "callback_data": f"sold_all|{ticker}|{price_raw}"},
-                  {"text": "❌ Cancel",     "callback_data": f"cancel_pending|{chat_id}"}]],
-                chat_id=chat_id,
-            )
-            return ""
-
-        return _execute_sold(ticker, price_raw, chat_id, shares_sold=shares_raw)
+        send_inline_keyboard(
+            f"Remove <b>{ticker}</b> from your portfolio?",
+            [[{"text": f"✅ Yes, I sold {ticker}", "callback_data": f"confirm_sell|{ticker}"},
+              {"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return ""
 
     # ── Single-step param commands ────────────────────────────────────────────
     if command == "history":
@@ -3853,15 +3615,22 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     if text in ("POSITIONS", "PORTFOLIO"):
         import yfinance as yf
 
-        log  = load_user_trade_log(chat_id)
+        log         = load_user_trade_log(chat_id)
         open_trades = log.get("open", [])
         if not open_trades:
-            return "📭 No open positions. Use <code>/bought AAPL 182.50</code> to log a trade."
+            return "📭 No holdings yet. Tap /bought and tell me which stocks or crypto you're holding."
 
-        # Fetch current prices for all tickers
-        tickers_list = [t["ticker"] for t in open_trades]
-        prices = {}
-        for ticker in tickers_list:
+        # Deduplicate by ticker (keep first occurrence)
+        seen: set = set()
+        unique_trades = []
+        for t in open_trades:
+            if t["ticker"] not in seen:
+                seen.add(t["ticker"])
+                unique_trades.append(t)
+
+        # Fetch current prices
+        prices: dict = {}
+        for ticker in [t["ticker"] for t in unique_trades]:
             try:
                 info  = yf.Ticker(ticker).fast_info
                 price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
@@ -3877,27 +3646,23 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             except Exception:
                 pass
 
-        # Build position summaries + get AI guidance in one Haiku call
+        # Build position data for Haiku guidance
         position_data = []
-        for t in open_trades:
+        for t in unique_trades:
             ticker  = t["ticker"]
+            current = prices.get(ticker)
             entry   = float(t.get("entry_price") or 0)
             target  = float(t.get("target_price") or 0)
             stop    = float(t.get("stop_loss") or 0)
-            current = prices.get(ticker)
-            if current and entry:
-                ret_pct    = (current - entry) / entry * 100
-                to_target  = (target / current - 1) * 100 if target else None
-                to_stop    = (stop   / current - 1) * 100 if stop   else None
+            if current:
                 position_data.append({
-                    "ticker":     ticker,
-                    "entry":      entry,
-                    "current":    round(current, 2),
-                    "target":     target or None,
-                    "stop":       stop or None,
-                    "return_pct": round(ret_pct, 2),
-                    "to_target":  round(to_target, 2) if to_target is not None else None,
-                    "to_stop":    round(to_stop,  2) if to_stop  is not None else None,
+                    "ticker":    ticker,
+                    "current":   round(current, 2),
+                    "pick_entry": entry or None,
+                    "target":    target or None,
+                    "stop":      stop   or None,
+                    "to_target": round((target / current - 1) * 100, 1) if target and current else None,
+                    "to_stop":   round((stop   / current - 1) * 100, 1) if stop   and current else None,
                 })
 
         # Ask Haiku for one-line guidance per position
@@ -3906,93 +3671,71 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             try:
                 import anthropic as _ant, json as _j
                 prompt = (
-                    "You are a brief trading advisor. For each position below give ONE short action line "
-                    "(max 10 words): HOLD / ADD MORE / TAKE PROFIT / TIGHTEN STOP / CONSIDER SELLING / etc. "
-                    "Be direct. Consider proximity to target/stop and current return.\n\n"
+                    "You are a brief trading advisor. For each position give ONE short action line "
+                    "(max 10 words): HOLD / WATCH / TAKE PROFIT / NEAR STOP — ACT / etc. "
+                    "Be direct. Consider proximity to target/stop.\n\n"
                     f"Positions: {_j.dumps(position_data)}\n\n"
-                    'Return ONLY a JSON object keyed by ticker, e.g. {"AAPL": "Hold — strong, 3.2% from target"}'
+                    'Return ONLY a JSON object keyed by ticker, e.g. {"AAPL": "Hold — 3% from target"}'
                 )
                 client  = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
                 message = client.messages.create(
-                    model="claude-haiku-4-5-20251001", max_tokens=200,
+                    model="claude-haiku-4-5-20251001", max_tokens=250,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 guidance = _j.loads(message.content[0].text.strip())
             except Exception as exc:
                 print(f"[portfolio] Guidance fetch failed (non-critical): {exc}")
 
-        lines = ["<b>📂 Portfolio</b>", ""]
-        for t in open_trades:
+        lines = [f"<b>📂 Portfolio</b>  <i>· {len(unique_trades)} holding{'s' if len(unique_trades) != 1 else ''}</i>", ""]
+
+        for t in unique_trades:
             ticker  = t["ticker"]
-            entry   = float(t.get("entry_price") or 0)
+            current = prices.get(ticker)
+            entry   = t.get("entry_price")
             target  = t.get("target_price")
             stop    = t.get("stop_loss")
-            current = prices.get(ticker)
-            manual  = "  <i>(manual)</i>" if t.get("manual") else ""
 
-            if current and entry:
-                ret_pct   = (current - entry) / entry * 100
-                sign      = "+" if ret_pct >= 0 else ""
-                pnl_emoji = "🟢" if ret_pct >= 0 else "🔴"
-                stop_warn = "  ⚠️ <b>NEAR STOP</b>" if stop and current <= float(stop) * 1.01 else ""
-                hit_target = "  🎯 <b>NEAR TARGET</b>" if target and current >= float(target) * 0.99 else ""
-                to_target = f"{((float(target)/current-1)*100):+.1f}% to target" if target else ""
-                to_stop   = f"{((float(stop)/current-1)*100):+.1f}% to stop"   if stop   else ""
-                price_line = " · ".join(filter(None, [to_target, to_stop]))
-
-                lines.append(
-                    f"{pnl_emoji} <b>{ticker}</b>  <code>${current:.2f}</code>  "
-                    f"<i>({sign}{ret_pct:.1f}%)</i>{stop_warn}{hit_target}{manual}"
-                )
-                lines.append(f"   entry <code>${entry:.2f}</code>  {price_line}")
-                if ticker in guidance:
-                    lines.append(f"   💡 <i>{guidance[ticker]}</i>")
-            else:
-                lines.append(f"⬜ <b>{ticker}</b>  entry <code>${entry:.2f}</code>  "
-                             f"<i>(price unavailable)</i>{manual}")
-                if target or stop:
-                    lines.append(f"   target <code>${target}</code>  stop <code>${stop}</code>")
-            lines.append("")
-
-        # ── Portfolio totals footer ───────────────────────────────────────────
-        total_invested  = 0.0
-        total_current   = 0.0
-        winners         = 0
-        losers          = 0
-        for t in open_trades:
-            entry   = float(t.get("entry_price") or 0)
-            alloc   = float(t.get("allocation") or 0)
-            shares  = float(t.get("shares") or 0)
-            current = prices.get(t["ticker"])
-            if entry and current:
-                # derive cost from allocation (dollars) or shares × entry
-                cost_basis = alloc if alloc else (shares * entry if shares else 0)
-                curr_val   = (alloc / entry * current) if alloc else (shares * current if shares else 0)
-                total_invested += cost_basis
-                total_current  += curr_val
-                if current >= entry:
-                    winners += 1
+            if current:
+                # Alert badges
+                stop_hit   = stop   and current <= float(stop)
+                near_stop  = stop   and not stop_hit and current <= float(stop) * 1.03
+                near_tgt   = target and current >= float(target) * 0.97
+                if stop_hit:
+                    badge = "  🔴 <b>STOP HIT</b>"
+                elif near_stop:
+                    badge = "  ⚠️ <b>NEAR STOP</b>"
+                elif near_tgt:
+                    badge = "  🎯 <b>NEAR TARGET</b>"
                 else:
-                    losers += 1
+                    badge = ""
 
-        if total_invested > 0:
-            total_pnl     = total_current - total_invested
-            total_pnl_pct = total_pnl / total_invested * 100
-            pnl_sign      = "+" if total_pnl >= 0 else ""
-            pnl_emoji     = "🟢" if total_pnl >= 0 else "🔴"
-            lines.append("─────────────────")
-            lines.append(
-                f"{pnl_emoji} <b>Total P&L: {pnl_sign}{total_pnl_pct:.1f}%</b>  "
-                f"(${total_pnl:+,.2f})"
-            )
-            lines.append(
-                f"   Invested: <b>${total_invested:,.2f}</b>  →  "
-                f"Now: <b>${total_current:,.2f}</b>"
-            )
-            lines.append(f"   {winners}🟢 winning  ·  {losers}🔴 losing  ·  {len(open_trades)} total")
+                lines.append(f"<b>{ticker}</b>  <code>${_p(current)}</code>{badge}")
+
+                # Pick levels line (only if we have them)
+                if entry or target or stop:
+                    level_parts = []
+                    if entry:
+                        to_entry = (current - float(entry)) / float(entry) * 100
+                        sign     = "+" if to_entry >= 0 else ""
+                        level_parts.append(f"entry <code>${_p(entry)}</code> ({sign}{to_entry:.1f}%)")
+                    if target:
+                        to_tgt = (float(target) / current - 1) * 100
+                        level_parts.append(f"target <code>${_p(target)}</code> ({to_tgt:+.1f}%)")
+                    if stop:
+                        to_stp = (float(stop) / current - 1) * 100
+                        level_parts.append(f"stop <code>${_p(stop)}</code> ({to_stp:+.1f}%)")
+                    lines.append("   " + "  ·  ".join(level_parts))
+                else:
+                    lines.append("   <i>No pick levels — add via today's picks</i>")
+
+                if ticker in guidance:
+                    lines.append(f"   💡 <i>{_esc(guidance[ticker])}</i>")
+            else:
+                lines.append(f"<b>{ticker}</b>  <i>price unavailable</i>")
+
             lines.append("")
 
-        lines.append("<i>Use <code>/sold TICKER price</code> to close a position.</i>")
+        lines.append("<i>Tap /sold to exit a position  ·  /bought to add one</i>")
         return "\n".join(lines)
 
     # ── Natural language fallback ─────────────────────────────────────────────
