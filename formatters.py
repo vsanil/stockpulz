@@ -396,6 +396,9 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
 
+    def _header(label: str) -> list[dict]:
+        return [{"text": label, "callback_data": "noop"}]
+
     def _row(ticker: str, asset_type: str) -> list[dict]:
         return [
             {"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"},
@@ -403,19 +406,26 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         ]
 
     buttons = []
-    for s in stocks.get("short_term", []):
-        ticker = s.get("ticker", "")
-        if ticker:
-            buttons.append(_row(ticker, "stock"))
-    for s in stocks.get("long_term", []):
-        ticker = s.get("ticker", "")
-        if ticker:
-            buttons.append(_row(ticker, "stock"))
-    if show_crypto:
-        for c in crypto.get("short_term", []):
-            sym = c.get("symbol", "")
-            if sym:
-                buttons.append(_row(sym, "crypto"))
+
+    st_picks  = [s for s in stocks.get("short_term", []) if s.get("ticker")]
+    lt_picks  = [s for s in stocks.get("long_term",  []) if s.get("ticker")]
+    cst_picks = [c for c in crypto.get("short_term", []) if c.get("symbol")] if show_crypto else []
+
+    if st_picks:
+        buttons.append(_header("── 📈 Short Term ──"))
+        for s in st_picks:
+            buttons.append(_row(s["ticker"], "stock"))
+
+    if lt_picks:
+        buttons.append(_header("── 🏛 Long Term ──"))
+        for s in lt_picks:
+            buttons.append(_row(s["ticker"], "stock"))
+
+    if cst_picks:
+        buttons.append(_header("── 🪙 Crypto ──"))
+        for c in cst_picks:
+            buttons.append(_row(c["symbol"], "crypto"))
+
     return buttons
 
 
