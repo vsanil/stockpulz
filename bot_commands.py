@@ -477,11 +477,45 @@ def handle_callback_query(callback_query: dict) -> None:
         save_pending_state(chat_id, "sold", step=2, data={"ticker": ticker})
         kb = [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]]
         if live:
-            kb.insert(0, [{"text": f"✅ Sell at live price ${_p(live)}", "callback_data": f"sold_confirm|{ticker}|{live}|"}])
+            kb.insert(0, [{"text": f"Use live price ${_p(live)}", "callback_data": f"sold_review|{ticker}|{live}"}])
         send_inline_keyboard(
             f"💸 <b>{ticker}</b> — what price did you sell at?{live_hint}\n"
             f"<i>Type the price, or tap the button to use live price.</i>",
             kb,
+            chat_id=chat_id,
+        )
+        return
+
+    if action == "sold_review":
+        # Confirmation step — show summary before executing
+        ticker     = parts[1].upper() if len(parts) > 1 else ""
+        price_raw  = parts[2]         if len(parts) > 2 else ""
+        if not ticker or not price_raw:
+            return
+        try:
+            price = float(price_raw)
+        except ValueError:
+            send_message("⚠️ Invalid price.", chat_id=chat_id)
+            return
+        # Look up entry for P&L preview
+        log   = load_user_trade_log(chat_id)
+        entry = None
+        for t in log.get("open", []):
+            if t["ticker"] == ticker:
+                entry = t.get("entry_price")
+                break
+        pnl_preview = ""
+        if entry:
+            try:
+                ret = (price - float(entry)) / float(entry) * 100
+                sign = "+" if ret >= 0 else ""
+                pnl_preview = f"\n<i>Return: {sign}{ret:.1f}% vs entry <code>${_p(entry)}</code></i>"
+            except Exception:
+                pass
+        send_inline_keyboard(
+            f"💸 Close <b>{ticker}</b> at <code>${_p(price)}</code>?{pnl_preview}",
+            [[{"text": f"✅ Yes, close {ticker}", "callback_data": f"sold_confirm|{ticker}|{price}|"},
+              {"text": "❌ Cancel",               "callback_data": f"cancel_pending|{chat_id}"}]],
             chat_id=chat_id,
         )
         return
@@ -1306,7 +1340,38 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     # ── /sold ─────────────────────────────────────────────────────────────────
     if command == "sold":
-        # Just need the ticker — confirm before removing
+        if step == 2:
+            # User typed an exit price after tapping a position from the picker
+            ticker = data.get("ticker", "")
+            if not ticker:
+                return "⚠️ Couldn't find the ticker. Please try /sold again."
+            if not _is_number(text.strip()):
+                return "⚠️ Please send just the price, e.g. <code>197.50</code>"
+            price = float(text.strip().replace(",", ""))
+            # Show P&L preview
+            log   = load_user_trade_log(chat_id)
+            entry = None
+            for t in log.get("open", []):
+                if t["ticker"] == ticker:
+                    entry = t.get("entry_price")
+                    break
+            pnl_preview = ""
+            if entry:
+                try:
+                    ret  = (price - float(entry)) / float(entry) * 100
+                    sign = "+" if ret >= 0 else ""
+                    pnl_preview = f"\n<i>Return: {sign}{ret:.1f}% vs entry <code>${_p(entry)}</code></i>"
+                except Exception:
+                    pass
+            send_inline_keyboard(
+                f"💸 Close <b>{ticker}</b> at <code>${_p(price)}</code>?{pnl_preview}",
+                [[{"text": f"✅ Yes, close {ticker}", "callback_data": f"sold_confirm|{ticker}|{price}|"},
+                  {"text": "❌ Cancel",               "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
+        # step 1 — user typed a ticker name
         name_raw = text.strip().split()[0] if text.strip() else ""
         if not name_raw:
             return "⚠️ Please tell me which stock or crypto you sold."
