@@ -2231,6 +2231,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n<b>💼 My Portfolio</b>"
             "\n/bought — Add a stock to your portfolio"
             "\n/sold — Remove a stock from your portfolio"
+            "\n/summary — Portfolio health: P&amp;L, win rate, open positions"
             "\n/positions — Open positions with live alerts\n"
             "\n<b>🧪 Paper Trading</b>"
             "\n/paper_buy — Simulate a buy (no real money)"
@@ -3480,6 +3481,123 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 chat_id=chat_id,
             )
         return ""
+
+    # ── /summary — one-shot portfolio health view ────────────────────────────
+    if text == "SUMMARY":
+        import yfinance as yf
+        from trade_logger import get_performance_stats
+
+        log         = load_user_trade_log(chat_id)
+        open_trades = log.get("open", [])
+        stats       = get_performance_stats(chat_id)
+
+        lines = ["📊 <b>Portfolio Health</b>", ""]
+
+        # ── All-time stats block ──────────────────────────────────────────────
+        if stats and stats["count"] > 0:
+            wins   = stats["wins"]
+            losses = stats["count"] - wins
+            sign   = "+" if stats["total_gain_usd"] >= 0 else ""
+            pnl_sign = "+" if stats["avg_return"] >= 0 else ""
+            lines.append(
+                f"<b>All-time</b>  ·  {stats['count']} trades  ·  "
+                f"<b>{stats['win_rate']}%</b> win rate  ({wins}W / {losses}L)"
+            )
+            lines.append(
+                f"P&amp;L: <b>{sign}${abs(stats['total_gain_usd']):.2f}</b>  ·  "
+                f"avg <b>{pnl_sign}{stats['avg_return']}%</b>/trade"
+            )
+            # Best / worst
+            if stats.get("best"):
+                bt, br = stats["best"]
+                wt, wr = stats["worst"]
+                lines.append(
+                    f"🏆 Best: <b>{bt}</b> {'+' if br >= 0 else ''}{br:.1f}%  ·  "
+                    f"💔 Worst: <b>{wt}</b> {'+' if wr >= 0 else ''}{wr:.1f}%"
+                )
+            # Streak
+            if stats.get("streak", 0) >= 2:
+                lines.append(f"🔥 <b>{stats['streak']} win streak</b>")
+            elif stats["count"] > 0 and wins == 0:
+                lines.append(f"<i>No wins yet — hang in there.</i>")
+            # Outcomes breakdown
+            t_hits  = stats.get("targets_hit", 0)
+            s_hits  = stats.get("stops_hit", 0)
+            expired = stats.get("expired", 0)
+            if t_hits or s_hits or expired:
+                outcome_parts = []
+                if t_hits:  outcome_parts.append(f"🎯 {t_hits} targets hit")
+                if s_hits:  outcome_parts.append(f"🛑 {s_hits} stops hit")
+                if expired: outcome_parts.append(f"⏱ {expired} expired")
+                lines.append("  ".join(outcome_parts))
+        else:
+            lines.append("<i>No closed trades yet.</i>")
+            lines.append("<i>Log a buy with /bought — I'll track target &amp; stop for you.</i>")
+
+        # ── Open positions block ──────────────────────────────────────────────
+        lines.append("")
+
+        if open_trades:
+            # Deduplicate by ticker
+            seen: set = set()
+            unique: list = []
+            for t in open_trades:
+                if t["ticker"] not in seen:
+                    seen.add(t["ticker"])
+                    unique.append(t)
+
+            lines.append(f"<b>Open</b>  ·  {len(unique)} holding{'s' if len(unique) != 1 else ''}")
+
+            # Fetch live prices in bulk
+            prices: dict = {}
+            for ticker in [t["ticker"] for t in unique]:
+                try:
+                    info  = yf.Ticker(ticker).fast_info
+                    price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
+                    if price:
+                        prices[ticker] = round(float(price), 2)
+                        continue
+                except Exception:
+                    pass
+                try:
+                    hist = yf.Ticker(ticker).history(period="1d", interval="1m")
+                    if not hist.empty:
+                        prices[ticker] = round(float(hist["Close"].iloc[-1]), 2)
+                except Exception:
+                    pass
+
+            for t in unique:
+                ticker  = t["ticker"]
+                current = prices.get(ticker)
+                entry   = t.get("entry_price")
+                target  = t.get("target_price")
+                stop    = t.get("stop_loss")
+
+                if current and entry:
+                    pct     = (current - float(entry)) / float(entry) * 100
+                    sign    = "+" if pct >= 0 else ""
+                    badge   = ""
+                    if stop   and current <= float(stop):
+                        badge = "  🔴 STOP HIT"
+                    elif stop and current <= float(stop) * 1.03:
+                        badge = "  ⚠️ NEAR STOP"
+                    elif target and current >= float(target) * 0.97:
+                        badge = "  🎯 NEAR TARGET"
+                    lines.append(
+                        f"<b>{ticker}</b>  <code>${_p(current)}</code>  "
+                        f"<b>{sign}{pct:.1f}%</b> vs entry{badge}"
+                    )
+                elif current:
+                    lines.append(f"<b>{ticker}</b>  <code>${_p(current)}</code>  <i>no entry price</i>")
+                else:
+                    lines.append(f"<b>{ticker}</b>  <i>price unavailable</i>")
+        else:
+            lines.append("<b>Open</b>  ·  no holdings")
+            lines.append("<i>Use /bought to log a position.</i>")
+
+        lines.append("")
+        lines.append("<i>/positions for full detail  ·  /history for trade log</i>")
+        return "\n".join(lines)
 
     # ── /positions / /portfolio ───────────────────────────────────────────────
     if text in ("POSITIONS", "PORTFOLIO"):
