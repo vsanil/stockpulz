@@ -279,7 +279,11 @@ def format_daily_message(picks: dict, config: dict,
                 f"— consider sizing down to manage sector risk.</i>"
             )
 
-    lines += ["", "⚠️ <i>Not financial advice.</i>  📋 /help  ·  📲 /share"]
+    lines += [
+        "",
+        "⚠️ <i>Not financial advice.</i>  📋 /help  ·  📲 /share",
+        "<i>💬 Have a question about any pick? Just type it.</i>",
+    ]
     if concentration_line:
         lines.append(concentration_line)
 
@@ -401,4 +405,116 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
         "<i>Entry vs Friday close — not actual trade results.</i>",
         "<i>⚠️ Not financial advice.</i>",
     ]
+    return "\n".join(lines)
+
+
+# ── EOD portfolio summary (3:30 PM close check) ───────────────────────────────
+
+def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[dict]) -> str:
+    """
+    End-of-day snapshot sent at 3:30 PM.
+    Shows today's picks with move since entry, plus any user holdings with alerts.
+    Always sent — not just when a target/stop hits.
+    """
+    et     = pytz.timezone("America/New_York")
+    now_et = datetime.now(et)
+    now    = now_et.strftime("%I:%M %p ET").lstrip("0")
+
+    stocks = picks.get("stocks", picks)
+    crypto = picks.get("crypto", {})
+
+    lines = [f"<u><b>📊 Close Check — {now}</b></u>", ""]
+
+    any_picks = False
+
+    def _row(symbol: str, entry, target, stop, label: str = "") -> str:
+        current = current_prices.get(symbol)
+        if current is None or entry is None:
+            return f"  <b>{symbol}</b>  <i>price unavailable</i>"
+        pct   = (current - float(entry)) / float(entry) * 100
+        sign  = "+" if pct >= 0 else ""
+        arrow = "▲" if pct >= 0 else "▼"
+        emoji = "🟢" if pct >= 1 else ("🔴" if pct <= -1 else "🟡")
+        badges = []
+        if stop and current <= float(stop):
+            badges.append("🔴 STOP HIT")
+        elif stop and current <= float(stop) * 1.03:
+            badges.append("⚠️ near stop")
+        if target and current >= float(target) * 0.97:
+            badges.append("🎯 near target")
+        badge_str = f"  <i>{' · '.join(badges)}</i>" if badges else ""
+        lbl = f"  <i>{label}</i>" if label else ""
+        return (f"  {emoji} <b>{symbol}</b>  <code>${_p(current)}</code>  "
+                f"{arrow}{sign}{abs(pct):.1f}%  from <code>${_p(entry)}</code>{badge_str}{lbl}")
+
+    st  = stocks.get("short_term", [])
+    lt  = stocks.get("long_term",  [])
+    cst = crypto.get("short_term", [])
+
+    if st or lt or cst:
+        any_picks = True
+        lines.append("<b>Today's picks:</b>")
+        for s in st:
+            lines.append(_row(s.get("ticker", ""), s.get("entry_price"), s.get("target_price"), s.get("stop_loss")))
+        for s in lt:
+            lines.append(_row(s.get("ticker", ""), s.get("entry_price"), s.get("target_price"), None, "LT"))
+        for c in cst:
+            lines.append(_row(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss"), "crypto"))
+
+    # User's portfolio holdings not already in picks
+    pick_symbols = (
+        {s.get("ticker") for s in st + lt} |
+        {c.get("symbol") for c in cst}
+    )
+    extra = [h for h in open_holdings if h.get("ticker") not in pick_symbols
+             and h.get("entry_price") and current_prices.get(h["ticker"])]
+
+    if extra:
+        lines.append("")
+        lines.append("<b>Your portfolio:</b>")
+        for h in extra:
+            lines.append(_row(h["ticker"], h.get("entry_price"), h.get("target_price"), h.get("stop_loss")))
+
+    if not any_picks and not extra:
+        return ""   # nothing to show
+
+    lines += ["", "<i>⚠️ Not financial advice.</i>  📋 /help"]
+    return "\n".join(lines)
+
+
+# ── Monday "Week Ahead" block ────────────────────────────────────────────────
+
+def format_week_ahead(earnings_this_week: dict, regime: dict | None = None) -> str:
+    """
+    Monday-only block appended to the morning message.
+    Shows upcoming earnings for held/watchlisted tickers + macro context.
+
+    earnings_this_week: {ticker: date_str, ...}  e.g. {"MSFT": "Wed May 14", "GOOGL": "Thu May 15"}
+    regime: output of get_market_regime()
+    """
+    lines = ["", "─" * 20, "🗓 <b>Week Ahead</b>"]
+
+    if earnings_this_week:
+        lines.append("")
+        lines.append("<b>Earnings this week:</b>")
+        for ticker, date_str in sorted(earnings_this_week.items(), key=lambda x: x[1]):
+            lines.append(f"  📢 <b>{ticker}</b> — {date_str}")
+        lines.append("<i>Earnings can cause sharp moves — size positions accordingly.</i>")
+    else:
+        lines.append("<i>No major earnings this week for today's picks.</i>")
+
+    if regime:
+        r = regime.get("regime", "neutral")
+        vix = regime.get("vix")
+        regime_note = {
+            "bull":     "📈 Trend is bullish — momentum setups favoured.",
+            "bear":     "🐻 Bear regime — stay defensive, smaller sizes.",
+            "volatile": "⚡ High volatility — tighten stops, reduce exposure.",
+            "neutral":  "🟡 Mixed signals — follow entries, respect stops.",
+        }.get(r, "")
+        if regime_note:
+            lines += ["", regime_note]
+        if vix:
+            lines.append(f"<i>VIX: {vix} — {'elevated fear' if vix > 20 else 'calm'}</i>")
+
     return "\n".join(lines)
