@@ -434,16 +434,19 @@ def handle_callback_query(callback_query: dict) -> None:
         ticker = parts[1].upper() if len(parts) > 1 else ""
         if not ticker:
             return
-        reply = _execute_bought(ticker, chat_id)
-        send_message(reply, chat_id=chat_id)
-        # Increment shared buy counter if social feature is enabled
         try:
-            from config_manager import increment_buy_count
-            cfg = get_config()
-            if cfg.get("show_buy_counts"):
-                increment_buy_count(ticker)
+            reply = _execute_bought(ticker, chat_id)
+            send_message(reply, chat_id=chat_id)
+            try:
+                from config_manager import increment_buy_count
+                cfg = get_config()
+                if cfg.get("show_buy_counts"):
+                    increment_buy_count(ticker)
+            except Exception as exc:
+                print(f"[bot] buy count increment failed (non-critical): {exc}")
         except Exception as exc:
-            print(f"[bot] buy count increment failed (non-critical): {exc}")
+            print(f"[bot] quickbuy failed for {ticker}: {exc}")
+            send_message(f"⚠️ Couldn't log <b>{ticker}</b> — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
         return
 
     if action == "chart":
@@ -451,11 +454,18 @@ def handle_callback_query(callback_query: dict) -> None:
         asset_type = parts[2] if len(parts) > 2 else "stock"
         if not ticker:
             return
-        send_message("📊 <i>Generating chart…</i>", chat_id=chat_id)
-        threading.Thread(
-            target=_send_chart, args=(ticker, asset_type, chat_id), daemon=True
-        ).start()
+        try:
+            send_message("📊 <i>Generating chart…</i>", chat_id=chat_id)
+            threading.Thread(
+                target=_send_chart, args=(ticker, asset_type, chat_id), daemon=True
+            ).start()
+        except Exception as exc:
+            print(f"[bot] chart failed for {ticker}: {exc}")
+            send_message(f"⚠️ Chart unavailable for <b>{ticker}</b> right now.", chat_id=chat_id)
         return
+
+    if action == "noop":
+        return   # section header tap — do nothing
 
     if action == "approve_user":
         new_id = parts[1] if len(parts) > 1 else ""
