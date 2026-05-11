@@ -620,7 +620,10 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
     if not any_picks and not extra:
         return ""   # nothing to show
 
-    lines += ["", "<i>⚠️ Not financial advice.</i>  📋 /help"]
+    lines += [
+        "",
+        "<i>🟢 +1%+  🟡 flat  🔴 −1%+  ·  ⚠️ Not financial advice.</i>  📋 /help",
+    ]
     return "\n".join(lines)
 
 
