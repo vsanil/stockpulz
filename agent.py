@@ -30,7 +30,7 @@ from trade_logger import check_and_close_trades
 from price_alert_manager import check_all_alerts
 from screener import run_screener
 from crypto_screener import run_crypto_screener
-from ai_analyzer import analyze_with_claude, personalize_picks, generate_trade_debrief
+from ai_analyzer import analyze_with_claude, personalize_picks, personalize_picks_batch, generate_trade_debrief
 from price_checker import get_current_prices
 from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
@@ -1211,6 +1211,48 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
     except Exception as streak_exc:
         print(f"[agent] Streak computation failed (non-critical): {streak_exc}")
 
+    # ── Pre-compute personalised notes in ONE batch call ─────────────────────
+    # Collect only users who have open positions (no positions → no useful note).
+    # Batch-call Haiku once for all of them instead of N individual calls.
+    users_batch_data: list[dict] = []
+    user_positions_cache: dict[str, list] = {}   # uid → open positions
+
+    for uid in recipients:
+        try:
+            user_cfg_tmp = {**global_config, **get_user_config(uid)}
+            if user_cfg_tmp.get("paused"):
+                continue
+            log            = load_user_trade_log(uid)
+            open_positions = log.get("open", [])
+            user_positions_cache[uid] = open_positions
+            if open_positions:   # only users with positions need personalisation
+                users_batch_data.append({
+                    "uid":          uid,
+                    "positions":    open_positions,
+                    "risk_profile": user_cfg_tmp.get("risk_profile", "moderate"),
+                })
+        except Exception:
+            user_positions_cache[uid] = []
+
+    # One batch Haiku call → {uid: {ticker: note}}
+    all_personal_notes: dict[str, dict] = {}
+    if users_batch_data:
+        try:
+            all_personal_notes = personalize_picks_batch(picks, users_batch_data)
+            print(f"[agent] Batch personalisation done: {len(users_batch_data)} users, "
+                  f"{len(all_personal_notes)} notes generated.")
+        except Exception as batch_exc:
+            print(f"[agent] personalize_picks_batch failed (non-critical): {batch_exc}")
+
+    # Load buy counts once (shared across all users)
+    buy_counts: dict = {}
+    if global_config.get("show_buy_counts"):
+        try:
+            from config_manager import load_buy_counts
+            buy_counts = load_buy_counts()
+        except Exception:
+            pass
+
     for uid in recipients:
         try:
             user_cfg = {**global_config, **get_user_config(uid)}
@@ -1218,25 +1260,8 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
                 print(f"[agent] Skipping {uid} — picks paused by user.")
                 continue
 
-            # ── Personalised notes (Feature 1) ────────────────────────────────
-            # Load user's open positions and ask Haiku why each pick fits their portfolio.
-            personal_notes: dict = {}
-            try:
-                log = load_user_trade_log(uid)
-                open_positions = log.get("open", [])
-                risk_profile   = user_cfg.get("risk_profile", "moderate")
-                personal_notes = personalize_picks(picks, open_positions, risk_profile)
-            except Exception as pn_exc:
-                print(f"[agent] personalize_picks failed for {uid} (non-critical): {pn_exc}")
-
-            # Load buy counts once (shared across all users, only if feature is on)
-            buy_counts: dict = {}
-            if global_config.get("show_buy_counts"):
-                try:
-                    from config_manager import load_buy_counts
-                    buy_counts = load_buy_counts()
-                except Exception:
-                    pass
+            # Look up pre-computed notes — no Haiku call here
+            personal_notes: dict = all_personal_notes.get(uid, {})
 
             message = format_daily_message(picks, user_cfg, personal_notes=personal_notes,
                                            pick_streaks=pick_streaks, buy_counts=buy_counts)
