@@ -131,12 +131,36 @@ services:
         sync: false
 
   - type: cron
-    name: stock-agent-weekend
+    name: stock-agent-saturday
     runtime: python
-    schedule: "0 12 * * 0,6"       # 8:00 AM ET (Sat–Sun) — crypto only
+    schedule: "0 12 * * 6"         # 8:00 AM ET Saturday — crypto picks + weekly recap
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
     envVars:
+      - key: RUN_MODE
+        value: weekly
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: GH_GIST_TOKEN
+        sync: false
+      - key: GIST_ID
+        sync: false
+
+  - type: cron
+    name: stock-agent-sunday
+    runtime: python
+    schedule: "0 12 * * 0"         # 8:00 AM ET Sunday — Week Ahead briefing
+    buildCommand: pip install -r requirements.txt
+    startCommand: python agent.py
+    envVars:
+      - key: RUN_MODE
+        value: week_ahead
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: FINNHUB_API_KEY

@@ -5,6 +5,7 @@ Three run modes (auto-detected by ET time, or forced via RUN_MODE env var):
   morning      → 8:00 AM ET  — full screener + Claude analysis + save picks
   confirmation → 10:30 AM ET — fetch live prices, compare to morning picks
   weekly       → Saturday 8 AM — runs crypto morning picks THEN weekly recap
+  week_ahead   → Sunday 8 AM  — standalone Week Ahead brief (earnings + regime)
 
 Env vars:
   DRY_RUN=true    → print message, don't send
@@ -147,8 +148,10 @@ MOCK_CRYPTO_CANDIDATES = {
 def detect_run_mode(now_et: datetime) -> str:
     """Auto-detect run mode by ET hour/weekday. Override with RUN_MODE env var."""
     forced = os.environ.get("RUN_MODE", "").lower()
-    if forced in ("morning", "confirmation", "weekly", "close_check", "prescreener", "price_alerts"):
+    if forced in ("morning", "confirmation", "weekly", "close_check", "prescreener", "price_alerts", "week_ahead"):
         return forced
+    if now_et.weekday() == 6 and now_et.hour < 14:   # Sunday morning → week ahead briefing
+        return "week_ahead"
     if now_et.weekday() == 5 and now_et.hour < 10:   # Saturday morning
         return "weekly"
     if now_et.hour < 10:
@@ -703,6 +706,81 @@ def run_weekly_recap(config: dict, now_et: datetime):
         print(f"[agent] Weekly recap failed (non-critical): {exc}")
 
 
+# ── Sunday Week Ahead briefing ───────────────────────────────────────────────
+
+def run_week_ahead(config: dict):
+    """
+    Sunday run — send a standalone 'Week Ahead' message to all users.
+    Includes: upcoming earnings for watchlisted tickers, current market
+    regime, and the standard week-ahead commentary from format_week_ahead().
+    No new picks are generated — this is a pure briefing.
+    """
+    print("[agent] Building Sunday Week Ahead briefing...")
+
+    # Gather tickers from all users' watchlists + any still-open trades
+    all_tickers: list[str] = []
+    for uid in _all_recipients():
+        try:
+            wl = get_user_config(uid).get("watchlist", [])
+            all_tickers.extend(wl)
+        except Exception:
+            pass
+    # Include this week's last saved picks if available
+    try:
+        from config_manager import load_weekly_picks
+        weekly = load_weekly_picks()
+        if weekly:
+            latest_picks = list(weekly.values())[-1]
+            stocks = latest_picks.get("stocks", latest_picks)
+            for s in stocks.get("short_term", []) + stocks.get("long_term", []):
+                t = s.get("ticker")
+                if t:
+                    all_tickers.append(t)
+    except Exception as exc:
+        print(f"[agent] Week-ahead: weekly picks load failed (non-critical): {exc}")
+
+    all_tickers = list(dict.fromkeys(t for t in all_tickers if t))
+
+    # Fetch earnings + regime
+    earnings_week: dict = {}
+    try:
+        from earnings_checker import get_upcoming_earnings
+        earnings_week = get_upcoming_earnings(all_tickers, days_ahead=5) if all_tickers else {}
+        print(f"[agent] Week-ahead: {len(earnings_week)} earnings events found.")
+    except Exception as exc:
+        print(f"[agent] Week-ahead: earnings fetch failed (non-critical): {exc}")
+
+    regime: dict = {}
+    try:
+        from market_regime import get_market_regime
+        regime = get_market_regime()
+    except Exception as exc:
+        print(f"[agent] Week-ahead: regime fetch failed (non-critical): {exc}")
+
+    week_msg = format_week_ahead(earnings_week, regime)
+
+    if not week_msg:
+        print("[agent] Week-ahead message was empty — skipping.")
+        return
+
+    recipients = _all_recipients()
+    print(f"[agent] Sending Sunday Week Ahead to {len(recipients)} user(s)...")
+    for uid in recipients:
+        try:
+            user_cfg = {**config, **get_user_config(uid)}
+            if user_cfg.get("paused"):
+                print(f"[agent] Skipping week-ahead for {uid} — picks paused.")
+                continue
+            if DRY_RUN:
+                print(f"\n{'=' * 60}\nDRY RUN — Week Ahead for {uid}:\n{'=' * 60}\n{week_msg}\n")
+            else:
+                send_message(week_msg, chat_id=uid)
+        except Exception as exc:
+            print(f"[agent] Week-ahead send failed for {uid}: {exc}")
+
+    print("[agent] Sunday Week Ahead complete.")
+
+
 # ── Intraday price-alert-only run (every 30 min during market hours) ─────────
 
 def run_price_alerts():
@@ -776,6 +854,8 @@ def main():
         run_morning(config, now_et)
     elif mode == "weekly":
         run_weekly_recap(config, now_et)
+    elif mode == "week_ahead":
+        run_week_ahead(config)
     elif mode == "close_check":
         run_close_check()
     elif mode == "price_alerts":
