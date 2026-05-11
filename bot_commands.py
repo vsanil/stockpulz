@@ -2109,6 +2109,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n/next — When's the next scheduled pick"
             "\n/reset — Reset all your settings"
             "\n/share — Get your invite link\n"
+            "\n<i>💬 You can also just type naturally — e.g. \"why was NVDA picked?\" "
+            "or \"set my risk to aggressive\" or \"alert me when BTC hits 100k\".</i>\n"
         )
         if is_admin:
             msg += (
@@ -2367,26 +2369,26 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 pass
         send_message(
             "✅ <b>You're in! Welcome to StockPulz.</b>\n\n"
-            "Here's what happens from here:\n\n"
-            "📬 <b>8:30 AM ET</b> — morning picks land in this chat, before the market opens. "
-            "Each pick includes an entry price, profit target, and stop-loss.\n\n"
-            "🕙 <b>10:30 AM ET</b> — a live check compares current prices to your entries — hold, watch, or exit.\n\n"
-            "📅 <b>Weekends</b> — crypto picks + a weekly performance recap.\n\n"
-            "<b>Commands you'll use most:</b>\n"
-            "/today — today's picks (if market is open)\n"
-            "/bought AAPL — log a trade &amp; track it\n"
-            "/positions — open trades &amp; P&amp;L\n"
-            "/alert NVDA above 1000 — price alert\n"
-            "/settings — your preferences\n"
-            "/help — full command list\n\n"
-            "<b>Customise your picks:</b>\n"
-            "/crypto off — hide crypto if you only want stocks\n"
-            "/set_risk aggressive — adjust risk appetite\n"
-            "/set_budget stocks 200 — set per-trade budget\n\n"
-            "<i>You can also just type naturally — e.g. \"why was NVDA picked?\" or \"add Tesla to my watchlist\".</i>"
+            "Every morning before the market opens, you'll get 2–5 AI-curated stock and crypto picks — "
+            "each with an entry price, profit target, stop-loss, and a one-line reason why.\n\n"
+            "<b>Your daily schedule:</b>\n"
+            "📬 <b>8 AM ET</b> — morning picks with conviction scores &amp; personal notes\n"
+            "🕙 <b>10:30 AM</b> — live price check: hold, watch, or exit\n"
+            "📊 <b>3:30 PM</b> — end-of-day snapshot of how picks moved\n"
+            "📅 <b>Saturday</b> — crypto picks + weekly recap\n\n"
+            "<b>Step 1 — Set your preferences:</b>\n"
+            "Just tap /settings to set your risk level, budget, and whether you want crypto.\n\n"
+            "<b>Step 2 — Track your portfolio:</b>\n"
+            "Tell me what you hold with /bought AAPL and I'll watch it for you.\n\n"
+            "<b>Step 3 — Ask anything:</b>\n"
+            "You can type naturally — \"why was NVDA picked?\", \"set my risk to aggressive\", "
+            "\"alert me when BTC hits 100k\". No slash commands needed.\n\n"
+            "📋 /help — full command list  ·  /today — today's picks"
             + picks_msg,
             chat_id=new_id,
         )
+        # Send settings panel immediately after welcome so user can configure on the spot
+        _send_settings_panel(new_id)
         return f"✅ <code>{new_id}</code> approved and welcomed. Today's picks sent."
 
     if text.startswith("REMOVEUSER ") or text == "REMOVEUSER":
@@ -3436,8 +3438,24 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
             lines.append("")
 
-        lines.append("<i>Tap /sold to exit a position  ·  /bought to add one</i>")
-        return "\n".join(lines)
+        lines.append("<i>Tap a button to remove a holding, or /bought to add one</i>")
+        send_message("\n".join(lines), chat_id=chat_id)
+
+        # ── Quick-remove buttons — one per holding ────────────────────────────
+        buttons = []
+        for t in unique_trades:
+            ticker = t["ticker"]
+            buttons.append([{
+                "text":          f"🗑 Remove {ticker}",
+                "callback_data": f"confirm_sell|{ticker}",
+            }])
+        if buttons:
+            send_inline_keyboard(
+                "Remove a holding from your portfolio:",
+                buttons,
+                chat_id=chat_id,
+            )
+        return ""
 
     # ── Natural language fallback ─────────────────────────────────────────────
     return _handle_natural_language(original or text, chat_id=chat_id)

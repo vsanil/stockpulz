@@ -33,6 +33,7 @@ from ai_analyzer import analyze_with_claude, personalize_picks, generate_trade_d
 from price_checker import get_current_prices
 from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
+    format_eod_summary, format_week_ahead,
 )
 from telegram_api import send_message
 
@@ -381,6 +382,40 @@ def run_morning(config: dict, now_et: datetime):
 
     _send_morning_personalised(picks, config, label="8:00 AM Morning Briefing")
 
+    # ── Monday "Week Ahead" block ─────────────────────────────────────────────
+    if now_et.weekday() == 0:   # Monday only
+        try:
+            from earnings_checker import get_upcoming_earnings
+            stocks   = picks.get("stocks", picks)
+            crypto   = picks.get("crypto", {})
+            all_tickers = (
+                [s.get("ticker") for s in stocks.get("short_term", [])] +
+                [s.get("ticker") for s in stocks.get("long_term",  [])]
+            )
+            # Also include each user's watchlist tickers
+            for uid in _all_recipients():
+                try:
+                    from config_manager import get_user_config
+                    wl = get_user_config(uid).get("watchlist", [])
+                    all_tickers.extend(wl)
+                except Exception:
+                    pass
+            all_tickers = list(dict.fromkeys(t for t in all_tickers if t))
+            earnings_week = get_upcoming_earnings(all_tickers, days_ahead=5)
+            from market_regime import get_market_regime
+            regime = get_market_regime()
+            week_msg = format_week_ahead(earnings_week, regime)
+            if week_msg:
+                for uid in _all_recipients():
+                    try:
+                        user_cfg = {**config, **get_user_config(uid)}
+                        if not user_cfg.get("paused"):
+                            send_message(week_msg, chat_id=uid)
+                    except Exception:
+                        pass
+        except Exception as exc:
+            print(f"[agent] Week-ahead block failed (non-critical): {exc}")
+
     # ── Admin run summary ─────────────────────────────────────────────────────
     try:
         stocks  = picks.get("stocks", {})
@@ -479,6 +514,67 @@ def run_confirmation():
         except Exception as exc:
             print(f"[agent] Earnings warning check failed for {uid} (non-critical): {exc}")
 
+    # ── Watchlist signal alerts ───────────────────────────────────────────────
+    # Fire a proactive alert when a watchlisted ticker hits a technical signal
+    # (RSI < 40 bouncing, or MACD crossover) even if it didn't make today's picks.
+    try:
+        import yfinance as yf
+        import pandas as pd
+        pick_symbols = set()
+        for s in picks.get("stocks", picks).get("short_term", []):
+            pick_symbols.add(s.get("ticker", ""))
+        for s in picks.get("stocks", picks).get("long_term", []):
+            pick_symbols.add(s.get("ticker", ""))
+
+        for uid in _all_recipients():
+            try:
+                from config_manager import get_user_config
+                watchlist = get_user_config(uid).get("watchlist", [])
+                # Only scan tickers NOT already in today's picks
+                scan = [t for t in watchlist if t and t not in pick_symbols]
+                if not scan:
+                    continue
+                hist = yf.download(" ".join(scan), period="60d", interval="1d",
+                                   progress=False, auto_adjust=True)
+                closes = hist["Close"] if hasattr(hist["Close"], "columns") else hist[["Close"]].rename(columns={"Close": scan[0]})
+                for ticker in scan:
+                    try:
+                        col = closes[ticker] if ticker in closes.columns else closes.iloc[:, 0]
+                        col = col.dropna()
+                        if len(col) < 20:
+                            continue
+                        # RSI-14
+                        delta  = col.diff()
+                        gain   = delta.clip(lower=0).rolling(14).mean()
+                        loss   = (-delta.clip(upper=0)).rolling(14).mean()
+                        rs     = gain / loss.replace(0, float("nan"))
+                        rsi    = (100 - 100 / (1 + rs)).iloc[-1]
+                        # MACD crossover (12/26/9)
+                        ema12  = col.ewm(span=12, adjust=False).mean()
+                        ema26  = col.ewm(span=26, adjust=False).mean()
+                        macd   = ema12 - ema26
+                        signal = macd.ewm(span=9, adjust=False).mean()
+                        crossed_up = macd.iloc[-1] > signal.iloc[-1] and macd.iloc[-2] <= signal.iloc[-2]
+                        current_price = round(float(col.iloc[-1]), 2)
+                        alerts = []
+                        if rsi < 38:
+                            alerts.append(f"RSI {rsi:.0f} — oversold")
+                        if crossed_up:
+                            alerts.append("MACD bullish crossover")
+                        if alerts:
+                            send_message(
+                                f"👀 <b>Watchlist Signal — {ticker}</b>  <code>${current_price:,.2f}</code>\n"
+                                f"<i>{' · '.join(alerts)}</i>\n"
+                                f"Not in today's picks — but worth a look.",
+                                chat_id=uid,
+                            )
+                    except Exception:
+                        continue
+            except Exception as exc:
+                print(f"[agent] Watchlist scan failed for {uid} (non-critical): {exc}")
+    except Exception as exc:
+        print(f"[agent] Watchlist signal check failed (non-critical): {exc}")
+
     message = format_confirmation_message(picks, current_prices)
     _send_or_print(message, label="10:30 AM Confirmation")
 
@@ -538,6 +634,23 @@ def run_close_check():
             print(f"[agent] {fired} price alert(s) triggered.")
     except Exception as exc:
         print(f"[agent] Price alert check failed (non-critical): {exc}")
+
+    # ── Always-send EOD portfolio summary ────────────────────────────────────
+    # Even when no target/stop was hit, show a brief snapshot of how the day went.
+    for uid in _all_recipients():
+        try:
+            from config_manager import get_user_config
+            if get_user_config(uid).get("paused"):
+                continue
+            log = load_user_trade_log(uid)
+            eod_msg = format_eod_summary(picks, current_prices, log.get("open", []))
+            if eod_msg:
+                if DRY_RUN:
+                    print(f"\nDRY RUN — EOD Summary for {uid}:\n{eod_msg}")
+                else:
+                    send_message(eod_msg, chat_id=uid)
+        except Exception as exc:
+            print(f"[agent] EOD summary failed for {uid} (non-critical): {exc}")
 
 
 # ── Weekly recap (Saturday morning) ──────────────────────────────────────────
