@@ -305,6 +305,37 @@ def format_daily_message(picks: dict, config: dict,
     return "\n".join(lines)
 
 
+# ── Quick-buy keyboard for morning picks ─────────────────────────────────────
+
+def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[dict]]:
+    """
+    Build an inline keyboard for the morning picks message.
+    Returns one '✅ Bought TICKER' button per pick (ST stocks, LT stocks, crypto).
+    Tapping a button fires the quickbuy callback — no typing needed.
+    """
+    cfg         = config or {}
+    show_crypto = cfg.get("show_crypto", True)
+
+    stocks = picks.get("stocks", picks)
+    crypto = picks.get("crypto", {})
+
+    buttons = []
+    for s in stocks.get("short_term", []):
+        ticker = s.get("ticker", "")
+        if ticker:
+            buttons.append([{"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"}])
+    for s in stocks.get("long_term", []):
+        ticker = s.get("ticker", "")
+        if ticker:
+            buttons.append([{"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"}])
+    if show_crypto:
+        for c in crypto.get("short_term", []):
+            sym = c.get("symbol", "")
+            if sym:
+                buttons.append([{"text": f"✅ Bought {sym}", "callback_data": f"quickbuy|{sym}"}])
+    return buttons
+
+
 # ── Confirmation message ──────────────────────────────────────────────────────
 
 def format_confirmation_message(picks: dict, current_prices: dict) -> str:
@@ -323,7 +354,11 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
         if current is None or entry is None:
             return f"   <b>{symbol}</b>  price unavailable"
         pct   = (current - float(entry)) / float(entry) * 100
-        arrow = "▲" if pct >= 0 else "▼"
+        if abs(pct) < 0.05:
+            change_str = "≈0%"
+        else:
+            arrow      = "▲" if pct >= 0 else "▼"
+            change_str = f"{arrow}{abs(pct):.1f}%"
         if stop and current <= float(stop):
             badge = "🔴 Stop hit — consider exit"
         elif pct <= -2:
@@ -335,7 +370,7 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
         else:
             badge = "🟡 Flat — hold"
         return (f"   <b>{symbol}</b>  <code>${_p(entry)}</code> → <code>${_p(current)}</code> "
-                f"{arrow}{abs(pct):.1f}%  {badge}")
+                f"{change_str}  {badge}")
 
     st  = stocks.get("short_term", [])
     lt  = stocks.get("long_term", [])

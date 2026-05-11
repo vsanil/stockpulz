@@ -33,9 +33,9 @@ from ai_analyzer import analyze_with_claude, personalize_picks, generate_trade_d
 from price_checker import get_current_prices
 from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
-    format_eod_summary, format_week_ahead,
+    format_eod_summary, format_week_ahead, build_picks_keyboard,
 )
-from telegram_api import send_message
+from telegram_api import send_message, send_inline_keyboard
 
 ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
@@ -917,7 +917,9 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             if DRY_RUN:
                 print(f"\n{'=' * 60}\nDRY RUN — {label} for {uid}:\n{'=' * 60}\n{message}\n")
             else:
-                success = send_message(message, chat_id=uid)
+                kb      = build_picks_keyboard(picks, user_cfg)
+                success = (send_inline_keyboard(message, kb, chat_id=uid)
+                           if kb else send_message(message, chat_id=uid))
                 if not success:
                     print(f"[agent] WARNING: Morning message failed to send to {uid}.")
         except Exception as exc:
