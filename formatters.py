@@ -570,9 +570,13 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
         if current is None or entry is None:
             return f"  <b>{symbol}</b>  <i>price unavailable</i>"
         pct   = (current - float(entry)) / float(entry) * 100
-        sign  = "+" if pct >= 0 else ""
-        arrow = "▲" if pct >= 0 else "▼"
         emoji = "🟢" if pct >= 1 else ("🔴" if pct <= -1 else "🟡")
+        if abs(pct) < 0.05:
+            change_str = "≈0%"
+        elif pct > 0:
+            change_str = f"▲{pct:.1f}%"
+        else:
+            change_str = f"▼{abs(pct):.1f}%"
         badges = []
         if stop and current <= float(stop):
             badges.append("🔴 STOP HIT")
@@ -583,7 +587,7 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
         badge_str = f"  <i>{' · '.join(badges)}</i>" if badges else ""
         lbl = f"  <i>{label}</i>" if label else ""
         return (f"  {emoji} <b>{symbol}</b>  <code>${_p(current)}</code>  "
-                f"{arrow}{sign}{abs(pct):.1f}%  from <code>${_p(entry)}</code>{badge_str}{lbl}")
+                f"{change_str}  from <code>${_p(entry)}</code>{badge_str}{lbl}")
 
     st  = stocks.get("short_term", [])
     lt  = stocks.get("long_term",  [])
