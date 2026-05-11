@@ -44,6 +44,29 @@ def _upside(entry, target) -> str:
         return ""
 
 
+def _entry_window(entry, is_long_term: bool = False, is_crypto: bool = False) -> str:
+    """
+    Return a one-line entry window hint for a pick.
+
+    Short-term stock / crypto: 2% band  →  "⏱ Enter within 2% — skip if above $X"
+    Long-term stock:           3% band  →  "⏱ Patient entry — up to $X (+3%)"
+    Returns empty string if entry price is missing or invalid.
+    """
+    if not entry:
+        return ""
+    try:
+        e   = float(entry)
+        pct = 0.03 if (is_long_term or is_crypto) else 0.02
+        upper = e * (1 + pct)
+        pct_label = "3%" if pct == 0.03 else "2%"
+        if is_long_term:
+            return f"⏱ <i>Patient entry — up to <code>${_p(upper)}</code>  <b>(+{pct_label})</b></i>"
+        else:
+            return f"⏱ <i>Enter within {pct_label} — skip if above <code>${_p(upper)}</code></i>"
+    except Exception:
+        return ""
+
+
 def _conviction_badge(conviction: int) -> str:
     """Return a subtle signal-strength label for high/low conviction picks."""
     c = max(1, min(5, int(conviction or 3)))
@@ -217,11 +240,13 @@ def format_daily_message(picks: dict, config: dict,
         streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
         social_badge  = _buy_badge(ticker)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
+        window        = _entry_window(entry, is_long_term=False, is_crypto=False)
+        window_line   = f"\n{window}" if window else ""
         return (
             f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
             f"<i>{_esc(_short_company(s.get('company', '')))}</i>{earnings_tag}\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}\n"
+            f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}{window_line}\n"
             f"<i>{_esc(s.get('thesis'))}</i>{personal_line}"
         )
 
@@ -233,11 +258,13 @@ def format_daily_message(picks: dict, config: dict,
         badge         = _conviction_badge(s.get("conviction", 3))
         social_badge  = _buy_badge(ticker)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
+        window        = _entry_window(entry, is_long_term=True, is_crypto=False)
+        window_line   = f"\n{window}" if window else ""
         return (
             f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{social_badge}  "
             f"<i>{_esc(_short_company(s.get('company', '')))}</i>\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>  ·  {_esc(s.get('horizon'))}{alloc_str}\n"
+            f"<i>{_upside(entry, target)}</i>  ·  {_esc(s.get('horizon'))}{alloc_str}{window_line}\n"
             f"<i>{_esc(s.get('thesis'))}</i>{personal_line}"
         )
 
@@ -253,11 +280,13 @@ def format_daily_message(picks: dict, config: dict,
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         lt_label      = "  <i>· long-term</i>" if is_lt else ""
         stop_str      = f"  ·  stop <code>${_p(stop)}</code>" if not is_lt else ""
+        window        = _entry_window(entry, is_long_term=is_lt, is_crypto=True)
+        window_line   = f"\n{window}" if window else ""
         return (
             f"<b>{_esc(sym)}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
             f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}\n"
+            f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}{window_line}\n"
             f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
         )
 
