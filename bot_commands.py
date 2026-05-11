@@ -467,6 +467,30 @@ def handle_callback_query(callback_query: dict) -> None:
     if action == "noop":
         return   # section header tap — do nothing
 
+    if action == "sold_pick":
+        # User tapped a position from the /sold picker — ask for exit price
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        live = _fetch_live_price(ticker)
+        live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+        save_pending_state(chat_id, "sold", step=2, data={"ticker": ticker})
+        kb = [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]]
+        if live:
+            kb.insert(0, [{"text": f"✅ Sell at live price ${_p(live)}", "callback_data": f"sold_confirm|{ticker}|{live}|"}])
+        send_inline_keyboard(
+            f"💸 <b>{ticker}</b> — what price did you sell at?{live_hint}\n"
+            f"<i>Type the price, or tap the button to use live price.</i>",
+            kb,
+            chat_id=chat_id,
+        )
+        return
+
+    if action == "sold_manual":
+        # User wants to type a ticker manually
+        _prompt_for_param("sold", chat_id)
+        return
+
     if action == "approve_user":
         new_id = parts[1] if len(parts) > 1 else ""
         if not new_id:
@@ -3332,7 +3356,34 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
     # ── /sold [TICKER|name [price]] ──────────────────────────────────────────
     if text == "SOLD":
-        _prompt_for_param("sold", chat_id)
+        # Show open positions as tappable buttons — no typing needed
+        log         = load_user_trade_log(chat_id)
+        open_trades = log.get("open", [])
+        seen: set   = set()
+        unique      = []
+        for t in open_trades:
+            if t["ticker"] not in seen:
+                seen.add(t["ticker"])
+                unique.append(t)
+
+        if unique:
+            buttons = []
+            for t in unique:
+                ticker = t["ticker"]
+                entry  = t.get("entry_price")
+                entry_str = f"  (entry ${_p(entry)})" if entry else ""
+                buttons.append([{
+                    "text":          f"💸 {ticker}{entry_str}",
+                    "callback_data": f"sold_pick|{ticker}",
+                }])
+            buttons.append([{"text": "✏️ Type a different ticker", "callback_data": "sold_manual"}])
+            send_inline_keyboard(
+                "💸 <b>Which position did you close?</b>",
+                buttons,
+                chat_id=chat_id,
+            )
+        else:
+            _prompt_for_param("sold", chat_id)
         return ""
 
     if text.startswith("SOLD "):
