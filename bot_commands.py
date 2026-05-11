@@ -537,6 +537,27 @@ def handle_callback_query(callback_query: dict) -> None:
         _prompt_for_param("sold", chat_id)
         return
 
+    if action == "updatelevel_pick":
+        # User tapped a position from the /updatestop or /updatetarget picker
+        sub_cmd   = parts[1] if len(parts) > 1 else ""   # "updatestop" or "updatetarget"
+        ticker    = parts[2].upper() if len(parts) > 2 else ""
+        if not sub_cmd or not ticker:
+            return
+        _field    = "stop_loss" if sub_cmd == "updatestop" else "target_price"
+        label     = "stop-loss" if _field == "stop_loss" else "target"
+        emoji     = "🛑" if _field == "stop_loss" else "🎯"
+        log       = load_user_trade_log(chat_id)
+        current   = next((t.get(_field) for t in log.get("open", []) if t["ticker"] == ticker), None)
+        hint      = f"  <i>(current: {emoji} <code>${_p(current)}</code>)</i>" if current else ""
+        save_pending_state(chat_id, sub_cmd, step=2, data={"ticker": ticker})
+        send_inline_keyboard(
+            f"📝 New {label} for <b>{ticker}</b>?{hint}\n"
+            f"<i>Type the price below.</i>",
+            [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return
+
     if action == "approve_user":
         new_id = parts[1] if len(parts) > 1 else ""
         if not new_id:
@@ -3942,12 +3963,26 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     for _cmd, _field in (("UPDATESTOP", "stop_loss"), ("UPDATETARGET", "target_price")):
         prefix = _cmd + " "
         if text == _cmd:
-            label = "stop-loss" if _field == "stop_loss" else "target"
-            save_pending_state(chat_id, _cmd.lower())
+            label     = "stop-loss" if _field == "stop_loss" else "target"
+            emoji     = "🛑" if _field == "stop_loss" else "🎯"
+            log       = load_user_trade_log(chat_id)
+            open_trades = log.get("open", [])
+            if not open_trades:
+                return f"📭 No open positions to update."
+            # Build one button per open position showing current level
+            buttons = []
+            for t in open_trades:
+                tk      = t["ticker"]
+                current = t.get(_field)
+                level   = f"  ·  current {emoji} <code>${_p(current)}</code>" if current else ""
+                buttons.append([{
+                    "text":          f"{tk}{('  · ' + emoji + ' $' + _p(current)) if current else ''}",
+                    "callback_data": f"updatelevel_pick|{_cmd.lower()}|{tk}",
+                }])
+            buttons.append([{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}])
             send_inline_keyboard(
-                f"📝 <b>Update {label}</b>\n"
-                f"<i>Send the ticker and new price, e.g. <code>NVDA 118</code></i>",
-                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                f"📝 <b>Update {label}</b> — pick a position:",
+                buttons,
                 chat_id=chat_id,
             )
             return ""
