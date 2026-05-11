@@ -45,6 +45,26 @@ services:
 
 
   - type: cron
+    name: stock-agent-premarket
+    runtime: python
+    schedule: "45 12 * * 1-5"      # 8:45 AM ET (Mon–Fri) — pre-market pulse for open positions
+    buildCommand: pip install -r requirements.txt
+    startCommand: python agent.py
+    envVars:
+      - key: RUN_MODE
+        value: premarket
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: GH_GIST_TOKEN
+        sync: false
+      - key: GIST_ID
+        sync: false
+
+  - type: cron
     name: stock-agent-morning
     runtime: python
     schedule: "0 11 * * 1-5"       # 7:00 AM ET / 6:00 AM CDT (Mon–Fri) — morning briefing (arrives ~8:30 AM ET, 1 hour before open)

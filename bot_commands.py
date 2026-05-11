@@ -974,6 +974,7 @@ def _send_settings_panel(chat_id: str) -> None:
     skip_conf   = bool(cfg.get("skip_confirmation",     False))
     skip_eod    = bool(cfg.get("skip_eod",              False))
     skip_wl     = bool(cfg.get("skip_watchlist_alerts", False))
+    skip_pre    = bool(cfg.get("skip_premarket",        False))
 
     # Labels
     risk_emoji  = {"conservative": "🛡", "moderate": "⚖️", "aggressive": "🔥"}.get(risk, "⚖️")
@@ -996,7 +997,8 @@ def _send_settings_panel(chat_id: str) -> None:
         f"👀 Watchlist: <b>{wl_label}</b>   🚫 Excluded: <b>{ex_label}</b>\n"
         f"📨 10:30 confirm: <b>{'off' if skip_conf else 'on'}</b>   "
         f"🌅 EOD summary: <b>{'off' if skip_eod else 'on'}</b>   "
-        f"👁 WL alerts: <b>{'off' if skip_wl else 'on'}</b>"
+        f"👁 WL alerts: <b>{'off' if skip_wl else 'on'}</b>   "
+        f"🌅 Pre-market: <b>{'off' if skip_pre else 'on'}</b>"
     )
 
     buttons = [
@@ -1032,14 +1034,19 @@ def _send_settings_panel(chat_id: str) -> None:
             {"text": f"👀 Watchlist: {wl_label}",      "callback_data": "settings_prompt|watchlist"},
             {"text": f"🚫 Exclude: {ex_label}",        "callback_data": "settings_prompt|exclude"},
         ],
-        # Row 7: notification opt-outs
+        # Row 7: notification opt-outs (row a)
         [
             {"text": f"📨 10:30 AM {'✅' if not skip_conf else '🔕 off'}",
              "callback_data": "settings_toggle|skip_confirmation"},
             {"text": f"🌅 EOD {'✅' if not skip_eod else '🔕 off'}",
              "callback_data": "settings_toggle|skip_eod"},
+        ],
+        # Row 7b: more notification opt-outs
+        [
             {"text": f"👁 WL alerts {'✅' if not skip_wl else '🔕 off'}",
              "callback_data": "settings_toggle|skip_watchlist_alerts"},
+            {"text": f"🌅 Pre-market {'✅' if not skip_pre else '🔕 off'}",
+             "callback_data": "settings_toggle|skip_premarket"},
         ],
         # Row 8: reset
         [
