@@ -611,8 +611,12 @@ def handle_callback_query(callback_query: dict) -> None:
         ticker = parts[1] if len(parts) > 1 else ""
         if not ticker:
             return
-        reply = _execute_sold(ticker, chat_id)
-        send_message(reply, chat_id=chat_id)
+        try:
+            reply = _execute_sold(ticker, chat_id)
+            send_message(reply, chat_id=chat_id)
+        except Exception as exc:
+            print(f"[bot] confirm_sell failed for {ticker}: {exc}")
+            send_message(f"⚠️ Couldn't remove <b>{ticker}</b> — try <code>/sold {ticker}</code> instead.", chat_id=chat_id)
 
     elif action == "sold_bulk":
         payload = "|".join(parts[1:])
@@ -622,8 +626,12 @@ def handle_callback_query(callback_query: dict) -> None:
             ep = entry.split("|")
             if len(ep) == 2:
                 ticker, price = ep[0].strip(), ep[1].strip()
-                r = _execute_sold(ticker, chat_id, price=price)
-                results.append(r)
+                try:
+                    r = _execute_sold(ticker, chat_id, price=price)
+                    results.append(r)
+                except Exception as exc:
+                    print(f"[bot] sold_bulk failed for {ticker}: {exc}")
+                    results.append(f"⚠️ Couldn't close <b>{ticker}</b>.")
         clear_pending_state(chat_id)
         send_message("\n\n".join(results), chat_id=chat_id)
 
@@ -636,8 +644,12 @@ def handle_callback_query(callback_query: dict) -> None:
             ep = entry.split("|")
             if len(ep) == 2:
                 ticker, price = ep[0].strip(), ep[1].strip()
-                r = _execute_bought(ticker, chat_id, price=price)
-                results.append(r)
+                try:
+                    r = _execute_bought(ticker, chat_id, price=price)
+                    results.append(r)
+                except Exception as exc:
+                    print(f"[bot] bought_bulk failed for {ticker}: {exc}")
+                    results.append(f"⚠️ Couldn't log <b>{ticker}</b>.")
         clear_pending_state(chat_id)
         send_message("\n\n".join(results), chat_id=chat_id)
 
@@ -646,16 +658,24 @@ def handle_callback_query(callback_query: dict) -> None:
         price_raw  = parts[2] if len(parts) > 2 else ""
         shares_raw = parts[3] if len(parts) > 3 else None
         clear_pending_state(chat_id)
-        result = _execute_bought(ticker, chat_id, price=price_raw or None, shares=shares_raw or None)
-        send_message(result, chat_id=chat_id)
+        try:
+            result = _execute_bought(ticker, chat_id, price=price_raw or None, shares=shares_raw or None)
+            send_message(result, chat_id=chat_id)
+        except Exception as exc:
+            print(f"[bot] bought_confirm failed for {ticker}: {exc}")
+            send_message(f"⚠️ Couldn't log <b>{ticker}</b> — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
 
     elif action == "sold_confirm":
         ticker     = parts[1] if len(parts) > 1 else ""
         price_raw  = parts[2] if len(parts) > 2 else ""
         shares_raw = parts[3] if len(parts) > 3 else None
         clear_pending_state(chat_id)
-        result = _execute_sold(ticker, chat_id, price=price_raw or None, shares_sold=shares_raw or None)
-        send_message(result, chat_id=chat_id)
+        try:
+            result = _execute_sold(ticker, chat_id, price=price_raw or None, shares_sold=shares_raw or None)
+            send_message(result, chat_id=chat_id)
+        except Exception as exc:
+            print(f"[bot] sold_confirm failed for {ticker}: {exc}")
+            send_message(f"⚠️ Couldn't close <b>{ticker}</b> — try <code>/sold {ticker}</code> instead.", chat_id=chat_id)
 
     elif action == "pbuy_confirm":
         # Confirm paper buy — format: pbuy_confirm|TICKER|price|shares
