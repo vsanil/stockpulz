@@ -23,7 +23,7 @@ from config_manager import (
     get_user_config, update_user_config, update_user_config_multi, reset_user_config,
     load_picks,
     load_pending_state, save_pending_state, clear_pending_state,
-    load_user_trade_log,
+    load_user_trade_log, save_user_trade_log,
     load_user_paper,
     get_pending_users, add_pending_user, remove_pending_user,
     get_allowed_users,
@@ -1141,6 +1141,46 @@ def _execute_sold(ticker: str, chat_id: str) -> str:
     return f"✅ <b>{ticker}</b> removed from your portfolio."
 
 
+def _execute_update_level(ticker: str, field: str, new_price: float, chat_id: str) -> str:
+    """
+    Update stop_loss or target_price on an open trade.
+    field: "stop_loss" | "target_price"
+    Resets trailing-stop notification flags when stop is updated so nudges
+    can re-fire if the position continues to move.
+    """
+    ticker = ticker.upper()
+    log    = load_user_trade_log(chat_id)
+
+    for trade in log.get("open", []):
+        if trade["ticker"] != ticker:
+            continue
+
+        old_val   = trade.get(field)
+        trade[field] = round(new_price, 2)
+
+        # Reset trailing nudge flags so they can re-fire from the new level
+        if field == "stop_loss":
+            trade.pop("_notified_breakeven", None)
+            trade.pop("_notified_trail_90",  None)
+
+        save_user_trade_log(chat_id, log)
+
+        label    = "stop-loss" if field == "stop_loss" else "target"
+        old_str  = f"${_p(old_val)}" if old_val else "none"
+        entry    = trade.get("entry_price")
+        vs_entry = ""
+        if entry:
+            pct = (new_price - float(entry)) / float(entry) * 100
+            vs_entry = f"  <i>({'+' if pct >= 0 else ''}{pct:.1f}% vs entry)</i>"
+
+        return (
+            f"✅ <b>{ticker}</b> {label} updated: "
+            f"<code>{old_str}</code> → <code>${_p(new_price)}</code>{vs_entry}"
+        )
+
+    return f"⚠️ <b>{ticker}</b> not found in your open positions."
+
+
 
 # ── Pending reply handler ─────────────────────────────────────────────────────
 
@@ -1213,6 +1253,28 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             target=_send_chart, args=(ticker, asset_type, chat_id), daemon=True
         ).start()
         return None
+
+    if command in ("updatestop", "updatetarget"):
+        field = "stop_loss" if command == "updatestop" else "target_price"
+        if step == 1:
+            # Received ticker — save and ask for price
+            ticker = text.strip().split()[0].upper() if text.strip() else ""
+            if not ticker:
+                return "⚠️ Please send the ticker, e.g. <code>NVDA</code>"
+            label = "stop-loss" if field == "stop_loss" else "target"
+            save_pending_state(chat_id, command, step=2, data={"ticker": ticker})
+            send_inline_keyboard(
+                f"📝 New {label} price for <b>{ticker}</b>?",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+        else:
+            # step 2: received price
+            ticker = data.get("ticker", "")
+            if not ticker or not _is_number(text.strip()):
+                return "⚠️ Please send just the new price, e.g. <code>118.50</code>"
+            return _execute_update_level(ticker, field, float(text.strip().replace(",", "")), chat_id)
 
     if command == "watch":
         return _parse_and_execute(f"WATCH {text}", original=f"/watch {text}", chat_id=chat_id)
@@ -2239,7 +2301,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n/bought — Add a stock to your portfolio"
             "\n/sold — Remove a stock from your portfolio"
             "\n/summary — Portfolio health: P&amp;L, win rate, open positions"
-            "\n/positions — Open positions with live alerts\n"
+            "\n/positions — Open positions with exposure &amp; live P&amp;L"
+            "\n/updatestop — Move stop-loss on an open trade (e.g. to breakeven)"
+            "\n/updatetarget — Adjust target on an open trade\n"
             "\n<b>🧪 Paper Trading</b>"
             "\n/paper_buy — Simulate a buy (no real money)"
             "\n/paper_sell — Simulate a sell"
@@ -3606,6 +3670,40 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         lines.append("<i>/positions for full detail  ·  /history for trade log</i>")
         return "\n".join(lines)
 
+    # ── /updatestop / /updatetarget — adjust levels on open trades ──────────
+    for _cmd, _field in (("UPDATESTOP", "stop_loss"), ("UPDATETARGET", "target_price")):
+        prefix = _cmd + " "
+        if text == _cmd:
+            label = "stop-loss" if _field == "stop_loss" else "target"
+            save_pending_state(chat_id, _cmd.lower())
+            send_inline_keyboard(
+                f"📝 <b>Update {label}</b>\n"
+                f"<i>Send the ticker and new price, e.g. <code>NVDA 118</code></i>",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+
+        if text.startswith(prefix):
+            parts = text[len(prefix):].strip().split()
+            if len(parts) >= 2 and _is_number(parts[-1]):
+                ticker    = parts[0].upper()
+                new_price = float(parts[-1].replace(",", ""))
+                return _execute_update_level(ticker, _field, new_price, chat_id)
+            elif len(parts) == 1:
+                # Got ticker only — prompt for price
+                ticker = parts[0].upper()
+                label  = "stop-loss" if _field == "stop_loss" else "target"
+                save_pending_state(chat_id, _cmd.lower(), step=2, data={"ticker": ticker})
+                send_inline_keyboard(
+                    f"📝 New {label} price for <b>{ticker}</b>?",
+                    [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                    chat_id=chat_id,
+                )
+                return ""
+            else:
+                return f"⚠️ Usage: <code>/{_cmd.lower()} TICKER PRICE</code>  e.g. <code>/{_cmd.lower()} NVDA 118</code>"
+
     # ── /positions / /portfolio ───────────────────────────────────────────────
     if text in ("POSITIONS", "PORTFOLIO"):
         import yfinance as yf
@@ -3681,7 +3779,42 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             except Exception as exc:
                 print(f"[portfolio] Guidance fetch failed (non-critical): {exc}")
 
-        lines = [f"<b>📂 Portfolio</b>  <i>· {len(unique_trades)} holding{'s' if len(unique_trades) != 1 else ''}</i>", ""]
+        # ── Exposure summary ──────────────────────────────────────────────────
+        total_alloc  = sum(float(t.get("allocation") or 0) for t in unique_trades)
+        stock_alloc  = sum(float(t.get("allocation") or 0) for t in unique_trades
+                          if t.get("asset_type") == "stock")
+        crypto_alloc = sum(float(t.get("allocation") or 0) for t in unique_trades
+                          if t.get("asset_type") == "crypto")
+
+        total_pnl    = 0.0
+        priced_count = 0
+        for t in unique_trades:
+            current = prices.get(t["ticker"])
+            entry   = t.get("entry_price")
+            alloc   = t.get("allocation")
+            if current and entry and alloc:
+                total_pnl += (float(current) - float(entry)) / float(entry) * float(alloc)
+                priced_count += 1
+
+        n = len(unique_trades)
+        lines = [f"<b>📂 Portfolio</b>  <i>· {n} holding{'s' if n != 1 else ''}</i>"]
+
+        # Deployment line — only show if any allocation data exists
+        if total_alloc > 0:
+            deploy_parts = []
+            if stock_alloc  > 0: deploy_parts.append(f"stocks ${stock_alloc:,.0f}")
+            if crypto_alloc > 0: deploy_parts.append(f"crypto ${crypto_alloc:,.0f}")
+            breakdown = "  ·  " + " / ".join(deploy_parts) if deploy_parts else ""
+            lines.append(f"💼 <b>${total_alloc:,.0f}</b> deployed{breakdown}")
+
+        # P&L line — only if we have live prices for at least one position
+        if priced_count > 0:
+            pnl_sign  = "+" if total_pnl >= 0 else ""
+            pnl_emoji = "📈" if total_pnl >= 0 else "📉"
+            pnl_pct   = f"  ({pnl_sign}{total_pnl / total_alloc * 100:.1f}%)" if total_alloc > 0 else ""
+            lines.append(f"{pnl_emoji} Unrealized P&amp;L: <b>{pnl_sign}${abs(total_pnl):,.2f}</b>{pnl_pct}")
+
+        lines.append("")
 
         for t in unique_trades:
             ticker  = t["ticker"]
