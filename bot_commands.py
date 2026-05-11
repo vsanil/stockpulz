@@ -2859,6 +2859,27 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 )
         return "\n".join(lines)
 
+    # ── /fixticker OLD NEW — rename a stored ticker in your trade log ─────────
+    if text.startswith("FIXTICKER "):
+        parts_ft = text[len("FIXTICKER "):].strip().upper().split()
+        if len(parts_ft) != 2:
+            return "⚠️ Usage: <code>/fixticker OLDTICKER NEWTICKER</code>  e.g. <code>/fixticker COSTCO COST</code>"
+        old_tk, new_tk = parts_ft
+        log     = load_user_trade_log(chat_id)
+        changed = 0
+        for t in log.get("open", []):
+            if t["ticker"] == old_tk:
+                t["ticker"] = new_tk
+                changed += 1
+        for t in log.get("closed", []):
+            if t["ticker"] == old_tk:
+                t["ticker"] = new_tk
+                changed += 1
+        if changed == 0:
+            return f"⚠️ <b>{old_tk}</b> not found in your portfolio."
+        save_user_trade_log(chat_id, log)
+        return f"✅ Renamed <b>{old_tk}</b> → <b>{new_tk}</b> ({changed} entr{'y' if changed == 1 else 'ies'} updated)."
+
     # ── /pause /resume (per-user) ─────────────────────────────────────────────
     if text == "PAUSE":
         update_user_config(chat_id, "paused", True)
