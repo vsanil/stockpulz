@@ -654,6 +654,94 @@ def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str
         return {}
 
 
+def personalize_picks_batch(
+    picks: dict,
+    users_data: list[dict],
+    batch_size: int = 20,
+) -> dict[str, dict]:
+    """
+    Batch-personalize picks for multiple users — replaces N per-user Haiku calls
+    with ceil(N / batch_size) calls.  ~94% cost reduction vs calling per-user.
+
+    Args:
+        picks:      Daily picks dict (same structure as analyze_with_claude output).
+        users_data: List of {uid, positions, risk_profile} dicts.
+                    Only include users who actually have open positions.
+        batch_size: Max users per Haiku call (default 20 keeps prompt under ~4K tokens).
+
+    Returns:
+        {uid: {ticker: note_str}} — missing uid means no notes (graceful skip).
+    """
+    stocks    = picks.get("stocks", {})
+    crypto    = picks.get("crypto", {})
+    all_picks = (
+        [p.get("ticker", "") for p in stocks.get("short_term", [])] +
+        [p.get("ticker", "") for p in stocks.get("long_term",  [])] +
+        [c.get("symbol", "") for c in crypto.get("short_term", [])]
+    )
+    all_picks = [t for t in all_picks if t]
+    if not all_picks or not users_data:
+        return {}
+
+    picks_str = ", ".join(all_picks)
+    system = (
+        "You are a personal portfolio advisor. All picks have been pre-vetted — never warn against them. "
+        "For each user and each pick, write ONE very short note (max 10 words) explaining why it fits "
+        "their portfolio: reference their holdings, risk profile, or sector exposure. "
+        "Frame crypto as: diversification, momentum, or high-growth exposure. "
+        "Never use discouraging language. "
+        "Return ONLY valid JSON: {\"uid\": {\"TICKER\": \"note\"}, ...}. No other text."
+    )
+
+    results: dict[str, dict] = {}
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    # Process in batches
+    for i in range(0, len(users_data), batch_size):
+        batch = users_data[i : i + batch_size]
+
+        # Build compact user summaries
+        user_lines = []
+        for u in batch:
+            uid      = u["uid"]
+            pos_list = u.get("positions", [])
+            risk     = u.get("risk_profile", "moderate")
+            pos_str  = ", ".join(
+                f"{t.get('ticker','')}({t.get('return_pct', 0):+.0f}%)"
+                for t in pos_list[:6] if t.get("ticker")
+            ) or "none"
+            user_lines.append(f"  {uid}: holdings=[{pos_str}] risk={risk}")
+
+        user_block = "\n".join(user_lines)
+        user_msg   = (
+            f"Today's picks: {picks_str}\n\n"
+            f"Users:\n{user_block}\n\n"
+            f"Return a JSON object with one note per ticker per user."
+        )
+
+        try:
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=batch_size * 20 + 200,   # ~20 tokens per ticker per user
+                system=system,
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            raw = message.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                results.update(parsed)
+            print(f"[ai_analyzer] Batch personalisation: {len(batch)} users, batch {i // batch_size + 1}")
+        except Exception as exc:
+            print(f"[ai_analyzer] personalize_picks_batch failed for batch {i // batch_size + 1}: {exc}")
+            # Graceful degradation — affected users just get no notes
+
+    return results
+
+
 def generate_trade_debrief(trade: dict) -> str:
     """
     Use Claude Haiku to write a 2-3 sentence debrief after a trade closes.
