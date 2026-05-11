@@ -3637,6 +3637,31 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 except Exception:
                     pass
 
+            # Sector concentration + earnings risk
+            from earnings_checker import get_upcoming_earnings as _get_earnings_s
+            _sum_stock_tickers = [t["ticker"] for t in unique if t.get("asset_type") == "stock"]
+            _sum_sector_map: dict[str, str] = {}
+            for _tk in _sum_stock_tickers:
+                try:
+                    _sum_sector_map[_tk] = yf.Ticker(_tk).info.get("sector", "Unknown")
+                except Exception:
+                    _sum_sector_map[_tk] = "Unknown"
+            _sum_earnings_map: dict[str, str] = _get_earnings_s(_sum_stock_tickers, days_ahead=2) if _sum_stock_tickers else {}
+
+            # Concentration warning
+            _sum_conc_warn = ""
+            if len(_sum_stock_tickers) >= 2:
+                _sc: dict[str, int] = {}
+                for _s in _sum_sector_map.values():
+                    _sc[_s] = _sc.get(_s, 0) + 1
+                _top_s, _top_n = max(_sc.items(), key=lambda x: x[1])
+                if _top_s and _top_s != "Unknown" and _top_n / len(_sum_stock_tickers) >= 0.5:
+                    _pct = int(_top_n / len(_sum_stock_tickers) * 100)
+                    _sum_conc_warn = f"⚡ <i>{_pct}% {_top_s} — consider diversifying</i>"
+
+            if _sum_conc_warn:
+                lines.append(_sum_conc_warn)
+
             for t in unique:
                 ticker  = t["ticker"]
                 current = prices.get(ticker)
@@ -3662,6 +3687,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                     lines.append(f"<b>{ticker}</b>  <code>${_p(current)}</code>  <i>no entry price</i>")
                 else:
                     lines.append(f"<b>{ticker}</b>  <i>price unavailable</i>")
+                if ticker in _sum_earnings_map:
+                    lines.append(f"   📅 <i>Earnings {_sum_earnings_map[ticker]} — consider position size</i>")
         else:
             lines.append("<b>Open</b>  ·  no holdings")
             lines.append("<i>Use /bought to log a position.</i>")
@@ -3739,6 +3766,33 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             except Exception:
                 pass
 
+        # ── Sector concentration + earnings risk ──────────────────────────────
+        from earnings_checker import get_upcoming_earnings as _get_earnings
+        stock_trades = [t for t in unique_trades if t.get("asset_type") == "stock"]
+        stock_tickers = [t["ticker"] for t in stock_trades]
+
+        # Sector fetch (one .info call per stock ticker)
+        sector_by_ticker: dict[str, str] = {}
+        for ticker in stock_tickers:
+            try:
+                sector_by_ticker[ticker] = yf.Ticker(ticker).info.get("sector", "Unknown")
+            except Exception:
+                sector_by_ticker[ticker] = "Unknown"
+
+        # Earnings in next 2 days
+        earnings_map: dict[str, str] = _get_earnings(stock_tickers, days_ahead=2) if stock_tickers else {}
+
+        # Concentration warning string
+        concentration_warn = ""
+        if len(stock_tickers) >= 2:
+            sector_counts: dict[str, int] = {}
+            for s in sector_by_ticker.values():
+                sector_counts[s] = sector_counts.get(s, 0) + 1
+            top_sector, top_n = max(sector_counts.items(), key=lambda x: x[1])
+            if top_sector and top_sector != "Unknown" and top_n / len(stock_tickers) >= 0.5:
+                pct = int(top_n / len(stock_tickers) * 100)
+                concentration_warn = f"⚡ <i>{pct}% {top_sector} — consider diversifying</i>"
+
         # Build position data for Haiku guidance
         position_data = []
         for t in unique_trades:
@@ -3814,6 +3868,9 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             pnl_pct   = f"  ({pnl_sign}{total_pnl / total_alloc * 100:.1f}%)" if total_alloc > 0 else ""
             lines.append(f"{pnl_emoji} Unrealized P&amp;L: <b>{pnl_sign}${abs(total_pnl):,.2f}</b>{pnl_pct}")
 
+        if concentration_warn:
+            lines.append(concentration_warn)
+
         lines.append("")
 
         for t in unique_trades:
@@ -3858,8 +3915,12 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
                 if ticker in guidance:
                     lines.append(f"   💡 <i>{_esc(guidance[ticker])}</i>")
+                if ticker in earnings_map:
+                    lines.append(f"   📅 <i>Earnings {earnings_map[ticker]} — consider position size</i>")
             else:
                 lines.append(f"<b>{ticker}</b>  <i>price unavailable</i>")
+                if ticker in earnings_map:
+                    lines.append(f"   📅 <i>Earnings {earnings_map[ticker]} — consider position size</i>")
 
             lines.append("")
 
