@@ -436,6 +436,14 @@ def handle_callback_query(callback_query: dict) -> None:
             return
         reply = _execute_bought(ticker, chat_id)
         send_message(reply, chat_id=chat_id)
+        # Increment shared buy counter if social feature is enabled
+        try:
+            from config_manager import increment_buy_count
+            cfg = get_config()
+            if cfg.get("show_buy_counts"):
+                increment_buy_count(ticker)
+        except Exception as exc:
+            print(f"[bot] buy count increment failed (non-critical): {exc}")
         return
 
     if action == "chart":
@@ -1757,7 +1765,15 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             personal_notes = personalize_picks(picks, open_positions, risk_profile)
         except Exception as pn_exc:
             print(f"[telegram] /today personal notes failed (non-critical): {pn_exc}")
-        return format_daily_message(picks, config, personal_notes=personal_notes)
+        buy_counts: dict = {}
+        if config.get("show_buy_counts"):
+            try:
+                from config_manager import load_buy_counts
+                buy_counts = load_buy_counts()
+            except Exception:
+                pass
+        return format_daily_message(picks, config, personal_notes=personal_notes,
+                                    buy_counts=buy_counts)
 
     if text == "EXPLAIN":
         _prompt_for_param("explain", chat_id)
@@ -1799,7 +1815,14 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         try:
             from price_checker import get_current_prices
             current_prices = get_current_prices(picks)
-            return format_confirmation_message(picks, current_prices)
+            buy_counts: dict = {}
+            if get_config().get("show_buy_counts"):
+                try:
+                    from config_manager import load_buy_counts
+                    buy_counts = load_buy_counts()
+                except Exception:
+                    pass
+            return format_confirmation_message(picks, current_prices, buy_counts=buy_counts)
         except Exception as exc:
             return f"⚠️ Could not fetch prices: {exc}"
 
@@ -2631,6 +2654,24 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             return "🔒 Admin only."
         update_config("crypto_enabled", False)
         return "⏸ <b>Crypto picks disabled.</b> No crypto analysis will run tomorrow morning."
+
+    # ── /bot_showcounts on|off (admin-only social buy-count feature) ─────────
+    if text in ("BOT SHOWCOUNTS ON", "BOT SHOWCOUNTS OFF"):
+        if not _is_admin(chat_id):
+            return "🔒 Admin only."
+        enabled = text.endswith("ON")
+        update_config("show_buy_counts", enabled)
+        if enabled:
+            return (
+                "👥 <b>Buy counts enabled.</b>\n"
+                "Members will see <i>'👥 N bought'</i> badges on picks once 2+ people tap ✅ Bought.\n"
+                "<i>Takes effect immediately.</i>"
+            )
+        return (
+            "🔕 <b>Buy counts disabled.</b>\n"
+            "Badges will no longer appear on picks.\n"
+            "<i>Takes effect immediately.</i>"
+        )
 
     # ── /crypto on|off (per-user crypto visibility toggle) ───────────────────
     if text in ("CRYPTO ON", "CRYPTO OFF", "CRYPTO"):

@@ -128,7 +128,8 @@ def _ordinal(n: int) -> str:
 
 def format_daily_message(picks: dict, config: dict,
                          personal_notes: dict | None = None,
-                         pick_streaks: dict | None = None) -> str:
+                         pick_streaks: dict | None = None,
+                         buy_counts: dict | None = None) -> str:
     """
     Build the formatted daily Telegram message from Claude picks (stocks + crypto).
 
@@ -201,16 +202,23 @@ def format_daily_message(picks: dict, config: dict,
     if macro_line:
         lines.append(macro_line)
 
+    def _buy_badge(ticker: str) -> str:
+        """Return '👥 N members bought' badge when count ≥ 2, else empty string."""
+        n = bc.get(ticker, 0)
+        return f"  <i>👥 {n} bought</i>" if n >= 2 else ""
+
     def _pick_row_st(i, s, personal_note: str = "", streak: int = 0):
         entry, target, stop = s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
+        ticker        = s.get("ticker", "")
         earnings_tag  = f"  🗓 {_esc(s['earnings_date'])}" if s.get("earnings_date") else ""
         alloc         = s.get("allocation")
         alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
         badge         = _conviction_badge(s.get("conviction", 3))
         streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
+        social_badge  = _buy_badge(ticker)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         return (
-            f"<b>{_esc(s.get('ticker'))}</b>  {_stars(s.get('conviction', 3))}{badge}{streak_badge}  "
+            f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
             f"<i>{_esc(_short_company(s.get('company', '')))}</i>{earnings_tag}\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}\n"
@@ -219,12 +227,14 @@ def format_daily_message(picks: dict, config: dict,
 
     def _pick_row_lt(i, s, personal_note: str = ""):
         entry, target = s.get("entry_price"), s.get("target_price")
+        ticker        = s.get("ticker", "")
         alloc         = s.get("allocation")
         alloc_str     = f"  <code>${_p(alloc)}/mo</code>" if alloc is not None else ""
         badge         = _conviction_badge(s.get("conviction", 3))
+        social_badge  = _buy_badge(ticker)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         return (
-            f"<b>{_esc(s.get('ticker'))}</b>  {_stars(s.get('conviction', 3))}{badge}  "
+            f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{social_badge}  "
             f"<i>{_esc(_short_company(s.get('company', '')))}</i>\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>  ·  {_esc(s.get('horizon'))}{alloc_str}\n"
@@ -233,16 +243,18 @@ def format_daily_message(picks: dict, config: dict,
 
     def _pick_row_cst(i, c, personal_note: str = "", streak: int = 0):
         entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
+        sym           = c.get("symbol", "")
         is_lt         = c.get("_lt", False)
         alloc         = c.get("allocation")
         alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
         badge         = _conviction_badge(c.get("conviction", 3))
         streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
+        social_badge  = _buy_badge(sym)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         lt_label      = "  <i>· long-term</i>" if is_lt else ""
         stop_str      = f"  ·  stop <code>${_p(stop)}</code>" if not is_lt else ""
         return (
-            f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}  "
+            f"<b>{_esc(sym)}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
             f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}\n"
@@ -251,6 +263,7 @@ def format_daily_message(picks: dict, config: dict,
 
     pn = personal_notes or {}   # ticker/symbol → personal note string
     ps = pick_streaks   or {}   # ticker/symbol → consecutive-day count
+    bc = buy_counts     or {}   # ticker/symbol → number of members who bought today
 
     if st_picks:
         budget_tag = f"  <code>${per_stock}/pick</code>" if per_stock else ""
@@ -344,7 +357,8 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
 
 # ── Confirmation message ──────────────────────────────────────────────────────
 
-def format_confirmation_message(picks: dict, current_prices: dict) -> str:
+def format_confirmation_message(picks: dict, current_prices: dict,
+                                buy_counts: dict | None = None) -> str:
     """
     Build the live prices check message.
     Compares entry prices from morning picks to current live prices.
@@ -354,6 +368,8 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
     now    = now_et.strftime("%a %b %d · %I:%M %p ET").replace(" 0", " ")
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
+
+    bc = buy_counts or {}
 
     def price_line(symbol: str, entry, target, stop) -> str:
         current = current_prices.get(symbol)
@@ -375,8 +391,10 @@ def format_confirmation_message(picks: dict, current_prices: dict) -> str:
             badge = "✅ On track"
         else:
             badge = "🟡 Flat — hold"
+        n = bc.get(symbol, 0)
+        social = f"  <i>👥 {n}</i>" if n >= 2 else ""
         return (f"   <b>{symbol}</b>  <code>${_p(entry)}</code> → <code>${_p(current)}</code> "
-                f"{change_str}  {badge}")
+                f"{change_str}  {badge}{social}")
 
     st  = stocks.get("short_term", [])
     lt  = stocks.get("long_term", [])

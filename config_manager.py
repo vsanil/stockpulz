@@ -60,6 +60,9 @@ DEFAULT_CONFIG = {
     "max_crypto_long_picks": 2,
     # Multi-user pilot: list of chat_id strings allowed to receive messages
     "allowed_users": [],
+    # Social: show how many members bought each pick (admin-only toggle)
+    # Keep False until the user base is large enough to make counts meaningful
+    "show_buy_counts": False,
 }
 
 # ── Per-user config (each user has their own copy of these) ───────────────────
@@ -90,6 +93,7 @@ PENDING_USERS_FILE     = "pending_users.json"   # Users awaiting admin approval
 PRICE_ALERTS_FILE      = "price_alerts.json"    # User price alerts (already per-user by chat_id)
 SIGNAL_CACHE_FILE      = "signal_cache.json"    # Cached sentiment + insider signals (5-day TTL)
 SCREENER_CACHE_FILE    = "screener_cache.json"  # Pre-scored candidates from midnight run
+BUY_COUNTS_FILE        = "buy_counts.json"      # Social: how many members bought each pick today
 # ── Per-user data files (keyed by chat_id inside the JSON) ───────────────────
 USER_CONFIGS_FILE      = "user_configs.json"    # Per-user settings (risk, watchlist, budget…)
 USER_TRADES_FILE       = "user_trades.json"     # Per-user trade logs (open + closed)
@@ -494,6 +498,42 @@ def load_screener_cache() -> dict | None:
     except Exception as exc:
         print(f"[config_manager] Screener cache invalid ({exc}).")
         return None
+
+
+# ── Buy counts (social feature, admin-gated) ─────────────────────────────────
+
+def load_buy_counts() -> dict:
+    """
+    Load today's buy counts.
+    Structure: {"date": "YYYY-MM-DD", "counts": {"NVDA": 3, "BTC": 2}}
+    Auto-resets when the date changes — counts are always today-only.
+    Returns empty counts dict if missing or stale.
+    """
+    from datetime import date
+    today = date.today().isoformat()
+    data  = _load_gist_file(BUY_COUNTS_FILE) or {}
+    if data.get("date") != today:
+        return {}   # new day — treat as empty (don't wipe Gist yet, lazy reset)
+    return data.get("counts", {})
+
+
+def increment_buy_count(ticker: str) -> int:
+    """
+    Increment the buy count for a ticker today.
+    Creates or resets the file if it's a new day.
+    Returns the new count.
+    """
+    from datetime import date
+    today = date.today().isoformat()
+    data  = _load_gist_file(BUY_COUNTS_FILE) or {}
+
+    if data.get("date") != today:
+        data = {"date": today, "counts": {}}   # new day — reset counts
+
+    data["counts"][ticker] = data["counts"].get(ticker, 0) + 1
+    _write_gist_file(BUY_COUNTS_FILE, data)
+    print(f"[config_manager] Buy count for {ticker}: {data['counts'][ticker]}")
+    return data["counts"][ticker]
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

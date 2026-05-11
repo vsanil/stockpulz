@@ -912,8 +912,17 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             except Exception as pn_exc:
                 print(f"[agent] personalize_picks failed for {uid} (non-critical): {pn_exc}")
 
+            # Load buy counts once (shared across all users, only if feature is on)
+            buy_counts: dict = {}
+            if global_config.get("show_buy_counts"):
+                try:
+                    from config_manager import load_buy_counts
+                    buy_counts = load_buy_counts()
+                except Exception:
+                    pass
+
             message = format_daily_message(picks, user_cfg, personal_notes=personal_notes,
-                                           pick_streaks=pick_streaks)
+                                           pick_streaks=pick_streaks, buy_counts=buy_counts)
             if DRY_RUN:
                 print(f"\n{'=' * 60}\nDRY RUN — {label} for {uid}:\n{'=' * 60}\n{message}\n")
             else:
