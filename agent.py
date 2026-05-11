@@ -25,7 +25,7 @@ from config_manager import (
     load_user_trade_log,
     save_screener_cache, load_screener_cache,
 )
-from trade_logger import check_and_close_trades, update_trailing_stops
+from trade_logger import check_and_close_trades
 from price_alert_manager import check_all_alerts
 from screener import run_screener
 from crypto_screener import run_crypto_screener
@@ -426,23 +426,8 @@ def run_confirmation():
         _alert("⚠ Could not fetch prices for 10:30 AM check.", admin_only=True)
         return
 
-    # ── Per-user trailing stops + trade close checks ──────────────────────────
+    # ── Per-user trade close checks ───────────────────────────────────────────
     for uid in _all_recipients():
-        try:
-            trail_closed = update_trailing_stops(current_prices, uid)
-            for trade in trail_closed:
-                sign = "+" if trade["return_pct"] >= 0 else ""
-                send_message(
-                    f"🔒 <b>{trade['ticker']} TRAILING STOP HIT</b>\n"
-                    f"Sold @ <code>${trade['closed_price']}</code>  "
-                    f"<b>{sign}{trade['return_pct']:.1f}%</b>  (${trade['gain_usd']:+.2f})\n"
-                    f"<i>Peak ${trade.get('highest_reached', '?')} → "
-                    f"Trail stop ${trade.get('trailing_stop_level', '?')}</i>",
-                    chat_id=uid,
-                )
-        except Exception as exc:
-            print(f"[agent] Trailing stop update failed for {uid} (non-critical): {exc}")
-
         try:
             closed = check_and_close_trades(current_prices, uid)
             for trade in closed:
@@ -473,8 +458,7 @@ def run_confirmation():
     except Exception as exc:
         print(f"[agent] Price alert check failed (non-critical): {exc}")
 
-    # ── Per-user earnings warnings + portfolio alerts ─────────────────────────
-    import yfinance as yf
+    # ── Per-user earnings warnings ────────────────────────────────────────────
     for uid in _all_recipients():
         try:
             from earnings_checker import get_upcoming_earnings
@@ -494,48 +478,6 @@ def run_confirmation():
                     )
         except Exception as exc:
             print(f"[agent] Earnings warning check failed for {uid} (non-critical): {exc}")
-
-        try:
-            log = load_user_trade_log(uid)
-            manual_open = [t for t in log.get("open", []) if t.get("manual")]
-            if manual_open:
-                syms  = [t["ticker"] for t in manual_open]
-                pdata = yf.download(" ".join(syms), period="1d", interval="1m",
-                                    progress=False, auto_adjust=True)
-                for t in manual_open:
-                    ticker  = t["ticker"]
-                    entry   = float(t.get("entry_price") or 0)
-                    target  = t.get("target_price")
-                    stop    = t.get("stop_loss")
-                    try:
-                        if len(syms) == 1:
-                            cur = float(pdata["Close"].dropna().iloc[-1])
-                        else:
-                            cur = float(pdata["Close"][ticker].dropna().iloc[-1])
-                    except Exception:
-                        continue
-                    if not entry:
-                        continue
-                    ret_pct = (cur - entry) / entry * 100
-                    sign    = "+" if ret_pct >= 0 else ""
-                    if stop and cur <= float(stop) * 1.02:
-                        send_message(
-                            f"⚠️ <b>{ticker} NEAR STOP LOSS</b>\n"
-                            f"Current <code>${cur:.2f}</code>  Stop <code>${stop}</code>  "
-                            f"Return {sign}{ret_pct:.1f}%\n"
-                            f"<i>Consider cutting the position to limit losses.</i>",
-                            chat_id=uid,
-                        )
-                    elif target and cur >= float(target) * 0.98:
-                        send_message(
-                            f"🎯 <b>{ticker} NEAR TARGET</b>\n"
-                            f"Current <code>${cur:.2f}</code>  Target <code>${target}</code>  "
-                            f"Return {sign}{ret_pct:.1f}%\n"
-                            f"<i>Consider taking profit or raising your stop.</i>",
-                            chat_id=uid,
-                        )
-        except Exception as exc:
-            print(f"[agent] Portfolio alert check failed for {uid} (non-critical): {exc}")
 
     message = format_confirmation_message(picks, current_prices)
     _send_or_print(message, label="10:30 AM Confirmation")
@@ -567,21 +509,6 @@ def run_close_check():
 
     for uid in _all_recipients():
         try:
-            trail_closed = update_trailing_stops(current_prices, uid)
-            for trade in trail_closed:
-                sign = "+" if trade["return_pct"] >= 0 else ""
-                send_message(
-                    f"🔒 <b>{trade['ticker']} TRAILING STOP HIT</b>\n"
-                    f"Sold @ <code>${trade['closed_price']}</code>  "
-                    f"<b>{sign}{trade['return_pct']:.1f}%</b>  (${trade['gain_usd']:+.2f})\n"
-                    f"<i>Peak ${trade.get('highest_reached', '?')} → "
-                    f"Trail stop ${trade.get('trailing_stop_level', '?')}</i>",
-                    chat_id=uid,
-                )
-        except Exception as exc:
-            print(f"[agent] Trailing stop update failed for {uid} (non-critical): {exc}")
-
-        try:
             closed = check_and_close_trades(current_prices, uid)
             for trade in closed:
                 emoji = "✅" if trade["outcome"] == "target" else ("🔴" if trade["outcome"] == "stop" else "⏱")
@@ -592,7 +519,6 @@ def run_close_check():
                     f"<b>{sign}{trade['return_pct']:.1f}%</b>  "
                     f"(${trade['gain_usd']:+.2f})"
                 )
-                # Feature 2: post-trade debrief (Haiku)
                 try:
                     debrief = generate_trade_debrief(trade)
                     if debrief:
@@ -612,44 +538,6 @@ def run_close_check():
             print(f"[agent] {fired} price alert(s) triggered.")
     except Exception as exc:
         print(f"[agent] Price alert check failed (non-critical): {exc}")
-
-    # ── End-of-day portfolio summary per user (manually logged trades) ────────
-    import yfinance as yf
-    for uid in _all_recipients():
-        try:
-            log = load_user_trade_log(uid)
-            manual_open = [t for t in log.get("open", []) if t.get("manual")]
-            if not manual_open:
-                continue
-            syms   = [t["ticker"] for t in manual_open]
-            pdata  = yf.download(" ".join(syms), period="1d", interval="1m",
-                                 progress=False, auto_adjust=True)
-            alerts = []
-            for t in manual_open:
-                ticker = t["ticker"]
-                entry  = float(t.get("entry_price") or 0)
-                target = t.get("target_price")
-                stop   = t.get("stop_loss")
-                try:
-                    cur = float(pdata["Close"].dropna().iloc[-1]) if len(syms) == 1 \
-                          else float(pdata["Close"][ticker].dropna().iloc[-1])
-                except Exception:
-                    continue
-                if not entry:
-                    continue
-                ret_pct = (cur - entry) / entry * 100
-                sign    = "+" if ret_pct >= 0 else ""
-                emoji   = "🟢" if ret_pct >= 0 else "🔴"
-                to_t    = f"  {((float(target)/cur-1)*100):+.1f}% to target" if target else ""
-                to_s    = f"  {((float(stop)/cur-1)*100):+.1f}% to stop" if stop else ""
-                alerts.append(f"{emoji} <b>{ticker}</b> <code>${cur:.2f}</code>  {sign}{ret_pct:.1f}%{to_t}{to_s}")
-            if alerts:
-                send_message(
-                    "📊 <b>End-of-day portfolio check</b>\n\n" + "\n".join(alerts),
-                    chat_id=uid,
-                )
-        except Exception as exc:
-            print(f"[agent] End-of-day portfolio summary failed for {uid} (non-critical): {exc}")
 
 
 # ── Weekly recap (Saturday morning) ──────────────────────────────────────────
@@ -706,7 +594,7 @@ def run_price_alerts():
     except Exception as exc:
         print(f"[agent] Price alert check failed: {exc}")
 
-    # Also check trailing stops on open positions using live prices — per user
+    # Also check trade targets/stops on open positions using live prices — per user
     import yfinance as yf
     for uid in _all_recipients():
         try:
@@ -723,18 +611,6 @@ def run_price_alerts():
                                   for t in tickers if t in raw["Close"].columns}
             else:
                 current_prices = {tickers[0]: float(raw["Close"].dropna().iloc[-1])} if tickers else {}
-
-            trail_closed = update_trailing_stops(current_prices, uid)
-            for trade in trail_closed:
-                sign = "+" if trade["return_pct"] >= 0 else ""
-                send_message(
-                    f"🔒 <b>{trade['ticker']} TRAILING STOP HIT</b>\n"
-                    f"Sold @ <code>${trade['closed_price']}</code>  "
-                    f"<b>{sign}{trade['return_pct']:.1f}%</b>  (${trade['gain_usd']:+.2f})\n"
-                    f"<i>Peak ${trade.get('highest_reached', '?')} → "
-                    f"Trail stop ${trade.get('trailing_stop_level', '?')}</i>",
-                    chat_id=uid,
-                )
 
             newly_closed = check_and_close_trades(current_prices, uid)
             for trade in newly_closed:
