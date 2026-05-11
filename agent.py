@@ -901,6 +901,7 @@ def run_premarket(config: dict):
             # Fetch pre-market price for each ticker
             position_lines = []
             big_movers     = []
+            sector_by_ticker: dict[str, str] = {}   # for concentration check
 
             for trade in unique:
                 ticker = trade["ticker"]
@@ -909,6 +910,9 @@ def run_premarket(config: dict):
                     pre_price   = info.get("preMarketPrice") or info.get("currentPrice")
                     prev_close  = info.get("regularMarketPreviousClose") or info.get("previousClose")
                     entry       = trade.get("entry_price")
+                    # Capture sector for concentration check (stocks only)
+                    if trade.get("asset_type") == "stock":
+                        sector_by_ticker[ticker] = info.get("sector", "Unknown")
 
                     if not pre_price:
                         position_lines.append(f"  <b>{ticker}</b>  <i>pre-market data unavailable</i>")
@@ -954,6 +958,29 @@ def run_premarket(config: dict):
             if not position_lines:
                 continue
 
+            # ── Sector concentration warning ──────────────────────────────────
+            concentration_line = ""
+            stock_count = len(sector_by_ticker)
+            if stock_count >= 2:
+                sector_counts: dict[str, int] = {}
+                for s in sector_by_ticker.values():
+                    sector_counts[s] = sector_counts.get(s, 0) + 1
+                top_sector, top_n = max(sector_counts.items(), key=lambda x: x[1])
+                if top_sector and top_sector != "Unknown" and top_n / stock_count >= 0.5:
+                    pct = int(top_n / stock_count * 100)
+                    concentration_line = f"\n⚡ <i>{pct}% of your holdings are {top_sector} — consider diversifying</i>"
+
+            # ── Earnings risk on open positions (2-day window) ─────────────────
+            from earnings_checker import get_upcoming_earnings
+            earnings_map = get_upcoming_earnings(list(sector_by_ticker.keys()), days_ahead=2)
+            earnings_section = ""
+            if earnings_map:
+                e_lines = [
+                    f"  📅 <b>{t}</b> reports {d} — review position size"
+                    for t, d in sorted(earnings_map.items())
+                ]
+                earnings_section = "\n\n⚠️ <b>Earnings this week (open positions)</b>\n" + "\n".join(e_lines)
+
             # ── Big mover alerts (sent first, individually) ───────────────────
             for ticker, price, pct, stop in big_movers:
                 direction = "gapping UP" if pct > 0 else "gapping DOWN"
@@ -976,7 +1003,9 @@ def run_premarket(config: dict):
             n    = len(unique)
             send_message(
                 f"🌅 <b>Pre-market — your {n} position{'s' if n != 1 else ''}</b>\n\n"
-                f"{body}\n\n"
+                f"{body}"
+                f"{concentration_line}"
+                f"{earnings_section}\n\n"
                 f"<i>Market opens in ~45 min. 🟢 = +3%+  🔴 = -3%+  ⚪ = quiet</i>",
                 chat_id=uid,
             )
