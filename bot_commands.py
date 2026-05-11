@@ -333,20 +333,24 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
 
     raw = name_or_ticker.strip()
 
-    # Already looks like a ticker — return directly, no Haiku needed
-    if _re.match(r"^[A-Za-z.\-]{1,6}$", raw):
+    # Fast path: looks unambiguously like a ticker symbol (1-5 chars, letters/dots/hyphens).
+    # ≤5 chars covers AAPL, MSFT, GOOGL, META, ETH, BTC, SOL etc.
+    # Anything longer (COSTCO=6, ACCENTURE=9) must go through Haiku for proper resolution.
+    if _re.match(r"^[A-Za-z.\-]{1,5}$", raw):
         return [{"ticker": raw.upper(), "name": raw.upper()}]
 
     # Ask Haiku for up to 4 candidates with full names
     prompt = (
         f'The user typed "{raw}" as a stock or crypto to trade. '
         'Return up to 4 matching US stock/crypto candidates as a JSON array of objects. '
-        'Each object must have "ticker" (official symbol) and "name" (short company name). '
+        'Each object must have "ticker" (official symbol, max 5 chars) and "name" (short company name). '
         'Order by most likely match first. '
         'Examples: "apple" → [{"ticker":"AAPL","name":"Apple Inc"}], '
+        '"costco" → [{"ticker":"COST","name":"Costco"}], '
+        '"accenture" → [{"ticker":"ACN","name":"Accenture"}], '
         '"bank" → [{"ticker":"JPM","name":"JPMorgan"},{"ticker":"BAC","name":"Bank of America"},'
         '{"ticker":"WFC","name":"Wells Fargo"},{"ticker":"C","name":"Citigroup"}]. '
-        'Return ONLY the JSON array.'
+        'Return ONLY the JSON array, no other text.'
     )
     try:
         client  = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -355,13 +359,21 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
             max_tokens=150,
             messages=[{"role": "user", "content": prompt}],
         )
-        candidates = _j.loads(message.content[0].text.strip())
+        raw_json = message.content[0].text.strip()
+        if raw_json.startswith("```"):
+            raw_json = raw_json.split("```")[1]
+            if raw_json.startswith("json"):
+                raw_json = raw_json[4:]
+        candidates = _j.loads(raw_json)
         if isinstance(candidates, list) and candidates:
             return candidates
     except Exception as exc:
         print(f"[telegram] _resolve_ticker_candidates failed: {exc}")
 
-    return [{"ticker": raw.upper(), "name": raw.upper()}]
+    # Last-resort fallback — warn that we're not confident about this ticker
+    ticker_guess = raw.upper()
+    print(f"[bot] Ticker resolution fallback: storing '{ticker_guess}' as-is — may be invalid")
+    return [{"ticker": ticker_guess, "name": ticker_guess}]
 
 
 def _send_release_broadcast(notes: str, admin_chat_id: str) -> str:
