@@ -656,14 +656,20 @@ def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str
 
 def generate_trade_debrief(trade: dict) -> str:
     """
-    Use Claude Haiku to write a 2-sentence debrief after a trade closes.
+    Use Claude Haiku to write a 2-3 sentence debrief after a trade closes.
+    Uses the original pick thesis to give context-aware, actionable feedback.
+
+    For stop-outs: tells the user whether the thesis is broken or it's noise,
+    and suggests re-entry conditions if the setup still has merit.
+    For targets: reinforces what worked.
+    For expired: explains what stalled and what to watch for.
 
     Args:
-        trade: Closed trade dict with keys: ticker, entry_price, closed_price,
-               return_pct, outcome ("target" | "stop" | "expired"), gain_usd.
+        trade: Closed trade dict — must include ticker, entry_price, closed_price,
+               return_pct, outcome, gain_usd. Optionally includes thesis.
 
     Returns:
-        A 2-sentence educational debrief string, or "" on failure.
+        A short debrief string (2-3 sentences), or "" on failure.
     """
     ticker     = trade.get("ticker", "")
     entry      = trade.get("entry_price", "?")
@@ -671,6 +677,9 @@ def generate_trade_debrief(trade: dict) -> str:
     ret        = trade.get("return_pct", 0)
     outcome    = trade.get("outcome", "")
     gain       = trade.get("gain_usd", 0)
+    thesis     = trade.get("thesis", "")
+
+    sign = "+" if ret >= 0 else ""
 
     outcome_desc = {
         "target":  "hit its profit target",
@@ -678,24 +687,46 @@ def generate_trade_debrief(trade: dict) -> str:
         "expired": "expired before hitting target or stop",
     }.get(outcome, "closed")
 
-    sign = "+" if ret >= 0 else ""
+    thesis_line = f"\nOriginal thesis: \"{thesis}\"" if thesis else ""
 
-    system = (
-        "You are a friendly trading coach. Write a 2-sentence post-trade debrief. "
-        "Sentence 1: what likely happened (market/technical reason). "
-        "Sentence 2: one actionable lesson for next time. "
-        "Keep it warm, direct, under 40 words total. No disclaimers."
-    )
+    if outcome == "stop":
+        system = (
+            "You are a concise trading coach. A position just hit its stop-loss. "
+            "Write exactly 2-3 sentences:\n"
+            "1. What likely caused the stop to hit (market or technical reason).\n"
+            "2. Whether the original thesis is broken or just temporarily invalidated.\n"
+            "3. If the thesis still has merit, give ONE specific re-entry condition "
+            "   (e.g. 'Re-enter if price reclaims $X with volume'). "
+            "   If thesis is broken, say so plainly and move on.\n"
+            "Be direct and specific. Under 50 words. No disclaimers."
+        )
+    elif outcome == "target":
+        system = (
+            "You are a concise trading coach. A position just hit its profit target. "
+            "Write exactly 2 sentences:\n"
+            "1. What drove the move (market or technical reason).\n"
+            "2. One key takeaway to apply to future similar setups.\n"
+            "Be warm and specific. Under 35 words. No disclaimers."
+        )
+    else:  # expired
+        system = (
+            "You are a concise trading coach. A position expired without hitting "
+            "its target or stop. Write exactly 2 sentences:\n"
+            "1. What likely caused the thesis to stall.\n"
+            "2. What signal to look for before re-entering this type of setup.\n"
+            "Be direct and specific. Under 40 words. No disclaimers."
+        )
+
     user_msg = (
         f"{ticker} {outcome_desc} at ${exit_price} (entry ${entry}). "
-        f"Return: {sign}{ret}% (${gain:+.2f}). Outcome: {outcome}."
+        f"Return: {sign}{ret}% (${gain:+.2f}).{thesis_line}"
     )
 
     try:
         client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=120,
+            max_tokens=150,
             system=system,
             messages=[{"role": "user", "content": user_msg}],
         )
