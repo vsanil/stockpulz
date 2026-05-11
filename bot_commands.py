@@ -552,7 +552,7 @@ def handle_callback_query(callback_query: dict) -> None:
             ep = entry.split("|")
             if len(ep) == 2:
                 ticker, price = ep[0].strip(), ep[1].strip()
-                r = _execute_sold(ticker, price, chat_id)
+                r = _execute_sold(ticker, chat_id, price=price)
                 results.append(r)
         clear_pending_state(chat_id)
         send_message("\n\n".join(results), chat_id=chat_id)
@@ -566,7 +566,7 @@ def handle_callback_query(callback_query: dict) -> None:
             ep = entry.split("|")
             if len(ep) == 2:
                 ticker, price = ep[0].strip(), ep[1].strip()
-                r = _execute_bought(ticker, price, None, chat_id)
+                r = _execute_bought(ticker, chat_id, price=price)
                 results.append(r)
         clear_pending_state(chat_id)
         send_message("\n\n".join(results), chat_id=chat_id)
@@ -576,7 +576,7 @@ def handle_callback_query(callback_query: dict) -> None:
         price_raw  = parts[2] if len(parts) > 2 else ""
         shares_raw = parts[3] if len(parts) > 3 else None
         clear_pending_state(chat_id)
-        result = _execute_bought(ticker, price_raw or None, shares_raw or None, chat_id)
+        result = _execute_bought(ticker, chat_id, price=price_raw or None, shares=shares_raw or None)
         send_message(result, chat_id=chat_id)
 
     elif action == "sold_confirm":
@@ -584,7 +584,7 @@ def handle_callback_query(callback_query: dict) -> None:
         price_raw  = parts[2] if len(parts) > 2 else ""
         shares_raw = parts[3] if len(parts) > 3 else None
         clear_pending_state(chat_id)
-        result = _execute_sold(ticker, price_raw or None, chat_id, shares_sold=shares_raw or None)
+        result = _execute_sold(ticker, chat_id, price=price_raw or None, shares_sold=shares_raw or None)
         send_message(result, chat_id=chat_id)
 
     elif action == "pbuy_confirm":
@@ -634,7 +634,7 @@ def handle_callback_query(callback_query: dict) -> None:
         ticker    = parts[1] if len(parts) > 1 else ""
         price_raw = parts[2] if len(parts) > 2 else ""
         clear_pending_state(chat_id)
-        result = _execute_bought(ticker, price_raw or None, None, chat_id)
+        result = _execute_bought(ticker, chat_id, price=price_raw or None)
         send_message(result, chat_id=chat_id)
 
     elif action == "sold_all":
@@ -642,7 +642,7 @@ def handle_callback_query(callback_query: dict) -> None:
         ticker    = parts[1] if len(parts) > 1 else ""
         price_raw = parts[2] if len(parts) > 2 else ""
         clear_pending_state(chat_id)
-        result = _execute_sold(ticker, price_raw or None, chat_id, shares_sold=None)
+        result = _execute_sold(ticker, chat_id, price=price_raw or None)
         send_message(result, chat_id=chat_id)
 
     elif action == "paper_cancel_pos":
@@ -1116,18 +1116,44 @@ def _send_chart(ticker: str, asset_type: str, chat_id: str) -> None:
     send_photo(img, caption=caption, chat_id=chat_id)
 
 
-def _execute_bought(ticker: str, chat_id: str) -> str:
-    """Add ticker to user's portfolio. No price or quantity needed."""
+def _execute_bought(ticker: str, chat_id: str,
+                    price=None, shares=None) -> str:
+    """
+    Add ticker to user's portfolio.
+    price / shares are optional — used when the user confirms a manual /bought entry.
+    Without price, pick levels from today's picks are used as-is.
+    """
     from trade_logger import add_holding
-    picks = load_picks()
+    ticker = ticker.upper()
+    picks  = load_picks()
     trade, existed = add_holding(ticker, chat_id, picks=picks)
 
     if existed:
         return f"📌 <b>{ticker}</b> is already in your portfolio — I'm watching it."
 
+    # Override entry price if user provided one explicitly
+    if price is not None:
+        try:
+            entry_val = float(str(price).replace(",", ""))
+            log = load_user_trade_log(chat_id)
+            for t in log.get("open", []):
+                if t["ticker"] == ticker:
+                    t["entry_price"] = entry_val
+                    if shares:
+                        try:
+                            t["shares"] = float(str(shares).replace(",", ""))
+                            t["allocation"] = round(entry_val * t["shares"], 2)
+                        except Exception:
+                            pass
+                    break
+            save_user_trade_log(chat_id, log)
+            trade["entry_price"] = entry_val
+        except Exception:
+            pass
+
+    entry  = trade.get("entry_price")
     target = trade.get("target_price")
     stop   = trade.get("stop_loss")
-    entry  = trade.get("entry_price")
 
     lines = [f"✅ <b>{ticker}</b> added to your portfolio."]
     if entry and target and stop:
@@ -1137,18 +1163,48 @@ def _execute_bought(ticker: str, chat_id: str) -> str:
             f"· stop <code>${_p(stop)}</code>"
         )
         lines.append("<i>I'll alert you if the price hits the target or stop.</i>")
+    elif entry:
+        lines.append(f"Entry logged at <code>${_p(entry)}</code>.")
     else:
         lines.append("<i>Not in today's picks — I'll watch the price for you.</i>")
     return "\n".join(lines)
 
 
-def _execute_sold(ticker: str, chat_id: str) -> str:
-    """Remove ticker from user's portfolio."""
+def _execute_sold(ticker: str, chat_id: str,
+                  price=None, shares_sold=None) -> str:
+    """
+    Remove ticker from user's portfolio.
+    If price is provided, calculates and shows realized P&L before removing.
+    """
     from trade_logger import remove_holding
+    ticker = ticker.upper()
+
+    # Calculate P&L if exit price provided
+    pnl_line = ""
+    if price is not None:
+        try:
+            exit_price = float(str(price).replace(",", ""))
+            log        = load_user_trade_log(chat_id)
+            for t in log.get("open", []):
+                if t["ticker"] == ticker:
+                    entry = t.get("entry_price")
+                    if entry:
+                        entry    = float(entry)
+                        ret_pct  = (exit_price - entry) / entry * 100
+                        sign     = "+" if ret_pct >= 0 else ""
+                        emoji    = "📈" if ret_pct >= 0 else "📉"
+                        qty      = float(t.get("shares") or shares_sold or 0)
+                        pnl_usd  = (exit_price - entry) * qty if qty else None
+                        pnl_str  = f"  ·  P&amp;L: <b>{sign}${abs(pnl_usd):,.2f}</b>" if pnl_usd else ""
+                        pnl_line = f"\n{emoji} Return: <b>{sign}{ret_pct:.1f}%</b>{pnl_str}"
+                    break
+        except Exception:
+            pass
+
     removed = remove_holding(ticker, chat_id)
     if not removed:
         return f"⚠️ <b>{ticker}</b> is not in your portfolio."
-    return f"✅ <b>{ticker}</b> removed from your portfolio."
+    return f"✅ <b>{ticker}</b> removed from your portfolio.{pnl_line}"
 
 
 def _execute_update_level(ticker: str, field: str, new_price: float, chat_id: str) -> str:
