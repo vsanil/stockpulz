@@ -23,7 +23,7 @@ import pytz
 from config_manager import (
     get_config, save_picks, load_picks, save_weekly_pick,
     get_dynamic_pick_counts, get_user_config,
-    load_user_trade_log,
+    load_user_trade_log, save_user_trade_log,
     save_screener_cache, load_screener_cache,
 )
 from trade_logger import check_and_close_trades
@@ -34,7 +34,7 @@ from ai_analyzer import analyze_with_claude, personalize_picks, generate_trade_d
 from price_checker import get_current_prices
 from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
-    format_eod_summary, format_week_ahead, build_picks_keyboard,
+    format_eod_summary, format_week_ahead, build_picks_keyboard, _p,
 )
 from telegram_api import send_message, send_inline_keyboard
 
@@ -148,12 +148,14 @@ MOCK_CRYPTO_CANDIDATES = {
 def detect_run_mode(now_et: datetime) -> str:
     """Auto-detect run mode by ET hour/weekday. Override with RUN_MODE env var."""
     forced = os.environ.get("RUN_MODE", "").lower()
-    if forced in ("morning", "confirmation", "weekly", "close_check", "prescreener", "price_alerts", "week_ahead"):
+    if forced in ("morning", "confirmation", "weekly", "close_check", "prescreener", "price_alerts", "week_ahead", "premarket"):
         return forced
     if now_et.weekday() == 6 and now_et.hour < 14:   # Sunday morning → week ahead briefing
         return "week_ahead"
     if now_et.weekday() == 5 and now_et.hour < 10:   # Saturday morning
         return "weekly"
+    if now_et.weekday() < 5 and now_et.hour == 8 and now_et.minute >= 40:
+        return "premarket"   # 8:40–8:59 AM ET weekday → pre-market pulse
     if now_et.hour < 10:
         return "morning"
     if now_et.hour >= 15:
@@ -488,6 +490,13 @@ def run_confirmation():
         except Exception as exc:
             print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
 
+    # ── Trailing stop nudges — suggest stop adjustments for open trades ──────
+    for uid in _all_recipients():
+        try:
+            _check_trailing_stops(current_prices, uid)
+        except Exception as exc:
+            print(f"[agent] Trailing stop check failed for {uid} (non-critical): {exc}")
+
     # ── Price alerts ──────────────────────────────────────────────────────────
     try:
         fired = check_all_alerts(send_fn=_alert)
@@ -645,6 +654,13 @@ def run_close_check():
         except Exception as exc:
             print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
 
+    # ── Trailing stop nudges ──────────────────────────────────────────────────
+    for uid in _all_recipients():
+        try:
+            _check_trailing_stops(current_prices, uid)
+        except Exception as exc:
+            print(f"[agent] Trailing stop check failed for {uid} (non-critical): {exc}")
+
     # ── Price alerts ──────────────────────────────────────────────────────────
     try:
         fired = check_all_alerts(send_fn=_alert)
@@ -704,6 +720,69 @@ def run_weekly_recap(config: dict, now_et: datetime):
             print("[agent] No weekly picks data — skipping recap.")
     except Exception as exc:
         print(f"[agent] Weekly recap failed (non-critical): {exc}")
+
+
+# ── Trailing stop nudge helper ───────────────────────────────────────────────
+
+def _check_trailing_stops(current_prices: dict, uid: str) -> None:
+    """
+    For each open trade for uid, check if the position has moved far enough
+    to warrant adjusting the stop-loss. Fires once per threshold per trade,
+    tracked via flags stamped onto the trade dict in the log.
+
+    Thresholds:
+      +8%  from entry → suggest moving stop to breakeven (entry price)
+      90%  of target  → suggest trailing stop to -5% from current (lock in gains)
+    """
+    log         = load_user_trade_log(uid)
+    open_trades = log.get("open", [])
+    dirty       = False   # track whether we modified the log
+
+    for trade in open_trades:
+        ticker  = trade.get("ticker")
+        entry   = trade.get("entry_price")
+        target  = trade.get("target_price")
+        current = current_prices.get(ticker) if ticker else None
+
+        if not (ticker and entry and current):
+            continue
+
+        entry_f   = float(entry)
+        current_f = float(current)
+        gain_pct  = (current_f - entry_f) / entry_f * 100
+
+        # ── Threshold 1: +8% — move stop to breakeven ────────────────────────
+        if gain_pct >= 8.0 and not trade.get("_notified_breakeven"):
+            trade["_notified_breakeven"] = True
+            dirty = True
+            send_message(
+                f"📈 <b>{ticker}</b> is up <b>+{gain_pct:.1f}%</b> from your entry.\n"
+                f"💡 Consider moving your stop-loss to <b>breakeven</b> "
+                f"(<code>${_p(entry_f)}</code>) — you'd be playing with the house's money.",
+                chat_id=uid,
+            )
+
+        # ── Threshold 2: 90% of the way to target — trail at -5% from now ────
+        if target:
+            target_f = float(target)
+            if target_f > entry_f:
+                progress = (current_f - entry_f) / (target_f - entry_f)
+                if progress >= 0.90 and not trade.get("_notified_trail_90"):
+                    trade["_notified_trail_90"] = True
+                    dirty = True
+                    lock_price = round(current_f * 0.95, 2)
+                    remaining  = round((target_f - current_f) / current_f * 100, 1)
+                    send_message(
+                        f"🎯 <b>{ticker}</b> is 90% of the way to target "
+                        f"(<code>${_p(target_f)}</code>, {remaining}% left).\n"
+                        f"💡 Consider trailing your stop to <code>${_p(lock_price)}</code> "
+                        f"(-5% from now) to lock in most of the gain.",
+                        chat_id=uid,
+                    )
+
+    if dirty:
+        log["open"] = open_trades
+        save_user_trade_log(uid, log)
 
 
 # ── Sunday Week Ahead briefing ───────────────────────────────────────────────
@@ -781,6 +860,133 @@ def run_week_ahead(config: dict):
     print("[agent] Sunday Week Ahead complete.")
 
 
+# ── Pre-market pulse (8:45 AM ET Mon–Fri, before the open) ──────────────────
+
+def run_premarket(config: dict):
+    """
+    8:45 AM run — fires 45 min before market open.
+    For each user with open stock positions: fetch pre-market prices via yfinance
+    and send a brief 'heading into the open' message.
+
+    Two signals:
+      - Big pre-market move (>= 3% either direction) → urgent alert
+      - Quiet open (<3% on all positions) → one compact digest message
+
+    Skipped entirely if a user has no open stock positions.
+    """
+    import yfinance as yf
+    print("[agent] Running pre-market pulse...")
+
+    for uid in _all_recipients():
+        try:
+            user_cfg = {**config, **get_user_config(uid)}
+            if user_cfg.get("paused") or user_cfg.get("skip_premarket"):
+                continue
+
+            log         = load_user_trade_log(uid)
+            open_trades = log.get("open", [])
+            # Only stocks — crypto is 24/7 and doesn't have a "pre-market"
+            stock_trades = [t for t in open_trades if t.get("asset_type") == "stock"]
+            if not stock_trades:
+                continue
+
+            # Deduplicate tickers
+            seen: set = set()
+            unique = []
+            for t in stock_trades:
+                if t["ticker"] not in seen:
+                    seen.add(t["ticker"])
+                    unique.append(t)
+
+            # Fetch pre-market price for each ticker
+            position_lines = []
+            big_movers     = []
+
+            for trade in unique:
+                ticker = trade["ticker"]
+                try:
+                    info        = yf.Ticker(ticker).info
+                    pre_price   = info.get("preMarketPrice") or info.get("currentPrice")
+                    prev_close  = info.get("regularMarketPreviousClose") or info.get("previousClose")
+                    entry       = trade.get("entry_price")
+
+                    if not pre_price:
+                        position_lines.append(f"  <b>{ticker}</b>  <i>pre-market data unavailable</i>")
+                        continue
+
+                    pre_price  = round(float(pre_price), 2)
+                    prev_close = round(float(prev_close), 2) if prev_close else None
+
+                    # % vs previous close
+                    if prev_close:
+                        vs_prev = (pre_price - prev_close) / prev_close * 100
+                        vs_prev_str = f"{'+' if vs_prev >= 0 else ''}{vs_prev:.1f}% vs close"
+                    else:
+                        vs_prev     = 0
+                        vs_prev_str = ""
+
+                    # % vs entry
+                    vs_entry_str = ""
+                    if entry:
+                        vs_entry = (pre_price - float(entry)) / float(entry) * 100
+                        vs_entry_str = f"  ·  {'+' if vs_entry >= 0 else ''}{vs_entry:.1f}% vs entry"
+
+                    # Stop proximity
+                    stop = trade.get("stop_loss")
+                    stop_badge = ""
+                    if stop and pre_price <= float(stop) * 1.02:
+                        stop_badge = "  ⚠️ <b>NEAR STOP</b>"
+
+                    move_icon = "🔴" if vs_prev <= -3 else ("🟢" if vs_prev >= 3 else "⚪")
+                    line = (
+                        f"  {move_icon} <b>{ticker}</b>  <code>${_p(pre_price)}</code>  "
+                        f"<i>{vs_prev_str}{vs_entry_str}</i>{stop_badge}"
+                    )
+                    position_lines.append(line)
+
+                    if abs(vs_prev) >= 3:
+                        big_movers.append((ticker, pre_price, vs_prev, stop))
+
+                except Exception as exc:
+                    print(f"[agent] Pre-market fetch failed for {ticker}: {exc}")
+                    position_lines.append(f"  <b>{ticker}</b>  <i>data unavailable</i>")
+
+            if not position_lines:
+                continue
+
+            # ── Big mover alerts (sent first, individually) ───────────────────
+            for ticker, price, pct, stop in big_movers:
+                direction = "gapping UP" if pct > 0 else "gapping DOWN"
+                action    = ""
+                if pct <= -3 and stop and price <= float(stop) * 1.05:
+                    action = "\n⚠️ <b>Approaching stop-loss</b> — consider your risk before open."
+                elif pct >= 5:
+                    action = "\n💡 Strong open expected — consider taking partial profits near target."
+                send_message(
+                    f"{'🟢' if pct > 0 else '🔴'} <b>{ticker}</b> {direction} <b>{'+' if pct > 0 else ''}{pct:.1f}%</b> "
+                    f"pre-market → <code>${_p(price)}</code>{action}",
+                    chat_id=uid,
+                )
+
+            # ── Quiet digest (one message for all positions) ──────────────────
+            quiet_trades = [t for _, *t in [(None, t) for t in unique]
+                            if t[0]["ticker"] not in {m[0] for m in big_movers}]
+
+            body = "\n".join(position_lines)
+            n    = len(unique)
+            send_message(
+                f"🌅 <b>Pre-market — your {n} position{'s' if n != 1 else ''}</b>\n\n"
+                f"{body}\n\n"
+                f"<i>Market opens in ~45 min. 🟢 = +3%+  🔴 = -3%+  ⚪ = quiet</i>",
+                chat_id=uid,
+            )
+
+        except Exception as exc:
+            print(f"[agent] Pre-market pulse failed for {uid} (non-critical): {exc}")
+
+    print("[agent] Pre-market pulse complete.")
+
+
 # ── Intraday price-alert-only run (every 30 min during market hours) ─────────
 
 def run_price_alerts():
@@ -850,6 +1056,8 @@ def main():
 
     if mode == "prescreener":
         run_prescreener(config)
+    elif mode == "premarket":
+        run_premarket(config)
     elif mode == "morning":
         run_morning(config, now_et)
     elif mode == "weekly":
