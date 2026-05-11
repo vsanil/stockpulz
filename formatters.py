@@ -44,12 +44,17 @@ def _upside(entry, target) -> str:
         return ""
 
 
-def _entry_window(entry, is_long_term: bool = False, is_crypto: bool = False) -> str:
+def _entry_window(entry, stop=None, budget=None,
+                  is_long_term: bool = False, is_crypto: bool = False) -> str:
     """
-    Return a one-line entry window hint for a pick.
+    Return a one-line entry window + position sizing hint for a pick.
 
-    Short-term stock / crypto: 2% band  →  "⏱ Enter within 2% — skip if above $X"
-    Long-term stock:           3% band  →  "⏱ Patient entry — up to $X (+3%)"
+    Short-term stock / crypto:
+      "⏱ Enter within 2% — skip if above $X  ·  risk $Y/share"
+      With budget: "⏱ … → N shares, $Z risk at stop"
+    Long-term stock:
+      "⏱ Patient entry — up to $X (+3%)"
+      With budget: "⏱ … → ~N shares at entry"
     Returns empty string if entry price is missing or invalid.
     """
     if not entry:
@@ -57,12 +62,39 @@ def _entry_window(entry, is_long_term: bool = False, is_crypto: bool = False) ->
     try:
         e   = float(entry)
         pct = 0.03 if (is_long_term or is_crypto) else 0.02
-        upper = e * (1 + pct)
+        upper     = e * (1 + pct)
         pct_label = "3%" if pct == 0.03 else "2%"
+
+        # ── Position sizing suffix ────────────────────────────────────────────
+        sizing = ""
         if is_long_term:
-            return f"⏱ <i>Patient entry — up to <code>${_p(upper)}</code>  <b>(+{pct_label})</b></i>"
+            # LT picks have no stop — just show share count if budget set
+            if budget:
+                shares = max(1, int(float(budget) / e))
+                sizing = f"  ·  <code>${int(budget)}</code> → ~{shares} share{'s' if shares != 1 else ''}"
+            return (
+                f"⏱ <i>Patient entry — up to <code>${_p(upper)}</code>  "
+                f"<b>(+{pct_label})</b>{sizing}</i>"
+            )
         else:
-            return f"⏱ <i>Enter within {pct_label} — skip if above <code>${_p(upper)}</code></i>"
+            # Short-term: always show risk/share; add share count if budget set
+            risk_str = ""
+            if stop:
+                risk_per_share = round(e - float(stop), 2)
+                if risk_per_share > 0:
+                    risk_str = f"  ·  risk <b>${_p(risk_per_share)}/share</b>"
+                    if budget:
+                        shares    = max(1, int(float(budget) / e))
+                        total_risk = round(shares * risk_per_share, 2)
+                        sizing = (
+                            f"  ·  <code>${int(budget)}</code> → {shares} share{'s' if shares != 1 else ''}, "
+                            f"${_p(total_risk)} risk at stop"
+                        )
+                        risk_str = sizing   # replace plain risk_str with full sizing line
+            return (
+                f"⏱ <i>Enter within {pct_label} — skip if above "
+                f"<code>${_p(upper)}</code>{risk_str}</i>"
+            )
     except Exception:
         return ""
 
@@ -240,7 +272,8 @@ def format_daily_message(picks: dict, config: dict,
         streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
         social_badge  = _buy_badge(ticker)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
-        window        = _entry_window(entry, is_long_term=False, is_crypto=False)
+        window        = _entry_window(entry, stop=stop, budget=per_stock,
+                                       is_long_term=False, is_crypto=False)
         window_line   = f"\n{window}" if window else ""
         return (
             f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
@@ -258,7 +291,8 @@ def format_daily_message(picks: dict, config: dict,
         badge         = _conviction_badge(s.get("conviction", 3))
         social_badge  = _buy_badge(ticker)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
-        window        = _entry_window(entry, is_long_term=True, is_crypto=False)
+        window        = _entry_window(entry, budget=per_stock,
+                                       is_long_term=True, is_crypto=False)
         window_line   = f"\n{window}" if window else ""
         return (
             f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{social_badge}  "
@@ -280,7 +314,8 @@ def format_daily_message(picks: dict, config: dict,
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         lt_label      = "  <i>· long-term</i>" if is_lt else ""
         stop_str      = f"  ·  stop <code>${_p(stop)}</code>" if not is_lt else ""
-        window        = _entry_window(entry, is_long_term=is_lt, is_crypto=True)
+        window        = _entry_window(entry, stop=stop, budget=per_crypto,
+                                       is_long_term=is_lt, is_crypto=True)
         window_line   = f"\n{window}" if window else ""
         return (
             f"<b>{_esc(sym)}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
