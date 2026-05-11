@@ -529,7 +529,10 @@ def run_confirmation():
         for uid in _all_recipients():
             try:
                 from config_manager import get_user_config
-                watchlist = get_user_config(uid).get("watchlist", [])
+                u_cfg     = get_user_config(uid)
+                if u_cfg.get("paused") or u_cfg.get("skip_watchlist_alerts"):
+                    continue
+                watchlist = u_cfg.get("watchlist", [])
                 # Only scan tickers NOT already in today's picks
                 scan = [t for t in watchlist if t and t not in pick_symbols]
                 if not scan:
@@ -576,7 +579,19 @@ def run_confirmation():
         print(f"[agent] Watchlist signal check failed (non-critical): {exc}")
 
     message = format_confirmation_message(picks, current_prices)
-    _send_or_print(message, label="10:30 AM Confirmation")
+    # Broadcast to all users who haven't opted out
+    if DRY_RUN:
+        print(f"\n{'=' * 60}\nDRY RUN — 10:30 AM Confirmation (not sent):\n{'=' * 60}\n{message}")
+    else:
+        for uid in _all_recipients():
+            try:
+                ucfg = get_user_config(uid)
+                if ucfg.get("paused") or ucfg.get("skip_confirmation"):
+                    print(f"[agent] Skipping confirmation for {uid} (paused or opted out).")
+                    continue
+                send_message(message, chat_id=uid)
+            except Exception as exc:
+                print(f"[agent] WARNING: Confirmation send failed for {uid}: {exc}")
 
     # Mark as sent so retries don't fire again today
     if not DRY_RUN:
@@ -640,7 +655,8 @@ def run_close_check():
     for uid in _all_recipients():
         try:
             from config_manager import get_user_config
-            if get_user_config(uid).get("paused"):
+            eod_cfg = get_user_config(uid)
+            if eod_cfg.get("paused") or eod_cfg.get("skip_eod"):
                 continue
             log = load_user_trade_log(uid)
             eod_msg = format_eod_summary(picks, current_prices, log.get("open", []))
@@ -770,6 +786,66 @@ def main():
     print(f"[agent] Done ({mode}) for {now_et.strftime('%Y-%m-%d')}.")
 
 
+def compute_pick_streaks(weekly_picks: dict) -> dict:
+    """
+    Given weekly_picks = {date_str: picks_dict, ...}, return a dict of
+    {ticker/symbol: consecutive_day_count} for tickers that appear in today's
+    picks AND appeared on each immediately prior trading day in the weekly data.
+
+    Only tickers with a streak ≥ 2 are included.
+    Called once per morning run; result passed to format_daily_message().
+    """
+    from datetime import date, timedelta
+
+    today     = date.today()
+    today_str = today.isoformat()
+
+    # Build {date_str: set(ticker)} from weekly picks
+    tickers_by_day: dict[str, set] = {}
+    for date_str, picks in weekly_picks.items():
+        stocks = picks.get("stocks", picks)
+        crypto = picks.get("crypto", {})
+        day_set: set = set()
+        for s in stocks.get("short_term", []) + stocks.get("long_term", []):
+            t = s.get("ticker")
+            if t:
+                day_set.add(t)
+        for c in crypto.get("short_term", []) + crypto.get("long_term", []):
+            sym = c.get("symbol", "")
+            if sym:
+                day_set.add(sym)
+        tickers_by_day[date_str] = day_set
+
+    today_tickers = tickers_by_day.get(today_str, set())
+    if not today_tickers:
+        return {}
+
+    streaks: dict[str, int] = {}
+    for ticker in today_tickers:
+        streak      = 1
+        check_date  = today - timedelta(days=1)
+        # Walk backwards through calendar days; skip days with no data (weekend/holiday)
+        # but stop as soon as a market day has data and the ticker is absent
+        checked_days = 0
+        while checked_days < 7:   # never look back more than 7 calendar days
+            check_str = check_date.isoformat()
+            if check_str in tickers_by_day:
+                if ticker in tickers_by_day[check_str]:
+                    streak += 1
+                    checked_days += 1
+                    check_date -= timedelta(days=1)
+                    continue
+                else:
+                    break   # market day present but ticker missing — streak ends
+            # No data for this calendar day (weekend/holiday) — skip it
+            check_date  -= timedelta(days=1)
+            checked_days += 1
+        if streak >= 2:
+            streaks[ticker] = streak
+
+    return streaks
+
+
 def _all_recipients() -> list[str]:
     """Return all allowed chat_ids (always includes owner)."""
     try:
@@ -806,6 +882,18 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
     """
     recipients = _all_recipients()
     print(f"[agent] Sending personalised {label} to {len(recipients)} user(s)...")
+
+    # ── Streak tracking — computed once, shared across all users ─────────────
+    pick_streaks: dict = {}
+    try:
+        from config_manager import load_weekly_picks
+        weekly = load_weekly_picks()
+        pick_streaks = compute_pick_streaks(weekly)
+        if pick_streaks:
+            print(f"[agent] Streak tickers: {pick_streaks}")
+    except Exception as streak_exc:
+        print(f"[agent] Streak computation failed (non-critical): {streak_exc}")
+
     for uid in recipients:
         try:
             user_cfg = {**global_config, **get_user_config(uid)}
@@ -824,7 +912,8 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             except Exception as pn_exc:
                 print(f"[agent] personalize_picks failed for {uid} (non-critical): {pn_exc}")
 
-            message = format_daily_message(picks, user_cfg, personal_notes=personal_notes)
+            message = format_daily_message(picks, user_cfg, personal_notes=personal_notes,
+                                           pick_streaks=pick_streaks)
             if DRY_RUN:
                 print(f"\n{'=' * 60}\nDRY RUN — {label} for {uid}:\n{'=' * 60}\n{message}\n")
             else:

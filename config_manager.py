@@ -76,6 +76,10 @@ DEFAULT_USER_CONFIG = {
     "stop_loss_pct":     None,         # % below entry to auto-close (None = use global default of 7%)
     "target_gain_pct":   None,         # % above entry as default target (None = use global default of 15%)
     "show_crypto":       True,         # False = hide all crypto sections from daily picks
+    # Notification opt-outs (all default on)
+    "skip_confirmation":     False,    # True = skip 10:30 AM confirmation message
+    "skip_eod":              False,    # True = skip 3:30 PM EOD portfolio summary
+    "skip_watchlist_alerts": False,    # True = skip watchlist RSI/MACD signal alerts
 }
 
 GIST_FILENAME          = "config.json"
