@@ -14,7 +14,7 @@ import hashlib
 import requests
 from telegram_api import (
     TELEGRAM_API,
-    send_message, send_inline_keyboard, send_typing_action,
+    send_message, send_inline_keyboard, send_typing_action, send_photo,
     typing_until_done, answer_callback_query, _bot_token, _chat_id,
     _get_bot_username,
 )
@@ -436,6 +436,17 @@ def handle_callback_query(callback_query: dict) -> None:
             return
         reply = _execute_bought(ticker, chat_id)
         send_message(reply, chat_id=chat_id)
+        return
+
+    if action == "chart":
+        ticker     = parts[1].upper() if len(parts) > 1 else ""
+        asset_type = parts[2] if len(parts) > 2 else "stock"
+        if not ticker:
+            return
+        send_message("📊 <i>Generating chart…</i>", chat_id=chat_id)
+        threading.Thread(
+            target=_send_chart, args=(ticker, asset_type, chat_id), daemon=True
+        ).start()
         return
 
     if action == "approve_user":
@@ -918,6 +929,8 @@ _PARAM_PROMPTS: dict[str, str] = {
                   "<i>e.g.</i>  <code>Picks will be delayed today — back tomorrow at 8:30 AM ET</code>"),
     "release":   ("🚀 <b>Type your release note to send to all users:</b>\n"
                   "<i>e.g.</i>  <code>New feature: price alerts now support crypto!</code>"),
+    "chart":     ("📊 <b>Which ticker?</b>\n"
+                  "<i>e.g.</i>  <code>AAPL</code>  ·  <code>NVDA</code>  ·  <code>BTC</code>"),
 }
 
 
@@ -1031,6 +1044,53 @@ def _send_settings_panel(chat_id: str) -> None:
 
 # ── Extracted buy/sell execution (shared by direct + conversational paths) ────
 
+def _send_chart(ticker: str, asset_type: str, chat_id: str) -> None:
+    """
+    Generate and send a candlestick chart for a ticker.
+    Annotates with entry/target/stop lines if the ticker is in today's picks.
+    Runs synchronously — call from a background thread for non-blocking UX.
+    """
+    from chart_generator import generate_chart
+    from telegram_api import send_photo
+
+    ticker = ticker.upper()
+
+    # Look up pick levels from today's picks
+    entry = target = stop = None
+    try:
+        picks = load_picks()
+        if picks:
+            all_p = (
+                picks.get("stocks", {}).get("short_term", []) +
+                picks.get("stocks", {}).get("long_term",  []) +
+                picks.get("crypto", {}).get("short_term", [])
+            )
+            for p in all_p:
+                sym = (p.get("ticker") or p.get("symbol", "")).upper()
+                if sym == ticker:
+                    entry  = p.get("entry_price")
+                    target = p.get("target_price")
+                    stop   = p.get("stop_loss")
+                    break
+    except Exception as exc:
+        print(f"[bot] Chart level lookup failed (non-critical): {exc}")
+
+    img = generate_chart(ticker, entry=entry, target=target, stop=stop, asset_type=asset_type)
+
+    if img is None:
+        send_message(f"⚠️ Could not generate chart for <b>{ticker}</b>. Try again shortly.", chat_id=chat_id)
+        return
+
+    # Build caption with level legend
+    parts = [f"<b>{ticker}</b>  ·  30-day chart"]
+    if entry:  parts.append(f"🟢 Entry  <code>${_p(entry)}</code>")
+    if target: parts.append(f"🔵 Target <code>${_p(target)}</code>")
+    if stop:   parts.append(f"🔴 Stop   <code>${_p(stop)}</code>")
+    caption = "\n".join(parts)
+
+    send_photo(img, caption=caption, chat_id=chat_id)
+
+
 def _execute_bought(ticker: str, chat_id: str) -> str:
     """Add ticker to user's portfolio. No price or quantity needed."""
     from trade_logger import add_holding
@@ -1126,6 +1186,18 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     # ── Single-step param commands ────────────────────────────────────────────
     if command == "explain":
         return _explain_pick(text)
+
+    if command == "chart":
+        ticker = text.strip().split()[0].upper() if text.strip() else ""
+        if not ticker:
+            return "⚠️ Please provide a ticker, e.g. <code>AAPL</code>"
+        from chart_generator import is_crypto
+        asset_type = "crypto" if is_crypto(ticker) else "stock"
+        send_message("📊 <i>Generating chart…</i>", chat_id=chat_id)
+        threading.Thread(
+            target=_send_chart, args=(ticker, asset_type, chat_id), daemon=True
+        ).start()
+        return None
 
     if command == "watch":
         return _parse_and_execute(f"WATCH {text}", original=f"/watch {text}", chat_id=chat_id)
@@ -1703,6 +1775,22 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             send_message(reply, chat_id=chat_id)
         threading.Thread(target=_explain_async, daemon=True).start()
         return None   # already sent "Thinking…", don't send a second message
+
+    if text == "CHART":
+        _prompt_for_param("chart", chat_id)
+        return ""
+
+    if text.startswith("CHART "):
+        ticker = text.split(" ", 1)[1].strip().upper()
+        if not ticker:
+            return "⚠️ Please provide a ticker, e.g. /chart AAPL"
+        from chart_generator import is_crypto
+        asset_type = "crypto" if is_crypto(ticker) else "stock"
+        send_message("📊 <i>Generating chart…</i>", chat_id=chat_id)
+        threading.Thread(
+            target=_send_chart, args=(ticker, asset_type, chat_id), daemon=True
+        ).start()
+        return None   # already sent "Generating…"
 
     if text == "PRICES":
         picks = load_picks()
