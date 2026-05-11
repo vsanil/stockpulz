@@ -3619,33 +3619,39 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
             lines.append(f"<b>Open</b>  ·  {len(unique)} holding{'s' if len(unique) != 1 else ''}")
 
-            # Fetch live prices in bulk
-            prices: dict = {}
-            for ticker in [t["ticker"] for t in unique]:
-                try:
-                    info  = yf.Ticker(ticker).fast_info
-                    price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
-                    if price:
-                        prices[ticker] = round(float(price), 2)
-                        continue
-                except Exception:
-                    pass
-                try:
-                    hist = yf.Ticker(ticker).history(period="1d", interval="1m")
-                    if not hist.empty:
-                        prices[ticker] = round(float(hist["Close"].iloc[-1]), 2)
-                except Exception:
-                    pass
-
-            # Sector concentration + earnings risk
+            # Fetch live prices + sector in one pass (stocks: .info; crypto: fast_info)
             from earnings_checker import get_upcoming_earnings as _get_earnings_s
-            _sum_stock_tickers = [t["ticker"] for t in unique if t.get("asset_type") == "stock"]
+            prices: dict = {}
             _sum_sector_map: dict[str, str] = {}
-            for _tk in _sum_stock_tickers:
-                try:
-                    _sum_sector_map[_tk] = yf.Ticker(_tk).info.get("sector", "Unknown")
-                except Exception:
-                    _sum_sector_map[_tk] = "Unknown"
+            _sum_stock_tickers = [t["ticker"] for t in unique if t.get("asset_type") == "stock"]
+
+            for t in unique:
+                ticker = t["ticker"]
+                if t.get("asset_type") == "stock":
+                    try:
+                        _inf  = yf.Ticker(ticker).info
+                        _pr   = (_inf.get("currentPrice") or _inf.get("regularMarketPrice")
+                                 or _inf.get("previousClose"))
+                        if _pr:
+                            prices[ticker] = round(float(_pr), 2)
+                        _sum_sector_map[ticker] = _inf.get("sector", "Unknown")
+                    except Exception:
+                        _sum_sector_map[ticker] = "Unknown"
+                else:
+                    try:
+                        _fi  = yf.Ticker(ticker).fast_info
+                        _pr  = getattr(_fi, "last_price", None) or getattr(_fi, "regular_market_price", None)
+                        if _pr:
+                            prices[ticker] = round(float(_pr), 2)
+                            continue
+                    except Exception:
+                        pass
+                    try:
+                        _hist = yf.Ticker(ticker).history(period="1d", interval="1m")
+                        if not _hist.empty:
+                            prices[ticker] = round(float(_hist["Close"].iloc[-1]), 2)
+                    except Exception:
+                        pass
             _sum_earnings_map: dict[str, str] = _get_earnings_s(_sum_stock_tickers, days_ahead=2) if _sum_stock_tickers else {}
 
             # Concentration warning
@@ -3748,12 +3754,34 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 seen.add(t["ticker"])
                 unique_trades.append(t)
 
-        # Fetch current prices
-        prices: dict = {}
-        for ticker in [t["ticker"] for t in unique_trades]:
+        # Fetch current prices + sector in one pass.
+        # Stocks: single .info call gives price AND sector (no double-fetch).
+        # Crypto: fast_info is sufficient (no sector needed).
+        from earnings_checker import get_upcoming_earnings as _get_earnings
+        prices: dict          = {}
+        sector_by_ticker: dict[str, str] = {}
+
+        stock_trades  = [t for t in unique_trades if t.get("asset_type") == "stock"]
+        crypto_trades = [t for t in unique_trades if t.get("asset_type") != "stock"]
+        stock_tickers = [t["ticker"] for t in stock_trades]
+
+        for t in stock_trades:
+            ticker = t["ticker"]
             try:
-                info  = yf.Ticker(ticker).fast_info
-                price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
+                info   = yf.Ticker(ticker).info
+                price  = (info.get("currentPrice") or info.get("regularMarketPrice")
+                          or info.get("previousClose"))
+                if price:
+                    prices[ticker] = round(float(price), 2)
+                sector_by_ticker[ticker] = info.get("sector", "Unknown")
+            except Exception:
+                sector_by_ticker[ticker] = "Unknown"
+
+        for t in crypto_trades:
+            ticker = t["ticker"]
+            try:
+                fi    = yf.Ticker(ticker).fast_info
+                price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
                 if price:
                     prices[ticker] = round(float(price), 2)
                     continue
@@ -3765,19 +3793,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                     prices[ticker] = round(float(hist["Close"].iloc[-1]), 2)
             except Exception:
                 pass
-
-        # ── Sector concentration + earnings risk ──────────────────────────────
-        from earnings_checker import get_upcoming_earnings as _get_earnings
-        stock_trades = [t for t in unique_trades if t.get("asset_type") == "stock"]
-        stock_tickers = [t["ticker"] for t in stock_trades]
-
-        # Sector fetch (one .info call per stock ticker)
-        sector_by_ticker: dict[str, str] = {}
-        for ticker in stock_tickers:
-            try:
-                sector_by_ticker[ticker] = yf.Ticker(ticker).info.get("sector", "Unknown")
-            except Exception:
-                sector_by_ticker[ticker] = "Unknown"
 
         # Earnings in next 2 days
         earnings_map: dict[str, str] = _get_earnings(stock_tickers, days_ahead=2) if stock_tickers else {}
