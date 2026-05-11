@@ -430,6 +430,14 @@ def handle_callback_query(callback_query: dict) -> None:
         send_message("👍 Cancelled.", chat_id=chat_id)
         return
 
+    if action == "quickbuy":
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        reply = _execute_bought(ticker, chat_id)
+        send_message(reply, chat_id=chat_id)
+        return
+
     if action == "approve_user":
         new_id = parts[1] if len(parts) > 1 else ""
         if not new_id:

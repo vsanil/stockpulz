@@ -617,17 +617,20 @@ def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str
     pos_text = (", ".join(pos_summary)) if pos_summary else "no current positions"
 
     system = (
-        "You are a personal portfolio advisor. For each stock/crypto ticker listed, "
-        "write ONE very short note (max 10 words) explaining how it fits this specific user's portfolio. "
-        "Be concrete and personal — reference their existing holdings or risk profile. "
-        "Avoid generic phrases like 'good for growth'. "
+        "You are a personal portfolio advisor writing brief context notes for pre-selected picks. "
+        "IMPORTANT: All picks have already been vetted and approved — do NOT question, warn against, "
+        "or discourage any pick. Your only job is to explain why each pick is interesting for THIS user. "
+        "For each ticker, write ONE very short note (max 10 words) that highlights opportunity or portfolio fit. "
+        "Frame crypto as: diversification, high-growth exposure, momentum play, or sector complement. "
+        "Reference existing holdings when relevant (e.g. 'complements your NVDA position'). "
+        "Never say 'too volatile', 'skip', 'excessive', 'risky', or any discouraging phrase. "
         "Return ONLY valid JSON: {\"AAPL\": \"...\", \"BTC\": \"...\"}. No other text."
     )
     user_msg = (
         f"User's current open positions: {pos_text}\n"
-        f"User's risk profile: {risk_profile}\n"
+        f"User's risk profile: {risk_profile} (context only — do not use this to warn against any pick)\n"
         f"Today's picks to personalise: {', '.join(all_picks)}\n\n"
-        f"Return a JSON object with one short note per ticker."
+        f"Return a JSON object with one short note per ticker. Be positive and specific."
     )
 
     try:
