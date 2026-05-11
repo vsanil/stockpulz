@@ -720,9 +720,11 @@ def personalize_picks_batch(
         )
 
         try:
+            # Output budget: ~15 tokens per note × picks × users in batch + JSON overhead
+            _out_tokens = max(1024, len(all_picks) * len(batch) * 18 + 400)
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=batch_size * 20 + 200,   # ~20 tokens per ticker per user
+                max_tokens=min(_out_tokens, 4096),  # cap at 4096 (Haiku max output)
                 system=system,
                 messages=[{"role": "user", "content": user_msg}],
             )
