@@ -615,7 +615,7 @@ def handle_callback_query(callback_query: dict) -> None:
         send_message(result, chat_id=chat_id)
 
     elif action == "settings_toggle":
-        # Instant toggle for pause / show_crypto
+        # Instant toggle for pause / show_crypto / notification opt-outs
         key = parts[1] if len(parts) > 1 else ""
         cfg = get_user_config(chat_id)
         if key == "paused":
@@ -626,6 +626,21 @@ def handle_callback_query(callback_query: dict) -> None:
             new_val = not bool(cfg.get("show_crypto", True))
             update_user_config(chat_id, "show_crypto", new_val)
             send_message("🔕 Crypto hidden from picks." if not new_val else "🔔 Crypto shown in picks.", chat_id=chat_id)
+        elif key == "skip_confirmation":
+            new_val = not bool(cfg.get("skip_confirmation", False))
+            update_user_config(chat_id, "skip_confirmation", new_val)
+            send_message("🔕 10:30 AM confirmation off — you won't get the mid-morning price check." if new_val
+                         else "📨 10:30 AM confirmation on.", chat_id=chat_id)
+        elif key == "skip_eod":
+            new_val = not bool(cfg.get("skip_eod", False))
+            update_user_config(chat_id, "skip_eod", new_val)
+            send_message("🔕 EOD summary off — no end-of-day snapshot." if new_val
+                         else "🌅 EOD summary on.", chat_id=chat_id)
+        elif key == "skip_watchlist_alerts":
+            new_val = not bool(cfg.get("skip_watchlist_alerts", False))
+            update_user_config(chat_id, "skip_watchlist_alerts", new_val)
+            send_message("🔕 Watchlist alerts off — RSI/MACD signals won't be sent." if new_val
+                         else "👁 Watchlist alerts on.", chat_id=chat_id)
         _send_settings_panel(chat_id)
 
     elif action == "settings_open":
@@ -927,6 +942,9 @@ def _send_settings_panel(chat_id: str) -> None:
     tg_pct      = cfg.get("target_gain_pct") or global_cfg.get("target_gain_pct", 15)
     wl          = cfg.get("watchlist", [])
     ex          = cfg.get("excluded_sectors", [])
+    skip_conf   = bool(cfg.get("skip_confirmation",     False))
+    skip_eod    = bool(cfg.get("skip_eod",              False))
+    skip_wl     = bool(cfg.get("skip_watchlist_alerts", False))
 
     # Labels
     risk_emoji  = {"conservative": "🛡", "moderate": "⚖️", "aggressive": "🔥"}.get(risk, "⚖️")
@@ -946,7 +964,10 @@ def _send_settings_panel(chat_id: str) -> None:
         f"💰 Stock budget: <b>{sb_label}</b>   ₿ Crypto: <b>{cb_label}</b>\n"
         f"📈 Stock picks: <b>{ms_label}</b>   🪙 Crypto picks: <b>{mc_label}</b>\n"
         f"🛑 Stop loss: <b>{sl_pct}%</b>   🎯 Target: <b>{tg_pct}%</b>\n"
-        f"👀 Watchlist: <b>{wl_label}</b>   🚫 Excluded: <b>{ex_label}</b>"
+        f"👀 Watchlist: <b>{wl_label}</b>   🚫 Excluded: <b>{ex_label}</b>\n"
+        f"📨 10:30 confirm: <b>{'off' if skip_conf else 'on'}</b>   "
+        f"🌅 EOD summary: <b>{'off' if skip_eod else 'on'}</b>   "
+        f"👁 WL alerts: <b>{'off' if skip_wl else 'on'}</b>"
     )
 
     buttons = [
@@ -982,7 +1003,16 @@ def _send_settings_panel(chat_id: str) -> None:
             {"text": f"👀 Watchlist: {wl_label}",      "callback_data": "settings_prompt|watchlist"},
             {"text": f"🚫 Exclude: {ex_label}",        "callback_data": "settings_prompt|exclude"},
         ],
-        # Row 7: reset
+        # Row 7: notification opt-outs
+        [
+            {"text": f"📨 10:30 AM {'✅' if not skip_conf else '🔕 off'}",
+             "callback_data": "settings_toggle|skip_confirmation"},
+            {"text": f"🌅 EOD {'✅' if not skip_eod else '🔕 off'}",
+             "callback_data": "settings_toggle|skip_eod"},
+            {"text": f"👁 WL alerts {'✅' if not skip_wl else '🔕 off'}",
+             "callback_data": "settings_toggle|skip_watchlist_alerts"},
+        ],
+        # Row 8: reset
         [
             {"text": "🔄 Reset all settings", "callback_data": "settings_reset_ask"},
         ],

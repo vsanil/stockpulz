@@ -119,14 +119,26 @@ def _macro_narrative_line(m: dict) -> str:
 
 # ── Daily picks message (8 AM morning briefing) ───────────────────────────────
 
+def _ordinal(n: int) -> str:
+    """Return '2nd', '3rd', '4th' etc. for streak labels."""
+    if 11 <= n % 100 <= 13:
+        return f"{n}th"
+    return f"{n}{['th', 'st', 'nd', 'rd', 'th'][min(n % 10, 4)]}"
+
+
 def format_daily_message(picks: dict, config: dict,
-                         personal_notes: dict | None = None) -> str:
+                         personal_notes: dict | None = None,
+                         pick_streaks: dict | None = None) -> str:
     """
     Build the formatted daily Telegram message from Claude picks (stocks + crypto).
 
     personal_notes (optional): dict mapping ticker/symbol → one-line personalised note.
       e.g. {"AAPL": "Balances your tech-heavy portfolio with value", "BTC": "Complements your ETH long"}
       When provided, each pick gets a 💡 line showing why this pick suits the user's portfolio.
+
+    pick_streaks (optional): dict mapping ticker/symbol → consecutive-day count (≥ 2).
+      e.g. {"AAPL": 3, "BTC": 2}
+      When provided, picks that recur on consecutive days show a ⚡ N-day badge.
     """
     today         = date.today().strftime("%a %b %d, %Y")
     stock_budget  = config.get("stock_budget")
@@ -189,15 +201,16 @@ def format_daily_message(picks: dict, config: dict,
     if macro_line:
         lines.append(macro_line)
 
-    def _pick_row_st(i, s, personal_note: str = ""):
+    def _pick_row_st(i, s, personal_note: str = "", streak: int = 0):
         entry, target, stop = s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
         earnings_tag  = f"  🗓 {_esc(s['earnings_date'])}" if s.get("earnings_date") else ""
         alloc         = s.get("allocation")
         alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
         badge         = _conviction_badge(s.get("conviction", 3))
+        streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         return (
-            f"<b>{_esc(s.get('ticker'))}</b>  {_stars(s.get('conviction', 3))}{badge}  "
+            f"<b>{_esc(s.get('ticker'))}</b>  {_stars(s.get('conviction', 3))}{badge}{streak_badge}  "
             f"<i>{_esc(_short_company(s.get('company', '')))}</i>{earnings_tag}\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}\n"
@@ -218,17 +231,18 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_esc(s.get('thesis'))}</i>{personal_line}"
         )
 
-    def _pick_row_cst(i, c, personal_note: str = ""):
+    def _pick_row_cst(i, c, personal_note: str = "", streak: int = 0):
         entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
         is_lt         = c.get("_lt", False)
         alloc         = c.get("allocation")
         alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
         badge         = _conviction_badge(c.get("conviction", 3))
+        streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
         lt_label      = "  <i>· long-term</i>" if is_lt else ""
         stop_str      = f"  ·  stop <code>${_p(stop)}</code>" if not is_lt else ""
         return (
-            f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}{badge}  "
+            f"<b>{_esc(c.get('symbol'))}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}  "
             f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}\n"
@@ -236,11 +250,12 @@ def format_daily_message(picks: dict, config: dict,
         )
 
     pn = personal_notes or {}   # ticker/symbol → personal note string
+    ps = pick_streaks   or {}   # ticker/symbol → consecutive-day count
 
     if st_picks:
         budget_tag = f"  <code>${per_stock}/pick</code>" if per_stock else ""
         body = "\n\n".join(
-            _pick_row_st(i, s, pn.get(s.get("ticker", ""), ""))
+            _pick_row_st(i, s, pn.get(s.get("ticker", ""), ""), ps.get(s.get("ticker", ""), 0))
             for i, s in enumerate(st_picks, 1)
         )
         lines += ["", f"<blockquote expandable>📈 <b>STOCK — SHORT TERM</b>{budget_tag}\n\n{body}</blockquote>"]
@@ -256,7 +271,7 @@ def format_daily_message(picks: dict, config: dict,
     if cst_picks:
         budget_tag = f"  <code>${per_crypto}/pick</code>" if per_crypto else ""
         body = "\n\n".join(
-            _pick_row_cst(i, c, pn.get(c.get("symbol", ""), ""))
+            _pick_row_cst(i, c, pn.get(c.get("symbol", ""), ""), ps.get(c.get("symbol", ""), 0))
             for i, c in enumerate(cst_picks, 1)
         )
         lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO</b>{budget_tag}  ⚡ HIGH RISK\n\n{body}</blockquote>"]
