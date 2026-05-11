@@ -319,20 +319,26 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
 
+    def _row(ticker: str, asset_type: str) -> list[dict]:
+        return [
+            {"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"},
+            {"text": "📊 Chart",            "callback_data": f"chart|{ticker}|{asset_type}"},
+        ]
+
     buttons = []
     for s in stocks.get("short_term", []):
         ticker = s.get("ticker", "")
         if ticker:
-            buttons.append([{"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"}])
+            buttons.append(_row(ticker, "stock"))
     for s in stocks.get("long_term", []):
         ticker = s.get("ticker", "")
         if ticker:
-            buttons.append([{"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"}])
+            buttons.append(_row(ticker, "stock"))
     if show_crypto:
         for c in crypto.get("short_term", []):
             sym = c.get("symbol", "")
             if sym:
-                buttons.append([{"text": f"✅ Bought {sym}", "callback_data": f"quickbuy|{sym}"}])
+                buttons.append(_row(sym, "crypto"))
     return buttons
 
 

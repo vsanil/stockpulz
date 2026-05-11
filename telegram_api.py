@@ -158,6 +158,30 @@ def typing_until_done(chat_id: str | None = None):
     return _ctx()
 
 
+def send_photo(photo_bytes: bytes, caption: str = "", chat_id: str | None = None) -> bool:
+    """Send a photo (PNG bytes) to a Telegram chat with an optional HTML caption."""
+    token   = _bot_token()
+    chat_id = chat_id or _chat_id()
+    url     = TELEGRAM_API.format(token=token, method="sendPhoto")
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = requests.post(
+                url,
+                data  = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
+                files = {"photo": ("chart.png", photo_bytes, "image/png")},
+                timeout = 30,
+            )
+            if resp.status_code == 200:
+                print(f"[telegram] Photo sent ({len(photo_bytes)//1024}KB).")
+                return True
+            print(f"[telegram] send_photo attempt {attempt} failed: HTTP {resp.status_code} — {resp.text[:120]}")
+        except Exception as exc:
+            print(f"[telegram] send_photo attempt {attempt} exception: {exc}")
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY)
+    return False
+
+
 def answer_callback_query(callback_query_id: str, text: str = "") -> None:
     """Acknowledge a Telegram callback query (dismisses the loading spinner)."""
     token = _bot_token()
