@@ -42,12 +42,6 @@ def _is_number(s: str) -> bool:
         return False
 
 
-def _track_position_sizes(chat_id: str) -> bool:
-    """Return True if user has opted in to position-size tracking (shares/quantity questions)."""
-    from config_manager import get_user_config
-    return bool(get_user_config(str(chat_id)).get("track_position_sizes", False))
-
-
 # Crypto tickers recognised by the bot (used to set asset_type on manual trades)
 _CRYPTO_SYMBOLS = {
     "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
@@ -620,17 +614,6 @@ def handle_callback_query(callback_query: dict) -> None:
         result = paper_cancel(ticker, chat_id)
         send_message(result, chat_id=chat_id)
 
-    elif action == "toggle_setting":
-        key      = parts[1] if len(parts) > 1 else ""
-        cur_val  = bool(get_user_config(chat_id).get(key, False))
-        new_val  = not cur_val
-        update_user_config(chat_id, key, new_val)
-        labels = {"track_position_sizes": ("Position size tracking", "on — bot will ask shares/quantity", "off — just log ticker + price")}
-        label, on_desc, off_desc = labels.get(key, (key, "enabled", "disabled"))
-        desc = on_desc if new_val else off_desc
-        send_message(f"✅ <b>{label}:</b> {desc}", chat_id=chat_id)
-        _send_settings_panel(chat_id)
-
     elif action == "settings_toggle":
         # Instant toggle for pause / show_crypto
         key = parts[1] if len(parts) > 1 else ""
@@ -794,32 +777,6 @@ def handle_callback_query(callback_query: dict) -> None:
     elif action == "cancel_abort":
         send_message("👍 No changes made.", chat_id=chat_id)
 
-    elif action == "confirm_cancel":
-        from trade_logger import cancel_trade
-        ticker  = parts[1] if len(parts) > 1 else ""
-        removed = cancel_trade(ticker, chat_id)
-        if not removed:
-            send_message(f"⚠️ No open position found for <b>{ticker}</b>.", chat_id=chat_id)
-        else:
-            send_message(
-                f"🗑 <b>Cancelled buy: {ticker}</b>\n"
-                f"Entry <code>${removed.get('entry_price')}</code> removed — not counted in P&amp;L.",
-                chat_id=chat_id,
-            )
-
-    elif action == "confirm_reopen":
-        from trade_logger import reopen_trade
-        ticker   = parts[1] if len(parts) > 1 else ""
-        reopened = reopen_trade(ticker, chat_id)
-        if not reopened:
-            send_message(f"⚠️ No closed trade found for <b>{ticker}</b> to reopen.", chat_id=chat_id)
-        else:
-            send_message(
-                f"↩️ <b>Undid sell: {ticker}</b>\n"
-                f"Entry <code>${reopened.get('entry_price')}</code> moved back to open positions.",
-                chat_id=chat_id,
-            )
-
     elif action == "paper_hist_rm_confirm":
         from paper_trader import paper_history as get_paper_history
         idx_str = parts[1] if len(parts) > 1 else ""
@@ -860,93 +817,6 @@ def handle_callback_query(callback_query: dict) -> None:
             return
         result = paper_remove_history(chat_id, idx)
         send_message(result, chat_id=chat_id)
-
-    elif action in ("cancel", "cancel_auto"):
-        from trade_logger import cancel_trade, reopen_trade
-        ticker = parts[1] if len(parts) > 1 else ""
-
-        if action == "cancel_auto":
-            log        = load_user_trade_log(chat_id)
-            open_trade   = next((t for t in log.get("open",   []) if t["ticker"] == ticker), None)
-            closed_trade = next((t for t in reversed(log.get("closed", [])) if t["ticker"] == ticker), None)
-
-            if open_trade and closed_trade:
-                # Both exist — ask which one to undo
-                send_inline_keyboard(
-                    f"↩️ What do you want to undo for <b>{ticker}</b>?\n\n"
-                    f"Open:   bought <code>${open_trade.get('entry_price')}</code>  · {open_trade.get('opened_date')}\n"
-                    f"Closed: sold <code>${closed_trade.get('closed_price')}</code>  · {closed_trade.get('closed_date')}",
-                    [[
-                        {"text": "❌ Undo buy",  "callback_data": f"confirm_cancel|{ticker}"},
-                        {"text": "↩️ Undo sell", "callback_data": f"confirm_reopen|{ticker}"},
-                    ]],
-                    chat_id=chat_id,
-                )
-                return
-
-            if open_trade:
-                # Confirm before removing the open buy
-                send_inline_keyboard(
-                    f"⚠️ <b>Undo this buy?</b>\n\n"
-                    f"<b>{ticker}</b>  bought at <code>${open_trade.get('entry_price')}</code>  "
-                    f"· {open_trade.get('opened_date')}\n"
-                    f"<i>This will remove it from your open positions.</i>",
-                    [[
-                        {"text": "✅ Yes, undo buy", "callback_data": f"confirm_cancel|{ticker}"},
-                        {"text": "❌ No, keep it",   "callback_data": "cancel_abort"},
-                    ]],
-                    chat_id=chat_id,
-                )
-                return
-
-            if closed_trade:
-                # Confirm before reopening the closed sell
-                ret  = closed_trade.get("return_pct", 0)
-                sign = "+" if ret >= 0 else ""
-                send_inline_keyboard(
-                    f"⚠️ <b>Undo this sell?</b>\n\n"
-                    f"<b>{ticker}</b>  sold at <code>${closed_trade.get('closed_price')}</code>  "
-                    f"{sign}{ret}%  · {closed_trade.get('closed_date')}\n"
-                    f"<i>This will reopen the position as if the sale never happened.</i>",
-                    [[
-                        {"text": "✅ Yes, undo sell", "callback_data": f"confirm_reopen|{ticker}"},
-                        {"text": "❌ No, keep it",    "callback_data": "cancel_abort"},
-                    ]],
-                    chat_id=chat_id,
-                )
-                return
-
-    elif action == "sell":
-        ticker     = parts[1] if len(parts) > 1 else ""
-        price_raw  = parts[2] if len(parts) > 2 else ""
-        shares_raw = parts[3] if len(parts) > 3 else ""
-
-        price = float(price_raw) if price_raw else _fetch_live_price(ticker)
-        if not price:
-            send_message(f"⚠️ Could not fetch price for <b>{ticker}</b>. Try: <code>/sold {ticker} 197.10</code>", chat_id=chat_id)
-            return
-
-        shares_sold = float(shares_raw) if shares_raw else None
-        closed = manual_close_trade(ticker, price, chat_id, shares_sold=shares_sold)
-        if not closed:
-            send_message(f"⚠️ No open position found for <b>{ticker}</b>. Use /positions to see open trades.", chat_id=chat_id)
-            return
-
-        ret   = closed["return_pct"]
-        gain  = closed["gain_usd"]
-        emoji = "✅" if ret >= 0 else "🔴"
-        sign  = "+" if ret >= 0 else ""
-        gsign = "+" if gain >= 0 else ""
-        partial_note = "  <i>· partial sell, position still open</i>" if closed.get("partial") else ""
-        shares_str   = f"  · {closed['shares']} shares" if closed.get("shares") else ""
-        send_message(
-            f"{emoji} <b>{'Partial sell' if closed.get('partial') else 'Closed'}: {ticker}</b>\n"
-            f"Entry:  <code>${closed['entry_price']}</code>\n"
-            f"Exit:   <code>${closed['closed_price']}</code>{shares_str}\n"
-            f"Return: <b>{sign}{ret}%</b>  P&amp;L: <code>{gsign}${abs(gain):.2f}</code>{partial_note}\n"
-            f"<i>Saved to trade history.</i>",
-            chat_id=chat_id,
-        )
 
     elif action == "psell_confirm":
         # Confirm paper sell — format: psell_confirm|TICKER|price_or_empty|shares_or_empty
@@ -1047,7 +917,6 @@ def _send_settings_panel(chat_id: str) -> None:
     # Values
     paused      = bool(cfg.get("paused", False))
     show_crypto = bool(cfg.get("show_crypto", True))
-    track       = bool(cfg.get("track_position_sizes", False))
     risk        = cfg.get("risk_profile", "moderate")
     mode        = cfg.get("pick_mode", "both")
     sb          = cfg.get("stock_budget")
@@ -1077,7 +946,6 @@ def _send_settings_panel(chat_id: str) -> None:
         f"💰 Stock budget: <b>{sb_label}</b>   ₿ Crypto: <b>{cb_label}</b>\n"
         f"📈 Stock picks: <b>{ms_label}</b>   🪙 Crypto picks: <b>{mc_label}</b>\n"
         f"🛑 Stop loss: <b>{sl_pct}%</b>   🎯 Target: <b>{tg_pct}%</b>\n"
-        f"{'✅' if track else '⬜'} Position tracking: <b>{'on' if track else 'off'}</b>\n"
         f"👀 Watchlist: <b>{wl_label}</b>   🚫 Excluded: <b>{ex_label}</b>"
     )
 
@@ -1114,12 +982,7 @@ def _send_settings_panel(chat_id: str) -> None:
             {"text": f"👀 Watchlist: {wl_label}",      "callback_data": "settings_prompt|watchlist"},
             {"text": f"🚫 Exclude: {ex_label}",        "callback_data": "settings_prompt|exclude"},
         ],
-        # Row 7: position tracking toggle
-        [
-            {"text": f"{'✅' if track else '⬜'} Position tracking: {'on' if track else 'off'}",
-             "callback_data": "toggle_setting|track_position_sizes"},
-        ],
-        # Row 8: reset
+        # Row 7: reset
         [
             {"text": "🔄 Reset all settings", "callback_data": "settings_reset_ask"},
         ],
@@ -1223,12 +1086,6 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return ""
 
     # ── Single-step param commands ────────────────────────────────────────────
-    if command == "history":
-        return _parse_and_execute("HISTORY", original="/history", chat_id=chat_id)
-
-    if command == "cancel":
-        return _parse_and_execute(f"CANCEL {text}", original=f"/cancel {text}", chat_id=chat_id)
-
     if command == "explain":
         return _explain_pick(text)
 
@@ -1542,7 +1399,6 @@ Available intents and their exact JSON format:
 {"intent": "settings"}
 {"intent": "today"}
 {"intent": "prices"}
-{"intent": "perf"}
 {"intent": "reset"}
 {"intent": "explain",     "query": "the user's question verbatim"}
 {"intent": "unknown"}
@@ -1687,8 +1543,6 @@ Rules:
         return _parse_and_execute("TODAY", original=query, chat_id=chat_id)
     if intent == "prices":
         return _parse_and_execute("PRICES", original=query, chat_id=chat_id)
-    if intent == "perf":
-        return _parse_and_execute("PERF", original=query, chat_id=chat_id)
     if intent == "reset":
         return _parse_and_execute("RESET", original=query, chat_id=chat_id)
     if intent == "explain":
@@ -1811,46 +1665,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             send_message(reply, chat_id=chat_id)
         threading.Thread(target=_explain_async, daemon=True).start()
         return None   # already sent "Thinking…", don't send a second message
-
-    if text == "PERF":
-        from trade_logger import get_performance_stats
-        stock_stats  = get_performance_stats(chat_id, "stock")
-        crypto_stats = get_performance_stats(chat_id, "crypto")
-
-        if not stock_stats and not crypto_stats:
-            return "📭 No closed trades yet. Check back after your first picks are resolved."
-
-        def _stat_block(label: str, s: dict) -> str:
-            if not s:
-                return f"{label}: no closed trades yet"
-            sign      = "+" if s["avg_return"] >= 0 else ""
-            gain_sign = "+" if s["total_gain_usd"] >= 0 else ""
-            cum_sign  = "+" if s.get("cumulative_return_pct", 0) >= 0 else ""
-            best_sym,  best_r  = s["best"]
-            worst_sym, worst_r = s["worst"]
-            streak = s.get("streak", 0)
-            streak_str = f"  🔥 {streak}-win streak" if streak >= 2 else ""
-            return (
-                f"<b>{label}</b> — {s['count']} trades  {s['win_rate']}% wins{streak_str}\n"
-                f"Avg/trade: {sign}{s['avg_return']}%  "
-                f"Cumulative: <b>{cum_sign}{s['cumulative_return_pct']}%</b>\n"
-                f"Best: <b>{best_sym}</b> {'+' if best_r >= 0 else ''}{best_r}%  "
-                f"Worst: <b>{worst_sym}</b> {'+' if worst_r >= 0 else ''}{worst_r}%\n"
-                f"✅ {s['targets_hit']} targets  🔴 {s['stops_hit']} stops  ⏱ {s['expired']} expired\n"
-                f"P&L: <code>{gain_sign}${abs(s['total_gain_usd']):.2f}</code> "
-                f"on <code>${s['total_deployed_usd']:.0f}</code> deployed"
-            )
-
-        open_line = ""
-        if stock_stats and stock_stats["open_count"]:
-            open_line = f"\n\n<i>{stock_stats['open_count']} trade(s) still open</i>"
-
-        lines = ["<b>📊 All-Time Performance</b>", ""]
-        lines.append(_stat_block("📈 Stocks", stock_stats))
-        lines += ["", _stat_block("🪙 Crypto", crypto_stats)]
-        if open_line:
-            lines.append(open_line)
-        return "\n".join(lines)
 
     if text == "PRICES":
         picks = load_picks()
@@ -2264,14 +2078,11 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n<b>📈 Daily</b>"
             "\n/today — Today's stock &amp; crypto picks"
             "\n/prices — Live prices for today's picks"
-            "\n/perf — Your portfolio performance vs S&amp;P 500"
             "\n/explain — Ask any market question\n"
-            "\n<b>💼 My Trades</b>"
-            "\n/bought — Log a buy trade"
-            "\n/sold — Log a sell &amp; close a position"
-            "\n/cancel — Cancel a pending trade log"
-            "\n/positions — Open trades with live P&amp;L"
-            "\n/history — Closed trade history\n"
+            "\n<b>💼 My Portfolio</b>"
+            "\n/bought — Add a stock to your portfolio"
+            "\n/sold — Remove a stock from your portfolio"
+            "\n/positions — Open positions with live alerts\n"
             "\n<b>🧪 Paper Trading</b>"
             "\n/paper_buy — Simulate a buy (no real money)"
             "\n/paper_sell — Simulate a sell"
@@ -3500,116 +3311,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 chat_id=chat_id,
             )
         return ""
-
-    # ── /cancel — undo accidental /bought or /sold ───────────────────────────
-    if text == "CANCEL":
-        try:
-            log         = load_user_trade_log(chat_id)
-            open_trades = log.get("open", [])
-            closed      = log.get("closed", [])
-        except Exception:
-            open_trades, closed = [], []
-
-        if not open_trades and not closed:
-            return "📭 No trades to cancel."
-
-        # Telegram button text limit is 64 chars — keep labels short
-        buttons = []
-        for t in sorted(open_trades, key=lambda x: x.get("opened_date", ""), reverse=True):
-            date_short = (t.get("opened_date", "") or "")[:10]
-            label = f"🟢 BUY {t['ticker']} ${_p(t.get('entry_price'))} · {date_short}"
-            buttons.append([{"text": label[:64], "callback_data": f"cancel_auto|{t['ticker']}"}])
-
-        recent_closed = sorted(closed, key=lambda x: x.get("closed_date", ""), reverse=True)[:5]
-        for t in recent_closed:
-            ret        = t.get("return_pct", 0)
-            sign       = "+" if (ret or 0) >= 0 else ""
-            date_short = (t.get("closed_date", "") or "")[:10]
-            label = f"🔴 SELL {t['ticker']} ${_p(t.get('closed_price'))} {sign}{ret}% · {date_short}"
-            buttons.append([{"text": label[:64], "callback_data": f"cancel_auto|{t['ticker']}"}])
-
-        if not buttons:
-            return "📭 No trades to cancel."
-
-        send_inline_keyboard(
-            "↩️ <b>Which transaction to undo?</b>\n"
-            "<i>Tap a buy to remove it, or a sell to reopen the position.</i>",
-            buttons,
-            chat_id=chat_id,
-        )
-        return ""
-
-    if text.startswith("CANCEL "):
-        from trade_logger import cancel_trade, reopen_trade
-
-        name_raw   = text.split(None, 1)[1].strip()
-        candidates = _resolve_ticker_candidates(name_raw)
-
-        # Show ticker picker if ambiguous
-        if len(candidates) > 1:
-            buttons = [[{
-                "text": f"{c['ticker']} — {c['name']}",
-                "callback_data": f"cancel_auto|{c['ticker']}",
-            }] for c in candidates]
-            send_inline_keyboard(
-                f"🔍 Which stock did you mean?", buttons, chat_id=chat_id,
-            )
-            return ""
-
-        ticker = candidates[0]["ticker"]
-        log    = load_user_trade_log(chat_id)
-        has_open   = any(t["ticker"] == ticker for t in log.get("open", []))
-        has_closed = any(t["ticker"] == ticker for t in log.get("closed", []))
-
-        if not has_open and not has_closed:
-            return f"⚠️ No trade found for <b>{ticker}</b>. Use /positions to see open trades."
-
-        # Build a descriptive confirmation message
-        if has_open and has_closed:
-            # Show what-to-undo choice first, confirmation happens after
-            open_trade   = next(t for t in log["open"] if t["ticker"] == ticker)
-            closed_trade = next(t for t in reversed(log["closed"]) if t["ticker"] == ticker)
-            send_inline_keyboard(
-                f"↩️ What do you want to undo for <b>{ticker}</b>?\n\n"
-                f"Open:   entry <code>${open_trade.get('entry_price')}</code>\n"
-                f"Closed: sold <code>${closed_trade.get('closed_price')}</code>  "
-                f"({'+' if closed_trade.get('return_pct',0)>=0 else ''}{closed_trade.get('return_pct',0)}%)",
-                [[
-                    {"text": "❌ Undo buy",  "callback_data": f"confirm_cancel|{ticker}"},
-                    {"text": "↩️ Undo sell", "callback_data": f"confirm_reopen|{ticker}"},
-                ]],
-                chat_id=chat_id,
-            )
-            return ""
-
-        if has_open:
-            open_trade = next(t for t in log["open"] if t["ticker"] == ticker)
-            send_inline_keyboard(
-                f"⚠️ Confirm: remove open position for <b>{ticker}</b>?\n"
-                f"Entry <code>${open_trade.get('entry_price')}</code> · "
-                f"opened {open_trade.get('opened_date')}",
-                [[
-                    {"text": "✅ Yes, undo buy",  "callback_data": f"confirm_cancel|{ticker}"},
-                    {"text": "❌ No, keep it",    "callback_data": "cancel_abort"},
-                ]],
-                chat_id=chat_id,
-            )
-            return ""
-
-        if has_closed:
-            closed_trade = next(t for t in reversed(log["closed"]) if t["ticker"] == ticker)
-            ret  = closed_trade.get('return_pct', 0)
-            sign = "+" if ret >= 0 else ""
-            send_inline_keyboard(
-                f"⚠️ Confirm: reopen <b>{ticker}</b> as if the sale never happened?\n"
-                f"Was sold at <code>${closed_trade.get('closed_price')}</code>  ({sign}{ret}%)",
-                [[
-                    {"text": "✅ Yes, undo sell", "callback_data": f"confirm_reopen|{ticker}"},
-                    {"text": "❌ No, keep it",    "callback_data": "cancel_abort"},
-                ]],
-                chat_id=chat_id,
-            )
-            return ""
 
     # ── /positions / /portfolio ───────────────────────────────────────────────
     if text in ("POSITIONS", "PORTFOLIO"):

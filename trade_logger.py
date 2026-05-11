@@ -5,8 +5,9 @@ Per-user: each user's trades are stored separately, keyed by chat_id.
 Lifecycle:
   Morning run   → open_trades(picks, chat_id)          — log each ST pick
   Confirmation  → check_and_close_trades(prices, chat_id) — close if target/stop hit
-  /perf command → get_performance_stats(chat_id)       — all-time stats
   Saturday      → get_weekly_closed_trades(chat_id)    — this week's closed trades
+  /bought       → add_holding(ticker, chat_id)         — user-added portfolio holding
+  /sold         → remove_holding(ticker, chat_id)      — remove holding from portfolio
 
 Only short-term picks are tracked (they have clear entry/target/stop).
 Long-term DCA picks are tracked separately via weekly_picks.json.
@@ -39,17 +40,15 @@ def open_trades(picks: dict, chat_id: str) -> None:
             continue
         entry = s.get("entry_price")
         log["open"].append({
-            "ticker":             ticker,
-            "asset_type":         "stock",
-            "entry_price":        entry,
-            "target_price":       s.get("target_price"),
-            "stop_loss":          s.get("stop_loss"),
-            "trailing_stop_pct":  s.get("trailing_stop_pct"),   # None = use fixed stop only
-            "highest_price_seen": entry,                         # high-water mark for trailing stop
-            "allocation":         s.get("allocation"),
-            "conviction":         s.get("conviction"),
-            "thesis":             s.get("thesis", ""),
-            "opened_date":        today,
+            "ticker":       ticker,
+            "asset_type":   "stock",
+            "entry_price":  entry,
+            "target_price": s.get("target_price"),
+            "stop_loss":    s.get("stop_loss"),
+            "allocation":   s.get("allocation"),
+            "conviction":   s.get("conviction"),
+            "thesis":       s.get("thesis", ""),
+            "opened_date":  today,
         })
         open_tickers.add(ticker)
         new_count += 1
@@ -210,256 +209,6 @@ def get_performance_stats(chat_id: str, asset_type: str | None = None) -> dict |
         "expired":              by_outcome.get("expired", 0),
         "open_count":           open_count,
     }
-
-
-def manual_open_trade(ticker: str, bought_price: float, chat_id: str,
-                      asset_type: str = "stock",
-                      shares: float | None = None, allocation: float | None = None,
-                      target_price: float | None = None, stop_loss: float | None = None,
-                      stop_loss_pct: float = 7.0, target_gain_pct: float = 15.0) -> dict:
-    """
-    Log a trade the user actually placed.
-    If target/stop not provided, uses stop_loss_pct / target_gain_pct (caller should pass
-    per-user values; defaults are 7% stop and 15% target).
-    Returns the trade dict that was saved.
-    """
-    today = date.today().isoformat()
-    log   = load_user_trade_log(chat_id)
-
-    # Default target/stop from per-user thresholds
-    if target_price is None:
-        target_price = round(bought_price * (1 + target_gain_pct / 100), 2)
-    if stop_loss is None:
-        stop_loss = round(bought_price * (1 - stop_loss_pct / 100), 2)
-
-    # Derive allocation from shares if provided
-    if allocation is None and shares is not None:
-        allocation = round(bought_price * shares, 2)
-
-    trade = {
-        "ticker":       ticker.upper(),
-        "asset_type":   asset_type,
-        "entry_price":  round(bought_price, 2),
-        "target_price": target_price,
-        "stop_loss":    stop_loss,
-        "allocation":   allocation,
-        "conviction":   None,
-        "thesis":       "Manually logged",
-        "opened_date":  today,
-        "shares":       shares,
-        "manual":       True,
-    }
-
-    # Remove existing open entry for same ticker to avoid duplicates
-    log["open"] = [t for t in log["open"] if t["ticker"] != ticker.upper()]
-    log["open"].append(trade)
-    save_user_trade_log(chat_id, log)
-    print(f"[trade_logger] Manually opened {ticker.upper()} @ ${bought_price} for {chat_id}")
-    return trade
-
-
-def manual_close_trade(ticker: str, sold_price: float, chat_id: str,
-                       shares_sold: float | None = None) -> dict | None:
-    """
-    Log that the user sold a position (full or partial).
-    - shares_sold=None  → close the entire position
-    - shares_sold=N     → partial close: reduce open shares, log closed portion
-
-    Returns closed trade dict (with partial=True when applicable), or None if not found.
-    """
-    today = date.today().isoformat()
-    log   = load_user_trade_log(chat_id)
-
-    match = None
-    remaining = []
-    for t in log["open"]:
-        if t["ticker"] == ticker.upper() and match is None:
-            match = t
-        else:
-            remaining.append(t)
-
-    if not match:
-        return None
-
-    entry          = float(match.get("entry_price") or sold_price)
-    total_shares   = match.get("shares")
-    total_alloc    = float(match.get("allocation") or 0)
-
-    # Infer total_shares from allocation if needed
-    if total_shares is None and total_alloc and entry:
-        total_shares = total_alloc / entry
-
-    # Determine how many shares are being sold
-    if shares_sold is None or total_shares is None:
-        # Full close
-        sold_shares  = total_shares
-        closed_alloc = total_alloc
-        partial      = False
-        log["open"]  = remaining          # remove from open
-    else:
-        sold_shares  = min(float(shares_sold), float(total_shares))
-        frac         = sold_shares / float(total_shares)
-        closed_alloc = round(total_alloc * frac, 2) if total_alloc else round(entry * sold_shares, 2)
-        partial      = sold_shares < float(total_shares)
-        if partial:
-            # Keep the remaining shares in open
-            leftover_shares = round(float(total_shares) - sold_shares, 6)
-            leftover_alloc  = round(total_alloc - closed_alloc, 2) if total_alloc else round(entry * leftover_shares, 2)
-            updated = {**match, "shares": leftover_shares, "allocation": leftover_alloc}
-            log["open"] = remaining + [updated]
-        else:
-            log["open"] = remaining       # full close
-
-    if not closed_alloc and sold_shares:
-        closed_alloc = round(entry * float(sold_shares), 2)
-
-    return_pct = (sold_price - entry) / entry * 100
-    gain_usd   = round(closed_alloc * return_pct / 100, 2)
-
-    closed = {
-        **match,
-        "closed_date":  today,
-        "closed_price": round(sold_price, 2),
-        "outcome":      "manual",
-        "return_pct":   round(return_pct, 2),
-        "gain_usd":     gain_usd,
-        "shares":       round(float(sold_shares), 6) if sold_shares else match.get("shares"),
-        "allocation":   closed_alloc,
-        "partial":      partial,
-    }
-    log["closed"].append(closed)
-    save_user_trade_log(chat_id, log)
-    tag = " (partial)" if partial else ""
-    print(f"[trade_logger] Manually closed {ticker.upper()} @ ${sold_price} ({return_pct:+.1f}%){tag} for {chat_id}")
-    return closed
-
-
-def cancel_trade(ticker: str, chat_id: str) -> dict | None:
-    """
-    Remove an open position without recording it as a closed trade.
-    Used to undo an accidental /bought. Returns removed trade or None if not found.
-    """
-    log   = load_user_trade_log(chat_id)
-    match = None
-    remaining = []
-    for t in log["open"]:
-        if t["ticker"] == ticker.upper() and match is None:
-            match = t
-        else:
-            remaining.append(t)
-    if match:
-        log["open"] = remaining
-        save_user_trade_log(chat_id, log)
-        print(f"[trade_logger] Cancelled open position: {ticker.upper()} for {chat_id}")
-    return match
-
-
-def reopen_trade(ticker: str, chat_id: str) -> dict | None:
-    """
-    Move the most recently closed trade for a ticker back to open.
-    Used to undo an accidental /sold. Returns reopened trade or None if not found.
-    """
-    log    = load_user_trade_log(chat_id)
-    closed = log.get("closed", [])
-
-    # Find the most recent closed entry for this ticker
-    match_idx = None
-    for i in range(len(closed) - 1, -1, -1):
-        if closed[i]["ticker"] == ticker.upper():
-            match_idx = i
-            break
-
-    if match_idx is None:
-        return None
-
-    trade = closed.pop(match_idx)
-    # Strip closed-only fields before moving back to open
-    for field in ("closed_date", "closed_price", "outcome", "return_pct", "gain_usd"):
-        trade.pop(field, None)
-
-    log["closed"] = closed
-    log["open"].append(trade)
-    save_user_trade_log(chat_id, log)
-    print(f"[trade_logger] Reopened position: {ticker.upper()} for {chat_id}")
-    return trade
-
-
-def update_trailing_stops(current_prices: dict, chat_id: str,
-                          default_trailing_pct: float = 5.0) -> list[dict]:
-    """
-    Update high-water marks and evaluate trailing stops for a user's open trades.
-    For each trade:
-      1. If current price > highest_price_seen → update high-water mark
-      2. Compute trailing stop = highest_price_seen * (1 - trailing_pct / 100)
-      3. If current price <= trailing stop → close the trade (outcome = "trailing_stop")
-
-    Returns list of newly closed trades (same format as check_and_close_trades).
-    Only applies to trades where trailing_stop_pct is set, or uses default_trailing_pct.
-    """
-    today = date.today().isoformat()
-    log   = load_user_trade_log(chat_id)
-
-    if not log["open"]:
-        return []
-
-    still_open    = []
-    newly_closed  = []
-    hwm_updated   = False   # track if any high-water mark changed
-
-    for trade in log["open"]:
-        ticker  = trade["ticker"]
-        current = current_prices.get(ticker)
-
-        if current is None:
-            still_open.append(trade)
-            continue
-
-        current = float(current)
-        entry   = float(trade.get("entry_price") or current)
-
-        # Update high-water mark
-        hwm = float(trade.get("highest_price_seen") or entry)
-        if current > hwm:
-            trade["highest_price_seen"] = round(current, 2)
-            hwm         = current
-            hwm_updated = True
-
-        # Compute trailing stop level
-        trail_pct     = float(trade.get("trailing_stop_pct") or default_trailing_pct)
-        trailing_stop = hwm * (1 - trail_pct / 100)
-
-        # Only trigger if price is up from entry (trailing stop only locks in gains)
-        # Below entry, the regular stop_loss in check_and_close_trades handles it
-        if current >= entry and current <= trailing_stop:
-            return_pct = (current - entry) / entry * 100
-            allocation = float(trade.get("allocation") or 0)
-            gain_usd   = round(allocation * return_pct / 100, 2)
-            closed = {
-                **trade,
-                "closed_date":    today,
-                "closed_price":   round(current, 2),
-                "outcome":        "trailing_stop",
-                "trailing_stop_level": round(trailing_stop, 2),
-                "highest_reached": round(hwm, 2),
-                "return_pct":     round(return_pct, 2),
-                "gain_usd":       gain_usd,
-            }
-            log["closed"].append(closed)
-            newly_closed.append(closed)
-            print(f"[trade_logger] Trailing stop hit: {ticker} @ ${current:.2f} "
-                  f"(trail stop ${trailing_stop:.2f}, peak ${hwm:.2f}, {return_pct:+.1f}%) for {chat_id}")
-        else:
-            still_open.append(trade)
-
-    if newly_closed:
-        log["open"] = still_open
-        save_user_trade_log(chat_id, log)
-    elif hwm_updated:
-        # Save updated high-water marks even if no trailing stop triggered
-        log["open"] = still_open
-        save_user_trade_log(chat_id, log)
-
-    return newly_closed
 
 
 def add_holding(ticker: str, chat_id: str, picks: dict | None = None) -> tuple[dict, bool]:
