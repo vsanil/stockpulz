@@ -343,10 +343,9 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
 
     raw = name_or_ticker.strip()
 
-    # Fast path: looks unambiguously like a ticker symbol (1-5 chars, letters/dots/hyphens).
-    # ≤5 chars covers AAPL, MSFT, GOOGL, META, ETH, BTC, SOL etc.
-    # Anything longer (COSTCO=6, ACCENTURE=9) must go through Haiku for proper resolution.
-    if _re.match(r"^[A-Za-z.\-]{1,5}$", raw):
+    # Fast path: input is already an uppercase ticker symbol (AAPL, MSFT, BTC, etc.)
+    # Only applies when fully uppercase so "apple" / "Tesla" go through Haiku for proper resolution.
+    if _re.match(r"^[A-Z.\-]{1,5}$", raw):
         return [{"ticker": raw.upper(), "name": raw.upper()}]
 
     # Ask Haiku for up to 4 candidates with full names
@@ -2166,8 +2165,7 @@ Examples:
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=150,
-            system=SYSTEM,
-            messages=[{"role": "user", "content": raw}],
+            messages=[{"role": "user", "content": f"{SYSTEM}\n\nInput: {raw}"}],
         )
         result = _json.loads(message.content[0].text.strip())
         if isinstance(result, list) and result:
@@ -2236,9 +2234,8 @@ Rules:
         client  = _anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=80,
-            system=SYSTEM,
-            messages=[{"role": "user", "content": raw}],
+            max_tokens=120,
+            messages=[{"role": "user", "content": f"{SYSTEM}\n\nInput: {raw}"}],
         )
         result = _json.loads(message.content[0].text.strip())
         print(f"[telegram] NL trade parse ({command}): {result}")
