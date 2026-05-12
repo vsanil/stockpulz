@@ -2493,8 +2493,10 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                         "DOLLARS", "DOLLAR", "USD", "EACH", "FOR", "BUY", "PAPER",
                         "SOME", "ALL", "MY", "A", "AN", "THE", "I", "WE"}
 
-        # ── Multi-ticker: "jpm and msft" or "apple, google" ─────────────────
-        raw_names = [t.strip().strip(".,;") for t in _re.split(r",|\band\b", raw, flags=_re.IGNORECASE)]
+        # ── Multi-ticker: "jpm and msft" / "apple, google" / "avery dennison and microsoft"
+        # Use Haiku NL extraction so multi-word company names stay intact
+        raw_names = _nl_extract_tickers_list(raw)
+        # Strip any noise words that snuck in as standalone tokens
         raw_names = [n for n in raw_names if n and not _is_number(n) and n.upper() not in _MULTI_NOISE]
         if len(raw_names) >= 2:
             resolved = []
