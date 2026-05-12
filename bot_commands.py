@@ -278,8 +278,7 @@ def _explain_pick(query: str) -> str:
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=350,
-            system=system,
-            messages=[{"role": "user", "content": user_msg}],
+            messages=[{"role": "user", "content": f"{system}\n\n{user_msg}"}],
         )
         return f"💬 {message.content[0].text.strip()}"
     except Exception as exc:
@@ -2009,8 +2008,7 @@ Rules:
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=120,
-            system=SYSTEM,
-            messages=[{"role": "user", "content": query}],
+            messages=[{"role": "user", "content": f"{SYSTEM}\n\nInput: {query}"}],
         )
         parsed = json.loads(message.content[0].text.strip())
     except Exception as exc:
@@ -3625,16 +3623,16 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             try:
                 import anthropic, json as _json
                 _client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+                _sys = (
+                    'Parse threshold values. Return JSON only.\n'
+                    '{"stop_loss_pct": <number or null>, "target_gain_pct": <number or null>}\n'
+                    'Examples: "7% stop 12% target" → {"stop_loss_pct": 7, "target_gain_pct": 12}\n'
+                    '"tighten stop to 4" → {"stop_loss_pct": 4, "target_gain_pct": null}'
+                )
                 _msg    = _client.messages.create(
                     model="claude-haiku-4-5-20251001",
                     max_tokens=80,
-                    system=(
-                        'Parse threshold values. Return JSON only.\n'
-                        '{"stop_loss_pct": <number or null>, "target_gain_pct": <number or null>}\n'
-                        'Examples: "7% stop 12% target" → {"stop_loss_pct": 7, "target_gain_pct": 12}\n'
-                        '"tighten stop to 4" → {"stop_loss_pct": 4, "target_gain_pct": null}'
-                    ),
-                    messages=[{"role": "user", "content": raw}],
+                    messages=[{"role": "user", "content": f"{_sys}\n\nInput: {raw}"}],
                 )
                 parsed = _json.loads(_msg.content[0].text.strip())
                 if parsed.get("stop_loss_pct")   is not None:
