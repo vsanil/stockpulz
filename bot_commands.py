@@ -983,6 +983,10 @@ def handle_callback_query(callback_query: dict) -> None:
         result = paper_remove_history(chat_id, idx)
         send_message(result, chat_id=chat_id)
 
+    elif action == "pause_confirm":
+        update_user_config(chat_id, "paused", True)
+        send_message("⏸ <b>Your picks paused.</b> You won't receive daily briefings until you send /resume.\n<i>Other users are unaffected.</i>", chat_id=chat_id)
+
     elif action == "paper_reset_confirm":
         amount_raw = parts[1] if len(parts) > 1 else ""
         amount = float(amount_raw) if amount_raw and _is_number(amount_raw) else None
@@ -2977,8 +2981,14 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
 
     # ── /pause /resume (per-user) ─────────────────────────────────────────────
     if text == "PAUSE":
-        update_user_config(chat_id, "paused", True)
-        return "⏸ <b>Your picks paused.</b> You won't receive daily briefings until you send /resume.\n<i>Other users are unaffected.</i>"
+        send_inline_keyboard(
+            "⏸ <b>Pause your daily picks?</b>\n"
+            "<i>You won't receive morning briefings until you send /resume. Other users are unaffected.</i>",
+            [[{"text": "✅ Yes, pause picks", "callback_data": "pause_confirm"},
+              {"text": "❌ Cancel",           "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return ""
 
     if text == "RESUME":
         update_user_config(chat_id, "paused", False)
