@@ -26,6 +26,7 @@ from config_manager import (
     load_user_trade_log, save_user_trade_log,
     save_screener_cache, load_screener_cache,
 )
+from etf_screener import run_etf_screener
 from trade_logger import check_and_close_trades
 from price_alert_manager import check_all_alerts
 from screener import run_screener
@@ -329,11 +330,20 @@ def run_morning(config: dict, now_et: datetime):
                 print("[agent] Running crypto screener (with retry)...")
                 crypto_candidates = _run_crypto_with_retry()
 
+    # ── ETF screener ──────────────────────────────────────────────────────────
+    etf_candidates = {"short_term": [], "long_term": []}
+    try:
+        print("[agent] Running ETF screener...")
+        etf_candidates = run_etf_screener()
+    except Exception as exc:
+        print(f"[agent] ETF screener failed (non-critical): {exc}")
+
     has_stocks = bool(stock_candidates["short_term"] or stock_candidates["long_term"])
     has_crypto = bool(crypto_candidates["short_term"] or crypto_candidates["long_term"])
+    has_etfs   = bool(etf_candidates["short_term"] or etf_candidates["long_term"])
 
-    if not has_stocks and not has_crypto:
-        _alert("⚠ Both screeners returned no candidates today. No picks sent.", admin_only=True)
+    if not has_stocks and not has_crypto and not has_etfs:
+        _alert("⚠ All screeners returned no candidates today. No picks sent.", admin_only=True)
         return
 
     # Apply dynamic pick counts based on current budget
@@ -363,6 +373,7 @@ def run_morning(config: dict, now_et: datetime):
             stock_candidates, config,
             crypto_results=crypto_candidates if has_crypto else None,
             recent_losers=recent_losers,
+            etf_results=etf_candidates if has_etfs else None,
         )
     except Exception as exc:
         print(f"[agent] Claude analysis failed: {exc}")
@@ -423,17 +434,20 @@ def run_morning(config: dict, now_et: datetime):
 
     # ── Admin run summary ─────────────────────────────────────────────────────
     try:
-        stocks  = picks.get("stocks", {})
-        crypto  = picks.get("crypto", {})
-        n_st    = len(stocks.get("short_term", []))
-        n_lt    = len(stocks.get("long_term",  []))
+        stocks   = picks.get("stocks", {})
+        crypto   = picks.get("crypto", {})
+        etfs     = picks.get("etfs", {})
+        n_st     = len(stocks.get("short_term", []))
+        n_lt     = len(stocks.get("long_term",  []))
         n_crypto = len(crypto.get("short_term", [])) + len(crypto.get("long_term", []))
-        n_users = len(_all_recipients())
+        n_etf    = len(etfs.get("short_term", [])) + len(etfs.get("long_term", []))
+        n_users  = len(_all_recipients())
         _alert(
             f"✅ <b>Morning run complete</b>\n"
             f"Sent to {n_users} user(s)  ·  "
             f"📈 {n_st} ST + {n_lt} LT stocks  ·  "
-            f"🪙 {n_crypto} crypto",
+            f"🪙 {n_crypto} crypto  ·  "
+            f"📦 {n_etf} ETFs",
             admin_only=True,
         )
         # Save timestamp for /dashboard

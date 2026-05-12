@@ -1555,6 +1555,20 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             pass
         return "✅ <b>Thanks for your feedback!</b> It's been sent to the team."
 
+    if command == "dividends":
+        log     = load_user_trade_log(chat_id)
+        open_t  = log.get("open", [])
+        tickers = [t["ticker"] for t in open_t if t.get("asset_type", "stock") == "stock"]
+        if not tickers:
+            return "📭 You have no open stock positions to check dividends for.\n\nLog a position with /bought first."
+        send_message("💰 <i>Fetching dividend info…</i>", chat_id=chat_id)
+        try:
+            from dividends_checker import get_dividend_info, format_dividends_message
+            info = get_dividend_info(tickers)
+            return format_dividends_message(info)
+        except Exception as exc:
+            return f"⚠️ Could not fetch dividend data: {exc}"
+
     if command == "chart":
         ticker = text.strip().split()[0].upper() if text.strip() else ""
         if not ticker:
@@ -1837,6 +1851,9 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     if command == "removeuser":
         return _parse_and_execute(f"REMOVEUSER {text}", original=f"/removeuser {text}", chat_id=chat_id)
+
+    if command == "dividends":
+        return _parse_and_execute("DIVIDENDS", original="/dividends", chat_id=chat_id)
 
     if command == "feedback":
         return _parse_and_execute(f"FEEDBACK {text}" if text else "FEEDBACK", original=original, chat_id=chat_id)
@@ -2279,6 +2296,21 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         except Exception as exc:
             return f"⚠️ Could not fetch market regime: {exc}"
 
+    # ── /dividends ────────────────────────────────────────────────────────────
+    if text == "DIVIDENDS":
+        log     = load_user_trade_log(chat_id)
+        open_t  = log.get("open", [])
+        tickers = [t["ticker"] for t in open_t if t.get("asset_type", "stock") == "stock"]
+        if not tickers:
+            return "📭 You have no open stock positions to check dividends for.\n\nLog a position with /bought first."
+        send_message("💰 <i>Fetching dividend info…</i>", chat_id=chat_id)
+        try:
+            from dividends_checker import get_dividend_info, format_dividends_message
+            info = get_dividend_info(tickers)
+            return format_dividends_message(info)
+        except Exception as exc:
+            return f"⚠️ Could not fetch dividend data: {exc}"
+
     # ── Price alerts ──────────────────────────────────────────────────────────
     if text == "ALERTS":
         from price_alert_manager import list_alerts
@@ -2684,6 +2716,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n/status — Check if picks are active and when the next one runs"
             "\n/next — When's the next scheduled pick"
             "\n/reset — Reset all settings to defaults"
+            "\n/dividends — Dividend yield &amp; next ex-date for your positions"
             "\n/share — Get your invite link"
             "\n/feedback — Send feedback to the team\n"
             "\n<i>💬 You can also just type naturally — e.g. \"why was NVDA picked?\", "
