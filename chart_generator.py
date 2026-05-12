@@ -6,24 +6,27 @@ Returns PNG bytes ready for Telegram sendPhoto.
 Chart includes:
   - 30-day candlesticks (dark theme)
   - Volume bars
-  - MA20 (amber) + MA50 (purple) if enough history
-  - Entry price  — solid green horizontal line
-  - Target price — dashed blue horizontal line
-  - Stop loss    — dashed red horizontal line
+  - MA20 (amber)
+  - Entry  — solid green horizontal line  (price panel only)
+  - Target — dashed cyan horizontal line  (price panel only)
+  - Stop   — dashed red horizontal line   (price panel only)
+  - Right-side price labels for each level
 """
 
 import io
 import matplotlib
 matplotlib.use('Agg')   # non-interactive backend — must be set before pyplot import
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import yfinance as yf
 import mplfinance as mpf
 
 
 # ── Dark chart style ──────────────────────────────────────────────────────────
 
-_DARK_BG   = '#0f0f1a'
-_GRID_COL  = '#1e1e2e'
+_DARK_BG  = '#0f0f1a'
+_GRID_COL = '#1e1e2e'
 
 _STYLE = mpf.make_mpf_style(
     base_mpf_style = 'nightclouds',
@@ -33,9 +36,9 @@ _STYLE = mpf.make_mpf_style(
     figcolor       = _DARK_BG,
     edgecolor      = _DARK_BG,
     rc = {
-        'axes.labelcolor':  '#aaaaaa',
-        'xtick.color':      '#777777',
-        'ytick.color':      '#aaaaaa',
+        'axes.labelcolor':  '#888888',
+        'xtick.color':      '#666666',
+        'ytick.color':      '#888888',
         'font.size':        9,
         'axes.titlecolor':  '#dddddd',
         'axes.titlesize':   11,
@@ -55,6 +58,15 @@ def is_crypto(ticker: str) -> bool:
     return ticker.upper() in _CRYPTO_SYMBOLS
 
 
+def _fmt_price(p: float) -> str:
+    """Format price compactly — no trailing zeros."""
+    if p >= 1000:
+        return f"${p:,.0f}"
+    if p >= 10:
+        return f"${p:.2f}"
+    return f"${p:.4f}"
+
+
 # ── Main chart function ───────────────────────────────────────────────────────
 
 def generate_chart(
@@ -71,7 +83,7 @@ def generate_chart(
     Args:
         ticker:     Stock symbol (e.g. 'AAPL') or crypto symbol (e.g. 'BTC')
         entry:      Entry price — solid green horizontal line
-        target:     Target price — dashed blue horizontal line
+        target:     Target price — dashed cyan horizontal line
         stop:       Stop-loss price — dashed red horizontal line
         asset_type: 'stock' or 'crypto' (crypto fetches TICKER-USD from yfinance)
         days:       Calendar days of history to show (default 30)
@@ -96,67 +108,93 @@ def generate_chart(
         print(f"[chart] Data fetch error for {yf_ticker}: {exc}")
         return None
 
-    # ── Pick level lines ──────────────────────────────────────────────────────
-    hline_vals   = []
-    hline_colors = []
-    hline_styles = []
-
-    if entry is not None:
-        hline_vals.append(float(entry))
-        hline_colors.append('#00e676')   # bright green — entry
-        hline_styles.append('-')
-    if target is not None:
-        hline_vals.append(float(target))
-        hline_colors.append('#40c4ff')   # bright blue — target
-        hline_styles.append('--')
-    if stop is not None:
-        hline_vals.append(float(stop))
-        hline_colors.append('#ff5252')   # bright red — stop
-        hline_styles.append('--')
-
-    hlines_kwargs = {}
-    if hline_vals:
-        hlines_kwargs = dict(
-            hlines    = hline_vals,
-            colors    = hline_colors,
-            linestyle = hline_styles,
-            linewidths = 1.3,
-        )
-
-    # ── Moving averages ───────────────────────────────────────────────────────
+    # ── Moving average ────────────────────────────────────────────────────────
     add_plots = []
     closes = hist["Close"]
     if len(closes) >= 20:
         ma20 = closes.rolling(20).mean()
-        add_plots.append(mpf.make_addplot(ma20, color='#ffab40', width=1.1, label='MA20'))
-    if len(closes) >= 50:
-        ma50 = closes.rolling(50).mean()
-        add_plots.append(mpf.make_addplot(ma50, color='#ce93d8', width=1.1, label='MA50'))
+        add_plots.append(mpf.make_addplot(ma20, color='#ffab40', width=1.2, label='MA20'))
 
-    # ── Render to bytes ───────────────────────────────────────────────────────
+    # ── Render — returnfig=True so we can draw level lines on price axis only ─
     buf = io.BytesIO()
     try:
-        plot_kwargs: dict = dict(
+        fig, axes = mpf.plot(
+            hist,
             type         = 'candle',
             style        = _STYLE,
             volume       = True,
             figsize      = (10, 6),
-            title        = f"\n{ticker}  ·  {days}-day",
-            tight_layout = True,
+            addplot      = add_plots if add_plots else [],
+            returnfig    = True,
             warn_too_much_data = 100,
-            savefig      = dict(
-                fname        = buf,
-                dpi          = 140,
-                bbox_inches  = 'tight',
-                facecolor    = _DARK_BG,
-            ),
         )
-        if hlines_kwargs:
-            plot_kwargs['hlines'] = hlines_kwargs
-        if add_plots:
-            plot_kwargs['addplot'] = add_plots
 
-        mpf.plot(hist, **plot_kwargs)
+        price_ax = axes[0]   # top panel — price
+        n_bars   = len(hist)
+        x_right  = n_bars - 0.3   # x position for right-side labels
+
+        # ── Draw level lines on price axis only ───────────────────────────────
+        levels = []
+        if entry  is not None: levels.append((float(entry),  '#00e676', '-',  'Entry'))
+        if target is not None: levels.append((float(target), '#40c4ff', '--', 'Target'))
+        if stop   is not None: levels.append((float(stop),   '#ff5252', '--', 'Stop'))
+
+        for price_val, color, style, label in levels:
+            price_ax.axhline(
+                y         = price_val,
+                color     = color,
+                linestyle = style,
+                linewidth = 1.4,
+                alpha     = 0.85,
+                zorder    = 5,
+            )
+            # Right-side label with price
+            price_ax.text(
+                x_right, price_val,
+                f" {label} {_fmt_price(price_val)}",
+                color     = color,
+                fontsize  = 8.5,
+                fontweight= 'bold',
+                va        = 'center',
+                ha        = 'left',
+                zorder    = 6,
+                bbox      = dict(
+                    boxstyle  = 'round,pad=0.2',
+                    facecolor = _DARK_BG,
+                    edgecolor = color,
+                    alpha     = 0.75,
+                    linewidth = 0.8,
+                ),
+            )
+
+        # ── Current price marker on right y-axis ──────────────────────────────
+        last_close = float(closes.iloc[-1])
+        price_ax.annotate(
+            f"  {_fmt_price(last_close)}",
+            xy        = (1, last_close),
+            xycoords  = ('axes fraction', 'data'),
+            fontsize  = 8.5,
+            color     = '#ffffff',
+            va        = 'center',
+            ha        = 'left',
+        )
+
+        # ── Title ──────────────────────────────────────────────────────────────
+        price_ax.set_title(
+            f"{ticker}  ·  {days}-day",
+            color    = '#dddddd',
+            fontsize = 11,
+            pad      = 8,
+        )
+
+        # ── Save ───────────────────────────────────────────────────────────────
+        fig.savefig(
+            buf,
+            dpi         = 140,
+            bbox_inches = 'tight',
+            facecolor   = _DARK_BG,
+        )
+        plt.close(fig)
         buf.seek(0)
         data = buf.getvalue()
         print(f"[chart] Generated {len(data)//1024}KB chart for {ticker}")
@@ -164,4 +202,5 @@ def generate_chart(
 
     except Exception as exc:
         print(f"[chart] Render error for {ticker}: {exc}")
+        plt.close('all')
         return None
