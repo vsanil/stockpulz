@@ -1458,14 +1458,14 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         if not raw:
             return "⚠️ Please tell me which stock or crypto you bought."
 
-        # Split on commas and "and" to support multiple items in one message
-        # e.g. "avery dennison, microsoft, CRM, solana and EEM"
-        import re as _re
-        parts = [p.strip() for p in _re.split(r",|\band\b", raw, flags=_re.IGNORECASE) if p.strip()]
+        # Use Haiku NLP to extract a list of asset names/tickers from natural language.
+        # This handles "avery dennison, microsoft, CRM, solana and EEM" as well as
+        # casual sentences like "I picked up some apple and a bit of tesla today".
+        names_list = _nl_extract_tickers_list(raw)
 
-        if len(parts) == 1:
+        if len(names_list) == 1:
             # Single item — keep original behaviour with disambiguation prompt
-            name_raw = parts[0]
+            name_raw = names_list[0]
             candidates = _resolve_ticker_candidates(name_raw)
             if not candidates:
                 return f"⚠️ Couldn't find a ticker for <b>{_esc(name_raw)}</b>. Try using the ticker symbol directly, e.g. <code>AVY</code>"
@@ -1480,7 +1480,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
         # Multiple items — resolve and add each, report results
         results = []
-        for name_raw in parts:
+        for name_raw in names_list:
             try:
                 candidates = _resolve_ticker_candidates(name_raw)
                 if not candidates:
@@ -2101,6 +2101,51 @@ Rules:
 
 
 
+
+
+def _nl_extract_tickers_list(raw: str) -> list[str]:
+    """
+    Use Haiku to extract a list of stock/crypto names or tickers from a natural-language string.
+
+    Handles inputs like:
+      "avery dennison, microsoft, CRM, solana and EEM"
+      "I bought apple, tesla and a bit of solana"
+      "NVDA"
+
+    Returns a list of name/ticker strings (e.g. ["avery dennison", "MSFT", "CRM", "solana", "EEM"]).
+    Falls back to [raw] (treat entire input as one item) on any error.
+    """
+    import anthropic as _anthropic
+    import json as _json
+
+    SYSTEM = """You are a ticker extractor for a stock/crypto trading bot.
+The user's message names one or more stocks, ETFs, mutual funds, or cryptocurrencies they bought.
+Extract every asset mentioned and return ONLY a JSON array of strings — one entry per asset.
+Each entry should be the ticker symbol if obvious (e.g. "NVDA", "CRM", "EEM"),
+or the company/crypto name if a ticker isn't clear (e.g. "avery dennison", "solana").
+Do NOT include quantities, prices, or time references.
+Return ONLY the JSON array, nothing else.
+Examples:
+  "avery dennison, microsoft, CRM, solana and EEM" → ["avery dennison", "microsoft", "CRM", "solana", "EEM"]
+  "I picked up some apple and a bit of tesla today" → ["apple", "tesla"]
+  "NVDA" → ["NVDA"]
+  "bought 10 shares of amazon and 2 bitcoin" → ["amazon", "bitcoin"]"""
+
+    try:
+        client  = _anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            system=SYSTEM,
+            messages=[{"role": "user", "content": raw}],
+        )
+        result = _json.loads(message.content[0].text.strip())
+        if isinstance(result, list) and result:
+            print(f"[telegram] NL ticker list extracted: {result}")
+            return result
+    except Exception as exc:
+        print(f"[telegram] _nl_extract_tickers_list failed ({exc})")
+    return [raw]
 
 
 def _nl_parse_trade(command: str, raw: str) -> dict:
