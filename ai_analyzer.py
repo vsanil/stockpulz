@@ -17,7 +17,7 @@ from config_manager import (
     get_cached_signal, set_cached_signal,
 )
 
-MAX_TOKENS = 1500   # ~1000-1200 tokens actual output for 9 picks; 1500 gives safe headroom
+MAX_TOKENS = 2500   # ~1500-2000 tokens actual output for stocks + crypto + ETFs; 2500 gives safe headroom
 
 
 # ── News via yfinance (no API key needed) ─────────────────────────────────────
