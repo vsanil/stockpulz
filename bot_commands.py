@@ -2230,12 +2230,29 @@ Rules:
 
     try:
         client  = _anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        # Use multi-turn pattern: prime the assistant then give the input.
+        # More reliable than embedding instructions in user message.
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=120,
-            messages=[{"role": "user", "content": f"{SYSTEM}\n\nInput: {raw}"}],
+            messages=[
+                {"role": "user",      "content": SYSTEM},
+                {"role": "assistant", "content": "Understood. I will return only valid JSON."},
+                {"role": "user",      "content": f"/{command}: {raw}"},
+            ],
         )
-        result = _json.loads(message.content[0].text.strip())
+        raw_text = message.content[0].text.strip()
+        print(f"[telegram] NL trade parse raw ({command}): {raw_text!r}")
+        # Try direct parse first; fall back to extracting JSON object from text
+        try:
+            result = _json.loads(raw_text)
+        except _json.JSONDecodeError:
+            import re as _re2
+            m = _re2.search(r'\{.*\}', raw_text, _re2.DOTALL)
+            if m:
+                result = _json.loads(m.group())
+            else:
+                raise
         print(f"[telegram] NL trade parse ({command}): {result}")
         return result
     except Exception as exc:
@@ -3326,6 +3343,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         lines.append("\n<b>NL Trade Parsing</b>")
         try:
             r = _nl_parse_trade("bought", "I bought 10 apple stocks for $182.50")
+            lines.append(f"  <i>debug bought raw: {r}</i>")
             _chk("bought: ticker (AAPL)", (r.get("ticker") or "").upper(), "AAPL")
             _chk("bought: shares (10)", int(r.get("shares") or 0), 10)
             _chk("bought: price (182.5)", round(float(r.get("price") or 0), 1), 182.5)
