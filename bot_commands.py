@@ -1454,21 +1454,44 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     # ── /bought ───────────────────────────────────────────────────────────────
     if command == "bought":
-        # Just need the ticker — no price or quantity
-        name_raw = text.strip().split()[0] if text.strip() else ""
-        if not name_raw:
+        raw = text.strip()
+        if not raw:
             return "⚠️ Please tell me which stock or crypto you bought."
 
-        candidates = _resolve_ticker_candidates(name_raw)
-        if len(candidates) > 1:
-            buttons = [[{"text": f"{c['ticker']} — {c['name']}",
-                         "callback_data": f"buy|{c['ticker']}"}]
-                       for c in candidates]
-            send_inline_keyboard(f"🔍 Which one did you mean by <b>{_esc(name_raw)}</b>?",
-                                 buttons, chat_id=chat_id)
-            return ""
+        # Split on commas and "and" to support multiple items in one message
+        # e.g. "avery dennison, microsoft, CRM, solana and EEM"
+        import re as _re
+        parts = [p.strip() for p in _re.split(r",|\band\b", raw, flags=_re.IGNORECASE) if p.strip()]
 
-        return _execute_bought(candidates[0]["ticker"], chat_id)
+        if len(parts) == 1:
+            # Single item — keep original behaviour with disambiguation prompt
+            name_raw = parts[0]
+            candidates = _resolve_ticker_candidates(name_raw)
+            if not candidates:
+                return f"⚠️ Couldn't find a ticker for <b>{_esc(name_raw)}</b>. Try using the ticker symbol directly, e.g. <code>AVY</code>"
+            if len(candidates) > 1:
+                buttons = [[{"text": f"{c['ticker']} — {c['name']}",
+                             "callback_data": f"buy|{c['ticker']}"}]
+                           for c in candidates]
+                send_inline_keyboard(f"🔍 Which one did you mean by <b>{_esc(name_raw)}</b>?",
+                                     buttons, chat_id=chat_id)
+                return ""
+            return _execute_bought(candidates[0]["ticker"], chat_id)
+
+        # Multiple items — resolve and add each, report results
+        results = []
+        for name_raw in parts:
+            try:
+                candidates = _resolve_ticker_candidates(name_raw)
+                if not candidates:
+                    results.append(f"⚠️ <b>{_esc(name_raw)}</b> — couldn't resolve ticker")
+                    continue
+                ticker = candidates[0]["ticker"]
+                reply  = _execute_bought(ticker, chat_id)
+                results.append(reply)
+            except Exception as exc:
+                results.append(f"⚠️ <b>{_esc(name_raw)}</b> — error: {exc}")
+        return "\n\n".join(results)
 
     # ── /sold ─────────────────────────────────────────────────────────────────
     if command == "sold":
