@@ -983,6 +983,17 @@ def handle_callback_query(callback_query: dict) -> None:
         result = paper_remove_history(chat_id, idx)
         send_message(result, chat_id=chat_id)
 
+    elif action == "paper_reset_confirm":
+        amount_raw = parts[1] if len(parts) > 1 else ""
+        amount = float(amount_raw) if amount_raw and _is_number(amount_raw) else None
+        try:
+            from paper_trader import paper_reset as _pr
+            result = _pr(chat_id, amount)
+            send_message(result, chat_id=chat_id)
+        except Exception as exc:
+            print(f"[bot] paper_reset_confirm failed: {exc}")
+            send_message("⚠️ Reset failed — try again.", chat_id=chat_id)
+
     elif action == "psell_confirm":
         # Confirm paper sell — format: psell_confirm|TICKER|price_or_empty|shares_or_empty
         ticker     = parts[1] if len(parts) > 1 else ""
@@ -2503,7 +2514,22 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             raw    = text[len("PAPER RESET "):].strip()
             parsed = _nl_parse_trade("paper_reset", raw)
             amount = parsed.get("price")   # reuse price field for the cash amount
-        return paper_reset(chat_id, amount)
+        # Always confirm before wiping — show current portfolio value
+        from config_manager import load_user_paper
+        current   = load_user_paper(chat_id)
+        cash      = current.get("cash", 0)
+        positions = current.get("positions", [])
+        amount_enc = str(amount) if amount is not None else ""
+        cash_str   = f"${amount:,.2f}" if amount is not None else f"${current.get('starting_cash', 10_000):,.2f}"
+        detail     = f"  ·  {len(positions)} open position(s)  ·  ${cash:,.2f} cash" if positions else f"  ·  ${cash:,.2f} cash"
+        send_inline_keyboard(
+            f"⚠️ <b>Reset paper portfolio?</b>{detail}\n"
+            f"<i>This wipes all positions and history. Starting cash: <b>{cash_str}</b></i>",
+            [[{"text": "✅ Yes, reset everything", "callback_data": f"paper_reset_confirm|{amount_enc}"},
+              {"text": "❌ Cancel",                "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return ""
 
     # ── Backtest ──────────────────────────────────────────────────────────────
     if text == "BACKTEST":
