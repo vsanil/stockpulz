@@ -2291,9 +2291,12 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         return ""
 
     if text.startswith("CHART "):
-        ticker = text.split(" ", 1)[1].strip().upper()
-        if not ticker:
+        raw_chart = text.split(" ", 1)[1].strip()
+        if not raw_chart:
             return "⚠️ Please provide a ticker, e.g. /chart AAPL"
+        # Resolve full phrase so "chart avery dennison" → AVY, not "AVERY DENNISON"
+        _chart_cands = _resolve_ticker_candidates(raw_chart)
+        ticker = _chart_cands[0]["ticker"].upper() if _chart_cands else raw_chart.upper()
         from chart_generator import is_crypto
         asset_type = "crypto" if is_crypto(ticker) else "stock"
         send_message("📊 <i>Generating chart…</i>", chat_id=chat_id)
@@ -4399,12 +4402,16 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if text.startswith(prefix):
             parts = text[len(prefix):].strip().split()
             if len(parts) >= 2 and _is_number(parts[-1]):
-                ticker    = parts[0].upper()
-                new_price = float(parts[-1].replace(",", ""))
+                # Everything except last token = ticker/name, last token = price
+                new_price    = float(parts[-1].replace(",", ""))
+                ticker_input = " ".join(parts[:-1])
+                _upd_cands   = _resolve_ticker_candidates(ticker_input)
+                ticker       = _upd_cands[0]["ticker"].upper() if _upd_cands else parts[0].upper()
                 return _execute_update_level(ticker, _field, new_price, chat_id)
             elif len(parts) == 1:
-                # Got ticker only — prompt for price
-                ticker = parts[0].upper()
+                # Got ticker/name only — resolve then prompt for price
+                _upd_cands = _resolve_ticker_candidates(parts[0])
+                ticker     = _upd_cands[0]["ticker"].upper() if _upd_cands else parts[0].upper()
                 label  = "stop-loss" if _field == "stop_loss" else "target"
                 save_pending_state(chat_id, _cmd.lower(), step=2, data={"ticker": ticker})
                 send_inline_keyboard(
