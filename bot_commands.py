@@ -2359,7 +2359,21 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         return ""
 
     if text in ("PAPER SELL",):
-        _prompt_for_param("paper_sell", chat_id)
+        from config_manager import load_user_paper
+        positions = load_user_paper(chat_id).get("positions", [])
+        if not positions:
+            return "📭 No open paper positions to sell."
+        buttons = []
+        for p in positions:
+            tk    = p["ticker"]
+            entry = p.get("entry_price")
+            sh    = p.get("shares")
+            label = tk
+            if sh:    label += f"  ·  {sh} shares"
+            if entry: label += f"  @  ${_p(entry)}"
+            buttons.append([{"text": f"📄 {label}", "callback_data": f"psell|{tk}|"}])
+        buttons.append([{"text": "✏️ Type a different ticker", "callback_data": "sold_manual"}])
+        send_inline_keyboard("📄 <b>Paper sell — which position?</b>", buttons, chat_id=chat_id)
         return ""
 
     if text.startswith("PAPER SELL "):
