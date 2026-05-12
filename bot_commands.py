@@ -1526,10 +1526,17 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             )
             return ""
 
-        # step 1 — user typed a ticker name
-        name_raw = text.strip().split()[0] if text.strip() else ""
-        if not name_raw:
+        # step 1 — user typed a ticker name (natural language supported)
+        raw_sold = text.strip()
+        if not raw_sold:
             return "⚠️ Please tell me which stock or crypto you sold."
+
+        # Use NL parse first so "sold my avery dennison" resolves correctly
+        parsed_sold = _nl_parse_trade("sold", raw_sold)
+        name_raw    = (parsed_sold.get("ticker") or "").strip() or None
+        if not name_raw:
+            # Fallback: resolve full phrase as-is
+            name_raw = raw_sold
 
         candidates = _resolve_ticker_candidates(name_raw)
         if len(candidates) > 1:
@@ -1595,9 +1602,12 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             return f"⚠️ Could not fetch dividend data: {exc}"
 
     if command == "chart":
-        ticker = text.strip().split()[0].upper() if text.strip() else ""
-        if not ticker:
+        raw_chart = text.strip()
+        if not raw_chart:
             return "⚠️ Please provide a ticker, e.g. <code>AAPL</code>"
+        # Resolve full phrase — handles "apple", "avery dennison", "NVDA", etc.
+        chart_candidates = _resolve_ticker_candidates(raw_chart)
+        ticker = chart_candidates[0]["ticker"].upper() if chart_candidates else raw_chart.upper()
         from chart_generator import is_crypto
         asset_type = "crypto" if is_crypto(ticker) else "stock"
         send_message("📊 <i>Generating chart…</i>", chat_id=chat_id)
@@ -1609,10 +1619,12 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command in ("updatestop", "updatetarget"):
         field = "stop_loss" if command == "updatestop" else "target_price"
         if step == 1:
-            # Received ticker — save and ask for price
-            ticker = text.strip().split()[0].upper() if text.strip() else ""
-            if not ticker:
+            # Received ticker — resolve full phrase then ask for price
+            raw_upd = text.strip()
+            if not raw_upd:
                 return "⚠️ Please send the ticker, e.g. <code>NVDA</code>"
+            upd_candidates = _resolve_ticker_candidates(raw_upd)
+            ticker = upd_candidates[0]["ticker"].upper() if upd_candidates else raw_upd.upper()
             label = "stop-loss" if field == "stop_loss" else "target"
             save_pending_state(chat_id, command, step=2, data={"ticker": ticker})
             send_inline_keyboard(
@@ -1815,13 +1827,20 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             return paper_sell(ticker, chat_id, shares, price_raw)
 
         if step == 1:
-            # User replied with ticker (and optionally shares)
-            parts      = text.strip().split()
-            name_raw   = parts[0] if parts else ""
-            shares_raw = parts[1] if len(parts) >= 2 and _is_number(parts[1]) else None
-
-            if not name_raw:
+            # User replied with ticker (and optionally shares) — use NL parse
+            raw_ps = text.strip()
+            if not raw_ps:
                 return "⚠️ Please tell me which stock to sell."
+
+            parsed_ps  = _nl_parse_trade("paper_sell", raw_ps)
+            name_raw   = (parsed_ps.get("ticker") or "").strip() or raw_ps
+            shares_raw = str(parsed_ps["shares"]) if parsed_ps.get("shares") is not None else None
+
+            # Shares might also appear as a bare number after the name ("apple 5")
+            if shares_raw is None:
+                parts = raw_ps.split()
+                if len(parts) >= 2 and _is_number(parts[-1]):
+                    shares_raw = parts[-1]
 
             candidates = _resolve_ticker_candidates(name_raw)
             if len(candidates) > 1:
