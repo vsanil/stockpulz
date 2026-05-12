@@ -1902,6 +1902,17 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "feedback":
         return _parse_and_execute(f"FEEDBACK {text}" if text else "FEEDBACK", original=original, chat_id=chat_id)
 
+    if command == "test":
+        if not _is_admin(chat_id):
+            return "🔒 Admin only."
+        send_message("🧪 <i>Running self-test… back in ~20s</i>", chat_id=chat_id)
+        def _run_test():
+            result = _parse_and_execute("TEST", original="/test", chat_id=chat_id)
+            if result:
+                send_message(result, chat_id=chat_id)
+        threading.Thread(target=_run_test, daemon=True).start()
+        return None
+
     if command == "dashboard":
         return _parse_and_execute("DASHBOARD", original="/dashboard", chat_id=chat_id)
 
@@ -2820,6 +2831,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             msg += (
                 "\n<b>🔑 Admin</b>"
                 "\n/dashboard — Overview: users, positions, top performer, last run"
+                "\n/test — Live NL + routing self-test (reports ✅/❌ in Telegram)"
                 "\n/feedback — View all user feedback"
                 "\n/users — List all allowed users"
                 "\n/pending — Users awaiting approval"
@@ -3239,6 +3251,121 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             lines.append(f"💬 <b>Feedback</b>  {unread} unread — /feedback to view")
         else:
             lines.append("💬 <b>Feedback</b>  No new feedback")
+
+        return "\n".join(lines)
+
+    # ── /test — live NL + routing smoke test (admin only) ────────────────────
+    if text == "TEST":
+        if not _is_admin(chat_id):
+            return "🔒 Admin only."
+
+        send_message("🧪 <i>Running bot self-test… (uses Haiku, takes ~20s)</i>", chat_id=chat_id)
+
+        lines   = ["<b>🧪 Bot Self-Test Results</b>\n"]
+        passed  = 0
+        failed  = 0
+
+        def _chk(label: str, actual, expected):
+            nonlocal passed, failed
+            ok = str(actual).upper() == str(expected).upper()
+            if ok:
+                lines.append(f"  ✅ {label}")
+                passed += 1
+            else:
+                lines.append(f"  ❌ {label}  <i>got {actual}, want {expected}</i>")
+                failed += 1
+
+        def _chk_in(label: str, actual_list, must_include: list):
+            nonlocal passed, failed
+            upper = [str(x).upper() for x in actual_list]
+            missing = [m for m in must_include if m.upper() not in upper]
+            if not missing:
+                lines.append(f"  ✅ {label}")
+                passed += 1
+            else:
+                lines.append(f"  ❌ {label}  <i>missing: {missing} in {actual_list}</i>")
+                failed += 1
+
+        # ── 1. Ticker resolution ───────────────────────────────────────────────
+        lines.append("\n<b>Ticker Resolution</b>")
+        try:
+            r = _resolve_ticker_candidates("apple")
+            _chk("apple → AAPL", r[0]["ticker"] if r else "?", "AAPL")
+        except Exception as e:
+            lines.append(f"  ❌ apple → AAPL  <i>{e}</i>"); failed += 1
+
+        try:
+            r = _resolve_ticker_candidates("avery dennison")
+            _chk("avery dennison → AVY", r[0]["ticker"] if r else "?", "AVY")
+        except Exception as e:
+            lines.append(f"  ❌ avery dennison → AVY  <i>{e}</i>"); failed += 1
+
+        try:
+            r = _resolve_ticker_candidates("costco")
+            _chk("costco → COST", r[0]["ticker"] if r else "?", "COST")
+        except Exception as e:
+            lines.append(f"  ❌ costco → COST  <i>{e}</i>"); failed += 1
+
+        try:
+            r = _resolve_ticker_candidates("nvidea")   # intentional misspelling
+            _chk("nvidea → NVDA", r[0]["ticker"] if r else "?", "NVDA")
+        except Exception as e:
+            lines.append(f"  ❌ nvidea → NVDA  <i>{e}</i>"); failed += 1
+
+        # ── 2. Multi-ticker extraction ─────────────────────────────────────────
+        lines.append("\n<b>Multi-Ticker NL Extraction</b>")
+        try:
+            r = _nl_extract_tickers_list("avery dennison, microsoft, CRM, solana and EEM")
+            _chk_in("5-item mixed list", r, ["avery dennison", "microsoft", "CRM", "solana", "EEM"])
+            _chk("correct count (5)", len(r), 5)
+        except Exception as e:
+            lines.append(f"  ❌ 5-item extraction  <i>{e}</i>"); failed += 1; failed += 1
+
+        try:
+            r = _nl_extract_tickers_list("I picked up some apple and a bit of tesla today")
+            _chk("sentence noise stripped (count=2)", len(r), 2)
+        except Exception as e:
+            lines.append(f"  ❌ sentence extraction  <i>{e}</i>"); failed += 1
+
+        # ── 3. NL trade parse ─────────────────────────────────────────────────
+        lines.append("\n<b>NL Trade Parsing</b>")
+        try:
+            r = _nl_parse_trade("bought", "I bought 10 apple stocks for $182.50")
+            _chk("bought: ticker (AAPL)", (r.get("ticker") or "").upper(), "AAPL")
+            _chk("bought: shares (10)", int(r.get("shares") or 0), 10)
+            _chk("bought: price (182.5)", round(float(r.get("price") or 0), 1), 182.5)
+        except Exception as e:
+            lines.append(f"  ❌ bought parse  <i>{e}</i>"); failed += 3
+
+        try:
+            r = _nl_parse_trade("sold", "sold my avery dennison position")
+            _chk("sold: company name → AVY", (r.get("ticker") or "").upper(), "AVY")
+        except Exception as e:
+            lines.append(f"  ❌ sold parse  <i>{e}</i>"); failed += 1
+
+        try:
+            r = _nl_parse_trade("alert", "when nvidia drops below 800")
+            _chk("alert: ticker (NVDA)", (r.get("ticker") or "").upper(), "NVDA")
+            _chk("alert: direction (below)", r.get("direction"), "below")
+            _chk("alert: price (800)", int(float(r.get("price") or 0)), 800)
+        except Exception as e:
+            lines.append(f"  ❌ alert parse  <i>{e}</i>"); failed += 3
+
+        try:
+            r = _nl_parse_trade("paper_buy", "5 shares of tesla")
+            _chk("paper_buy: ticker (TSLA)", (r.get("ticker") or "").upper(), "TSLA")
+            _chk("paper_buy: shares (5)", int(float(r.get("shares") or 0)), 5)
+        except Exception as e:
+            lines.append(f"  ❌ paper_buy parse  <i>{e}</i>"); failed += 2
+
+        # ── Summary ───────────────────────────────────────────────────────────
+        total = passed + failed
+        emoji = "🟢" if failed == 0 else ("🟡" if failed <= 2 else "🔴")
+        lines.append(f"\n{emoji} <b>{passed}/{total} passed</b>")
+        if failed:
+            lines.append("⚠️ <i>Check logs on Render for details.</i>")
+        else:
+            lines.append("✅ <i>All systems operational.</i>")
 
         return "\n".join(lines)
 
