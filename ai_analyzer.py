@@ -300,6 +300,7 @@ def _build_user_prompt(
     recent_losers: list[str] | None = None,
     regime_info: dict | None = None,
     pick_mode: str = "both",
+    etf_candidates: list[dict] | None = None,
 ) -> str:
     # Pre-build conditional blocks (backslashes not allowed inside f-string expressions)
     if recent_losers:
@@ -451,6 +452,9 @@ Stock Candidates:
 Crypto Candidates:
 {json.dumps(crypto_candidates, indent=2)}
 
+ETF Candidates:
+{json.dumps(etf_candidates or [], indent=2)}
+
 Return this exact JSON structure:
 {{
   "daily_summary": "one sentence overall market mood covering both stocks and crypto",
@@ -502,6 +506,33 @@ Return this exact JSON structure:
       }}
     ]
   }},
+  "etfs": {{
+    "short_term": [
+      {{
+        "ticker": "QQQ",
+        "name": "Invesco QQQ Trust",
+        "action": "BUY",
+        "entry_price": 450.00,
+        "target_price": 475.00,
+        "stop_loss": 427.50,
+        "conviction": 3,
+        "thesis": "one sentence why, max 15 words",
+        "risk": "one sentence risk, max 10 words"
+      }}
+    ],
+    "long_term": [
+      {{
+        "ticker": "VTI",
+        "name": "Vanguard Total Stock Market ETF",
+        "action": "BUY",
+        "entry_price": 250.00,
+        "target_price": 290.00,
+        "conviction": 4,
+        "thesis": "one sentence why, max 15 words",
+        "horizon": "1-3 years"
+      }}
+    ]
+  }},
   "disclaimer": "For informational purposes only. Not financial advice. Crypto is highly volatile."
 }}"""
 
@@ -533,10 +564,11 @@ def analyze_with_claude(
     config: dict,
     crypto_results: dict | None = None,
     recent_losers: list[str] | None = None,
+    etf_results: dict | None = None,
 ) -> dict:
     """
-    Main entry point. Accepts stock screener output + optional crypto screener output.
-    Enriches stocks with Finnhub news, calls Claude once for both asset classes.
+    Main entry point. Accepts stock screener output + optional crypto + ETF screener output.
+    Enriches stocks with Finnhub news, calls Claude once for all asset classes.
     Returns unified picks dict.
     """
     print("[ai_analyzer] Building stock candidates payload...")
@@ -547,6 +579,14 @@ def analyze_with_claude(
         print("[ai_analyzer] Building crypto candidates payload...")
         crypto_candidates = _build_crypto_candidates(crypto_results)
 
+    etf_candidates = []
+    if etf_results:
+        print("[ai_analyzer] Building ETF candidates payload...")
+        etf_candidates = (
+            etf_results.get("short_term", []) +
+            [{**e, "_lt": True} for e in etf_results.get("long_term", [])]
+        )
+
     # Pass market regime context from screener results if available
     regime_info = screener_results.get("regime") if isinstance(screener_results, dict) else None
 
@@ -555,6 +595,7 @@ def analyze_with_claude(
         recent_losers=recent_losers or [],
         regime_info=regime_info,
         pick_mode=config.get("pick_mode", "both"),
+        etf_candidates=etf_candidates or [],
     )
 
     # Sonnet for main analysis — quality matters for picks

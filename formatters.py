@@ -215,6 +215,13 @@ def format_daily_message(picks: dict, config: dict,
     crypto    = picks.get("crypto", {})
     st_picks  = stocks.get("short_term", []) if show_st else []
     lt_picks  = stocks.get("long_term", [])  if show_lt else []
+
+    # ETF picks
+    etfs       = picks.get("etfs", {})
+    etf_st     = etfs.get("short_term", []) if show_st else []
+    etf_lt     = [{**e, "_lt": True} for e in etfs.get("long_term", [])] if show_lt else []
+    etf_picks  = etf_st + etf_lt
+
     # Merge ST + LT crypto — tag LT picks, deduplicate by symbol (ST wins)
     if show_crypto:
         _cst = crypto.get("short_term", [])
@@ -325,6 +332,22 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
         )
 
+    def _pick_row_etf(i, e):
+        entry, target, stop = e.get("entry_price"), e.get("target_price"), e.get("stop_loss")
+        ticker   = e.get("ticker", "")
+        is_lt    = e.get("_lt", False)
+        badge    = _conviction_badge(e.get("conviction", 3))
+        lt_label = "  <i>· long-term</i>" if is_lt else ""
+        stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop and not is_lt else ""
+        horizon  = f"  ·  {_esc(e.get('horizon', ''))}" if is_lt and e.get("horizon") else ""
+        return (
+            f"<b>{_esc(ticker)}</b>  {_stars(e.get('conviction', 3))}{badge}  "
+            f"<i>{_esc(_short_company(e.get('name', '')))}</i>{lt_label}\n"
+            f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
+            f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}\n"
+            f"<i>{_esc(e.get('thesis'))}</i>"
+        )
+
     pn = personal_notes or {}   # ticker/symbol → personal note string
     ps = pick_streaks   or {}   # ticker/symbol → consecutive-day count
     bc = buy_counts     or {}   # ticker/symbol → number of members who bought today
@@ -352,6 +375,13 @@ def format_daily_message(picks: dict, config: dict,
             for i, c in enumerate(cst_picks, 1)
         )
         lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO</b>{budget_tag}  ⚡ HIGH RISK\n\n{body}</blockquote>"]
+
+    if etf_picks:
+        body = "\n\n".join(
+            _pick_row_etf(i, e)
+            for i, e in enumerate(etf_picks, 1)
+        )
+        lines += ["", f"<blockquote expandable>📦 <b>ETF PICKS</b>\n\n{body}</blockquote>"]
 
     # Footer — sector concentration warning (only shown when picks are concentrated)
     sector_counts: dict = {}
