@@ -3343,7 +3343,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         lines.append("\n<b>NL Trade Parsing</b>")
         try:
             r = _nl_parse_trade("bought", "I bought 10 apple stocks for $182.50")
-            lines.append(f"  <i>debug bought raw: {r}</i>")
             _chk("bought: ticker (AAPL)", (r.get("ticker") or "").upper(), "AAPL")
             _chk("bought: shares (10)", int(r.get("shares") or 0), 10)
             _chk("bought: price (182.5)", round(float(r.get("price") or 0), 1), 182.5)
