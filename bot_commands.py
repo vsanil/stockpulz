@@ -987,6 +987,26 @@ def handle_callback_query(callback_query: dict) -> None:
         update_user_config(chat_id, "paused", True)
         send_message("⏸ <b>Your picks paused.</b> You won't receive daily briefings until you send /resume.\n<i>Other users are unaffected.</i>", chat_id=chat_id)
 
+    elif action == "reset_confirm":
+        try:
+            reset_user_config(chat_id)
+            global_cfg = get_config()
+            sl = global_cfg.get("stop_loss_pct", 7)
+            tg = global_cfg.get("target_gain_pct", 15)
+            send_message(
+                f"🔄 Your settings reset to defaults.\n"
+                f"Risk: moderate  ·  Pick mode: both\n"
+                f"Budgets: unset  ·  Watchlist: cleared\n"
+                f"Stop loss: {sl}%  ·  Target gain: {tg}%  (global defaults)",
+                chat_id=chat_id,
+            )
+        except Exception as exc:
+            print(f"[bot] reset_confirm failed: {exc}")
+            send_message("⚠️ Reset failed — try again.", chat_id=chat_id)
+
+    elif action == "cancel_abort":
+        send_message("👍 Cancelled.", chat_id=chat_id)
+
     elif action == "paper_reset_confirm":
         amount_raw = parts[1] if len(parts) > 1 else ""
         amount = float(amount_raw) if amount_raw and _is_number(amount_raw) else None
