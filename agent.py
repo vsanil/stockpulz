@@ -21,7 +21,7 @@ from datetime import datetime, date, timedelta
 import pytz
 
 from config_manager import (
-    get_config, save_picks, load_picks, save_weekly_pick,
+    get_config, update_config, save_picks, load_picks, save_weekly_pick,
     get_dynamic_pick_counts, get_user_config,
     load_user_trade_log, save_user_trade_log,
     save_screener_cache, load_screener_cache,
@@ -436,6 +436,9 @@ def run_morning(config: dict, now_et: datetime):
             f"🪙 {n_crypto} crypto",
             admin_only=True,
         )
+        # Save timestamp for /dashboard
+        from datetime import datetime as _dt
+        update_config("last_morning_run", _dt.utcnow().isoformat())
     except Exception as exc:
         print(f"[agent] Admin run summary failed (non-critical): {exc}")
 

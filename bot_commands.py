@@ -146,6 +146,13 @@ def handle_incoming_command(message_text: str, chat_id: str | None = None) -> st
                 )
             return ""
 
+    # Record last-seen timestamp for dashboard activity tracking
+    try:
+        from datetime import datetime as _dt
+        update_user_config(chat_id, "last_seen", _dt.utcnow().isoformat())
+    except Exception:
+        pass
+
     reply = _parse_and_execute(text.upper(), original=text, chat_id=chat_id)
     if reply:
         # Append /help hint to every command response except /help itself and daily picks
@@ -1800,6 +1807,9 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "removeuser":
         return _parse_and_execute(f"REMOVEUSER {text}", original=f"/removeuser {text}", chat_id=chat_id)
 
+    if command == "dashboard":
+        return _parse_and_execute("DASHBOARD", original="/dashboard", chat_id=chat_id)
+
     if command == "users":
         return _parse_and_execute("USERS", original="/users", chat_id=chat_id)
 
@@ -2647,6 +2657,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if is_admin:
             msg += (
                 "\n<b>🔑 Admin</b>"
+                "\n/dashboard — Overview: users, positions, top performer, last run"
                 "\n/users — List all allowed users"
                 "\n/pending — Users awaiting approval"
                 "\n/broadcast — Send a message to all users"
@@ -2936,6 +2947,80 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             return f"✅ Removed <code>{rem_id}</code> from allowlist."
         except ValueError as e:
             return f"❌ {e}"
+
+    # ── /dashboard — admin overview ───────────────────────────────────────────
+    if text == "DASHBOARD":
+        if not _is_admin(chat_id):
+            return "🔒 Admin only."
+        from datetime import datetime as _dt, timezone as _tz
+        from trade_logger import get_performance_stats
+
+        users   = get_allowed_users()
+        owner   = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
+        pending = get_pending_users()
+        now_utc = _dt.utcnow()
+
+        # ── Active users (seen in last 7 days) ────────────────────────────────
+        active_7d = 0
+        total_open = 0
+        best_uid, best_win_rate, best_trades = None, 0, 0
+
+        for uid in users:
+            ucfg = get_user_config(uid)
+            last_seen = ucfg.get("last_seen")
+            if last_seen:
+                try:
+                    delta = (now_utc - _dt.fromisoformat(last_seen)).days
+                    if delta <= 7:
+                        active_7d += 1
+                except Exception:
+                    pass
+
+            log = load_user_trade_log(uid)
+            total_open += len(log.get("open", []))
+
+            stats = get_performance_stats(uid)
+            if stats and stats["count"] >= 3 and stats["win_rate"] > best_win_rate:
+                best_win_rate = stats["win_rate"]
+                best_trades   = stats["count"]
+                best_uid      = uid
+
+        # ── Last morning run ──────────────────────────────────────────────────
+        cfg = get_config()
+        last_run = cfg.get("last_morning_run")
+        if last_run:
+            try:
+                run_dt  = _dt.fromisoformat(last_run)
+                run_ago = (now_utc - run_dt).seconds // 60
+                if run_ago < 60:
+                    run_str = f"{run_ago}m ago"
+                else:
+                    run_str = run_dt.strftime("%b %d  %H:%M UTC")
+            except Exception:
+                run_str = last_run[:16]
+        else:
+            run_str = "unknown"
+
+        # ── Build message ─────────────────────────────────────────────────────
+        lines = ["<b>📊 StockPulz Dashboard</b>\n"]
+
+        lines.append(f"👥 <b>Users</b>  {len(users)} total  ·  {active_7d} active last 7d")
+        if pending:
+            lines.append(f"⏳ <b>Pending</b>  {len(pending)} request(s) — /pending to action")
+        else:
+            lines.append("✅ <b>Pending</b>  No requests")
+
+        lines.append(f"\n📈 <b>Open positions</b>  {total_open} across all users")
+
+        if best_uid:
+            tag = " (you)" if best_uid == owner else f"  <code>{best_uid}</code>"
+            lines.append(f"🏆 <b>Top user</b>{tag}  {best_win_rate}% win rate  ·  {best_trades} trades")
+        else:
+            lines.append("🏆 <b>Top user</b>  Not enough data yet (need ≥3 trades)")
+
+        lines.append(f"\n🤖 <b>Last morning run</b>  {run_str}")
+
+        return "\n".join(lines)
 
     if text == "USERS":
         if not _is_admin(chat_id):
