@@ -637,10 +637,13 @@ def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str
 
     stocks = picks.get("stocks", {})
     crypto = picks.get("crypto", {})
+    etfs   = picks.get("etfs", {})
     all_picks = (
         [p.get("ticker", "") for p in stocks.get("short_term", [])] +
         [p.get("ticker", "") for p in stocks.get("long_term",  [])] +
-        [c.get("symbol", "") for c in crypto.get("short_term", [])]
+        [c.get("symbol", "") for c in crypto.get("short_term", [])] +
+        [e.get("ticker", "") for e in etfs.get("short_term", [])] +
+        [e.get("ticker", "") for e in etfs.get("long_term",  [])]
     )
     all_picks = [t for t in all_picks if t]
     if not all_picks:
