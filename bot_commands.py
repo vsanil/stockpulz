@@ -429,10 +429,28 @@ def handle_callback_query(callback_query: dict) -> None:
     data    = callback_query.get("data", "")
     chat_id = str(callback_query.get("message", {}).get("chat", {}).get("id", ""))
 
-    answer_callback_query(cq_id)   # dismiss spinner immediately
-
     parts = data.split("|")
     action = parts[0] if parts else ""
+
+    # Show an instant toast so users know the tap registered (prevents double-tapping)
+    _TOASTS = {
+        "quickbuy":           "⏳ Logging position…",
+        "chart":              "⏳ Generating chart…",
+        "confirm_sell":       "⏳ Removing position…",
+        "sold_pick":          "⏳ Loading…",
+        "sold_review":        "⏳ Loading…",
+        "sold_confirm":       "⏳ Closing position…",
+        "bought_confirm":     "⏳ Logging position…",
+        "updatelevel_pick":   "⏳ Loading…",
+        "paper_reset_confirm":"⏳ Resetting…",
+        "pause_confirm":      "⏳ Pausing picks…",
+        "reset_confirm":      "⏳ Resetting settings…",
+        "psell":              "⏳ Loading…",
+        "psell_confirm":      "⏳ Closing paper position…",
+        "noop":               "",
+    }
+    toast = _TOASTS.get(action, "⏳ Working…") if action not in ("noop", "cancel_pending", "cancel_abort") else ""
+    answer_callback_query(cq_id, text=toast)
 
     if action == "cancel_pending":
         target_chat = parts[1] if len(parts) > 1 else chat_id
