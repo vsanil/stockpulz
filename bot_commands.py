@@ -425,8 +425,6 @@ def handle_callback_query(callback_query: dict) -> None:
       buy|TICKER|price|shares   (price/shares may be empty string)
       sell|TICKER|price
     """
-    from trade_logger import manual_open_trade, manual_close_trade
-
     cq_id   = callback_query.get("id", "")
     data    = callback_query.get("data", "")
     chat_id = str(callback_query.get("message", {}).get("chat", {}).get("id", ""))
