@@ -403,7 +403,7 @@ def format_daily_message(picks: dict, config: dict,
 
     lines += [
         "",
-        "⚠️ <i>Not financial advice.</i>  📋 /help  ·  📲 /share",
+        "⚠️ <i>Not financial advice.</i>  📋 /help  ·  📲 /share  ·  💬 /feedback",
         "<i>💬 Have a question about any pick? Just type it.</i>",
     ]
     if concentration_line:
