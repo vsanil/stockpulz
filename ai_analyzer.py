@@ -545,8 +545,7 @@ def _call_claude(system: str, user: str, model: str = "claude-sonnet-4-6") -> di
     message = client.messages.create(
         model=model,
         max_tokens=MAX_TOKENS,
-        system=system,
-        messages=[{"role": "user", "content": user}],
+        messages=[{"role": "user", "content": f"{system}\n\n{user}"}],
     )
     raw = message.content[0].text.strip()
     # Strip accidental markdown fences
@@ -682,8 +681,7 @@ def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
-            system=system,
-            messages=[{"role": "user", "content": user_msg}],
+            messages=[{"role": "user", "content": f"{system}\n\n{user_msg}"}],
         )
         raw = message.content[0].text.strip()
         if raw.startswith("```"):
@@ -769,8 +767,7 @@ def personalize_picks_batch(
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=min(_out_tokens, 4096),  # cap at 4096 (Haiku max output)
-                system=system,
-                messages=[{"role": "user", "content": user_msg}],
+                messages=[{"role": "user", "content": f"{system}\n\n{user_msg}"}],
             )
             raw = message.content[0].text.strip()
             if raw.startswith("```"):
@@ -861,8 +858,7 @@ def generate_trade_debrief(trade: dict) -> str:
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=150,
-            system=system,
-            messages=[{"role": "user", "content": user_msg}],
+            messages=[{"role": "user", "content": f"{system}\n\n{user_msg}"}],
         )
         return message.content[0].text.strip()
     except Exception as exc:
