@@ -482,18 +482,22 @@ def handle_callback_query(callback_query: dict) -> None:
         ticker = parts[1].upper() if len(parts) > 1 else ""
         if not ticker:
             return
-        live = _fetch_live_price(ticker)
-        live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
-        save_pending_state(chat_id, "sold", step=2, data={"ticker": ticker})
-        kb = [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]]
-        if live:
-            kb.insert(0, [{"text": f"Use live price ${_p(live)}", "callback_data": f"sold_review|{ticker}|{live}"}])
-        send_inline_keyboard(
-            f"💸 <b>{ticker}</b> — what price did you sell at?{live_hint}\n"
-            f"<i>Type the price, or tap the button to use live price.</i>",
-            kb,
-            chat_id=chat_id,
-        )
+        try:
+            live = _fetch_live_price(ticker)
+            live_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+            save_pending_state(chat_id, "sold", step=2, data={"ticker": ticker})
+            kb = [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]]
+            if live:
+                kb.insert(0, [{"text": f"Use live price ${_p(live)}", "callback_data": f"sold_review|{ticker}|{live}"}])
+            send_inline_keyboard(
+                f"💸 <b>{ticker}</b> — what price did you sell at?{live_hint}\n"
+                f"<i>Type the price, or tap the button to use live price.</i>",
+                kb,
+                chat_id=chat_id,
+            )
+        except Exception as exc:
+            print(f"[bot] sold_pick failed for {ticker}: {exc}")
+            send_message(f"⚠️ Something went wrong — try <code>/sold {ticker}</code> instead.", chat_id=chat_id)
         return
 
     if action == "sold_review":
