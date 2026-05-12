@@ -27,6 +27,7 @@ from config_manager import (
     load_user_paper,
     get_pending_users, add_pending_user, remove_pending_user,
     get_allowed_users,
+    load_feedback, add_feedback, mark_feedback_read, count_unread_feedback,
 )
 from formatters import (
     _esc, _p,
@@ -157,8 +158,8 @@ def handle_incoming_command(message_text: str, chat_id: str | None = None) -> st
     if reply:
         # Append /help hint to every command response except /help itself and daily picks
         cmd = text.lstrip("/").split()[0].lower() if text else ""
-        if cmd not in ("help", "start", "today", "prices", "share") and not reply.startswith("📋") and "/help" not in reply:
-            reply = reply + "\n\n<i>📋 /help  ·  📲 /share</i>"
+        if cmd not in ("help", "start", "today", "prices", "share", "feedback") and not reply.startswith("📋") and "/help" not in reply:
+            reply = reply + "\n\n<i>📋 /help  ·  📲 /share  ·  💬 /feedback</i>"
         send_message(reply, chat_id=chat_id)
     return reply
 
@@ -1122,6 +1123,8 @@ _PARAM_PROMPTS: dict[str, str] = {
                   "<i>e.g.</i>  <code>New feature: price alerts now support crypto!</code>"),
     "chart":     ("📊 <b>Which ticker?</b>\n"
                   "<i>e.g.</i>  <code>AAPL</code>  ·  <code>NVDA</code>  ·  <code>BTC</code>"),
+    "feedback":  ("💬 <b>What's on your mind?</b>\n"
+                  "<i>Share any thoughts, suggestions, or issues — your feedback goes straight to the team.</i>"),
 }
 
 
@@ -1524,6 +1527,34 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "explain":
         return _explain_pick(text)
 
+    if command == "feedback":
+        feedback_text = text.strip()
+        if not feedback_text:
+            return "⚠️ Please include some feedback text."
+        try:
+            import requests as _req
+            r = _req.get(
+                f"{TELEGRAM_API}/getChat",
+                params={"chat_id": chat_id}, timeout=5,
+            )
+            result     = r.json().get("result", {})
+            first_name = result.get("first_name", "")
+            username   = result.get("username", "")
+        except Exception:
+            first_name, username = "", ""
+        add_feedback(chat_id, feedback_text, username=username, first_name=first_name)
+        try:
+            admin_id  = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
+            name_str  = _esc(first_name) if first_name else f"<code>{chat_id}</code>"
+            uname_str = f"  @{_esc(username)}" if username else ""
+            send_message(
+                f"💬 <b>New feedback</b> from {name_str}{uname_str}\n\n{_esc(feedback_text)}",
+                chat_id=admin_id,
+            )
+        except Exception:
+            pass
+        return "✅ <b>Thanks for your feedback!</b> It's been sent to the team."
+
     if command == "chart":
         ticker = text.strip().split()[0].upper() if text.strip() else ""
         if not ticker:
@@ -1806,6 +1837,9 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     if command == "removeuser":
         return _parse_and_execute(f"REMOVEUSER {text}", original=f"/removeuser {text}", chat_id=chat_id)
+
+    if command == "feedback":
+        return _parse_and_execute(f"FEEDBACK {text}" if text else "FEEDBACK", original=original, chat_id=chat_id)
 
     if command == "dashboard":
         return _parse_and_execute("DASHBOARD", original="/dashboard", chat_id=chat_id)
@@ -2650,7 +2684,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "\n/status — Check if picks are active and when the next one runs"
             "\n/next — When's the next scheduled pick"
             "\n/reset — Reset all settings to defaults"
-            "\n/share — Get your invite link\n"
+            "\n/share — Get your invite link"
+            "\n/feedback — Send feedback to the team\n"
             "\n<i>💬 You can also just type naturally — e.g. \"why was NVDA picked?\", "
             "\"set my risk to aggressive\", or \"alert me when BTC hits 100k\".</i>\n"
         )
@@ -2658,6 +2693,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             msg += (
                 "\n<b>🔑 Admin</b>"
                 "\n/dashboard — Overview: users, positions, top performer, last run"
+                "\n/feedback — View all user feedback"
                 "\n/users — List all allowed users"
                 "\n/pending — Users awaiting approval"
                 "\n/broadcast — Send a message to all users"
@@ -2948,6 +2984,57 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         except ValueError as e:
             return f"❌ {e}"
 
+    # ── /feedback — submit feedback (users) or view all (admin) ─────────────
+    if text == "FEEDBACK":
+        if _is_admin(chat_id):
+            entries = load_feedback()
+            if not entries:
+                return "💬 <b>No feedback yet.</b>"
+            mark_feedback_read()
+            lines = [f"<b>💬 Feedback ({len(entries)} total)</b>\n"]
+            for e in entries[:20]:
+                name     = _esc(e.get("first_name") or e.get("chat_id", "?"))
+                uname    = f"  @{_esc(e['username'])}" if e.get("username") else ""
+                date_str = e.get("submitted_at", "")[:10]
+                lines.append(f"<b>{name}</b>{uname}  <i>{date_str}</i>")
+                lines.append(f"{_esc(e['text'])}\n")
+            if len(entries) > 20:
+                lines.append(f"<i>…and {len(entries) - 20} more</i>")
+            return "\n".join(lines)
+        else:
+            _prompt_for_param("feedback", chat_id)
+            return ""
+
+    if text.startswith("FEEDBACK "):
+        raw_feedback = original.split(" ", 1)[1].strip() if " " in original else ""
+        if not raw_feedback:
+            return "⚠️ Please include your feedback text. e.g. <code>/feedback I love this bot!</code>"
+        # Get user profile for context
+        try:
+            import requests as _req
+            r = _req.get(
+                f"{TELEGRAM_API}/getChat",
+                params={"chat_id": chat_id}, timeout=5,
+            )
+            result    = r.json().get("result", {})
+            first_name = result.get("first_name", "")
+            username   = result.get("username", "")
+        except Exception:
+            first_name, username = "", ""
+        add_feedback(chat_id, raw_feedback, username=username, first_name=first_name)
+        # Notify admin
+        try:
+            admin_id  = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
+            name_str  = _esc(first_name) if first_name else f"<code>{chat_id}</code>"
+            uname_str = f"  @{_esc(username)}" if username else ""
+            send_message(
+                f"💬 <b>New feedback</b> from {name_str}{uname_str}\n\n{_esc(raw_feedback)}",
+                chat_id=admin_id,
+            )
+        except Exception:
+            pass
+        return "✅ <b>Thanks for your feedback!</b> It's been sent to the team."
+
     # ── /dashboard — admin overview ───────────────────────────────────────────
     if text == "DASHBOARD":
         if not _is_admin(chat_id):
@@ -3019,6 +3106,12 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             lines.append("🏆 <b>Top user</b>  Not enough data yet (need ≥3 trades)")
 
         lines.append(f"\n🤖 <b>Last morning run</b>  {run_str}")
+
+        unread = count_unread_feedback()
+        if unread:
+            lines.append(f"💬 <b>Feedback</b>  {unread} unread — /feedback to view")
+        else:
+            lines.append("💬 <b>Feedback</b>  No new feedback")
 
         return "\n".join(lines)
 

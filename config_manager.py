@@ -98,6 +98,7 @@ BUY_COUNTS_FILE        = "buy_counts.json"      # Social: how many members bough
 USER_CONFIGS_FILE      = "user_configs.json"    # Per-user settings (risk, watchlist, budget…)
 USER_TRADES_FILE       = "user_trades.json"     # Per-user trade logs (open + closed)
 USER_PAPER_FILE        = "user_paper.json"      # Per-user paper portfolios
+FEEDBACK_FILE          = "feedback.json"        # User feedback submissions
 
 
 def _gist_headers() -> dict:
@@ -610,6 +611,48 @@ def save_pending_state(chat_id: str, command: str,
 def clear_pending_state(chat_id: str) -> None:
     """Remove pending state for a chat_id."""
     _PENDING_STATE_CACHE.pop(str(chat_id), None)
+
+
+# ── User feedback ────────────────────────────────────────────────────────────
+
+def load_feedback() -> list:
+    """Return list of feedback entries, newest first."""
+    data = _load_gist_file(FEEDBACK_FILE)
+    if not data:
+        return []
+    return data.get("entries", [])
+
+
+def add_feedback(chat_id: str, text: str, username: str = "", first_name: str = "") -> None:
+    """Append a new feedback entry."""
+    from datetime import datetime
+    data = _load_gist_file(FEEDBACK_FILE) or {"entries": []}
+    data.setdefault("entries", [])
+    data["entries"].insert(0, {
+        "chat_id":    str(chat_id),
+        "first_name": first_name,
+        "username":   username,
+        "text":       text,
+        "submitted_at": datetime.utcnow().isoformat(),
+        "read":       False,
+    })
+    # Keep last 200 entries
+    data["entries"] = data["entries"][:200]
+    _write_gist_file(FEEDBACK_FILE, data)
+
+
+def mark_feedback_read() -> None:
+    """Mark all feedback entries as read."""
+    data = _load_gist_file(FEEDBACK_FILE) or {"entries": []}
+    for entry in data.get("entries", []):
+        entry["read"] = True
+    _write_gist_file(FEEDBACK_FILE, data)
+
+
+def count_unread_feedback() -> int:
+    """Return number of unread feedback entries."""
+    entries = load_feedback()
+    return sum(1 for e in entries if not e.get("read", False))
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────
