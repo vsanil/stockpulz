@@ -147,12 +147,14 @@ def handle_incoming_command(message_text: str, chat_id: str | None = None) -> st
                 )
             return ""
 
-    # Record last-seen timestamp for dashboard activity tracking
-    try:
-        from datetime import datetime as _dt
-        update_user_config(chat_id, "last_seen", _dt.utcnow().isoformat())
-    except Exception:
-        pass
+    # Record last-seen timestamp for dashboard activity tracking (background — non-blocking)
+    def _record_seen():
+        try:
+            from datetime import datetime as _dt
+            update_user_config(chat_id, "last_seen", _dt.utcnow().isoformat())
+        except Exception:
+            pass
+    threading.Thread(target=_record_seen, daemon=True).start()
 
     reply = _parse_and_execute(text.upper(), original=text, chat_id=chat_id)
     if reply:
