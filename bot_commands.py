@@ -1234,6 +1234,18 @@ def _execute_bought(ticker: str, chat_id: str,
     """
     from trade_logger import add_holding
     ticker = ticker.upper()
+
+    # Resolve to canonical ticker symbol (e.g. "COSTCO" → "COST") before storing.
+    # This prevents duplicates when the user types a company name instead of a symbol.
+    try:
+        candidates = _resolve_ticker_candidates(ticker)
+        if candidates:
+            canonical = candidates[0]["ticker"].upper()
+            if canonical != ticker:
+                print(f"[bot] _execute_bought: resolved {ticker} → {canonical}")
+                ticker = canonical
+    except Exception:
+        pass  # keep original ticker if resolution fails
     picks  = load_picks()
     trade, existed = add_holding(ticker, chat_id, picks=picks)
 
