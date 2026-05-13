@@ -11,6 +11,8 @@ import threading
 import hmac
 import hashlib
 
+import json
+import anthropic
 import requests
 from telegram_api import (
     TELEGRAM_API,
@@ -55,6 +57,18 @@ def _is_admin(chat_id: str | None = None) -> bool:
     return str(resolved) == str(os.environ.get("TELEGRAM_CHAT_ID", ""))
 
 
+
+
+
+# ── Anthropic client singleton ────────────────────────────────────────────────
+_anthropic_client: anthropic.Anthropic | None = None
+
+def _get_client() -> anthropic.Anthropic:
+    """Return a shared Anthropic client, created lazily on first call."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    return _anthropic_client
 
 # ── Admin invite token (HMAC-signed, time-limited) ───────────────────────────
 
@@ -171,9 +185,6 @@ def _explain_pick(query: str) -> str:
     Use Claude Haiku to answer a plain-English question about today's picks.
     Fuzzy-matches the query to a specific pick when possible.
     """
-    import anthropic
-    import json
-
     picks = load_picks()
     if not picks:
         return "📭 No picks for today yet. Check back after 8 AM ET."
@@ -212,25 +223,10 @@ def _explain_pick(query: str) -> str:
     else:
         # Not in today's picks — fetch live info via yfinance and answer generally
         import yfinance as yf
-        import re
 
-        # Try to extract a ticker from the query
-        ticker_match = re.search(r'\b([A-Z]{1,5})\b', query.upper())
-        # Also try common name→ticker mappings
-        name_map = {
-            "NVIDIA": "NVDA", "NVDIA": "NVDA", "NVIDEA": "NVDA",
-            "APPLE": "AAPL", "MICROSOFT": "MSFT", "AMAZON": "AMZN",
-            "GOOGLE": "GOOGL", "ALPHABET": "GOOGL", "META": "META",
-            "TESLA": "TSLA", "NETFLIX": "NFLX", "BITCOIN": "BTC-USD",
-            "ETHEREUM": "ETH-USD", "SOLANA": "SOL-USD",
-        }
-        guessed_ticker = None
-        for name, sym in name_map.items():
-            if name in query.upper():
-                guessed_ticker = sym
-                break
-        if not guessed_ticker and ticker_match:
-            guessed_ticker = ticker_match.group(1)
+        # Resolve ticker using AI-backed resolver (handles names, misspellings, tickers)
+        candidates = _resolve_ticker_candidates(query)
+        guessed_ticker = candidates[0]["ticker"] if candidates else None
 
         live_context = ""
         if guessed_ticker:
@@ -274,7 +270,7 @@ def _explain_pick(query: str) -> str:
         user_msg = f"{context}\n\nUser question: {query}"
 
     try:
-        client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client  = _get_client()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=350,
@@ -294,7 +290,6 @@ def _nl_param(command: str, raw: str) -> str:
     command="watch"   → returns JSON array of ticker symbols e.g. '["TSLA","MSFT","BRK-B"]'
     command="risk"    → returns one word: conservative | moderate | aggressive
     """
-    import anthropic
     prompts = {
         "exclude": (
             f'Map "{raw}" to a JSON array of standard US stock sector names. '
@@ -318,7 +313,7 @@ def _nl_param(command: str, raw: str) -> str:
         ),
     }
     try:
-        client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client  = _get_client()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=80,
@@ -337,8 +332,6 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
     Returns a single-item list for unambiguous matches, multiple for ambiguous ones.
     """
     import re as _re
-    import json as _j
-    import anthropic as _ant
 
     raw = name_or_ticker.strip()
 
@@ -361,7 +354,7 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
         'Return ONLY the JSON array, no other text.'
     )
     try:
-        client  = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client  = _get_client()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=150,
@@ -372,7 +365,7 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
             raw_json = raw_json.split("```")[1]
             if raw_json.startswith("json"):
                 raw_json = raw_json[4:]
-        candidates = _j.loads(raw_json)
+        candidates = json.loads(raw_json)
         if isinstance(candidates, list) and candidates:
             return candidates
     except Exception as exc:
@@ -1948,9 +1941,6 @@ def _handle_natural_language(query: str, chat_id: str | None = None) -> str:
       "set stock budget to 200, crypto 50" → set_budget stocks 200 crypto 50
       "why was microsoft picked today?"   → explain query
     """
-    import anthropic
-    import json
-
     SYSTEM = """You are a command parser for a personal stock advisor Telegram bot.
 Parse the user's natural language message into a JSON command. Return ONLY valid JSON — no text before or after.
 
@@ -2004,7 +1994,7 @@ Rules:
 - If truly unclear, use unknown"""
 
     try:
-        client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client  = _get_client()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=120,
@@ -2142,9 +2132,6 @@ def _nl_extract_tickers_list(raw: str) -> list[str]:
     Returns a list of name/ticker strings (e.g. ["avery dennison", "MSFT", "CRM", "solana", "EEM"]).
     Falls back to [raw] (treat entire input as one item) on any error.
     """
-    import anthropic as _anthropic
-    import json as _json
-
     SYSTEM = """You are a ticker extractor for a stock/crypto trading bot.
 The user's message names one or more stocks, ETFs, mutual funds, or cryptocurrencies they bought.
 Extract every asset mentioned and return ONLY a JSON array of strings — one entry per asset.
@@ -2159,13 +2146,13 @@ Examples:
   "bought 10 shares of amazon and 2 bitcoin" → ["amazon", "bitcoin"]"""
 
     try:
-        client  = _anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client  = _get_client()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=150,
             messages=[{"role": "user", "content": f"{SYSTEM}\n\nInput: {raw}"}],
         )
-        result = _json.loads(message.content[0].text.strip())
+        result = json.loads(message.content[0].text.strip())
         if isinstance(result, list) and result:
             print(f"[telegram] NL ticker list extracted: {result}")
             return result
@@ -2192,9 +2179,6 @@ def _nl_parse_trade(command: str, raw: str) -> dict:
       paper_buy "buy 5 shares of tesla"
               → {"ticker": "TSLA", "shares": 5, "price": None}
     """
-    import anthropic as _anthropic
-    import json as _json
-
     schemas = {
         "bought":    '{"ticker": "AAPL or null", "price": 182.50, "shares": 10}  — shares is optional',
         "sold":      '{"ticker": "AAPL or null", "price": 197.10, "shares": null}  — price is optional',
@@ -2229,7 +2213,7 @@ Rules:
 - Return ONLY the JSON object, nothing else."""
 
     try:
-        client  = _anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client  = _get_client()
         # Use multi-turn pattern: prime the assistant then give the input.
         # More reliable than embedding instructions in user message.
         message = client.messages.create(
@@ -2245,12 +2229,12 @@ Rules:
         print(f"[telegram] NL trade parse raw ({command}): {raw_text!r}")
         # Try direct parse first; fall back to extracting JSON object from text
         try:
-            result = _json.loads(raw_text)
-        except _json.JSONDecodeError:
+            result = json.loads(raw_text)
+        except json.JSONDecodeError:
             import re as _re2
             m = _re2.search(r'\{.*\}', raw_text, _re2.DOTALL)
             if m:
-                result = _json.loads(m.group())
+                result = json.loads(m.group())
             else:
                 raise
         print(f"[telegram] NL trade parse ({command}): {result}")
@@ -2260,13 +2244,9 @@ Rules:
         return {"ticker": None}
 
 
-def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None) -> str:
-    """Parse command string and return reply."""
-    chat_id = chat_id or _chat_id()
 
-    # Telegram slash-commands (/help) or plain text (HELP) — normalise both
-    text = text.lstrip("/").replace("_", " ")   # /set_st 30 → SET ST 30
-
+def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
+    """Market data & portfolio commands."""
     if text == "TODAY":
         picks = load_picks()
         if not picks:
@@ -2426,6 +2406,10 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         except Exception as exc:
             return f"⚠️ Could not fetch dividend data: {exc}"
 
+    return None
+
+def _cmd_alerts(text: str, original: str, chat_id: str) -> "str | None":
+    """Price alert commands."""
     # ── Price alerts ──────────────────────────────────────────────────────────
     if text == "ALERTS":
         from price_alert_manager import list_alerts
@@ -2503,6 +2487,10 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             return ""
         return remove_alert(chat_id, ticker, price)
 
+    return None
+
+def _cmd_paper(text: str, original: str, chat_id: str) -> "str | None":
+    """Paper trading commands."""
     # ── Paper trading ─────────────────────────────────────────────────────────
     if text in ("PAPER BUY",):
         _prompt_for_param("paper_buy", chat_id)
@@ -2786,6 +2774,10 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         threading.Thread(target=_run_and_send, daemon=True).start()
         return None  # webhook already got its "200 OK" — no second message from here
 
+    return None
+
+def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
+    """Help, status and utility commands."""
     if text in ("HELP", "START"):
         is_admin = _is_admin(chat_id)
         msg = (
@@ -2858,6 +2850,10 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         )
         return msg
 
+    return None
+
+def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
+    """User preference / settings commands."""
     # /set_risk conservative | moderate | aggressive  (or natural language)
     if text == "SET RISK":
         _prompt_for_param("set_risk", chat_id)
@@ -2927,9 +2923,8 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             update_user_config(chat_id, "excluded_sectors", [])
             return "✅ Sector exclusions cleared — all sectors eligible again."
         # Use Haiku to map natural language → proper sector names
-        import json as _json
         try:
-            excluded = _json.loads(_nl_param("exclude", sectors_input))
+            excluded = json.loads(_nl_param("exclude", sectors_input))
         except Exception:
             excluded = [sectors_input.title()]
         update_user_config(chat_id, "excluded_sectors", excluded)
@@ -3077,6 +3072,10 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
             "📖 <a href=\"https://stockpulz.com\">Learn more at stockpulz.com →</a>"
         )
 
+    return None
+
+def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
+    """Admin user-management commands."""
     # ── Admin: user management ────────────────────────────────────────────────
     if text.startswith("ADDUSER ") or text == "ADDUSER":
         if not _is_admin(chat_id):
@@ -3638,8 +3637,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if not updates:
             # NL fallback via Haiku
             try:
-                import anthropic, json as _json
-                _client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+                _client = _get_client()
                 _sys = (
                     'Parse threshold values. Return JSON only.\n'
                     '{"stop_loss_pct": <number or null>, "target_gain_pct": <number or null>}\n'
@@ -3651,7 +3649,7 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                     max_tokens=80,
                     messages=[{"role": "user", "content": f"{_sys}\n\nInput: {raw}"}],
                 )
-                parsed = _json.loads(_msg.content[0].text.strip())
+                parsed = json.loads(_msg.content[0].text.strip())
                 if parsed.get("stop_loss_pct")   is not None:
                     updates["stop_loss_pct"]   = max(0.5, round(float(parsed["stop_loss_pct"]),   1))
                 if parsed.get("target_gain_pct") is not None:
@@ -3892,7 +3890,6 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         if not updates:
             # NL fallback via Haiku
             try:
-                import anthropic as _ant, json as _j
                 prompt = (
                     f'Parse "{raw}" into pick limits for a stock bot. '
                     'Return ONLY JSON with optional keys "max_stock_picks" and "max_crypto_picks" as integers. '
@@ -3900,12 +3897,12 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                     '"show me 4 stocks"→{"max_stock_picks":4}, "just 1 crypto"→{"max_crypto_picks":1}. '
                     'If unclear return {}.'
                 )
-                client  = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+                client  = _get_client()
                 msg     = client.messages.create(
                     model="claude-haiku-4-5-20251001", max_tokens=60,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                updates = _j.loads(msg.content[0].text.strip())
+                updates = json.loads(msg.content[0].text.strip())
                 updates = {k: max(1, int(v)) for k, v in updates.items()
                            if k in ("max_stock_picks", "max_crypto_picks")}
             except Exception:
@@ -3937,6 +3934,10 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         lines.append("<i>Takes effect on tomorrow's briefing.</i>")
         return "\n".join(lines)
 
+    return None
+
+def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
+    """Real-money trade commands."""
     # ── /bought [TICKER|name [price] [shares]] ───────────────────────────────
     if text == "BOUGHT":
         _prompt_for_param("bought", chat_id)
@@ -4658,20 +4659,19 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
         guidance: dict[str, str] = {}
         if position_data:
             try:
-                import anthropic as _ant, json as _j
                 prompt = (
                     "You are a brief trading advisor. For each position give ONE short action line "
                     "(max 10 words): HOLD / WATCH / TAKE PROFIT / NEAR STOP — ACT / etc. "
                     "Be direct. Consider proximity to target/stop.\n\n"
-                    f"Positions: {_j.dumps(position_data)}\n\n"
+                    f"Positions: {json.dumps(position_data)}\n\n"
                     'Return ONLY a JSON object keyed by ticker, e.g. {"AAPL": "Hold — 3% from target"}'
                 )
-                client  = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+                client  = _get_client()
                 message = client.messages.create(
                     model="claude-haiku-4-5-20251001", max_tokens=250,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                guidance = _j.loads(message.content[0].text.strip())
+                guidance = json.loads(message.content[0].text.strip())
             except Exception as exc:
                 print(f"[portfolio] Guidance fetch failed (non-critical): {exc}")
 
@@ -4784,6 +4784,22 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
                 chat_id=chat_id,
             )
         return ""
+
+    return None
+
+def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None) -> str:
+    """Parse command string and return reply."""
+    chat_id = chat_id or _chat_id()
+
+    # Telegram slash-commands (/help) or plain text (HELP) — normalise both
+    text = text.lstrip("/").replace("_", " ")   # /set_st 30 → SET ST 30
+
+
+    for _handler in (_cmd_market, _cmd_alerts, _cmd_paper, _cmd_misc,
+                     _cmd_settings, _cmd_admin, _cmd_trades):
+        _result = _handler(text, original, chat_id)
+        if _result is not None:
+            return _result
 
     # ── Natural language fallback ─────────────────────────────────────────────
     return _handle_natural_language(original or text, chat_id=chat_id)
