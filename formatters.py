@@ -677,6 +677,144 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
     return "\n".join(lines)
 
 
+def format_eod_full_summary(
+    picks: dict,
+    current_prices: dict,
+    open_holdings: list[dict],
+) -> str:
+    """
+    Rich end-of-day wrap-up sent ~4:15 PM ET after market close.
+    Shows final close prices, per-category P&L averages, and an optional
+    one-line Haiku-generated commentary on the day.
+    """
+    import os
+    et     = pytz.timezone("America/New_York")
+    now_et = datetime.now(et)
+    date_str = now_et.strftime("%a %b %-d")
+
+    stocks = picks.get("stocks", picks)
+    crypto = picks.get("crypto", {})
+    st  = stocks.get("short_term", [])
+    lt  = stocks.get("long_term",  [])
+    cst = crypto.get("short_term", [])
+
+    if not st and not lt and not cst:
+        return ""
+
+    lines = [f"<u><b>📊 End of Day — {date_str}</b></u>", ""]
+
+    def _row(symbol, entry, target, stop, label=""):
+        price = current_prices.get(symbol)
+        if price is None or entry is None:
+            return None, f"  <b>{symbol}</b>  <i>price unavailable</i>"
+        pct   = (price - float(entry)) / float(entry) * 100
+        emoji = "🟢" if pct >= 1 else ("🔴" if pct <= -1 else "🟡")
+        chg   = (f"▲{pct:.1f}%" if pct > 0 else (f"▼{abs(pct):.1f}%" if pct < 0 else "≈0%"))
+        badges = []
+        if stop and price <= float(stop):
+            badges.append("stop hit")
+        elif target and price >= float(target) * 0.97:
+            badges.append("near target 🎯")
+        badge_str = f"  <i>({', '.join(badges)})</i>" if badges else ""
+        lbl = f"  <i>{label}</i>" if label else ""
+        txt = f"  {emoji} <b>{symbol}</b>  <code>${_p(price)}</code>  {chg}{badge_str}{lbl}"
+        return pct, txt
+
+    # ── Short-term stocks ─────────────────────────────────────────────────────
+    st_pcts = []
+    if st:
+        lines.append("<b>📈 Short Term</b>")
+        for s in st:
+            pct, row = _row(s.get("ticker", ""), s.get("entry_price"),
+                            s.get("target_price"), s.get("stop_loss"))
+            lines.append(row)
+            if pct is not None:
+                st_pcts.append(pct)
+
+    # ── Long-term stocks ──────────────────────────────────────────────────────
+    lt_pcts = []
+    if lt:
+        lines.append("<b>🏦 Long Term</b>")
+        for s in lt:
+            pct, row = _row(s.get("ticker", ""), s.get("entry_price"),
+                            s.get("target_price"), None, "hold")
+            lines.append(row)
+            if pct is not None:
+                lt_pcts.append(pct)
+
+    # ── Crypto ────────────────────────────────────────────────────────────────
+    if cst:
+        lines.append("<b>🪙 Crypto</b>")
+        for c in cst:
+            _, row = _row(c.get("symbol", ""), c.get("entry_price"),
+                          c.get("target_price"), c.get("stop_loss"))
+            lines.append(row)
+
+    # ── User holdings not in today's picks ───────────────────────────────────
+    pick_syms = {s.get("ticker") for s in st + lt} | {c.get("symbol") for c in cst}
+    extra = [h for h in open_holdings if h.get("ticker") not in pick_syms
+             and h.get("entry_price") and current_prices.get(h["ticker"])]
+    if extra:
+        lines.append("")
+        lines.append("<b>📂 Your other positions</b>")
+        for h in extra:
+            _, row = _row(h["ticker"], h.get("entry_price"),
+                          h.get("target_price"), h.get("stop_loss"))
+            lines.append(row)
+
+    # ── Day averages ──────────────────────────────────────────────────────────
+    lines.append("")
+    avg_parts = []
+    if st_pcts:
+        avg = sum(st_pcts) / len(st_pcts)
+        avg_parts.append(f"ST avg {'+' if avg >= 0 else ''}{avg:.1f}%")
+    if lt_pcts:
+        avg = sum(lt_pcts) / len(lt_pcts)
+        avg_parts.append(f"LT avg {'+' if avg >= 0 else ''}{avg:.1f}%")
+    if avg_parts:
+        lines.append(f"<i>{' · '.join(avg_parts)}</i>")
+
+    # ── Haiku one-liner (non-critical) ────────────────────────────────────────
+    try:
+        import anthropic as _ant
+        all_rows = []
+        for s in st:
+            sym = s.get("ticker", "")
+            p = current_prices.get(sym)
+            e = s.get("entry_price")
+            if p and e:
+                all_rows.append(f"{sym}: {(p-float(e))/float(e)*100:+.1f}%")
+        for s in lt:
+            sym = s.get("ticker", "")
+            p = current_prices.get(sym)
+            e = s.get("entry_price")
+            if p and e:
+                all_rows.append(f"{sym}: {(p-float(e))/float(e)*100:+.1f}% (LT)")
+        if all_rows:
+            prompt = (
+                "You are a concise stock market commentator. "
+                "Write ONE sentence (max 15 words) summing up today's picks performance. "
+                "Be direct, no disclaimers.\n\n"
+                f"Today's results: {', '.join(all_rows)}"
+            )
+            client = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=60,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            commentary = msg.content[0].text.strip().rstrip(".")
+            lines.append(f"💬 <i>{commentary}</i>")
+    except Exception:
+        pass  # non-critical
+
+    lines += [
+        "",
+        "<i>Market closed. See you tomorrow.</i>",
+        "📋 /help  ·  📊 /positions  ·  📜 /history",
+    ]
+    return "\n".join(lines)
+
+
 # ── Monday "Week Ahead" block ────────────────────────────────────────────────
 
 def format_week_ahead(earnings_this_week: dict, regime: dict | None = None) -> str:

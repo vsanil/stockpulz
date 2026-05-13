@@ -133,7 +133,7 @@ services:
   - type: cron
     name: stock-agent-price-alerts
     runtime: python
-    schedule: "*/30 13-20 * * 1-5"  # Every 30 min, 9:30 AM–4:00 PM ET / 8:30 AM–3:00 PM CDT (Mon–Fri)
+    schedule: "*/30 13-19 * * 1-5"  # Every 30 min, 9:30 AM–3:30 PM ET (Mon–Fri) — stops at close
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
     envVars:
@@ -148,6 +148,28 @@ services:
       - key: GIST_ID
         sync: false
       - key: FINNHUB_API_KEY
+        sync: false
+
+  - type: cron
+    name: stock-agent-eod-summary
+    runtime: python
+    schedule: "15 20 * * 1-5"      # 4:15 PM ET (Mon–Fri) — full EOD wrap-up after market close
+    buildCommand: pip install -r requirements.txt
+    startCommand: python agent.py
+    envVars:
+      - key: RUN_MODE
+        value: eod_summary
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: GH_GIST_TOKEN
+        sync: false
+      - key: GIST_ID
         sync: false
 
   - type: cron
