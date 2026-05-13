@@ -18,6 +18,8 @@ services:
         sync: false
       - key: GIST_ID
         sync: false
+      - key: FLASK_SECRET_KEY
+        sync: false
 
   # ── Scheduled runs (Render cron — fires on exact UTC time, no GitHub delay) ──
 
