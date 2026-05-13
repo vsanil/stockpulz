@@ -43,6 +43,14 @@ ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
 MOCK_DATA = os.environ.get("MOCK_DATA", "false").lower() == "true"
 
+
+def _log_cron_run(mode: str) -> None:
+    """Record the last run timestamp for a cron mode in the shared config."""
+    try:
+        update_config(f"cron_last_{mode}", datetime.utcnow().isoformat())
+    except Exception as exc:
+        print(f"[agent] cron log failed for {mode}: {exc}")
+
 CRYPTO_RETRY_DELAYS = [15, 30, 60, 120]   # seconds between retries (4 attempts after first)
 
 VIX_ALERT_THRESHOLD = 25   # warn when VIX exceeds this level
@@ -205,6 +213,7 @@ def run_prescreener(config: dict):
     No Claude call, no Telegram message. Runs silently in ~90s.
     The 8 AM morning run loads this cache and skips straight to Claude.
     """
+    _log_cron_run("prescreener")
     print("[agent] Running midnight pre-screener...")
 
     if is_market_holiday(datetime.now(ET).date()):
@@ -252,6 +261,7 @@ def run_prescreener(config: dict):
 
 def run_morning(config: dict, now_et: datetime):
     """Full screener + Claude analysis + save picks + send morning message."""
+    _log_cron_run("morning")
     is_weekend = now_et.weekday() >= 5
     is_holiday = (not is_weekend) and is_market_holiday(now_et.date())
 
@@ -490,6 +500,7 @@ def _broadcast_trade_closes(current_prices: dict) -> None:
 
 def run_confirmation():
     """Load morning picks, fetch live prices, send comparison message."""
+    _log_cron_run("confirmation")
     print("[agent] Loading morning picks from Gist...")
     picks = load_picks()
 
@@ -643,6 +654,7 @@ def run_confirmation():
 
 def run_close_check():
     """3:30 PM run. Checks trades silently — only sends a message if target/stop hit."""
+    _log_cron_run("close_check")
     print("[agent] Running 3:30 PM close check...")
     picks = load_picks()
     if not picks:
@@ -680,6 +692,7 @@ def run_eod_summary():
     Sends a rich end-of-day wrap-up: final close prices, per-category averages,
     and an optional Haiku-generated one-line commentary on how the day went.
     """
+    _log_cron_run("eod_summary")
     print("[agent] Running end-of-day summary...")
     picks = load_picks()
     if not picks:
@@ -713,6 +726,7 @@ def run_eod_summary():
 
 def run_weekly_recap(config: dict, now_et: datetime):
     """Saturday: run crypto morning picks, then send a compact weekly recap."""
+    _log_cron_run("weekly")
     # Step 1: Saturday crypto morning picks (markets closed, crypto runs 24/7)
     run_morning(config, now_et)
 
@@ -815,6 +829,7 @@ def run_week_ahead(config: dict):
     regime, and the standard week-ahead commentary from format_week_ahead().
     No new picks are generated — this is a pure briefing.
     """
+    _log_cron_run("week_ahead")
     print("[agent] Building Sunday Week Ahead briefing...")
 
     # Gather tickers from all users' watchlists + any still-open trades
@@ -895,6 +910,7 @@ def run_premarket(config: dict):
 
     Skipped entirely if a user has no open stock positions.
     """
+    _log_cron_run("premarket")
     import yfinance as yf
     print("[agent] Running pre-market pulse...")
 
@@ -1041,6 +1057,7 @@ def run_price_alerts():
     No Claude call, no screener — just yfinance price fetch.
     Designed to run every 30 minutes during market hours.
     """
+    _log_cron_run("price_alerts")
     print("[agent] Running intraday price alerts check...")
 
     # Check user-set price alerts (above/below thresholds)

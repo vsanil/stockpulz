@@ -11,13 +11,21 @@ import os
 import sys
 import time
 import threading
+import secrets as _sec
+from datetime import datetime as _dt, timedelta as _td
+from functools import wraps as _wraps
+
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session, redirect
 
 from config_manager import get_config, get_allowed_users
 from telegram_notifier import handle_incoming_command, handle_callback_query, set_webhook, send_typing_action, typing_until_done, send_message
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or _sec.token_hex(32)
+
+# ── In-memory magic-link token store: {token: expiry_datetime_utc} ───────────
+_admin_tokens: dict = {}
 
 
 # ── Keep-alive (prevents Render free tier cold starts) ────────────────────────
@@ -148,6 +156,424 @@ def register():
 @app.route("/", methods=["GET"])
 def index():
     return jsonify({"service": "Stock Agent Telegram Webhook", "status": "running"}), 200
+
+
+# ── Admin auth helpers ────────────────────────────────────────────────────────
+
+def _require_admin(f):
+    """Decorator: redirect to login if no valid admin session."""
+    @_wraps(f)
+    def _inner(*a, **kw):
+        if not session.get("admin"):
+            return redirect("/admin/login")
+        return f(*a, **kw)
+    return _inner
+
+
+# ── Admin login page ──────────────────────────────────────────────────────────
+
+_ADMIN_LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StockPulz Admin</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;background:#080a0f;color:#eef0f5;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#0f1117;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px 36px;width:100%;max-width:380px;text-align:center}
+h1{font-size:22px;font-weight:700;margin-bottom:8px}
+.sub{color:#7c8899;font-size:14px;margin-bottom:28px}
+button{background:#4f8ef7;color:#fff;border:none;border-radius:10px;padding:13px 24px;font-size:15px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s}
+button:hover{opacity:.88}
+button:disabled{opacity:.45;cursor:default}
+.msg{margin-top:16px;font-size:13px;color:#7c8899;min-height:20px}
+.msg.ok{color:#34d399}
+.msg.err{color:#f87171}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#34d399;margin-right:8px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📈 StockPulz Admin</h1>
+  <p class="sub">Send a one-time login link to your Telegram.</p>
+  <button id="btn" onclick="go()">Send me a login link</button>
+  <p class="msg" id="msg"></p>
+</div>
+<script>
+const errParam = new URLSearchParams(location.search).get('error');
+if(errParam){
+  const el=document.getElementById('msg');
+  el.textContent='Link expired or already used — try again.';
+  el.className='msg err';
+}
+async function go(){
+  const btn=document.getElementById('btn'),msg=document.getElementById('msg');
+  btn.disabled=true;
+  msg.textContent='Sending…';msg.className='msg';
+  try{
+    const r=await fetch('/admin/request',{method:'POST'});
+    const d=await r.json();
+    if(d.sent){msg.textContent='Check your Telegram — link expires in 5 min.';msg.className='msg ok';}
+    else{msg.textContent='Failed: '+d.error;msg.className='msg err';btn.disabled=false;}
+  }catch(e){msg.textContent='Network error — try again.';msg.className='msg err';btn.disabled=false;}
+}
+</script>
+</body>
+</html>"""
+
+
+# ── Admin dashboard HTML ──────────────────────────────────────────────────────
+
+_ADMIN_DASH_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StockPulz Admin</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080a0f;--bg2:#0f1117;--bg3:#161b26;--bg4:#1c2233;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --text:#eef0f5;--muted:#7c8899;--muted2:#a0aab8;
+  --accent:#4f8ef7;--green:#34d399;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa;
+  --r:12px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;background:var(--bg);color:var(--text);line-height:1.5;padding:20px 24px;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.topbar-title{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
+.live{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block}
+.topbar-right{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+.btn-sm{background:var(--bg3);border:1px solid var(--border2);color:var(--muted2);padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit}
+.btn-sm:hover{border-color:var(--accent);color:var(--accent)}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.metric{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px}
+.m-label{font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em}
+.m-val{font-size:30px;font-weight:700}
+.m-sub{font-size:11px;color:var(--muted);margin-top:3px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px}
+.card-title{font-size:11px;font-weight:600;color:var(--muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:.06em}
+.row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.row:last-child{border-bottom:none}
+.avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.av-blue{background:#1c2e4a;color:var(--accent)}
+.av-green{background:#1a2e1a;color:var(--green)}
+.u-info{flex:1;min-width:0}
+.u-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.u-meta{font-size:11px;color:var(--muted);margin-top:1px}
+.pill{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;flex-shrink:0}
+.p-active{background:rgba(52,211,153,.12);color:var(--green)}
+.p-paused{background:rgba(251,191,36,.12);color:var(--amber)}
+.p-idle{background:rgba(124,136,153,.12);color:var(--muted)}
+.cron-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px}
+.cron-row:last-child{border-bottom:none}
+.cron-left{display:flex;align-items:center;gap:8px}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.d-green{background:var(--green)}
+.d-amber{background:var(--amber)}
+.d-muted{background:var(--muted);opacity:.4}
+.cron-time{color:var(--muted);font-size:11px;text-align:right}
+.tabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
+.tab{padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid var(--border);color:var(--muted);background:transparent;font-family:inherit}
+.tab.on{background:var(--bg4);border-color:var(--border2);color:var(--text)}
+.pick-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.pick-row:last-child{border-bottom:none}
+.ticker{font-weight:700;font-size:13px;min-width:52px;color:var(--text)}
+.detail{color:var(--muted);flex:1;font-size:11px}
+.fb-row{padding:8px 0;border-bottom:1px solid var(--border)}
+.fb-row:last-child{border-bottom:none}
+.fb-meta{font-size:11px;color:var(--muted);margin-bottom:3px}
+.fb-text{font-size:12px;color:var(--text);line-height:1.45}
+.unread{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:middle}
+.empty{color:var(--muted);font-size:12px;text-align:center;padding:20px 0}
+.loading{color:var(--muted);font-size:13px;text-align:center;padding:60px 0}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-title">📈 StockPulz Admin <span class="live"></span></div>
+  <div class="topbar-right">
+    <span id="ts"></span>
+    <button class="btn-sm" onclick="load()">↻ Refresh</button>
+    <a href="/admin/logout" class="btn-sm">Logout</a>
+  </div>
+</div>
+<div id="root"><p class="loading">Loading…</p></div>
+<script>
+var picks={},activeTab='';
+
+function age(iso){
+  if(!iso)return'—';
+  try{
+    var d=new Date(iso+(iso.endsWith('Z')?'':'Z')),now=new Date();
+    var m=Math.round((now-d)/60000);
+    if(m<2)return'just now';
+    if(m<60)return m+'m ago';
+    if(m<1440)return Math.round(m/60)+'h ago';
+    return Math.round(m/1440)+'d ago';
+  }catch(e){return iso.slice(0,16).replace('T',' ');}
+}
+
+function ini(first,uname){
+  var s=(first||uname||'??');
+  return s.slice(0,2).toUpperCase();
+}
+
+function metrics(s){
+  return '<div class="metrics">'
+    +'<div class="metric"><div class="m-label">Total users</div><div class="m-val">'+s.total_users+'</div><div class="m-sub">'+s.active_today+' active today</div></div>'
+    +'<div class="metric"><div class="m-label">Picks today</div><div class="m-val">'+s.total_picks+'</div><div class="m-sub">stocks · crypto · ETFs</div></div>'
+    +'<div class="metric"><div class="m-label">Open positions</div><div class="m-val">'+s.open_positions+'</div><div class="m-sub">across all users</div></div>'
+    +'<div class="metric"><div class="m-label">Unread feedback</div><div class="m-val">'+s.unread_feedback+'</div><div class="m-sub">&nbsp;</div></div>'
+    +'</div>';
+}
+
+function users(list){
+  if(!list.length)return'<p class="empty">No users yet</p>';
+  return list.map(function(u){
+    var name=u.first_name||u.username||('user_'+u.id.slice(-4));
+    var tag=u.is_admin?' <span style="color:var(--muted);font-weight:400;font-size:11px">(admin)</span>':'';
+    var pill=u.paused?'<span class="pill p-paused">paused</span>':u.is_active?'<span class="pill p-active">active</span>':'<span class="pill p-idle">idle</span>';
+    var avcls=u.is_admin?'av-green':'av-blue';
+    return'<div class="row"><div class="avatar '+avcls+'">'+ini(u.first_name,u.username)+'</div>'
+      +'<div class="u-info"><div class="u-name">'+name+tag+'</div>'
+      +'<div class="u-meta">'+u.open_positions+' position'+(u.open_positions!==1?'s':'')
+      +' &middot; last seen '+age(u.last_seen)+'</div></div>'+pill+'</div>';
+  }).join('');
+}
+
+var SCHED={
+  morning:'7:00 AM ET',premarket:'8:45 AM ET',confirmation:'10:30 AM ET',
+  close_check:'3:30 PM ET',eod_summary:'4:15 PM ET',prescreener:'11:00 PM ET',
+  price_alerts:'every 30 min',weekly:'Sat 8:00 AM',week_ahead:'Sun 8:00 AM'
+};
+
+function cron(c,lastMorning){
+  return Object.keys(SCHED).map(function(k){
+    var last=c[k]||(k==='morning'?lastMorning:'');
+    var dc=last?'d-green':'d-muted';
+    return'<div class="cron-row"><span class="cron-left"><span class="dot '+dc+'"></span>'+k.replace(/_/g,' ')+'</span>'
+      +'<span class="cron-time">'+(last?age(last):'not yet run')+' &middot; '+SCHED[k]+'</span></div>';
+  }).join('');
+}
+
+function pickRows(arr,isCrypto){
+  if(!arr||!arr.length)return'<p class="empty">No picks</p>';
+  return arr.map(function(p){
+    var sym=isCrypto?(p.symbol||p.ticker||''):(p.ticker||p.symbol||'');
+    var entry=p.entry_price||'—',tgt=p.target_price||'—',stop=p.stop_loss;
+    var det=stop?'entry $'+entry+' &middot; tgt $'+tgt+' &middot; stop $'+stop:'entry $'+entry+' &middot; tgt $'+tgt;
+    return'<div class="pick-row"><span class="ticker">'+sym+'</span><span class="detail">'+det+'</span></div>';
+  }).join('');
+}
+
+var TABS=[
+  ['stocks_st','ST Stocks',false],['stocks_lt','LT Stocks',false],
+  ['crypto_st','Crypto ST',true],['crypto_lt','Crypto LT',true],
+  ['etfs_st','ETF ST',false],['etfs_lt','ETF LT',false]
+];
+
+function picksPanel(p){
+  picks=p;
+  var avail=TABS.filter(function(t){return p[t[0]]&&p[t[0]].length;});
+  if(!avail.length)return'<p class="empty">No picks today</p>';
+  if(!avail.find(function(t){return t[0]===activeTab;}))activeTab=avail[0][0];
+  var tabsHtml=avail.map(function(t){
+    return'<button class="tab'+(t[0]===activeTab?' on':'')+'" onclick="switchTab(\''+t[0]+'\')">'
+      +t[1]+' ('+p[t[0]].length+')</button>';
+  }).join('');
+  var isCrypto=activeTab.startsWith('crypto');
+  return'<div class="tabs" id="tabs">'+tabsHtml+'</div><div id="pcontent">'+pickRows(p[activeTab],isCrypto)+'</div>';
+}
+
+function switchTab(k){
+  activeTab=k;
+  document.querySelectorAll('.tab').forEach(function(b){
+    var m=b.getAttribute('onclick').match(/'([^']+)'/);
+    b.className='tab'+(m&&m[1]===k?' on':'');
+  });
+  document.getElementById('pcontent').innerHTML=pickRows(picks[k],k.startsWith('crypto'));
+}
+
+function feedback(list){
+  if(!list.length)return'<p class="empty">No feedback yet</p>';
+  return list.slice(0,15).map(function(f){
+    var name=f.first_name||f.username||('user_'+f.chat_id.slice(-4));
+    var u=f.read?'':'<span class="unread"></span>';
+    return'<div class="fb-row"><div class="fb-meta">'+u+name+' &middot; '+age(f.submitted_at)+'</div>'
+      +'<div class="fb-text">'+f.text+'</div></div>';
+  }).join('');
+}
+
+async function load(){
+  var r;
+  try{r=await fetch('/admin/data');}
+  catch(e){document.getElementById('root').innerHTML='<p class="empty">Network error — retrying in 60s</p>';return;}
+  if(r.status===302||r.status===401){window.location='/admin/login';return;}
+  if(!r.ok){document.getElementById('root').innerHTML='<p class="empty">Error '+r.status+'</p>';return;}
+  var d=await r.json();
+  document.getElementById('root').innerHTML=
+    metrics(d.stats)
+    +'<div class="grid2">'
+      +'<div class="card"><div class="card-title">Users</div>'+users(d.users)+'</div>'
+      +'<div class="card"><div class="card-title">Cron health</div>'+cron(d.cron,d.last_morning_run)+'</div>'
+    +'</div>'
+    +'<div class="grid2">'
+      +'<div class="card"><div class="card-title">Today\'s picks</div>'+picksPanel(d.picks)+'</div>'
+      +'<div class="card"><div class="card-title">Feedback</div>'+feedback(d.feedback)+'</div>'
+    +'</div>';
+  document.getElementById('ts').textContent='Updated '+new Date().toLocaleTimeString();
+}
+
+load();
+setInterval(load,60000);
+</script>
+</body>
+</html>"""
+
+
+# ── Admin routes ──────────────────────────────────────────────────────────────
+
+@app.route("/admin/login")
+def admin_login():
+    return _ADMIN_LOGIN_HTML, 200
+
+
+@app.route("/admin/request", methods=["POST"])
+def admin_request_link():
+    """Generate a one-time magic link and send it to the owner's Telegram."""
+    # Purge expired tokens
+    now = _dt.utcnow()
+    for t in list(_admin_tokens):
+        if _admin_tokens[t] < now:
+            del _admin_tokens[t]
+
+    token = _sec.token_urlsafe(32)
+    _admin_tokens[token] = now + _td(minutes=5)
+
+    base = (os.environ.get("RENDER_EXTERNAL_URL") or request.host_url).rstrip("/")
+    link = f"{base}/admin/verify?t={token}"
+
+    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not owner:
+        return jsonify({"sent": False, "error": "TELEGRAM_CHAT_ID not set"}), 500
+
+    send_message(
+        f"🔐 <b>StockPulz Admin login link</b>\n\nExpires in 5 minutes — single use only.\n\n{link}",
+        chat_id=owner,
+    )
+    return jsonify({"sent": True})
+
+
+@app.route("/admin/verify")
+def admin_verify():
+    """Validate the magic-link token, set session cookie, redirect to dashboard."""
+    token = request.args.get("t", "")
+    now = _dt.utcnow()
+    expiry = _admin_tokens.get(token)
+    if not expiry or now > expiry:
+        return redirect("/admin/login?error=expired")
+    del _admin_tokens[token]          # single-use: consume immediately
+    session["admin"] = True
+    session.permanent = False         # session expires when browser closes
+    return redirect("/admin")
+
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("admin", None)
+    return redirect("/admin/login")
+
+
+@app.route("/admin")
+@_require_admin
+def admin_dashboard():
+    return _ADMIN_DASH_HTML, 200
+
+
+@app.route("/admin/data")
+@_require_admin
+def admin_data():
+    """Return JSON payload for the dashboard."""
+    from config_manager import (
+        get_allowed_users, get_user_config, load_picks,
+        load_user_trade_log, load_feedback, get_config,
+        count_unread_feedback,
+    )
+
+    cfg     = get_config()
+    owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
+    now_utc = _dt.utcnow()
+    users   = []
+    total_open   = 0
+    active_today = 0
+
+    for uid in get_allowed_users():
+        try:
+            ucfg = get_user_config(uid)
+            log  = load_user_trade_log(uid)
+            open_pos  = len(log.get("open", []))
+            total_open += open_pos
+            last_seen  = ucfg.get("last_seen", "")
+            is_active  = False
+            if last_seen:
+                try:
+                    delta = (now_utc - _dt.fromisoformat(last_seen)).total_seconds()
+                    is_active = delta < 86400
+                except Exception:
+                    pass
+            if is_active:
+                active_today += 1
+            users.append({
+                "id":            uid,
+                "first_name":    ucfg.get("first_name", ""),
+                "username":      ucfg.get("username", ""),
+                "last_seen":     last_seen,
+                "paused":        bool(ucfg.get("paused")),
+                "open_positions": open_pos,
+                "is_admin":      uid == owner,
+                "is_active":     is_active,
+            })
+        except Exception as exc:
+            print(f"[admin/data] user {uid} failed: {exc}")
+
+    picks_raw = load_picks() or {}
+    stocks = picks_raw.get("stocks", {})
+    crypto = picks_raw.get("crypto", {})
+    etfs   = picks_raw.get("etfs",   {})
+    st  = stocks.get("short_term", [])
+    lt  = stocks.get("long_term",  [])
+    cst = crypto.get("short_term", [])
+    clt = crypto.get("long_term",  [])
+    est = etfs.get("short_term",   [])
+    elt = etfs.get("long_term",    [])
+    total_picks = len(st) + len(lt) + len(cst) + len(clt) + len(est) + len(elt)
+
+    cron_keys = [
+        "prescreener", "premarket", "morning", "confirmation",
+        "close_check", "eod_summary", "weekly", "week_ahead", "price_alerts",
+    ]
+    cron = {k: cfg.get(f"cron_last_{k}", "") for k in cron_keys}
+
+    return jsonify({
+        "stats": {
+            "total_users":      len(users),
+            "active_today":     active_today,
+            "total_picks":      total_picks,
+            "open_positions":   total_open,
+            "unread_feedback":  count_unread_feedback(),
+        },
+        "users": users,
+        "picks": {
+            "stocks_st": st,  "stocks_lt": lt,
+            "crypto_st": cst, "crypto_lt": clt,
+            "etfs_st":   est, "etfs_lt":   elt,
+        },
+        "feedback":        load_feedback()[:20],
+        "cron":            cron,
+        "last_morning_run": cfg.get("last_morning_run", ""),
+    })
 
 
 # ── CLI webhook registration ──────────────────────────────────────────────────
