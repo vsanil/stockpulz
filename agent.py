@@ -35,7 +35,7 @@ from ai_analyzer import analyze_with_claude, personalize_picks_batch, generate_t
 from price_checker import get_current_prices
 from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
-    format_eod_summary, format_week_ahead, build_picks_keyboard, _p,
+    format_eod_summary, format_eod_full_summary, format_week_ahead, build_picks_keyboard, _p,
 )
 from telegram_api import send_message, send_inline_keyboard
 
@@ -149,7 +149,7 @@ MOCK_CRYPTO_CANDIDATES = {
 def detect_run_mode(now_et: datetime) -> str:
     """Auto-detect run mode by ET hour/weekday. Override with RUN_MODE env var."""
     forced = os.environ.get("RUN_MODE", "").lower()
-    if forced in ("morning", "confirmation", "weekly", "close_check", "prescreener", "price_alerts", "week_ahead", "premarket"):
+    if forced in ("morning", "confirmation", "weekly", "close_check", "eod_summary", "prescreener", "price_alerts", "week_ahead", "premarket"):
         return forced
     if now_et.weekday() == 6 and now_et.hour < 14:   # Sunday morning → week ahead briefing
         return "week_ahead"
@@ -159,8 +159,10 @@ def detect_run_mode(now_et: datetime) -> str:
         return "premarket"   # 8:40–8:59 AM ET weekday → pre-market pulse
     if now_et.hour < 10:
         return "morning"
-    if now_et.hour >= 15:
-        return "close_check"   # 3:30 PM ET — silent unless a trade closed
+    if now_et.hour >= 16:
+        return "eod_summary"  # after market close → full EOD wrap-up
+    if now_et.hour == 15:
+        return "close_check"  # 3:00–3:59 PM ET → intraday close check
     return "confirmation"
 
 
@@ -689,6 +691,40 @@ def run_close_check():
             print(f"[agent] EOD summary failed for {uid} (non-critical): {exc}")
 
 
+def run_eod_summary():
+    """
+    4:15 PM run — after market close.
+    Sends a rich end-of-day wrap-up: final close prices, per-category averages,
+    and an optional Haiku-generated one-line commentary on how the day went.
+    """
+    print("[agent] Running end-of-day summary...")
+    picks = load_picks()
+    if not picks:
+        print("[agent] No picks for today — skipping EOD summary.")
+        return
+
+    try:
+        current_prices = get_current_prices(picks)
+    except Exception as exc:
+        print(f"[agent] Price fetch failed for EOD summary: {exc}")
+        return
+
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            if cfg.get("paused") or cfg.get("skip_eod"):
+                continue
+            log = load_user_trade_log(uid)
+            msg = format_eod_full_summary(picks, current_prices, log.get("open", []))
+            if msg:
+                if DRY_RUN:
+                    print(f"\nDRY RUN — EOD Full Summary for {uid}:\n{msg}")
+                else:
+                    send_message(msg, chat_id=uid)
+        except Exception as exc:
+            print(f"[agent] EOD full summary failed for {uid} (non-critical): {exc}")
+
+
 # ── Weekly recap (Saturday morning) ──────────────────────────────────────────
 
 def run_weekly_recap(config: dict, now_et: datetime):
@@ -1092,6 +1128,8 @@ def main():
         run_week_ahead(config)
     elif mode == "close_check":
         run_close_check()
+    elif mode == "eod_summary":
+        run_eod_summary()
     elif mode == "price_alerts":
         run_price_alerts()
     else:
