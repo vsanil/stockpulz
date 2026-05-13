@@ -1486,6 +1486,10 @@ def _execute_bought(ticker: str, chat_id: str,
     target = trade.get("target_price")
     stop   = trade.get("stop_loss")
 
+    # Detect first-ever trade for this user (no prior open or closed trades)
+    log          = load_user_trade_log(chat_id)
+    is_first     = len(log.get("open", [])) == 1 and len(log.get("closed", [])) == 0
+
     lines = [f"✅ <b>{ticker}</b> added to your portfolio."]
     if entry and target and stop:
         lines.append(
@@ -1498,6 +1502,14 @@ def _execute_bought(ticker: str, chat_id: str,
         lines.append(f"Entry logged at <code>${_p(entry)}</code>.")
     else:
         lines.append("<i>Not in today's picks — I'll watch the price for you.</i>")
+
+    if is_first:
+        lines.append(
+            "\n<b>🎉 First trade logged!</b>\n"
+            "When you exit, send <code>/sold " + ticker + "</code> and I'll record your P&amp;L.\n"
+            "After your first closed trade, /stats will start showing your win rate and expectancy."
+        )
+
     return "\n".join(lines)
 
 
@@ -2482,11 +2494,29 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             from performance_tracker import get_recent_stats
             stats = get_performance_stats(chat_id)
             if not stats or stats["count"] == 0:
+                # Check if they have any open trades at all
+                log        = load_user_trade_log(chat_id)
+                open_count = len(log.get("open", []))
+                if open_count > 0:
+                    tickers_str = ", ".join(
+                        f"<b>{t['ticker']}</b>" for t in log["open"][:3]
+                    )
+                    return (
+                        "📊 <b>Your Stats</b>\n\n"
+                        f"You have {open_count} open position{'s' if open_count > 1 else ''} "
+                        f"({tickers_str}) but no closed trades yet.\n\n"
+                        "When you're ready to exit, send <code>/sold TICKER</code> — "
+                        "that's when the P&amp;L and win rate get recorded.\n\n"
+                        "<i>Stats appear here after your first closed trade.</i>"
+                    )
                 return (
                     "📊 <b>Your Stats</b>\n\n"
-                    "No closed trades yet.\n\n"
-                    "Log a buy with /bought, then /sold when you exit — "
-                    "your win rate, expectancy, and return history will appear here."
+                    "Nothing here yet — your win rate, expectancy, and P&amp;L build up as you trade.\n\n"
+                    "<b>How to start:</b>\n"
+                    "1. Check today's picks — /today\n"
+                    "2. Place a trade and log it — <code>/bought TICKER</code>\n"
+                    "3. Exit when ready — <code>/sold TICKER</code>\n\n"
+                    "After your first closed trade, this page fills in automatically."
                 )
             _s = lambda x: ("+" if x >= 0 else "") + str(x)
             streak_str = (
@@ -3044,7 +3074,8 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
             "\n/dividends — Dividend yield &amp; next ex-date for your positions"
             "\n/share — Get your invite link"
             "\n/feedback — Send feedback to the team"
-            "\n/guide — Quick reference: daily schedule, /bought, /stats explained\n"
+            "\n/guide — Quick reference: daily schedule, /bought, /stats explained"
+            "\n/setup — Re-run the setup wizard (budget, risk, assets)\n"
             "\n<i>💬 You can also just type naturally — e.g. \"why was NVDA picked?\", "
             "\"set my risk to aggressive\", or \"alert me when BTC hits 100k\".</i>\n"
         )
@@ -3913,6 +3944,13 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
             "<i>\"Why was NVDA picked?\"</i>  ·  <i>\"Set my risk to aggressive\"</i>  ·  <i>\"Alert me when BTC hits 100k\"</i>\n\n"
             "Questions? Just ask."
         )
+
+    if text == "SETUP":
+        # Re-run the onboarding wizard so the user can reconfigure from scratch
+        if _is_admin(chat_id) or chat_id in get_allowed_users():
+            _start_onboarding_wizard(chat_id)
+            return ""
+        return "🔒 You need to be an approved member to use this command."
 
     if text == "STATUS":
         global_cfg    = get_config()
