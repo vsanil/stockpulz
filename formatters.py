@@ -568,8 +568,8 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
         ]
 
     pick_mode    = (config or {}).get("pick_mode", "both")
-    show_stocks  = pick_mode in ("st", "lt", "both")   # always show stocks unless explicitly off
-    show_crypto  = pick_mode in ("st", "lt", "both")
+    show_stocks  = True                                           # stocks always shown in recap
+    show_crypto  = (config or {}).get("show_crypto", True)       # respect per-user setting
 
     lines = [f"<u><b>📅 Week of {week_end} — Recap</b></u>", ""]
 

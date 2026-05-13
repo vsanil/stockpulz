@@ -240,7 +240,6 @@ def save_user_paper(chat_id: str, data: dict) -> None:
 
 def get_allowed_users() -> list[str]:
     """Return list of allowed chat_ids. Always includes TELEGRAM_CHAT_ID (owner)."""
-    import os
     config = get_config()
     users  = [str(u) for u in config.get("allowed_users", [])]
     owner  = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -262,7 +261,6 @@ def add_allowed_user(chat_id: str) -> list[str]:
 
 def remove_allowed_user(chat_id: str) -> list[str]:
     """Remove a chat_id from allowed_users. Returns updated list."""
-    import os
     owner = os.environ.get("TELEGRAM_CHAT_ID", "")
     if str(chat_id) == str(owner):
         raise ValueError("Cannot remove the bot owner from the allowlist.")
