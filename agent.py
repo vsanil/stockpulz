@@ -1313,6 +1313,25 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             message = format_daily_message(picks, user_cfg, personal_notes=personal_notes,
                                            pick_streaks=pick_streaks, buy_counts=buy_counts,
                                            recent_stats=recent_stats)
+
+            # Append /bought tip for users who have never logged a trade
+            user_log = user_positions_cache.get(uid, None)
+            if user_log is None:
+                try:
+                    user_log = load_user_trade_log(uid).get("open", [])
+                except Exception:
+                    user_log = []
+            log_obj      = load_user_trade_log(uid) if uid in user_positions_cache else {"open": user_log, "closed": []}
+            has_no_trades = (
+                len(log_obj.get("open", [])) == 0 and
+                len(log_obj.get("closed", [])) == 0
+            )
+            if has_no_trades:
+                message += (
+                    "\n\n<i>💡 New here? If you place a trade, send <code>/bought TICKER</code> "
+                    "— e.g. <code>/bought NVDA</code>. That's how your win rate and P&amp;L get tracked in /stats.</i>"
+                )
+
             if DRY_RUN:
                 print(f"\n{'=' * 60}\nDRY RUN — {label} for {uid}:\n{'=' * 60}\n{message}\n")
             else:
