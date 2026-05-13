@@ -446,23 +446,29 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         return [{"text": label, "callback_data": "noop"}]
 
     def _pair(ticker: str, asset_type: str) -> list[dict]:
-        """Return [Bought, 📊] for one pick — used to build 2-per-row layouts."""
+        """Return [Bought, 📊 Chart] for one pick — used to build 2-per-row layouts."""
         return [
             {"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"},
-            {"text": "📊",                  "callback_data": f"chart|{ticker}|{asset_type}"},
+            {"text": "📊 Chart",            "callback_data": f"chart|{ticker}|{asset_type}"},
         ]
 
     def _add_section(picks_list: list, get_sym, asset_type: str, header: str):
-        """Append a section header + picks paired 2-per-row."""
+        """
+        Append a section header + picks paired 2-per-row.
+        Odd pick at end: place its Bought + Chart on one row (fills the space cleanly).
+        """
         if not picks_list:
             return
         buttons.append(_header(header))
         it = iter(picks_list)
         for p in it:
-            left  = _pair(get_sym(p), asset_type)
             right = next(it, None)
-            row   = left + (_pair(get_sym(right), asset_type) if right else [])
-            buttons.append(row)
+            if right is None:
+                # Last odd pick — buy + chart on one row, no empty columns
+                ticker = get_sym(p)
+                buttons.append(_pair(ticker, asset_type))
+            else:
+                buttons.append(_pair(get_sym(p), asset_type) + _pair(get_sym(right), asset_type))
 
     buttons = []
 

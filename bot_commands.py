@@ -491,10 +491,21 @@ def _send_release_broadcast(notes: str, admin_chat_id: str) -> str:
 
 
 def _fetch_live_price(ticker: str) -> float | None:
-    """Fetch the latest price for a ticker via yfinance."""
+    """Fetch the latest price for a ticker via yfinance. Handles crypto via TICKER-USD."""
     import yfinance as _yf
+    ticker    = ticker.upper()
+    yf_symbol = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
+    # Try fast_info first (faster, no download overhead)
     try:
-        data = _yf.download(ticker, period="1d", interval="1m",
+        fi    = _yf.Ticker(yf_symbol).fast_info
+        price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
+        if price:
+            return float(price)
+    except Exception:
+        pass
+    # Fallback: 1-min history
+    try:
+        data = _yf.download(yf_symbol, period="1d", interval="1m",
                             progress=False, auto_adjust=True)
         return float(data["Close"].dropna().iloc[-1])
     except Exception:
@@ -4708,8 +4719,9 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                     except Exception:
                         _sum_sector_map[ticker] = "Unknown"
                 else:
+                    _yf_sym = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
                     try:
-                        _fi  = yf.Ticker(ticker).fast_info
+                        _fi  = yf.Ticker(_yf_sym).fast_info
                         _pr  = getattr(_fi, "last_price", None) or getattr(_fi, "regular_market_price", None)
                         if _pr:
                             prices[ticker] = round(float(_pr), 2)
@@ -4717,7 +4729,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                     except Exception:
                         pass
                     try:
-                        _hist = yf.Ticker(ticker).history(period="1d", interval="1m")
+                        _hist = yf.Ticker(_yf_sym).history(period="1d", interval="1m")
                         if not _hist.empty:
                             prices[ticker] = round(float(_hist["Close"].iloc[-1]), 2)
                     except Exception:
@@ -4866,9 +4878,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 sector_by_ticker[ticker] = "Unknown"
 
         for t in crypto_trades:
-            ticker = t["ticker"]
+            ticker    = t["ticker"]
+            yf_symbol = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
             try:
-                fi    = yf.Ticker(ticker).fast_info
+                fi    = yf.Ticker(yf_symbol).fast_info
                 price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
                 if price:
                     prices[ticker] = round(float(price), 2)
@@ -4876,7 +4889,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             except Exception:
                 pass
             try:
-                hist = yf.Ticker(ticker).history(period="1d", interval="1m")
+                hist = yf.Ticker(yf_symbol).history(period="1d", interval="1m")
                 if not hist.empty:
                     prices[ticker] = round(float(hist["Close"].iloc[-1]), 2)
             except Exception:
