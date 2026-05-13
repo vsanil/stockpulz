@@ -19,6 +19,13 @@ from config_manager import _load_gist_file, _write_gist_file
 
 ALERTS_FILENAME = "price_alerts.json"
 
+# Crypto symbols that need the -USD suffix for yfinance
+_CRYPTO_SYMBOLS = {
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "DOT", "MATIC",
+    "LINK", "UNI", "ATOM", "LTC", "BCH", "ALGO", "XLM", "VET", "ICP", "FIL",
+    "TRX", "NEAR", "OP", "ARB", "SUI", "APT", "INJ", "SEI", "TIA",
+}
+
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
@@ -31,10 +38,44 @@ def _save_alerts(alerts: dict) -> None:
 
 
 def _current_price(ticker: str) -> float | None:
+    """Fetch current price. Crypto tickers use TICKER-USD format for yfinance."""
+    ticker = ticker.upper()
+    yf_symbol = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
     try:
-        return float(yf.Ticker(ticker).fast_info.last_price)
+        price = yf.Ticker(yf_symbol).fast_info.last_price
+        if price:
+            return float(price)
     except Exception:
-        return None
+        pass
+    # Fallback: try CoinGecko for crypto if yfinance failed
+    if ticker in _CRYPTO_SYMBOLS:
+        try:
+            import requests
+            _COINGECKO_IDS = {
+                "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana",
+                "BNB": "binancecoin", "XRP": "ripple", "ADA": "cardano",
+                "DOGE": "dogecoin", "AVAX": "avalanche-2", "DOT": "polkadot",
+                "MATIC": "matic-network", "LINK": "chainlink", "UNI": "uniswap",
+                "ATOM": "cosmos", "LTC": "litecoin", "BCH": "bitcoin-cash",
+                "ALGO": "algorand", "XLM": "stellar", "VET": "vechain",
+                "ICP": "internet-computer", "FIL": "filecoin", "TRX": "tron",
+                "NEAR": "near", "OP": "optimism", "ARB": "arbitrum",
+                "SUI": "sui", "APT": "aptos", "INJ": "injective-protocol",
+            }
+            cg_id = _COINGECKO_IDS.get(ticker)
+            if cg_id:
+                resp = requests.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={"ids": cg_id, "vs_currencies": "usd"},
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                price = resp.json().get(cg_id, {}).get("usd")
+                if price:
+                    return float(price)
+        except Exception:
+            pass
+    return None
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
