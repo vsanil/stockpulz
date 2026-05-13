@@ -56,7 +56,9 @@ def _fake_get_config():           return dict(_FAKE_CONFIG)
 def _fake_update_config(k, v):    _FAKE_CONFIG[k] = v
 def _fake_get_user_config(cid):   return dict(_FAKE_USER_CFGS.get(cid, {}))
 def _fake_update_user_config(cid, k, v): _FAKE_USER_CFGS.setdefault(cid, {})[k] = v
-def _fake_update_user_config_multi(cid, d): _FAKE_USER_CFGS.setdefault(cid, {}).update(d)
+def _fake_update_user_config_multi(cid, d):
+    _FAKE_USER_CFGS.setdefault(cid, {}).update(d)
+    return dict(_FAKE_USER_CFGS[cid])
 def _fake_reset_user_config(cid): _FAKE_USER_CFGS.pop(cid, None)
 def _fake_load_picks():           return dict(_FAKE_PICKS)
 def _fake_load_pending(cid):      return dict(_FAKE_PENDING.get(cid, {}))
@@ -634,6 +636,194 @@ def run_command_tests():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# SECTION 3 — Extended coverage: /today, /positions, /history, /settings
+# ═════════════════════════════════════════════════════════════════════════════
+
+_MOCK_PICKS = {
+    "daily_summary": "Markets are cautiously optimistic.",
+    "stocks": {
+        "short_term": [{
+            "ticker": "AAPL", "company": "Apple Inc", "action": "BUY",
+            "entry_price": 185.0, "target_price": 200.0, "stop_loss": 175.0,
+            "allocation": 50.0, "conviction": 4,
+            "thesis": "Breakout on volume.", "risk": "Macro headwinds.",
+        }],
+        "long_term": [{
+            "ticker": "MSFT", "company": "Microsoft Corp", "action": "BUY",
+            "entry_price": 415.0, "target_price": 500.0,
+            "allocation": 50.0, "conviction": 5,
+            "thesis": "Cloud growth intact.", "horizon": "2-3 years",
+        }],
+    },
+    "crypto": {
+        "short_term": [{
+            "id": "bitcoin", "symbol": "BTC", "name": "Bitcoin", "action": "BUY",
+            "entry_price": 62000, "target_price": 70000, "stop_loss": 58000,
+            "allocation": 25.0, "conviction": 3,
+            "thesis": "Momentum building.", "risk": "High volatility.",
+        }],
+    },
+    "disclaimer": "For informational purposes only.",
+    "_saved_date": __import__("datetime").date.today().isoformat(),
+}
+
+_MOCK_TRADE_LOG = {
+    "open": [
+        {"ticker": "AAPL", "asset_type": "stock", "entry_price": 170.0,
+         "target_price": 200.0, "stop_loss": 160.0, "opened_date": "2025-01-01",
+         "shares": 5, "allocation": 50.0},
+        {"ticker": "NVDA", "asset_type": "stock", "entry_price": 850.0,
+         "target_price": 1000.0, "stop_loss": 800.0, "opened_date": "2025-01-10",
+         "shares": 2, "allocation": 100.0},
+    ],
+    "closed": [
+        {"ticker": "TSLA", "asset_type": "stock", "entry_price": 165.0,
+         "closed_price": 185.0, "return_pct": 12.1, "outcome": "target",
+         "gain_usd": 40.0, "opened_date": "2024-12-01", "closed_date": "2025-01-05"},
+    ],
+}
+
+
+def run_extended_tests():
+    if not BOT_IMPORTED:
+        header("Extended Coverage Tests")
+        R.record_skip("All extended tests", "bot_commands failed to import")
+        return
+
+    def run():
+        # ── /today ────────────────────────────────────────────────────────────
+        header("Command: /today")
+
+        # No picks → returns "No picks" message
+        reply = _run_cmd("TODAY")
+        R.record("/today — no picks stored",
+                 "no picks" in reply.lower() or "📭" in reply,
+                 f"reply={reply[:60]}")
+
+        # With picks → formats daily message
+        _FAKE_PICKS.update(_MOCK_PICKS)
+        reply = _run_cmd("TODAY")
+        combined = reply + " ".join(s.get("text", "") for s in _SENT)
+        R.record("/today — with picks → renders message",
+                 "AAPL" in combined or "Apple" in combined or "stocks" in combined.lower(),
+                 f"reply={reply[:80]}")
+        _FAKE_PICKS.clear()
+
+        # ── /positions ────────────────────────────────────────────────────────
+        header("Command: /positions")
+
+        # No positions
+        reply = _run_cmd("POSITIONS")
+        R.record("/positions — empty portfolio",
+                 reply is not None,
+                 f"reply={reply[:60]}")
+
+        # With open positions
+        _FAKE_TRADE_LOGS[TEST_CHAT] = dict(_MOCK_TRADE_LOG)
+        reply = _run_cmd("POSITIONS")
+        combined = reply + " ".join(s.get("text", "") for s in _SENT)
+        R.record("/positions — shows open holdings",
+                 "AAPL" in combined or "NVDA" in combined or "position" in combined.lower(),
+                 f"combined={combined[:80]}")
+        _FAKE_TRADE_LOGS.clear()
+
+        # ── /history ──────────────────────────────────────────────────────────
+        header("Command: /history")
+
+        # No history
+        reply = _run_cmd("HISTORY")
+        R.record("/history — no closed trades",
+                 reply is not None,
+                 f"reply={reply[:60]}")
+
+        # With closed trades
+        _FAKE_TRADE_LOGS[TEST_CHAT] = dict(_MOCK_TRADE_LOG)
+        reply = _run_cmd("HISTORY")
+        combined = reply + " ".join(s.get("text", "") for s in _SENT)
+        R.record("/history — shows closed trades",
+                 "TSLA" in combined or "closed" in combined.lower() or "history" in combined.lower(),
+                 f"combined={combined[:80]}")
+        _FAKE_TRADE_LOGS.clear()
+
+        # ── /settings ────────────────────────────────────────────────────────
+        header("Command: /settings")
+
+        reply = _run_cmd("SETTINGS")
+        combined = reply + " ".join(s.get("text", "") for s in _SENT)
+        R.record("/settings — shows settings panel",
+                 bool(combined.strip()),
+                 f"combined={combined[:60]}")
+
+        # ── /status ───────────────────────────────────────────────────────────
+        header("Command: /status")
+
+        reply = _run_cmd("STATUS")
+        R.record("/status — returns a response",
+                 reply is not None,
+                 f"reply={reply[:60]}")
+
+        # ── /set_risk ────────────────────────────────────────────────────────
+        header("Command: /set_risk")
+
+        reply = _run_cmd("SET RISK aggressive")
+        R.record("/set_risk aggressive",
+                 "aggressive" in (reply or "").lower(),
+                 f"reply={reply[:60]}")
+
+        reply = _run_cmd("SET RISK conservative")
+        R.record("/set_risk conservative",
+                 "conservative" in (reply or "").lower(),
+                 f"reply={reply[:60]}")
+
+        # ── /set_budget ───────────────────────────────────────────────────────
+        header("Command: /set_budget")
+
+        reply = _run_cmd("SET BUDGET stocks 200 crypto 50")
+        R.record("/set_budget stocks + crypto",
+                 "200" in (reply or "") or "budget" in (reply or "").lower(),
+                 f"reply={reply[:60]}")
+
+        reply = _run_cmd("SET BUDGET off")
+        R.record("/set_budget off — clears budgets",
+                 "clear" in (reply or "").lower() or "✅" in (reply or ""),
+                 f"reply={reply[:60]}")
+
+        # ── /watch ────────────────────────────────────────────────────────────
+        header("Command: /watch extended")
+
+        _FAKE_USER_CFGS.clear()
+        reply = _run_cmd("WATCH NVDA TSLA AAPL")
+        R.record("/watch — accepts multiple tickers",
+                 reply is not None,
+                 f"reply={reply[:60]}")
+
+        # ── /pause / /resume ──────────────────────────────────────────────────
+        header("Command: /pause + /resume")
+
+        reply = _run_cmd("PAUSE")
+        # /pause sends a confirmation keyboard, returns "" — check for sent keyboard
+        combined = reply + " ".join(s.get("text", "") for s in _SENT)
+        R.record("/pause — sends confirmation keyboard",
+                 "pause" in combined.lower() or any(s["type"] == "keyboard" for s in _SENT),
+                 f"combined={combined[:60]}")
+
+        reply = _run_cmd("RESUME")
+        R.record("/resume — acknowledges",
+                 reply is not None and len(reply) > 0,
+                 f"reply={reply[:60]}")
+
+        # ── /help ─────────────────────────────────────────────────────────────
+        header("Command: /help")
+
+        reply = _run_cmd("HELP")
+        R.record("/help — returns command list",
+                 "help" in (reply or "").lower() or "/" in (reply or ""),
+                 f"reply={reply[:60]}")
+
+    with_mocks(run)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Entry point
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -651,12 +841,15 @@ if __name__ == "__main__":
         run_nl_tests()
     if mode in ("all", "commands"):
         run_command_tests()
+    if mode in ("all", "extended"):
+        run_extended_tests()
     if mode == "fast":
         print(f"\n{YELLOW}Fast mode: only running non-Haiku tests{RESET}")
         # Temporarily disable API key so NL tests are skipped
         _orig = os.environ.pop("ANTHROPIC_API_KEY", "")
         globals()["HAS_API_KEY"] = False
         run_command_tests()
+        run_extended_tests()
         if _orig:
             os.environ["ANTHROPIC_API_KEY"] = _orig
         globals()["HAS_API_KEY"] = bool(_orig)

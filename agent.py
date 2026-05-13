@@ -698,7 +698,8 @@ def run_eod_summary():
             if cfg.get("paused") or cfg.get("skip_eod"):
                 continue
             log = load_user_trade_log(uid)
-            msg = format_eod_full_summary(picks, current_prices, log.get("open", []))
+            watchlist = cfg.get("watchlist", [])
+            msg = format_eod_full_summary(picks, current_prices, log.get("open", []), watchlist=watchlist)
             if msg:
                 if DRY_RUN:
                     print(f"\nDRY RUN — EOD Full Summary for {uid}:\n{msg}")

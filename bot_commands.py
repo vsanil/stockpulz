@@ -2782,6 +2782,7 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
         is_admin = _is_admin(chat_id)
         msg = (
             "📋 <b>StockPulz Commands</b>\n"
+            "📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>\n"
             "\n<b>📈 Daily Picks</b>"
             "\n/today — Today's stock &amp; crypto picks"
             "\n/prices — Live prices vs entry for today's picks"
@@ -2836,7 +2837,7 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
                 "\n<b>🔑 Admin</b>"
                 "\n/dashboard — Overview: users, positions, top performer, last run"
                 "\n/test — Live NL + routing self-test (reports ✅/❌ in Telegram)"
-                "\n/feedback — View all user feedback"
+                "\n/feedbacks — View all user feedback"
                 "\n/users — List all allowed users"
                 "\n/pending — Users awaiting approval"
                 "\n/broadcast — Send a message to all users"
@@ -2845,9 +2846,6 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
                 "\n/bot_pause · /bot_resume — Global kill switch"
                 "\n/bot_crypto_on · /bot_crypto_off — Toggle crypto globally\n"
             )
-        msg += (
-            "\n📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>"
-        )
         return msg
 
     return None
@@ -3134,26 +3132,29 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
         except ValueError as e:
             return f"❌ {e}"
 
-    # ── /feedback — submit feedback (users) or view all (admin) ─────────────
+    # ── /feedback — submit feedback (everyone, including admin) ─────────────
     if text == "FEEDBACK":
-        if _is_admin(chat_id):
-            entries = load_feedback()
-            if not entries:
-                return "💬 <b>No feedback yet.</b>"
-            mark_feedback_read()
-            lines = [f"<b>💬 Feedback ({len(entries)} total)</b>\n"]
-            for e in entries[:20]:
-                name     = _esc(e.get("first_name") or e.get("chat_id", "?"))
-                uname    = f"  @{_esc(e['username'])}" if e.get("username") else ""
-                date_str = e.get("submitted_at", "")[:10]
-                lines.append(f"<b>{name}</b>{uname}  <i>{date_str}</i>")
-                lines.append(f"{_esc(e['text'])}\n")
-            if len(entries) > 20:
-                lines.append(f"<i>…and {len(entries) - 20} more</i>")
-            return "\n".join(lines)
-        else:
-            _prompt_for_param("feedback", chat_id)
-            return ""
+        _prompt_for_param("feedback", chat_id)
+        return ""
+
+    # ── /feedbacks — admin view of all submitted feedback ────────────────────
+    if text == "FEEDBACKS":
+        if not _is_admin(chat_id):
+            return "🔒 Admin only."
+        entries = load_feedback()
+        if not entries:
+            return "💬 <b>No feedback yet.</b>"
+        mark_feedback_read()
+        lines = [f"<b>💬 Feedback ({len(entries)} total)</b>\n"]
+        for e in entries[:20]:
+            name     = _esc(e.get("first_name") or e.get("chat_id", "?"))
+            uname    = f"  @{_esc(e['username'])}" if e.get("username") else ""
+            date_str = e.get("submitted_at", "")[:10]
+            lines.append(f"<b>{name}</b>{uname}  <i>{date_str}</i>")
+            lines.append(f"{_esc(e['text'])}\n")
+        if len(entries) > 20:
+            lines.append(f"<i>…and {len(entries) - 20} more</i>")
+        return "\n".join(lines)
 
     if text.startswith("FEEDBACK "):
         raw_feedback = original.split(" ", 1)[1].strip() if " " in original else ""

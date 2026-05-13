@@ -430,11 +430,24 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     def _header(label: str) -> list[dict]:
         return [{"text": label, "callback_data": "noop"}]
 
-    def _row(ticker: str, asset_type: str) -> list[dict]:
+    def _pair(ticker: str, asset_type: str) -> list[dict]:
+        """Return [Bought, 📊] for one pick — used to build 2-per-row layouts."""
         return [
             {"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"},
-            {"text": "📊 Chart",            "callback_data": f"chart|{ticker}|{asset_type}"},
+            {"text": "📊",                  "callback_data": f"chart|{ticker}|{asset_type}"},
         ]
+
+    def _add_section(picks_list: list, get_sym, asset_type: str, header: str):
+        """Append a section header + picks paired 2-per-row."""
+        if not picks_list:
+            return
+        buttons.append(_header(header))
+        it = iter(picks_list)
+        for p in it:
+            left  = _pair(get_sym(p), asset_type)
+            right = next(it, None)
+            row   = left + (_pair(get_sym(right), asset_type) if right else [])
+            buttons.append(row)
 
     buttons = []
 
@@ -446,25 +459,10 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         [e for e in etfs.get("long_term",  []) if e.get("ticker")]
     )
 
-    if st_picks:
-        buttons.append(_header("── 📈 Short Term ──"))
-        for s in st_picks:
-            buttons.append(_row(s["ticker"], "stock"))
-
-    if lt_picks:
-        buttons.append(_header("── 🏛 Long Term ──"))
-        for s in lt_picks:
-            buttons.append(_row(s["ticker"], "stock"))
-
-    if cst_picks:
-        buttons.append(_header("── 🪙 Crypto ──"))
-        for c in cst_picks:
-            buttons.append(_row(c["symbol"], "crypto"))
-
-    if etf_picks:
-        buttons.append(_header("── 📦 ETFs ──"))
-        for e in etf_picks:
-            buttons.append(_row(e["ticker"], "stock"))
+    _add_section(st_picks,  lambda s: s["ticker"], "stock",  "── 📈 Short Term ──")
+    _add_section(lt_picks,  lambda s: s["ticker"], "stock",  "── 🏛 Long Term ──")
+    _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──")
+    _add_section(etf_picks, lambda e: e["ticker"], "stock",  "── 📦 ETFs ──")
 
     return buttons
 
@@ -529,7 +527,7 @@ def format_confirmation_message(picks: dict, current_prices: dict,
         for c in cst:
             lines.append(price_line(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")))
 
-    lines += ["", "🔴 stop hit  ✅ on track  ⚠️ watch  🟡 flat", "<i>⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share"]
+    lines += ["", "🔴 stop hit  ✅ on track  ⚠️ watch  🟡 flat", "<i>⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share  ·  💬 /feedback"]
     return "\n".join(lines)
 
 
@@ -598,7 +596,8 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
 
 # ── EOD portfolio summary (3:30 PM close check) ───────────────────────────────
 
-def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[dict]) -> str:
+def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[dict],
+                       watchlist: list | None = None) -> str:
     """
     End-of-day snapshot sent at 3:30 PM.
     Shows today's picks with move since entry, plus any user holdings with alerts.
@@ -614,6 +613,8 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
     lines = [f"<u><b>📊 Close Check — {now}</b></u>", ""]
 
     any_picks = False
+
+    _watchlist = set(watchlist) if watchlist else set()
 
     def _row(symbol: str, entry, target, stop, label: str = "") -> str:
         current = current_prices.get(symbol)
@@ -636,14 +637,19 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
             badges.append("🎯 near target")
         badge_str = f"  <i>{' · '.join(badges)}</i>" if badges else ""
         lbl = f"  <i>{label}</i>" if label else ""
-        return (f"  {emoji} <b>{symbol}</b>  <code>${_p(current)}</code>  "
+        star = "⭐" if symbol in _watchlist else ""
+        return (f"  {emoji} {star}<b>{symbol}</b>  <code>${_p(current)}</code>  "
                 f"{change_str}  from <code>${_p(entry)}</code>{badge_str}{lbl}")
 
-    st  = stocks.get("short_term", [])
-    lt  = stocks.get("long_term",  [])
-    cst = crypto.get("short_term", [])
+    etfs = picks.get("etfs", {})
+    st   = stocks.get("short_term", [])
+    lt   = stocks.get("long_term",  [])
+    cst  = crypto.get("short_term", [])
+    clt  = crypto.get("long_term",  [])
+    est  = etfs.get("short_term",   [])
+    elt  = etfs.get("long_term",    [])
 
-    if st or lt or cst:
+    if st or lt or cst or clt or est or elt:
         any_picks = True
         lines.append("<b>Today's picks:</b>")
         for s in st:
@@ -651,12 +657,19 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
         for s in lt:
             lines.append(_row(s.get("ticker", ""), s.get("entry_price"), s.get("target_price"), None, "LT"))
         for c in cst:
-            lines.append(_row(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss"), "crypto"))
+            lines.append(_row(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss"), "🪙"))
+        for c in clt:
+            lines.append(_row(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), None, "🪙 LT"))
+        for e in est:
+            lines.append(_row(e.get("ticker", ""), e.get("entry_price"), e.get("target_price"), e.get("stop_loss"), "ETF"))
+        for e in elt:
+            lines.append(_row(e.get("ticker", ""), e.get("entry_price"), e.get("target_price"), None, "ETF LT"))
 
     # User's portfolio holdings not already in picks
     pick_symbols = (
         {s.get("ticker") for s in st + lt} |
-        {c.get("symbol") for c in cst}
+        {c.get("symbol") for c in cst + clt} |
+        {e.get("ticker") for e in est + elt}
     )
     extra = [h for h in open_holdings if h.get("ticker") not in pick_symbols
              and h.get("entry_price") and current_prices.get(h["ticker"])]
@@ -672,7 +685,7 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
 
     lines += [
         "",
-        "<i>🟢 +1%+  🟡 flat  🔴 −1%+  ·  ⚠️ Not financial advice.</i>  📋 /help",
+        "<i>🟢 +1%+  🟡 flat  🔴 −1%+  ·  ⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share  ·  💬 /feedback",
     ]
     return "\n".join(lines)
 
@@ -681,6 +694,7 @@ def format_eod_full_summary(
     picks: dict,
     current_prices: dict,
     open_holdings: list[dict],
+    watchlist: list | None = None,
 ) -> str:
     """
     Rich end-of-day wrap-up sent ~4:15 PM ET after market close.
@@ -694,14 +708,20 @@ def format_eod_full_summary(
 
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
+    etfs   = picks.get("etfs",   {})
     st  = stocks.get("short_term", [])
     lt  = stocks.get("long_term",  [])
     cst = crypto.get("short_term", [])
+    clt = crypto.get("long_term",  [])
+    est = etfs.get("short_term",   [])
+    elt = etfs.get("long_term",    [])
 
-    if not st and not lt and not cst:
+    if not any([st, lt, cst, clt, est, elt]):
         return ""
 
     lines = [f"<u><b>📊 End of Day — {date_str}</b></u>", ""]
+
+    _watchlist = set(watchlist) if watchlist else set()
 
     def _row(symbol, entry, target, stop, label=""):
         price = current_prices.get(symbol)
@@ -717,7 +737,8 @@ def format_eod_full_summary(
             badges.append("near target 🎯")
         badge_str = f"  <i>({', '.join(badges)})</i>" if badges else ""
         lbl = f"  <i>{label}</i>" if label else ""
-        txt = f"  {emoji} <b>{symbol}</b>  <code>${_p(price)}</code>  {chg}{badge_str}{lbl}"
+        star = "⭐" if symbol in _watchlist else ""
+        txt = f"  {emoji} {star}<b>{symbol}</b>  <code>${_p(price)}</code>  {chg}{badge_str}{lbl}"
         return pct, txt
 
     # ── Short-term stocks ─────────────────────────────────────────────────────
@@ -743,15 +764,35 @@ def format_eod_full_summary(
                 lt_pcts.append(pct)
 
     # ── Crypto ────────────────────────────────────────────────────────────────
-    if cst:
+    if cst or clt:
         lines.append("<b>🪙 Crypto</b>")
         for c in cst:
             _, row = _row(c.get("symbol", ""), c.get("entry_price"),
                           c.get("target_price"), c.get("stop_loss"))
             lines.append(row)
+        for c in clt:
+            _, row = _row(c.get("symbol", ""), c.get("entry_price"),
+                          c.get("target_price"), None, "LT")
+            lines.append(row)
+
+    # ── ETFs ─────────────────────────────────────────────────────────────────
+    if est or elt:
+        lines.append("<b>📦 ETFs</b>")
+        for e in est:
+            _, row = _row(e.get("ticker", ""), e.get("entry_price"),
+                          e.get("target_price"), e.get("stop_loss"))
+            lines.append(row)
+        for e in elt:
+            _, row = _row(e.get("ticker", ""), e.get("entry_price"),
+                          e.get("target_price"), None, "LT")
+            lines.append(row)
 
     # ── User holdings not in today's picks ───────────────────────────────────
-    pick_syms = {s.get("ticker") for s in st + lt} | {c.get("symbol") for c in cst}
+    pick_syms = (
+        {s.get("ticker") for s in st + lt} |
+        {c.get("symbol") for c in cst + clt} |
+        {e.get("ticker") for e in est + elt}
+    )
     extra = [h for h in open_holdings if h.get("ticker") not in pick_syms
              and h.get("entry_price") and current_prices.get(h["ticker"])]
     if extra:
@@ -810,7 +851,7 @@ def format_eod_full_summary(
     lines += [
         "",
         "<i>Market closed. See you tomorrow.</i>",
-        "📋 /help  ·  📊 /positions  ·  📜 /history",
+        "📋 /help  ·  📲 /share  ·  💬 /feedback  ·  📊 /positions  ·  📜 /history",
     ]
     return "\n".join(lines)
 
