@@ -2326,6 +2326,70 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         except Exception as exc:
             return f"⚠️ Could not fetch prices: {exc}"
 
+    if text == "STATS":
+        try:
+            from trade_logger import get_performance_stats
+            from performance_tracker import get_recent_stats
+            stats = get_performance_stats(chat_id)
+            if not stats or stats["count"] == 0:
+                return (
+                    "📊 <b>Your Stats</b>\n\n"
+                    "No closed trades yet.\n\n"
+                    "Log a buy with /bought, then /sold when you exit — "
+                    "your win rate, expectancy, and return history will appear here."
+                )
+            _s = lambda x: ("+" if x >= 0 else "") + str(x)
+            streak_str = (
+                f"\n🔥 Current streak: <b>{stats['streak']} wins</b>" if stats["streak"] >= 2
+                else ("\n❄️ <i>Last trade was a loss</i>" if stats["losses"] > 0 and stats["streak"] == 0 else "")
+            )
+            outcome_str = ""
+            if stats["targets_hit"] or stats["stops_hit"]:
+                outcome_str = (
+                    f"\n🎯 Targets hit: <b>{stats['targets_hit']}</b>  "
+                    f"🛑 Stops hit: <b>{stats['stops_hit']}</b>"
+                )
+            msg = (
+                f"📊 <b>Your Performance</b>\n\n"
+                f"<b>Closed trades:</b>  {stats['count']}\n"
+                f"<b>Win rate:</b>  {stats['win_rate']}%  ({stats['wins']}W / {stats['losses']}L)\n"
+                f"<b>Avg gain on winners:</b>  <b>+{stats['avg_gain']}%</b>\n"
+                f"<b>Avg loss on losers:</b>  {stats['avg_loss']}%\n"
+                f"<b>Expectancy:</b>  <b>{_s(stats['expectancy'])}% per trade</b>\n"
+                f"<b>Avg return:</b>  {_s(stats['avg_return'])}%"
+                f"{outcome_str}{streak_str}"
+            )
+            if stats.get("best"):
+                bt, br = stats["best"]
+                wt, wr = stats["worst"]
+                msg += f"\n\n🏆 Best:  <b>{bt}</b>  {_s(round(br,1))}%"
+                msg += f"\n💔 Worst: <b>{wt}</b>  {_s(round(wr,1))}%"
+            if stats["total_gain_usd"]:
+                msg += f"\n\n💵 Total P&L: <b>${stats['total_gain_usd']:+.2f}</b>"
+
+            # ── Community 30-day bar ───────────────────────────────────────────
+            try:
+                users = get_allowed_users()
+                logs  = [load_user_trade_log(u) for u in users]
+                rs    = get_recent_stats(logs, days=30)
+                if rs and rs.get("total"):
+                    t   = rs["total"]
+                    spy = rs.get("spy_return")
+                    spy_str = f"  ·  SPY {_s(spy)}%" if spy is not None else ""
+                    msg += (
+                        f"\n\n<b>📈 Community — last 30d</b>\n"
+                        f"{t['wins']}W/{t['losses']}L ({t['win_rate']}%)  ·  "
+                        f"avg {_s(t['avg_return'])}%  ·  "
+                        f"exp {_s(t['expectancy'])}%/trade{spy_str}"
+                    )
+            except Exception:
+                pass
+
+            msg += "\n\n<i>⚠️ Past performance doesn't guarantee future results.</i>  📋 /help"
+            return msg
+        except Exception as exc:
+            return f"⚠️ Could not load stats: {exc}"
+
     if text == "COMMUNITY":
         try:
             from performance_tracker import build_community_stats
@@ -2793,6 +2857,7 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
             "\n/sold — Close a position &amp; record P&amp;L"
             "\n/positions — Open positions with live P&amp;L &amp; exposure"
             "\n/summary — Portfolio health: win rate, open P&amp;L, risk warnings"
+            "\n/stats — Your win rate, expectancy &amp; P&amp;L breakdown"
             "\n/history — Full trade history (open &amp; closed)"
             "\n/updatestop — Move a stop-loss (e.g. to breakeven)"
             "\n/updatetarget — Adjust a price target"

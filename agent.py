@@ -1289,6 +1289,17 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
         except Exception:
             pass
 
+    # ── Recent performance stats — computed once, shown in morning performance bar ──
+    recent_stats = None
+    try:
+        from performance_tracker import get_recent_stats
+        all_logs = [load_user_trade_log(uid) for uid in recipients]
+        recent_stats = get_recent_stats(all_logs)
+        if recent_stats:
+            print(f"[agent] recent_stats: {recent_stats['total']['count']} trades over {recent_stats['days']}d")
+    except Exception as exc:
+        print(f"[agent] recent_stats failed (non-critical): {exc}")
+
     for uid in recipients:
         try:
             user_cfg = {**global_config, **get_user_config(uid)}
@@ -1300,7 +1311,8 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             personal_notes: dict = all_personal_notes.get(uid, {})
 
             message = format_daily_message(picks, user_cfg, personal_notes=personal_notes,
-                                           pick_streaks=pick_streaks, buy_counts=buy_counts)
+                                           pick_streaks=pick_streaks, buy_counts=buy_counts,
+                                           recent_stats=recent_stats)
             if DRY_RUN:
                 print(f"\n{'=' * 60}\nDRY RUN — {label} for {uid}:\n{'=' * 60}\n{message}\n")
             else:

@@ -184,7 +184,8 @@ def _ordinal(n: int) -> str:
 def format_daily_message(picks: dict, config: dict,
                          personal_notes: dict | None = None,
                          pick_streaks: dict | None = None,
-                         buy_counts: dict | None = None) -> str:
+                         buy_counts: dict | None = None,
+                         recent_stats: dict | None = None) -> str:
     """
     Build the formatted daily Telegram message from Claude picks (stocks + crypto).
 
@@ -263,6 +264,20 @@ def format_daily_message(picks: dict, config: dict,
     ]
     if macro_line:
         lines.append(macro_line)
+
+    # ── Performance bar — shown when at least 3 closed trades exist ──────────
+    if recent_stats and recent_stats.get("total"):
+        t   = recent_stats["total"]
+        spy = recent_stats.get("spy_return")
+        _s  = lambda x: "+" if x >= 0 else ""
+        parts = [
+            f"{t['wins']}W/{t['losses']}L ({t['win_rate']}%)",
+            f"avg {_s(t['avg_return'])}{t['avg_return']}%",
+            f"exp {_s(t['expectancy'])}{t['expectancy']}%/trade",
+        ]
+        if spy is not None:
+            parts.append(f"vs SPY {_s(spy)}{spy}%")
+        lines.append(f"<i>📊 Last {recent_stats['days']}d: {' · '.join(parts)}</i>")
 
     def _buy_badge(ticker: str) -> str:
         """Return '👥 N members bought' badge when count ≥ 2, else empty string."""

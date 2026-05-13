@@ -152,6 +152,68 @@ def build_weekly_recap() -> dict | None:
     }
 
 
+def get_recent_stats(trade_logs: list[dict], days: int = 30) -> dict | None:
+    """
+    Compute performance stats from closed trades in the last N days across all users.
+    Used for the morning message performance bar and /stats command.
+
+    Returns None if fewer than 3 closed trades in the window (not enough to be meaningful).
+    """
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+
+    all_closed = []
+    for log in trade_logs:
+        for t in log.get("closed", []):
+            if t.get("closed_date", "") >= cutoff and t.get("return_pct") is not None:
+                all_closed.append(t)
+
+    if len(all_closed) < 3:
+        return None
+
+    def _cat_stats(trades):
+        if not trades:
+            return None
+        returns    = [float(t["return_pct"]) for t in trades]
+        wins       = [r for r in returns if r > 0]
+        losses     = [r for r in returns if r <= 0]
+        win_rate   = len(wins) / len(returns)
+        avg_gain   = sum(wins)   / len(wins)   if wins   else 0.0
+        avg_loss   = sum(losses) / len(losses) if losses else 0.0
+        expectancy = win_rate * avg_gain + (1 - win_rate) * avg_loss
+        return {
+            "count":      len(trades),
+            "wins":       len(wins),
+            "losses":     len(losses),
+            "win_rate":   round(win_rate * 100, 1),
+            "avg_return": round(sum(returns) / len(returns), 1),
+            "avg_gain":   round(avg_gain, 1),
+            "avg_loss":   round(avg_loss, 1),
+            "expectancy": round(expectancy, 2),
+        }
+
+    stocks = [t for t in all_closed if t.get("asset_type") == "stock"]
+    crypto = [t for t in all_closed if t.get("asset_type") == "crypto"]
+
+    spy_return = None
+    try:
+        hist = yf.Ticker("SPY").history(period=f"{min(days, 59)}d")
+        if len(hist) >= 2:
+            spy_return = round(
+                (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100, 1
+            )
+    except Exception:
+        pass
+
+    return {
+        "days":       days,
+        "total":      _cat_stats(all_closed),
+        "stocks":     _cat_stats(stocks),
+        "crypto":     _cat_stats(crypto),
+        "spy_return": spy_return,
+    }
+
+
 def build_community_stats(user_trade_logs: list[dict]) -> dict | None:
     """
     Aggregate performance across all users' trade logs.

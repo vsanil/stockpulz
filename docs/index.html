@@ -778,6 +778,89 @@
     .t-name { font-size: 13.5px; font-weight: 700; }
     .t-handle { font-size: 12px; color: var(--muted); margin-top: 1px; }
 
+    /* ── TRACK RECORD ── */
+    .track-record-section {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 2rem 90px;
+    }
+
+    .tr-header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .tr-title {
+      font-size: clamp(24px, 4vw, 36px);
+      font-weight: 800;
+      letter-spacing: -0.8px;
+      margin: 10px 0 12px;
+    }
+
+    .tr-subtitle {
+      font-size: 15px;
+      color: var(--muted2);
+      max-width: 560px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    .tr-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    @media (max-width: 600px) { .tr-grid { grid-template-columns: 1fr; } }
+
+    .tr-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .tr-card:hover { border-color: var(--border2); transform: translateY(-2px); }
+
+    .tr-icon { font-size: 22px; margin-bottom: 10px; }
+
+    .tr-stat-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .tr-stat-main {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .tr-stat-sub {
+      font-size: 13px;
+      color: var(--muted2);
+      line-height: 1.5;
+    }
+
+    .tr-disclaimer {
+      background: rgba(79, 142, 247, 0.06);
+      border: 1px solid rgba(79, 142, 247, 0.18);
+      border-radius: 10px;
+      padding: 16px 20px;
+      font-size: 12.5px;
+      color: var(--muted2);
+      line-height: 1.6;
+      text-align: center;
+    }
+
+    .tr-disclaimer strong { color: var(--muted); }
+
     /* ── CTA SECTION ── */
     .cta-outer {
       padding: 0 2rem 110px;
@@ -1264,6 +1347,46 @@
         </div>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- TRACK RECORD -->
+<section class="track-record-section fade-in" id="track-record">
+  <div class="tr-header">
+    <div class="section-eyebrow">📈 Track Record</div>
+    <h2 class="tr-title">How we pick. How we measure.</h2>
+    <p class="tr-subtitle">Every pick gets an entry price, target, and stop. We track whether each one hit its target, stopped out, or expired — no cherry-picking, no hindsight edits.</p>
+  </div>
+
+  <div class="tr-grid">
+    <div class="tr-card">
+      <div class="tr-icon">🎯</div>
+      <div class="tr-stat-label">Methodology</div>
+      <div class="tr-stat-main">Entry + Target + Stop</div>
+      <div class="tr-stat-sub">Every short-term pick includes a specific entry price, profit target, and stop-loss. No vague "watch this stock" calls.</div>
+    </div>
+    <div class="tr-card">
+      <div class="tr-icon">📊</div>
+      <div class="tr-stat-label">Outcome tracking</div>
+      <div class="tr-stat-main">Target · Stop · Expired</div>
+      <div class="tr-stat-sub">Trades are automatically closed when target is hit, stop is triggered, or 28 days pass. All three outcomes are counted.</div>
+    </div>
+    <div class="tr-card">
+      <div class="tr-icon">⚡</div>
+      <div class="tr-stat-label">Confirmation filter</div>
+      <div class="tr-stat-main">10:30 AM gate</div>
+      <div class="tr-stat-sub">Morning picks are re-evaluated at open. Weak movers get a "wait" signal — reducing false entries on choppy days.</div>
+    </div>
+    <div class="tr-card">
+      <div class="tr-icon">🔁</div>
+      <div class="tr-stat-label">Backtesting</div>
+      <div class="tr-stat-main">Momentum + mean-reversion</div>
+      <div class="tr-stat-sub">Strategies are back-tested on 6-month rolling windows. Claude picks from the subset with positive historical expectancy.</div>
+    </div>
+  </div>
+
+  <div class="tr-disclaimer">
+    <strong>Performance note:</strong> Past results do not guarantee future returns. All picks are for informational purposes only and do not constitute financial advice. Your /stats command shows your personal track record — based only on picks you confirmed via /bought.
   </div>
 </section>
 
