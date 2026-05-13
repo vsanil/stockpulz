@@ -121,6 +121,103 @@ def _verify_admin_invite_token(token: str) -> bool:
     return True
 
 
+# ── Onboarding wizard ────────────────────────────────────────────────────────
+
+# Budget buckets: callback key → (label, stock_budget, crypto_budget)
+_BUDGET_BUCKETS = {
+    "lt500":    ("Under $500",   200,  50),
+    "mid1k":    ("$500–$2K",     800, 200),
+    "mid3k":    ("$2K–$5K",    2000, 500),
+    "gt5k":     ("Over $5K",   5000, 1000),
+}
+
+# Risk options: callback key → (label, risk_profile value)
+_RISK_OPTIONS = {
+    "conservative": ("🛡 Conservative", "conservative"),
+    "moderate":     ("⚖️ Moderate",     "moderate"),
+    "aggressive":   ("🔥 Aggressive",   "aggressive"),
+}
+
+# Asset options: callback key → (label, show_crypto, show_etfs)
+_ASSET_OPTIONS = {
+    "stocks":         ("📈 Stocks only",          False, False),
+    "stockscrypto":   ("📈+₿ Stocks + Crypto",    True,  False),
+    "all":            ("🌐 Everything (+ ETFs)",   True,  True),
+}
+
+
+def _start_onboarding_wizard(chat_id: str) -> None:
+    """Send the first wizard step (budget question) to a newly approved user."""
+    send_message(
+        "👋 <b>Welcome to StockPulz!</b>\n\n"
+        "You're in. Let's set you up in 3 quick questions so your picks are tailored to you.\n\n"
+        "<b>Question 1 of 3 — What's your rough budget per trade?</b>\n"
+        "<i>(This determines how many shares/coins you'd allocate per pick.)</i>",
+        chat_id=chat_id,
+    )
+    send_inline_keyboard(
+        "",
+        [[
+            {"text": label, "callback_data": f"onboard_budget_{key}"}
+            for key, (label, _, __) in _BUDGET_BUCKETS.items()
+        ]],
+        chat_id=chat_id,
+    )
+
+
+def _send_onboarding_complete(chat_id: str) -> None:
+    """
+    Send the final onboarding card: settings summary, daily rhythm,
+    today's picks (if available), and the /bought nudge.
+    """
+    user_cfg  = get_user_config(chat_id)
+    risk      = user_cfg.get("risk_profile", "moderate").capitalize()
+    s_budget  = user_cfg.get("stock_budget", 200)
+    c_budget  = user_cfg.get("crypto_budget", 50)
+    crypto_on = user_cfg.get("show_crypto", True)
+    etfs_on   = user_cfg.get("show_etfs", False)
+    assets    = "Stocks + Crypto" if crypto_on and not etfs_on else ("Everything" if etfs_on else "Stocks only")
+
+    send_message(
+        f"✅ <b>You're all set!</b>\n\n"
+        f"<b>Your settings:</b>\n"
+        f"  • Risk: <b>{risk}</b>\n"
+        f"  • Per-trade budget: <b>${s_budget} stocks</b>"
+        + (f" · <b>${c_budget} crypto</b>" if crypto_on else "") +
+        f"\n  • Assets: <b>{assets}</b>\n\n"
+        f"You can change any of these anytime with /settings.\n\n"
+        "─────────────────────\n"
+        "<b>📅 Your daily schedule:</b>\n"
+        "📬 <b>8:00 AM ET</b> — AI-curated picks with entry, target &amp; stop\n"
+        "🕙 <b>10:30 AM ET</b> — Confirmation: enter, wait, or exit signal\n"
+        "🔔 <b>Every 30 min</b> — Price alerts if a stop or target is hit\n"
+        "📊 <b>4:15 PM ET</b> — End-of-day wrap: how picks moved\n"
+        "📅 <b>Saturday</b> — Crypto picks + weekly P&amp;L recap\n"
+        "🗓 <b>Sunday</b> — Week-ahead briefing (earnings, macro)\n\n"
+        "─────────────────────\n"
+        "⭐ <b>One thing that makes this powerful:</b>\n"
+        "When you place a real trade, send <code>/bought TICKER</code> — e.g. <code>/bought NVDA</code>.\n"
+        "That's how your win rate, expectancy, and P&amp;L get tracked in /stats. "
+        "The more you log, the smarter your performance dashboard gets.\n\n"
+        "📖 Type /guide anytime for a quick reference card.",
+        chat_id=chat_id,
+    )
+
+    # Show today's picks if available
+    picks = load_picks()
+    if picks:
+        try:
+            global_cfg = get_config()
+            full_cfg   = {**global_cfg, **user_cfg}
+            picks_msg  = format_daily_message(picks, full_cfg)
+            send_message(
+                "Here are <b>today's picks</b> to get you started 👇\n\n" + picks_msg,
+                chat_id=chat_id,
+            )
+        except Exception as exc:
+            print(f"[onboarding] Could not send today's picks to {chat_id}: {exc}")
+
+
 # ── Command handler ───────────────────────────────────────────────────────────
 
 def handle_incoming_command(message_text: str, chat_id: str | None = None) -> str:
@@ -435,6 +532,9 @@ def handle_callback_query(callback_query: dict) -> None:
 
     # Show an instant toast so users know the tap registered (prevents double-tapping)
     _TOASTS = {
+        "onboard_budget":     "✅ Got it!",
+        "onboard_risk":       "✅ Got it!",
+        "onboard_assets":     "✅ Setting up your account…",
         "quickbuy":           "⏳ Logging position…",
         "chart":              "⏳ Generating chart…",
         "confirm_sell":       "⏳ Removing position…",
@@ -601,6 +701,56 @@ def handle_callback_query(callback_query: dict) -> None:
             chat_id=rej_id,
         )
         send_message(f"🚫 <code>{rej_id}</code> rejected and removed from pending.", chat_id=chat_id)
+        return
+
+    # ── Onboarding wizard callbacks ───────────────────────────────────────────
+    if action == "onboard_budget":
+        key = parts[1] if len(parts) > 1 else ""
+        if key not in _BUDGET_BUCKETS:
+            return
+        _, stock_b, crypto_b = _BUDGET_BUCKETS[key]
+        update_user_config_multi(chat_id, {"stock_budget": stock_b, "crypto_budget": crypto_b})
+        send_inline_keyboard(
+            "💰 Budget saved.\n\n"
+            "<b>Question 2 of 3 — What's your risk appetite?</b>\n"
+            "<i>Conservative = tighter stops, fewer trades. Aggressive = wider targets, higher volatility picks.</i>",
+            [[
+                {"text": label, "callback_data": f"onboard_risk_{key2}"}
+                for key2, (label, _) in _RISK_OPTIONS.items()
+            ]],
+            chat_id=chat_id,
+        )
+        return
+
+    if action == "onboard_risk":
+        key = parts[1] if len(parts) > 1 else ""
+        if key not in _RISK_OPTIONS:
+            return
+        _, profile = _RISK_OPTIONS[key]
+        update_user_config(chat_id, "risk_profile", profile)
+        send_inline_keyboard(
+            "⚖️ Risk profile saved.\n\n"
+            "<b>Question 3 of 3 — Which asset classes do you want picks for?</b>\n"
+            "<i>You can change this anytime in /settings.</i>",
+            [[
+                {"text": label, "callback_data": f"onboard_assets_{key2}"}
+                for key2, (label, _, __) in _ASSET_OPTIONS.items()
+            ]],
+            chat_id=chat_id,
+        )
+        return
+
+    if action == "onboard_assets":
+        key = parts[1] if len(parts) > 1 else ""
+        if key not in _ASSET_OPTIONS:
+            return
+        _, show_crypto, show_etfs = _ASSET_OPTIONS[key]
+        update_user_config_multi(chat_id, {
+            "show_crypto": show_crypto,
+            "show_etfs":   show_etfs,
+            "onboarded":   True,
+        })
+        _send_onboarding_complete(chat_id)
         return
 
     if action == "set_budget":
@@ -2893,7 +3043,8 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
             "\n/reset — Reset all settings to defaults"
             "\n/dividends — Dividend yield &amp; next ex-date for your positions"
             "\n/share — Get your invite link"
-            "\n/feedback — Send feedback to the team\n"
+            "\n/feedback — Send feedback to the team"
+            "\n/guide — Quick reference: daily schedule, /bought, /stats explained\n"
             "\n<i>💬 You can also just type naturally — e.g. \"why was NVDA picked?\", "
             "\"set my risk to aggressive\", or \"alert me when BTC hits 100k\".</i>\n"
         )
@@ -3057,30 +3208,35 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
         deep_param = text[6:].strip() if text.startswith("START ") else ""
         is_admin_invite = _verify_admin_invite_token(deep_param)
 
-        # Known user — show welcome back
+        # Known user — check if they've been through onboarding
         if _is_admin(chat_id) or chat_id in get_allowed_users():
+            user_cfg = get_user_config(chat_id)
+            if not user_cfg.get("onboarded") and not _is_admin(chat_id):
+                # Approved but never completed wizard — restart it
+                _start_onboarding_wizard(chat_id)
+                return ""
             return (
                 "👋 <b>Welcome back to StockPulz!</b>\n\n"
                 "/today — Today's stock &amp; crypto picks\n"
                 "/positions — open trades with live P&amp;L\n"
+                "/stats — your win rate &amp; P&amp;L breakdown\n"
+                "/guide — quick reference card\n"
                 "/settings — your preferences\n"
-                "/help — all commands with descriptions\n\n"
-                "📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>"
+                "/help — all commands\n"
             )
 
         # ── Admin invite link → auto-approve immediately ──────────────────────
         if is_admin_invite:
-            reply = _parse_and_execute(f"ADDUSER {chat_id}", original=f"/adduser {chat_id}", chat_id=chat_id)
-            # ADDUSER sends a full welcome message to the new user — just confirm here
-            return (
-                "✅ <b>You're in! Welcome to StockPulz.</b>\n\n"
-                "You were auto-approved via an admin invite link.\n\n"
-                "Here's how to get started:\n"
-                "/today — Today's stock &amp; crypto picks\n"
-                "/settings — set your risk level, budget &amp; preferences\n"
-                "/help — all commands with descriptions\n\n"
-                "📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>"
-            )
+            from config_manager import add_allowed_user
+            add_allowed_user(chat_id)
+            remove_pending_user(chat_id)
+            # Notify admin silently
+            owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+            if owner and owner != chat_id:
+                send_message(f"🔔 <code>{chat_id}</code> auto-approved via invite link.", chat_id=owner)
+            # Start the onboarding wizard — it handles the welcome
+            _start_onboarding_wizard(chat_id)
+            return ""   # wizard already sent above
 
         # ── Normal flow — add to pending, notify admin ────────────────────────
         pending = get_pending_users()
@@ -3150,38 +3306,9 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
         new_id = parts[1].strip()
         add_allowed_user(new_id)
         remove_pending_user(new_id)
-        # Build welcome message for the new user
-        picks     = load_picks()
-        user_cfg  = {**get_config(), **get_user_config(new_id)}
-        picks_msg = ""
-        if picks:
-            try:
-                picks_msg = "\n\n" + format_daily_message(picks, user_cfg)
-            except Exception:
-                pass
-        send_message(
-            "✅ <b>You're in! Welcome to StockPulz.</b>\n\n"
-            "Every morning before the market opens, you'll get 2–5 AI-curated stock and crypto picks — "
-            "each with an entry price, profit target, stop-loss, and a one-line reason why.\n\n"
-            "<b>Your daily schedule:</b>\n"
-            "📬 <b>8 AM ET</b> — morning picks with conviction scores &amp; personal notes\n"
-            "🕙 <b>10:30 AM</b> — live price check: hold, watch, or exit\n"
-            "📊 <b>3:30 PM</b> — end-of-day snapshot of how picks moved\n"
-            "📅 <b>Saturday</b> — crypto picks + weekly recap\n\n"
-            "<b>Step 1 — Set your preferences:</b>\n"
-            "Just tap /settings to set your risk level, budget, and whether you want crypto.\n\n"
-            "<b>Step 2 — Track your portfolio:</b>\n"
-            "Tell me what you hold with /bought AAPL and I'll watch it for you.\n\n"
-            "<b>Step 3 — Ask anything:</b>\n"
-            "You can type naturally — \"why was NVDA picked?\", \"set my risk to aggressive\", "
-            "\"alert me when BTC hits 100k\". No slash commands needed.\n\n"
-            "📋 /help — full command list  ·  /today — today's picks"
-            + picks_msg,
-            chat_id=new_id,
-        )
-        # Send settings panel immediately after welcome so user can configure on the spot
-        _send_settings_panel(new_id)
-        return f"✅ <code>{new_id}</code> approved and welcomed. Today's picks sent."
+        # Start the interactive onboarding wizard for the new user
+        _start_onboarding_wizard(new_id)
+        return f"✅ <code>{new_id}</code> approved — onboarding wizard sent."
 
     if text.startswith("REMOVEUSER ") or text == "REMOVEUSER":
         if not _is_admin(chat_id):
@@ -3759,6 +3886,32 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
             f"Risk: moderate  ·  Pick mode: both\n"
             f"Budgets: unset  ·  Watchlist: cleared\n"
             f"Stop loss: {sl}%  ·  Target gain: {tg}%  (global defaults)"
+        )
+
+    if text == "GUIDE":
+        return (
+            "📖 <b>StockPulz — Quick Reference</b>\n\n"
+            "<b>📅 What you receive each day:</b>\n"
+            "📬 <b>8:00 AM ET</b> — Morning picks: entry, target &amp; stop for each\n"
+            "🕙 <b>10:30 AM ET</b> — Confirmation: enter, wait, or exit signal\n"
+            "🔔 <b>Every 30 min</b> — Alert if a stop or target is hit\n"
+            "📊 <b>4:15 PM ET</b> — EOD wrap: how today's picks moved\n"
+            "📅 <b>Saturday</b> — Crypto picks + weekly P&amp;L recap\n"
+            "🗓 <b>Sunday</b> — Week-ahead: earnings, macro events\n\n"
+            "<b>💼 Tracking your trades:</b>\n"
+            "When you place a real trade, send <code>/bought TICKER</code>.\n"
+            "When you exit, send <code>/sold TICKER</code>.\n"
+            "That's all it takes — /stats then shows your win rate, avg gain, expectancy, and total P&amp;L.\n\n"
+            "<b>🔑 Essential commands:</b>\n"
+            "/today — today's picks on demand\n"
+            "/positions — open trades with live P&amp;L\n"
+            "/stats — your personal performance dashboard\n"
+            "/settings — budget, risk, assets, alerts\n"
+            "/guide — this card\n"
+            "/help — full command list\n\n"
+            "<b>💬 Natural language works too:</b>\n"
+            "<i>\"Why was NVDA picked?\"</i>  ·  <i>\"Set my risk to aggressive\"</i>  ·  <i>\"Alert me when BTC hits 100k\"</i>\n\n"
+            "Questions? Just ask."
         )
 
     if text == "STATUS":
