@@ -537,23 +537,38 @@ Return this exact JSON structure:
 }}"""
 
 
-# ── Claude call ───────────────────────────────────────────────────────────────
+# ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _call_claude(system: str, user: str, model: str = "claude-sonnet-4-6") -> dict:
-    """Call Claude API and parse JSON response. Raises on failure."""
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    message = client.messages.create(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        messages=[{"role": "user", "content": f"{system}\n\n{user}"}],
-    )
-    raw = message.content[0].text.strip()
-    # Strip accidental markdown fences
+def _strip_fences(raw: str) -> str:
+    """Strip accidental markdown code-fence wrappers from a JSON string."""
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
-    return json.loads(raw)
+    return raw
+
+
+_anthropic_client: anthropic.Anthropic | None = None
+
+
+def _get_client() -> anthropic.Anthropic:
+    """Return a cached Anthropic client (created once per process)."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    return _anthropic_client
+
+
+# ── Claude call ───────────────────────────────────────────────────────────────
+
+def _call_claude(system: str, user: str, model: str = "claude-sonnet-4-6") -> dict:
+    """Call Claude API and parse JSON response. Raises on failure."""
+    message = _get_client().messages.create(
+        model=model,
+        max_tokens=MAX_TOKENS,
+        messages=[{"role": "user", "content": f"{system}\n\n{user}"}],
+    )
+    return json.loads(_strip_fences(message.content[0].text.strip()))
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -677,18 +692,12 @@ def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str
     )
 
     try:
-        client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        message = client.messages.create(
+        message = _get_client().messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
             messages=[{"role": "user", "content": f"{system}\n\n{user_msg}"}],
         )
-        raw = message.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        result = json.loads(raw)
+        result = json.loads(_strip_fences(message.content[0].text.strip()))
         print(f"[ai_analyzer] Personalized notes generated for {list(result.keys())}")
         return result if isinstance(result, dict) else {}
     except Exception as exc:
@@ -736,8 +745,6 @@ def personalize_picks_batch(
     )
 
     results: dict[str, dict] = {}
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
     # Process in batches
     for i in range(0, len(users_data), batch_size):
         batch = users_data[i : i + batch_size]
@@ -764,17 +771,12 @@ def personalize_picks_batch(
         try:
             # Output budget: ~15 tokens per note × picks × users in batch + JSON overhead
             _out_tokens = max(1024, len(all_picks) * len(batch) * 18 + 400)
-            message = client.messages.create(
+            message = _get_client().messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=min(_out_tokens, 4096),  # cap at 4096 (Haiku max output)
                 messages=[{"role": "user", "content": f"{system}\n\n{user_msg}"}],
             )
-            raw = message.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            parsed = json.loads(raw)
+            parsed = json.loads(_strip_fences(message.content[0].text.strip()))
             if isinstance(parsed, dict):
                 results.update(parsed)
             print(f"[ai_analyzer] Batch personalisation: {len(batch)} users, batch {i // batch_size + 1}")
@@ -854,8 +856,7 @@ def generate_trade_debrief(trade: dict) -> str:
     )
 
     try:
-        client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        message = client.messages.create(
+        message = _get_client().messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=150,
             messages=[{"role": "user", "content": f"{system}\n\n{user_msg}"}],

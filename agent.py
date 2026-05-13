@@ -31,7 +31,7 @@ from trade_logger import check_and_close_trades
 from price_alert_manager import check_all_alerts
 from screener import run_screener
 from crypto_screener import run_crypto_screener
-from ai_analyzer import analyze_with_claude, personalize_picks, personalize_picks_batch, generate_trade_debrief
+from ai_analyzer import analyze_with_claude, personalize_picks_batch, generate_trade_debrief
 from price_checker import get_current_prices
 from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
@@ -451,10 +451,37 @@ def run_morning(config: dict, now_et: datetime):
             admin_only=True,
         )
         # Save timestamp for /dashboard
-        from datetime import datetime as _dt
-        update_config("last_morning_run", _dt.utcnow().isoformat())
+        update_config("last_morning_run", datetime.utcnow().isoformat())
     except Exception as exc:
         print(f"[agent] Admin run summary failed (non-critical): {exc}")
+
+
+# ── Trade-close broadcast helper (shared by confirmation + close-check runs) ──
+
+def _broadcast_trade_closes(current_prices: dict) -> None:
+    """Check and close trades for all recipients, sending close alerts + debriefs."""
+    for uid in _all_recipients():
+        try:
+            closed = check_and_close_trades(current_prices, uid)
+            for trade in closed:
+                emoji = "✅" if trade["outcome"] == "target" else ("🔴" if trade["outcome"] == "stop" else "⏱")
+                sign  = "+" if trade["return_pct"] >= 0 else ""
+                close_msg = (
+                    f"{emoji} <b>{trade['ticker']}</b> {trade['outcome'].upper()} HIT "
+                    f"@ <code>${trade['closed_price']}</code>  "
+                    f"<b>{sign}{trade['return_pct']:.1f}%</b>  "
+                    f"(${trade['gain_usd']:+.2f})"
+                )
+                # Post-trade debrief via Haiku (non-critical)
+                try:
+                    debrief = generate_trade_debrief(trade)
+                    if debrief:
+                        close_msg += f"\n\n📖 <i>{debrief}</i>"
+                except Exception as db_exc:
+                    print(f"[agent] Trade debrief failed (non-critical): {db_exc}")
+                send_message(close_msg, chat_id=uid)
+        except Exception as exc:
+            print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
 
 
 # ── Confirmation run ──────────────────────────────────────────────────────────
@@ -484,28 +511,7 @@ def run_confirmation():
         return
 
     # ── Per-user trade close checks ───────────────────────────────────────────
-    for uid in _all_recipients():
-        try:
-            closed = check_and_close_trades(current_prices, uid)
-            for trade in closed:
-                emoji = "✅" if trade["outcome"] == "target" else ("🔴" if trade["outcome"] == "stop" else "⏱")
-                sign  = "+" if trade["return_pct"] >= 0 else ""
-                close_msg = (
-                    f"{emoji} <b>{trade['ticker']}</b> {trade['outcome'].upper()} HIT "
-                    f"@ <code>${trade['closed_price']}</code>  "
-                    f"<b>{sign}{trade['return_pct']:.1f}%</b>  "
-                    f"(${trade['gain_usd']:+.2f})"
-                )
-                # Feature 2: post-trade debrief (Haiku — non-blocking, non-critical)
-                try:
-                    debrief = generate_trade_debrief(trade)
-                    if debrief:
-                        close_msg += f"\n\n📖 <i>{debrief}</i>"
-                except Exception as db_exc:
-                    print(f"[agent] Trade debrief failed (non-critical): {db_exc}")
-                send_message(close_msg, chat_id=uid)
-        except Exception as exc:
-            print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
+    _broadcast_trade_closes(current_prices)
 
     # ── Trailing stop nudges — suggest stop adjustments for open trades ──────
     for uid in _all_recipients():
@@ -647,29 +653,7 @@ def run_close_check():
         print(f"[agent] Price fetch failed: {exc}")
         return
 
-    for uid in _all_recipients():
-        try:
-            closed = check_and_close_trades(current_prices, uid)
-            for trade in closed:
-                emoji = "✅" if trade["outcome"] == "target" else ("🔴" if trade["outcome"] == "stop" else "⏱")
-                sign  = "+" if trade["return_pct"] >= 0 else ""
-                close_msg = (
-                    f"{emoji} <b>{trade['ticker']}</b> {trade['outcome'].upper()} HIT "
-                    f"@ <code>${trade['closed_price']}</code>  "
-                    f"<b>{sign}{trade['return_pct']:.1f}%</b>  "
-                    f"(${trade['gain_usd']:+.2f})"
-                )
-                try:
-                    debrief = generate_trade_debrief(trade)
-                    if debrief:
-                        close_msg += f"\n\n📖 <i>{debrief}</i>"
-                except Exception as db_exc:
-                    print(f"[agent] Trade debrief failed (non-critical): {db_exc}")
-                send_message(close_msg, chat_id=uid)
-            if not closed:
-                print(f"[agent] 3:30 PM close check for {uid}: no trades hit.")
-        except Exception as exc:
-            print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
+    _broadcast_trade_closes(current_prices)
 
     # ── Trailing stop nudges ──────────────────────────────────────────────────
     for uid in _all_recipients():
@@ -1011,10 +995,6 @@ def run_premarket(config: dict):
                     f"pre-market → <code>${_p(price)}</code>{action}",
                     chat_id=uid,
                 )
-
-            # ── Quiet digest (one message for all positions) ──────────────────
-            quiet_trades = [t for _, *t in [(None, t) for t in unique]
-                            if t[0]["ticker"] not in {m[0] for m in big_movers}]
 
             body = "\n".join(position_lines)
             n    = len(unique)
