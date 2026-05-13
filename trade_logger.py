@@ -169,9 +169,16 @@ def get_performance_stats(chat_id: str, asset_type: str | None = None) -> dict |
     if not closed:
         return None
 
+    all_returns      = [float(t["return_pct"]) for t in closed]
     returns          = [(t["ticker"], t["return_pct"]) for t in closed]
-    wins             = sum(1 for _, r in returns if r > 0)
-    avg_return       = sum(r for _, r in returns) / len(returns)
+    win_rets         = [r for r in all_returns if r > 0]
+    loss_rets        = [r for r in all_returns if r <= 0]
+    wins             = len(win_rets)
+    avg_return       = sum(all_returns) / len(all_returns)
+    avg_gain         = sum(win_rets)  / len(win_rets)  if win_rets  else 0.0
+    avg_loss         = sum(loss_rets) / len(loss_rets) if loss_rets else 0.0
+    win_rate_frac    = wins / len(closed)
+    expectancy       = win_rate_frac * avg_gain + (1 - win_rate_frac) * avg_loss
     total_gain_usd   = sum(t.get("gain_usd", 0) for t in closed)
     total_deployed   = sum(t.get("allocation", 0) for t in closed)
     open_count       = len(log.get("open", []))
@@ -194,20 +201,24 @@ def get_performance_stats(chat_id: str, asset_type: str | None = None) -> dict |
     cum_return_pct = round(total_gain_usd / total_deployed * 100, 1) if total_deployed > 0 else 0.0
 
     return {
-        "count":                len(closed),
-        "wins":                 wins,
-        "win_rate":             round(wins / len(closed) * 100),
-        "avg_return":           round(avg_return, 1),
-        "best":                 max(returns, key=lambda x: x[1]),
-        "worst":                min(returns, key=lambda x: x[1]),
-        "total_gain_usd":       round(total_gain_usd, 2),
-        "total_deployed_usd":   round(total_deployed, 2),
+        "count":                 len(closed),
+        "wins":                  wins,
+        "losses":                len(loss_rets),
+        "win_rate":              round(win_rate_frac * 100),
+        "avg_return":            round(avg_return, 1),
+        "avg_gain":              round(avg_gain, 1),
+        "avg_loss":              round(avg_loss, 1),
+        "expectancy":            round(expectancy, 2),
+        "best":                  max(returns, key=lambda x: x[1]),
+        "worst":                 min(returns, key=lambda x: x[1]),
+        "total_gain_usd":        round(total_gain_usd, 2),
+        "total_deployed_usd":    round(total_deployed, 2),
         "cumulative_return_pct": cum_return_pct,
-        "streak":               streak,
-        "targets_hit":          by_outcome.get("target", 0),
-        "stops_hit":            by_outcome.get("stop", 0),
-        "expired":              by_outcome.get("expired", 0),
-        "open_count":           open_count,
+        "streak":                streak,
+        "targets_hit":           by_outcome.get("target", 0),
+        "stops_hit":             by_outcome.get("stop", 0),
+        "expired":               by_outcome.get("expired", 0),
+        "open_count":            open_count,
     }
 
 
