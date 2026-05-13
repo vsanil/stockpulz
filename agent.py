@@ -671,24 +671,7 @@ def run_close_check():
             print(f"[agent] {fired} price alert(s) triggered.")
     except Exception as exc:
         print(f"[agent] Price alert check failed (non-critical): {exc}")
-
-    # ── Always-send EOD portfolio summary ────────────────────────────────────
-    # Even when no target/stop was hit, show a brief snapshot of how the day went.
-    for uid in _all_recipients():
-        try:
-            from config_manager import get_user_config
-            eod_cfg = get_user_config(uid)
-            if eod_cfg.get("paused") or eod_cfg.get("skip_eod"):
-                continue
-            log = load_user_trade_log(uid)
-            eod_msg = format_eod_summary(picks, current_prices, log.get("open", []))
-            if eod_msg:
-                if DRY_RUN:
-                    print(f"\nDRY RUN — EOD Summary for {uid}:\n{eod_msg}")
-                else:
-                    send_message(eod_msg, chat_id=uid)
-        except Exception as exc:
-            print(f"[agent] EOD summary failed for {uid} (non-critical): {exc}")
+    # Note: no always-send summary here — the 4:15 PM eod_summary run covers that.
 
 
 def run_eod_summary():
