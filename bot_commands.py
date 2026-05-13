@@ -3243,9 +3243,12 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
         if _is_admin(chat_id) or chat_id in get_allowed_users():
             user_cfg = get_user_config(chat_id)
             if not user_cfg.get("onboarded") and not _is_admin(chat_id):
-                # Approved but never completed wizard — restart it
-                _start_onboarding_wizard(chat_id)
-                return ""
+                if not user_cfg:
+                    # Truly new user — no config at all — start wizard
+                    _start_onboarding_wizard(chat_id)
+                    return ""
+                # Existing user with config but no flag — silently mark onboarded
+                update_user_config(chat_id, "onboarded", True)
             return (
                 "👋 <b>Welcome back to StockPulz!</b>\n\n"
                 "/today — Today's stock &amp; crypto picks\n"
