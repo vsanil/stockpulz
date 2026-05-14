@@ -559,6 +559,102 @@ def _get_client() -> anthropic.Anthropic:
     return _anthropic_client
 
 
+# ── Ticker validator ──────────────────────────────────────────────────────────
+
+# Known crypto symbols — don't validate these through yfinance stock lookup
+_KNOWN_CRYPTO = {
+    "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
+    "LINK","UNI","ATOM","LTC","BCH","ALGO","XLM","VET","ICP","FIL",
+    "TRX","NEAR","OP","ARB","SUI","APT","INJ","SEI","TIA","HYPE",
+}
+
+
+def _is_valid_ticker(ticker: str) -> bool:
+    """Return True if yfinance can find a price for this ticker (i.e. it's real)."""
+    try:
+        fi    = yf.Ticker(ticker).fast_info
+        price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
+        return bool(price)
+    except Exception:
+        return False
+
+
+def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
+    """
+    Walk every pick returned by Claude and drop any with invalid ticker symbols.
+    - Stock/ETF tickers are validated against the known screener candidates first,
+      then via a live yfinance lookup if the ticker wasn't in the candidates
+      (Claude sometimes picks real tickers outside the candidate list — allow those).
+    - Crypto symbols are checked against _KNOWN_CRYPTO.
+    - Anything that fails both checks is logged and dropped silently.
+    """
+    def _clean_section(picks_list: list, is_crypto: bool = False) -> list:
+        cleaned = []
+        for p in picks_list:
+            sym = (p.get("symbol") or p.get("ticker") or "").upper().strip()
+            if not sym:
+                continue
+            if is_crypto:
+                if sym in _KNOWN_CRYPTO:
+                    cleaned.append(p)
+                else:
+                    print(f"[ai_analyzer] Dropped unknown crypto symbol: {sym}")
+                continue
+            # Stock / ETF path
+            if sym in valid_stock_tickers:
+                cleaned.append(p)        # fast path — in original candidates
+                continue
+            # Not in candidates — could be a valid ticker Claude added independently
+            if _is_valid_ticker(sym):
+                print(f"[ai_analyzer] {sym} not in candidates but valid — keeping.")
+                cleaned.append(p)
+            else:
+                print(f"[ai_analyzer] Dropped invalid ticker: {sym} (not in candidates, yfinance failed)")
+        return cleaned
+
+    result = {}
+    stocks = picks.get("stocks", {})
+    crypto = picks.get("crypto", {})
+    etfs   = picks.get("etfs", {})
+
+    if stocks:
+        result["stocks"] = {
+            "short_term": _clean_section(stocks.get("short_term", []), is_crypto=False),
+            "long_term":  _clean_section(stocks.get("long_term",  []), is_crypto=False),
+        }
+    if crypto:
+        result["crypto"] = {
+            "short_term": _clean_section(crypto.get("short_term", []), is_crypto=True),
+            "long_term":  _clean_section(crypto.get("long_term",  []), is_crypto=True),
+        }
+    if etfs:
+        result["etfs"] = {
+            "short_term": _clean_section(etfs.get("short_term", []), is_crypto=False),
+            "long_term":  _clean_section(etfs.get("long_term",  []), is_crypto=False),
+        }
+
+    # Preserve any top-level keys Claude adds (macro_note, regime, etc.)
+    for k, v in picks.items():
+        if k not in ("stocks", "crypto", "etfs"):
+            result[k] = v
+
+    total_before = sum(
+        len(picks.get(a, {}).get(s, []))
+        for a in ("stocks", "crypto", "etfs") for s in ("short_term", "long_term")
+    )
+    total_after = sum(
+        len(result.get(a, {}).get(s, []))
+        for a in ("stocks", "crypto", "etfs") for s in ("short_term", "long_term")
+    )
+    if total_before != total_after:
+        print(f"[ai_analyzer] Ticker validation: {total_before} picks → {total_after} after cleaning "
+              f"({total_before - total_after} dropped).")
+    else:
+        print(f"[ai_analyzer] Ticker validation: all {total_after} picks passed.")
+
+    return result
+
+
 # ── Claude call ───────────────────────────────────────────────────────────────
 
 def _call_claude(system: str, user: str, model: str = "claude-sonnet-4-6") -> dict:
@@ -601,6 +697,12 @@ def analyze_with_claude(
             [{**e, "_lt": True} for e in etf_results.get("long_term", [])]
         )
 
+    # Build valid ticker set for post-analysis validation
+    valid_stock_tickers: set = (
+        {c["ticker"].upper() for c in stock_candidates if c.get("ticker")} |
+        {e.get("ticker", "").upper() for e in etf_candidates if e.get("ticker")}
+    )
+
     # Pass market regime context from screener results if available
     regime_info = screener_results.get("regime") if isinstance(screener_results, dict) else None
 
@@ -617,7 +719,7 @@ def analyze_with_claude(
     try:
         picks = _call_claude(SYSTEM_PROMPT, user_prompt, model="claude-sonnet-4-6")
         print("[ai_analyzer] Claude response parsed successfully.")
-        return picks
+        return _validate_and_clean_picks(picks, valid_stock_tickers)
     except (json.JSONDecodeError, KeyError, IndexError) as exc:
         print(f"[ai_analyzer] Parse error on first attempt ({exc}). Retrying with Haiku...")
 
@@ -625,7 +727,7 @@ def analyze_with_claude(
     try:
         picks = _call_claude(STRICT_RETRY_SYSTEM, user_prompt, model="claude-haiku-4-5-20251001")
         print("[ai_analyzer] Haiku retry succeeded.")
-        return picks
+        return _validate_and_clean_picks(picks, valid_stock_tickers)
     except Exception as exc2:
         print(f"[ai_analyzer] Claude analysis failed after retry: {exc2}")
         raise RuntimeError(f"Claude analysis failed: {exc2}") from exc2
