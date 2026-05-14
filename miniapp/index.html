@@ -764,6 +764,10 @@ body {
     <div class="live-dot"></div>
   </div>
   <div class="header-date" id="hdr-date"></div>
+  <div style="position:relative;cursor:pointer" onclick="openAlertsSheet()">
+    <span style="font-size:22px;line-height:1" id="bell-icon">🔔</span>
+    <span id="bell-badge" style="display:none;position:absolute;top:-2px;right:-2px;width:8px;height:8px;background:var(--red);border-radius:50%"></span>
+  </div>
 </div>
 
 <!-- ── Tab panes ───────────────────────────────────────────────────────────── -->
@@ -788,28 +792,21 @@ body {
     <div id="sett-body" style="display:none"></div>
   </div>
 
-  <div class="tab-pane" id="pane-alerts">
-    <div class="loading" id="alerts-spinner"><div class="spinner"></div>Loading alerts…</div>
-    <div id="alerts-body" style="display:none"></div>
-  </div>
 </div>
 
 <!-- ── Bottom nav ──────────────────────────────────────────────────────────── -->
 <nav class="bottom-nav">
   <div class="nav-item active" id="nav-picks"     onclick="gotoTab('picks')">
-    <div class="nav-icon">🔥</div><div class="nav-label" style="font-size:9px">Picks</div>
+    <div class="nav-icon">🔥</div><div class="nav-label">Picks</div>
   </div>
   <div class="nav-item"        id="nav-portfolio" onclick="gotoTab('portfolio')">
-    <div class="nav-icon">💼</div><div class="nav-label" style="font-size:9px">Portfolio</div>
-  </div>
-  <div class="nav-item"        id="nav-alerts"    onclick="gotoTab('alerts')">
-    <div class="nav-icon">🔔</div><div class="nav-label" style="font-size:9px">Alerts</div>
+    <div class="nav-icon">💼</div><div class="nav-label">Portfolio</div>
   </div>
   <div class="nav-item"        id="nav-stats"     onclick="gotoTab('stats')">
-    <div class="nav-icon">📊</div><div class="nav-label" style="font-size:9px">Stats</div>
+    <div class="nav-icon">📊</div><div class="nav-label">Stats</div>
   </div>
   <div class="nav-item"        id="nav-settings"  onclick="gotoTab('settings')">
-    <div class="nav-icon">⚙️</div><div class="nav-label" style="font-size:9px">Settings</div>
+    <div class="nav-icon">⚙️</div><div class="nav-label">Settings</div>
   </div>
 </nav>
 
@@ -920,6 +917,64 @@ body {
 </div>
 
 <!-- ── Alert add overlay ───────────────────────────────────────────────────── -->
+<!-- ── Alerts sheet overlay ──────────────────────────────────────────────── -->
+<!-- ── History sheet overlay ─────────────────────────────────────────────── -->
+<div id="history-sheet-overlay" class="overlay" onclick="handleOverlayTap(event,'history-sheet-overlay')">
+  <div class="bottom-sheet" style="max-height:92vh">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">📋 Trade History</div>
+      <button class="sheet-close" onclick="closeOverlay('history-sheet-overlay')">✕</button>
+    </div>
+    <div style="padding:0 16px 16px;overflow-y:auto;max-height:calc(92vh - 60px)">
+      <div class="loading" id="history-sheet-spinner"><div class="spinner"></div>Loading history…</div>
+      <div id="history-sheet-body" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Dividends sheet overlay ───────────────────────────────────────────── -->
+<div id="divs-sheet-overlay" class="overlay" onclick="handleOverlayTap(event,'divs-sheet-overlay')">
+  <div class="bottom-sheet" style="max-height:92vh">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">💰 Dividends</div>
+      <button class="sheet-close" onclick="closeOverlay('divs-sheet-overlay')">✕</button>
+    </div>
+    <div style="padding:0 16px 16px;overflow-y:auto;max-height:calc(92vh - 60px)">
+      <div class="loading" id="divs-sheet-spinner"><div class="spinner"></div>Loading dividends…</div>
+      <div id="divs-sheet-body" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Preferences sheet overlay ─────────────────────────────────────────── -->
+<div id="prefs-sheet-overlay" class="overlay" onclick="handleOverlayTap(event,'prefs-sheet-overlay')">
+  <div class="bottom-sheet" style="max-height:92vh">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">⚙️ Preferences</div>
+      <button class="sheet-close" onclick="closeOverlay('prefs-sheet-overlay')">✕</button>
+    </div>
+    <div style="padding:0 16px 16px;overflow-y:auto;max-height:calc(92vh - 60px)" id="prefs-sheet-body">
+    </div>
+  </div>
+</div>
+
+<div id="alerts-sheet-overlay" class="overlay" onclick="handleOverlayTap(event,'alerts-sheet-overlay')">
+  <div class="bottom-sheet" style="max-height:92vh">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">🔔 Price Alerts</div>
+      <button class="sheet-close" onclick="closeOverlay('alerts-sheet-overlay')">✕</button>
+    </div>
+    <div style="padding:0 16px 16px;overflow-y:auto;max-height:calc(92vh - 60px)">
+      <div class="loading" id="alerts-sheet-spinner"><div class="spinner"></div>Loading alerts…</div>
+      <div id="alerts-sheet-body" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
 <div id="alert-overlay" class="overlay" onclick="handleOverlayTap(event,'alert-overlay')">
   <div class="bottom-sheet">
     <div class="sheet-handle"></div>
@@ -974,7 +1029,6 @@ const loadedTabs  = {};
 let picksView         = 'picks';   // 'picks' | 'prices'
 let livePricesCache   = null;
 let regimeCache       = null;
-let dividendsLoaded   = false;
 let communityLoaded   = false;
 let _detailTicker     = null;
 
@@ -991,7 +1045,6 @@ function gotoTab(name) {
     if (name === 'portfolio') loadPortfolio();
     if (name === 'stats')     loadStats();
     if (name === 'settings')  loadSettings();
-    if (name === 'alerts')    loadAlerts();
   }
 }
 
@@ -1576,25 +1629,15 @@ async function loadPortfolio() {
 
     html += `<button class="btn-add-position" onclick="openAddPosition()">➕ Add Position</button>`;
 
-    // Dividends expandable section
-    dividendsLoaded = false;
-    html += `<div class="expand-row" onclick="toggleDividends()">
-      <span class="expand-row-title">💰 Dividends</span>
-      <span class="expand-arrow" id="div-arrow">›</span>
-    </div>
-    <div id="dividends-section" style="display:none">
-      <div class="loading" id="div-spinner" style="padding:20px 0"><div class="spinner"></div>Loading…</div>
-      <div id="dividends-rows"></div>
-    </div>`;
-
-    // Trade History section (collapsed by default)
-    html += `<div class="hist-hdr" onclick="toggleTradeHistory()">
-      <span class="hist-hdr-left">Trade History</span>
-      <span class="hist-toggle" id="hist-chevron">▼</span>
-    </div>
-    <div id="trade-history-section" style="display:none">
-      <div class="loading" id="hist-spinner" style="padding:30px 0"><div class="spinner"></div>Loading history…</div>
-      <div id="trade-history-rows"></div>
+    html += `<div class="settings-card" style="margin-top:14px">
+      <div class="action-row" onclick="openHistorySheet()">
+        <div class="action-row-left"><span class="action-icon">📋</span><span class="action-label">Trade History</span></div>
+        <span class="action-chevron">›</span>
+      </div>
+      <div class="action-row" onclick="openDividendsSheet()">
+        <div class="action-row-left"><span class="action-icon">💰</span><span class="action-label">Dividends</span></div>
+        <span class="action-chevron">›</span>
+      </div>
     </div>`;
 
     body.innerHTML = html;
@@ -1604,32 +1647,33 @@ async function loadPortfolio() {
   }
 }
 
-let historyLoaded = false;
+let historySheetLoaded = false;
+let dividendsSheetLoaded = false;
 
-async function toggleTradeHistory() {
-  const section = document.getElementById('trade-history-section');
-  const chevron = document.getElementById('hist-chevron');
-  if (!section) return;
+function openHistorySheet() {
   tg.HapticFeedback?.impactOccurred('light');
+  openOverlay('history-sheet-overlay');
+  if (!historySheetLoaded) {
+    historySheetLoaded = true;
+    loadHistorySheet();
+  }
+}
 
-  const isOpen = section.style.display !== 'none';
-  section.style.display = isOpen ? 'none' : 'block';
-  if (chevron) chevron.classList.toggle('open', !isOpen);
-
-  if (!isOpen && !historyLoaded) {
-    historyLoaded = true;
-    try {
-      const data = await api('/api/miniapp/history');
-      const trades = data.trades || [];
-      const rows = document.getElementById('trade-history-rows');
-      const spinner = document.getElementById('hist-spinner');
-      if (spinner) spinner.style.display = 'none';
-      if (!rows) return;
-      if (!trades.length) {
-        rows.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-sub">No closed trades yet.</div></div>';
-        return;
-      }
-      rows.innerHTML = trades.slice(0, 20).map(t => {
+async function loadHistorySheet() {
+  const spinner = document.getElementById('history-sheet-spinner');
+  const body    = document.getElementById('history-sheet-body');
+  try {
+    const data = await api('/api/miniapp/history');
+    const trades = data.trades || [];
+    if (spinner) spinner.style.display = 'none';
+    if (!body) return;
+    body.style.display = 'block';
+    if (!trades.length) {
+      body.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-sub">No closed trades yet.</div></div>';
+      return;
+    }
+    body.innerHTML = '<div class="settings-card" style="padding:0 16px">' +
+      trades.slice(0, 30).map(t => {
         const pct = parseFloat(t.return_pct || 0);
         const sym = t.ticker || t.symbol || '?';
         const outcomeIcon = t.outcome === 'target' ? '🎯' : t.outcome === 'stop' ? '🛑' : t.outcome === 'manual' ? '✋' : '📅';
@@ -1640,48 +1684,47 @@ async function toggleTradeHistory() {
           </div>
           <div class="trade-pct" style="color:${pct > 0 ? 'var(--green)' : pct < 0 ? 'var(--red)' : 'var(--hint)'}">${fmtPct(pct)}</div>
         </div>`;
-      }).join('');
-    } catch (e) {
-      const rows = document.getElementById('trade-history-rows');
-      if (rows) rows.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:12px 0">Could not load history.</div>';
-    }
+      }).join('') +
+      '</div>';
+  } catch (e) {
+    if (spinner) spinner.style.display = 'none';
+    if (body) { body.style.display = 'block'; body.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:12px 0">Could not load history.</div>'; }
   }
 }
 
-async function toggleDividends() {
-  const section = document.getElementById('dividends-section');
-  const arrow   = document.getElementById('div-arrow');
-  if (!section) return;
+function openDividendsSheet() {
   tg.HapticFeedback?.impactOccurred('light');
-  const isOpen = section.style.display !== 'none';
-  section.style.display = isOpen ? 'none' : 'block';
-  if (arrow) arrow.classList.toggle('open', !isOpen);
+  openOverlay('divs-sheet-overlay');
+  if (!dividendsSheetLoaded) {
+    dividendsSheetLoaded = true;
+    loadDividendsSheet();
+  }
+}
 
-  if (!isOpen && !dividendsLoaded) {
-    dividendsLoaded = true;
-    try {
-      const data = await api('/api/miniapp/dividends');
-      const divs = data.dividends || [];
-      const spinner = document.getElementById('div-spinner');
-      const rows    = document.getElementById('dividends-rows');
-      if (spinner) spinner.style.display = 'none';
-      if (!rows) return;
-      if (!divs.length) {
-        rows.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:10px 0">No dividend-paying stocks in your portfolio.</div>';
-        return;
-      }
-      rows.innerHTML = '<div class="settings-card" style="padding:0 16px">' +
-        divs.map(d => `<div class="div-row">
-          <span class="div-ticker">${d.ticker}</span>
-          <span class="div-yield">${d.yield_pct != null ? d.yield_pct.toFixed(2) + '%' : '—'} yield</span>
-          <span style="font-size:12px;color:var(--hint)">${d.ex_date || ''}</span>
-          <span style="font-size:13px">${d.per_share != null ? '$' + parseFloat(d.per_share).toFixed(3) + '/sh' : ''}</span>
-        </div>`).join('') +
-        '</div>';
-    } catch (e) {
-      const rows = document.getElementById('dividends-rows');
-      if (rows) rows.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:10px 0">Could not load dividend data.</div>';
+async function loadDividendsSheet() {
+  const spinner = document.getElementById('divs-sheet-spinner');
+  const body    = document.getElementById('divs-sheet-body');
+  try {
+    const data = await api('/api/miniapp/dividends');
+    const divs = data.dividends || [];
+    if (spinner) spinner.style.display = 'none';
+    if (!body) return;
+    body.style.display = 'block';
+    if (!divs.length) {
+      body.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:10px 0">No dividend-paying stocks in your portfolio.</div>';
+      return;
     }
+    body.innerHTML = '<div class="settings-card" style="padding:0 16px">' +
+      divs.map(d => `<div class="div-row">
+        <span class="div-ticker">${d.ticker}</span>
+        <span class="div-yield">${d.yield_pct != null ? d.yield_pct.toFixed(2) + '%' : '—'} yield</span>
+        <span style="font-size:12px;color:var(--hint)">${d.ex_date || ''}</span>
+        <span style="font-size:13px">${d.per_share != null ? '$' + parseFloat(d.per_share).toFixed(3) + '/sh' : ''}</span>
+      </div>`).join('') +
+      '</div>';
+  } catch (e) {
+    if (spinner) spinner.style.display = 'none';
+    if (body) { body.style.display = 'block'; body.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:10px 0">Could not load dividend data.</div>'; }
   }
 }
 
@@ -1735,8 +1778,8 @@ async function savePositionDetail() {
 async function switchPortfolioMode(mode) {
   if (portfolioMode === mode) return;
   portfolioMode = mode;
-  historyLoaded = false;
-  dividendsLoaded = false;
+  historySheetLoaded = false;
+  dividendsSheetLoaded = false;
   tg.HapticFeedback?.selectionChanged();
   loadedTabs['portfolio'] = false;
   loadPortfolio();
@@ -1857,17 +1900,29 @@ function setAlertDir(dir) {
   });
 }
 
+function updateBellBadge(count) {
+  const badge = document.getElementById('bell-badge');
+  if (badge) badge.style.display = count > 0 ? 'block' : 'none';
+}
+
+function openAlertsSheet() {
+  tg.HapticFeedback?.impactOccurred('light');
+  openOverlay('alerts-sheet-overlay');
+  loadAlerts();
+}
+
 async function loadAlerts() {
-  document.getElementById('alerts-spinner').style.display = 'flex';
-  const body = document.getElementById('alerts-body');
-  body.style.display = 'none';
+  const spinner = document.getElementById('alerts-sheet-spinner');
+  const body    = document.getElementById('alerts-sheet-body');
+  if (spinner) { spinner.style.display = 'flex'; spinner.innerHTML = '<div class="spinner"></div>Loading alerts…'; }
+  if (body) body.style.display = 'none';
 
   try {
     const data   = await api('/api/miniapp/alerts');
     const alerts = data.alerts || [];
 
-    document.getElementById('alerts-spinner').style.display = 'none';
-    body.style.display = 'block';
+    if (spinner) spinner.style.display = 'none';
+    if (body) body.style.display = 'block';
 
     let html = `<div class="alert-section-hdr">
       <span>Price Alerts</span>
@@ -1903,9 +1958,10 @@ async function loadAlerts() {
       html += '</div>';
     }
 
-    body.innerHTML = html;
+    if (body) body.innerHTML = html;
+    updateBellBadge(alerts.length);
   } catch (e) {
-    document.getElementById('alerts-spinner').innerHTML =
+    if (spinner) spinner.innerHTML =
       '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load alerts</div></div>';
   }
 }
@@ -1937,8 +1993,6 @@ async function submitAlert() {
     await api('/api/miniapp/add_alert', 'POST', { ticker, target, direction: alertDirection });
     tg.HapticFeedback?.notificationOccurred('success');
     closeOverlay('alert-overlay');
-    // Refresh alerts tab
-    loadedTabs['alerts'] = false;
     loadAlerts();
   } catch (e) {
     btn.disabled    = false;
@@ -1952,7 +2006,6 @@ async function deleteAlert(ticker, target) {
   try {
     await api('/api/miniapp/remove_alert', 'POST', { ticker, target });
     tg.HapticFeedback?.notificationOccurred('success');
-    loadedTabs['alerts'] = false;
     loadAlerts();
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
@@ -2209,7 +2262,69 @@ function renderSettings() {
     </div>`;
   }
 
+  // ── Prefs + Daily Picks card ───────────────────────────────────────────────
+  const riskLbl  = riskLabels[cfg.risk_profile]  || '⚖️ Moderate';
+  const assetLbl = assetLabels[cfg.assets]        || '📈 + ₿ Both';
+  const stockBudget = cfg.stock_budget  ? '$' + cfg.stock_budget  : '—';
+  const cryptoBudget= cfg.crypto_budget ? '$' + cfg.crypto_budget : '—';
+  const prefsSub = `${riskLbl.replace(/^[^ ]+ /,'')} · ${assetLbl.replace(/^[^ ]+ /,'')} · ${stockBudget}/${cryptoBudget}`;
+
   html += `<div class="settings-card">
+    <div class="action-row" onclick="openPrefsSheet()">
+      <div class="action-row-left">
+        <span class="action-icon">⚙️</span>
+        <div>
+          <div class="action-label">Preferences</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">${prefsSub}</div>
+        </div>
+      </div>
+      <span class="action-chevron">›</span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-key">Daily Picks</span>
+      <div class="toggle${paused ? '' : ' on'}" id="pause-toggle" onclick="togglePaused(${paused})"></div>
+    </div>
+  </div>`;
+
+  html += `<div class="settings-card">
+    <div class="action-row" onclick="openHelp()">
+      <div class="action-row-left">
+        <span class="action-icon">📋</span>
+        <span class="action-label">Help &amp; Commands</span>
+      </div>
+      <span class="action-chevron">›</span>
+    </div>
+    <div class="action-row" onclick="openFeedbackSheet()">
+      <div class="action-row-left">
+        <span class="action-icon">💬</span>
+        <span class="action-label">Send Feedback</span>
+      </div>
+      <span class="action-chevron">›</span>
+    </div>
+    <div class="action-row" onclick="shareApp()">
+      <div class="action-row-left">
+        <span class="action-icon">📲</span>
+        <span class="action-label">Share StockPulz</span>
+      </div>
+      <span class="action-chevron">›</span>
+    </div>
+  </div>`;
+
+  body.innerHTML = html;
+}
+
+function openPrefsSheet() {
+  tg.HapticFeedback?.impactOccurred('light');
+  openOverlay('prefs-sheet-overlay');
+  renderPrefsSheet();
+}
+
+function renderPrefsSheet() {
+  const body = document.getElementById('prefs-sheet-body');
+  if (!body) return;
+  const cfg = _settCfg;
+
+  let html = `<div class="settings-card">
     <div class="setting-row">
       <span class="setting-key">Risk Profile</span>
       <span class="setting-tap" onclick="cycleRisk()">
@@ -2254,13 +2369,6 @@ function renderSettings() {
     </div>
   </div>`;
 
-  html += `<div class="settings-card">
-    <div class="setting-row">
-      <span class="setting-key">Daily Picks</span>
-      <div class="toggle${paused ? '' : ' on'}" id="pause-toggle" onclick="togglePaused(${paused})"></div>
-    </div>
-  </div>`;
-
   // ── Watch List card ────────────────────────────────────────────────────────
   const watchlist = cfg.watchlist || [];
   const watchChips = watchlist.map(t =>
@@ -2294,30 +2402,6 @@ function renderSettings() {
     </select>` : '<div style="font-size:13px;color:var(--hint);padding-top:4px">All sectors excluded</div>'}
   </div>`;
 
-  html += `<div class="settings-card">
-    <div class="action-row" onclick="openHelp()">
-      <div class="action-row-left">
-        <span class="action-icon">📋</span>
-        <span class="action-label">Help &amp; Commands</span>
-      </div>
-      <span class="action-chevron">›</span>
-    </div>
-    <div class="action-row" onclick="openFeedbackSheet()">
-      <div class="action-row-left">
-        <span class="action-icon">💬</span>
-        <span class="action-label">Send Feedback</span>
-      </div>
-      <span class="action-chevron">›</span>
-    </div>
-    <div class="action-row" onclick="shareApp()">
-      <div class="action-row-left">
-        <span class="action-icon">📲</span>
-        <span class="action-label">Share StockPulz</span>
-      </div>
-      <span class="action-chevron">›</span>
-    </div>
-  </div>`;
-
   body.innerHTML = html;
 }
 
@@ -2327,6 +2411,7 @@ async function cycleRisk() {
   const next = RISK_CYCLE[(idx + 1) % RISK_CYCLE.length];
   _settCfg.risk_profile = next;
   tg.HapticFeedback?.selectionChanged();
+  renderPrefsSheet();
   renderSettings();
   try {
     await api('/api/miniapp/update_settings', 'POST', { risk_profile: next });
@@ -2339,6 +2424,7 @@ async function cycleAssets() {
   const next = ASSETS_CYCLE[(idx + 1) % ASSETS_CYCLE.length];
   _settCfg.assets = next;
   tg.HapticFeedback?.selectionChanged();
+  renderPrefsSheet();
   renderSettings();
   try {
     await api('/api/miniapp/update_settings', 'POST', { assets: next });
