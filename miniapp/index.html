@@ -629,6 +629,77 @@ body {
   text-align: right; outline: none; width: 90px;
   border-bottom: 1px solid var(--btn);
 }
+
+/* Regime pill */
+.regime-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px; border-radius: 20px;
+  font-size: 12px; font-weight: 600;
+  background: var(--card); border: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+/* Picks/Prices toggle */
+.view-toggle {
+  display: flex; gap: 0; background: var(--card);
+  border: 1px solid var(--border); border-radius: 10px;
+  overflow: hidden; margin-bottom: 12px;
+}
+.view-toggle-btn {
+  flex: 1; padding: 8px; font-size: 13px; font-weight: 600;
+  border: none; background: transparent; color: var(--hint);
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+  font-family: inherit;
+}
+.view-toggle-btn.active { background: var(--btn); color: var(--btn-text); }
+
+/* Prices table */
+.prices-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 0; border-bottom: 1px solid var(--border);
+}
+.prices-row:last-child { border-bottom: none; }
+.prices-ticker { font-size: 15px; font-weight: 700; }
+.prices-entry { font-size: 12px; color: var(--hint); margin-top: 2px; }
+.prices-live { font-size: 15px; font-weight: 700; }
+.prices-pct { font-size: 13px; font-weight: 700; }
+
+/* Position detail sheet */
+.pos-detail-input {
+  width: 100%; padding: 12px; border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font-size: 16px; font-family: inherit;
+  outline: none; margin-bottom: 10px;
+}
+.pos-detail-input:focus { border-color: var(--btn); }
+.pos-detail-label { font-size: 12px; color: var(--hint); margin-bottom: 5px; }
+
+/* Expandable section row */
+.expand-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 0; cursor: pointer;
+}
+.expand-row-title { font-size: 15px; font-weight: 600; }
+.expand-arrow { color: var(--hint); font-size: 13px; transition: transform 0.2s; }
+.expand-arrow.open { transform: rotate(90deg); }
+
+/* Community card */
+.community-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; margin-top: 12px;
+}
+.community-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
+.community-stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.community-stat-row:last-child { border-bottom: none; }
+
+/* Dividend row */
+.div-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px;
+}
+.div-row:last-child { border-bottom: none; }
+.div-ticker { font-weight: 700; }
+.div-yield { color: var(--green); font-weight: 600; }
 </style>
 </head>
 
@@ -723,6 +794,26 @@ body {
   </div>
 </div>
 
+<!-- Position detail sheet -->
+<div id="posdetail-overlay" class="overlay" onclick="handleOverlayTap(event,'posdetail-overlay')">
+  <div class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title" id="posdetail-title">Position</div>
+      <button class="sheet-close" onclick="closeOverlay('posdetail-overlay')">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div id="posdetail-summary" style="font-size:13px;color:var(--hint);margin-bottom:16px"></div>
+      <div class="pos-detail-label">Stop Loss $</div>
+      <input type="number" id="posdetail-stop" class="pos-detail-input" placeholder="e.g. 170.00" step="0.01">
+      <div class="pos-detail-label">Target Price $</div>
+      <input type="number" id="posdetail-target" class="pos-detail-input" placeholder="e.g. 210.00" step="0.01">
+      <button class="btn-primary" id="posdetail-save-btn" onclick="savePositionDetail()">Save</button>
+      <button class="btn-cancel" onclick="closeOverlay('posdetail-overlay')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Feedback overlay ──────────────────────────────────────────────────── -->
 <div id="feedback-overlay" class="overlay" onclick="handleOverlayTap(event,'feedback-overlay')">
   <div class="bottom-sheet">
@@ -806,6 +897,14 @@ let lwChart       = null;
 let lwSeries      = null;
 let sellTicker    = null;
 const loadedTabs  = {};
+
+// ── New feature state ─────────────────────────────────────────────────────────
+let picksView         = 'picks';   // 'picks' | 'prices'
+let livePricesCache   = null;
+let regimeCache       = null;
+let dividendsLoaded   = false;
+let communityLoaded   = false;
+let _detailTicker     = null;
 
 // ── Tab routing ───────────────────────────────────────────────────────────────
 function gotoTab(name) {
@@ -1065,17 +1164,108 @@ async function confirmAddPosition() {
 // PICKS TAB
 // ═══════════════════════════════════════════════════════════════════════════════
 
+async function loadRegime() {
+  if (regimeCache) return regimeCache;
+  try {
+    const data = await api('/api/miniapp/regime');
+    if (data.ok) regimeCache = data.regime;
+    return regimeCache;
+  } catch (e) { return null; }
+}
+
+function renderRegimePill(regime) {
+  if (!regime) return '';
+  const label = regime.label || regime.regime || regime;
+  const vix   = regime.vix ? ` · VIX ${parseFloat(regime.vix).toFixed(1)}` : '';
+  let dot = '⚪';
+  const lc = String(label).toLowerCase();
+  if (lc.includes('bull'))     dot = '🟢';
+  else if (lc.includes('bear')) dot = '🔴';
+  else if (lc.includes('vol'))  dot = '🟡';
+  return `<span class="regime-pill">${dot} ${label}${vix}</span>`;
+}
+
 async function loadPicks() {
+  // Kick off regime fetch in parallel; once done, patch in the pill
+  loadRegime().then(r => {
+    if (r && picksCache) {
+      // Update regime pill in DOM without full re-render
+      const existing = document.querySelectorAll('.regime-pill');
+      existing.forEach(el => { el.outerHTML = renderRegimePill(r); });
+    }
+  });
   try {
     const data = await api('/api/miniapp/picks');
     picksCache = data;
-    renderPicks('all');
+    renderPicksView();
   } catch (e) {
     document.getElementById('picks-spinner').innerHTML =
       '<div class="empty"><div class="empty-icon">😕</div>' +
       '<div class="empty-title">Couldn\'t load picks</div>' +
       '<div class="empty-sub">Make sure you\'re using the bot. Try closing and re-opening.</div></div>';
   }
+}
+
+function renderPicksView() {
+  if (picksView === 'prices') {
+    renderPricesView();
+  } else {
+    renderPicks(activeFilter);
+  }
+}
+
+async function renderPricesView() {
+  document.getElementById('picks-spinner').style.display = 'none';
+  const body = document.getElementById('picks-body');
+  body.style.display = 'block';
+
+  const toggleHtml = `<div class="view-toggle">
+    <button class="view-toggle-btn" onclick="switchPicksView('picks')">Picks</button>
+    <button class="view-toggle-btn active" onclick="switchPicksView('prices')">Prices</button>
+  </div>`;
+  const pillHtml = renderRegimePill(regimeCache);
+
+  if (!livePricesCache) {
+    body.innerHTML = toggleHtml + pillHtml +
+      '<div class="loading" style="padding:40px 0"><div class="spinner"></div>Loading live prices…</div>';
+    try {
+      const data = await api('/api/miniapp/live_prices');
+      livePricesCache = data.prices || [];
+    } catch (e) {
+      body.innerHTML = toggleHtml + pillHtml +
+        '<div style="color:var(--hint);font-size:13px;padding:20px 0;text-align:center">Could not load live prices.</div>';
+      return;
+    }
+  }
+
+  let html = toggleHtml + pillHtml;
+  if (!livePricesCache.length) {
+    html += '<div class="empty"><div class="empty-icon">📭</div><div class="empty-title">No picks today</div></div>';
+  } else {
+    html += '<div class="settings-card" style="padding:0 16px">';
+    livePricesCache.forEach(p => {
+      const pctColor = p.pct == null ? 'var(--hint)' : p.pct >= 0 ? 'var(--green)' : 'var(--red)';
+      const pctTxt   = p.pct == null ? '—' : (p.pct >= 0 ? '+' : '') + p.pct.toFixed(2) + '%';
+      html += `<div class="prices-row">
+        <div>
+          <div class="prices-ticker">${p.ticker}</div>
+          <div class="prices-entry">Entry: ${p.entry ? '$' + fmtPrice(p.entry) : '—'}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="prices-live">${p.live ? '$' + fmtPrice(p.live) : '—'}</div>
+          <div class="prices-pct" style="color:${pctColor}">${pctTxt}</div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  body.innerHTML = html;
+}
+
+function switchPicksView(view) {
+  picksView = view;
+  tg.HapticFeedback?.selectionChanged();
+  renderPicksView();
 }
 
 function renderPicks(filter) {
@@ -1105,7 +1295,14 @@ function renderPicks(filter) {
     ['etf',    `🗂 ETFs${counts.etf      ? ` (${counts.etf})`    : ''}`],
   ];
 
-  let html = '<div class="filter-row">';
+  // View toggle + regime pill
+  let html = `<div class="view-toggle">
+    <button class="view-toggle-btn active" onclick="switchPicksView('picks')">Picks</button>
+    <button class="view-toggle-btn" onclick="switchPicksView('prices')">Prices</button>
+  </div>`;
+  html += renderRegimePill(regimeCache);
+
+  html += '<div class="filter-row">';
   pillDefs.forEach(([f, lbl]) => {
     html += `<button class="pill${filter === f ? ' on' : ''}" onclick="renderPicks('${f}')">${lbl}</button>`;
   });
@@ -1282,6 +1479,8 @@ async function loadPortfolio() {
         if (range > 0) targetProgress = Math.min(100, Math.max(0, (move / range) * 100));
       }
 
+      const stopLoss    = p.stop_loss     != null ? p.stop_loss     : '';
+      const targetPrice = p.target_price != null ? p.target_price : '';
       html += `<div class="pos-card">
         <div class="pos-main">
           <div class="pos-avatar">${init}</div>
@@ -1298,11 +1497,23 @@ async function loadPortfolio() {
         <div class="pos-actions">
           <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}')">📊 Chart</button>
           <button class="pos-btn pos-btn-sell"  onclick="openSellSheet('${sym}')">💸 Sell</button>
+          <button class="pos-btn" style="flex:0;padding:8px 12px;background:transparent;border:1px solid var(--border);color:var(--hint)" onclick="openPositionDetail('${sym}',${JSON.stringify(p.entry_price)},${JSON.stringify(p.current_price)},${JSON.stringify(stopLoss)},${JSON.stringify(targetPrice)})">⋯</button>
         </div>
       </div>`;
     });
 
     html += `<button class="btn-add-position" onclick="openAddPosition()">➕ Add Position</button>`;
+
+    // Dividends expandable section
+    dividendsLoaded = false;
+    html += `<div class="expand-row" onclick="toggleDividends()">
+      <span class="expand-row-title">💰 Dividends</span>
+      <span class="expand-arrow" id="div-arrow">›</span>
+    </div>
+    <div id="dividends-section" style="display:none">
+      <div class="loading" id="div-spinner" style="padding:20px 0"><div class="spinner"></div>Loading…</div>
+      <div id="dividends-rows"></div>
+    </div>`;
 
     // Trade History section (collapsed by default)
     html += `<div class="hist-hdr" onclick="toggleTradeHistory()">
@@ -1365,10 +1576,95 @@ async function toggleTradeHistory() {
   }
 }
 
+async function toggleDividends() {
+  const section = document.getElementById('dividends-section');
+  const arrow   = document.getElementById('div-arrow');
+  if (!section) return;
+  tg.HapticFeedback?.impactOccurred('light');
+  const isOpen = section.style.display !== 'none';
+  section.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.classList.toggle('open', !isOpen);
+
+  if (!isOpen && !dividendsLoaded) {
+    dividendsLoaded = true;
+    try {
+      const data = await api('/api/miniapp/dividends');
+      const divs = data.dividends || [];
+      const spinner = document.getElementById('div-spinner');
+      const rows    = document.getElementById('dividends-rows');
+      if (spinner) spinner.style.display = 'none';
+      if (!rows) return;
+      if (!divs.length) {
+        rows.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:10px 0">No dividend-paying stocks in your portfolio.</div>';
+        return;
+      }
+      rows.innerHTML = '<div class="settings-card" style="padding:0 16px">' +
+        divs.map(d => `<div class="div-row">
+          <span class="div-ticker">${d.ticker}</span>
+          <span class="div-yield">${d.yield_pct != null ? d.yield_pct.toFixed(2) + '%' : '—'} yield</span>
+          <span style="font-size:12px;color:var(--hint)">${d.ex_date || ''}</span>
+          <span style="font-size:13px">${d.per_share != null ? '$' + parseFloat(d.per_share).toFixed(3) + '/sh' : ''}</span>
+        </div>`).join('') +
+        '</div>';
+    } catch (e) {
+      const rows = document.getElementById('dividends-rows');
+      if (rows) rows.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:10px 0">Could not load dividend data.</div>';
+    }
+  }
+}
+
+function openPositionDetail(ticker, entry, live, stop, target) {
+  _detailTicker = ticker;
+  document.getElementById('posdetail-title').textContent = ticker;
+  const entryFmt = entry ? '$' + fmtPrice(entry) : '—';
+  const liveFmt  = live  ? '$' + fmtPrice(live)  : '—';
+  let pnlHtml = '';
+  if (entry && live) {
+    const pct = ((live - entry) / entry * 100);
+    const sign = pct >= 0 ? '+' : '';
+    pnlHtml = ` · <span style="color:${pct >= 0 ? 'var(--green)' : 'var(--red)'}">${sign}${pct.toFixed(2)}%</span>`;
+  }
+  document.getElementById('posdetail-summary').innerHTML =
+    `Entry ${entryFmt} → Live ${liveFmt}${pnlHtml}`;
+  const stopInput   = document.getElementById('posdetail-stop');
+  const targetInput = document.getElementById('posdetail-target');
+  stopInput.value   = stop   !== '' && stop   != null ? stop   : '';
+  targetInput.value = target !== '' && target != null ? target : '';
+  const btn = document.getElementById('posdetail-save-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+  openOverlay('posdetail-overlay');
+  tg.HapticFeedback?.impactOccurred('light');
+}
+
+async function savePositionDetail() {
+  if (!_detailTicker) return;
+  const btn    = document.getElementById('posdetail-save-btn');
+  const stopV  = document.getElementById('posdetail-stop').value;
+  const targV  = document.getElementById('posdetail-target').value;
+  btn.disabled    = true;
+  btn.textContent = '⏳ Saving…';
+  try {
+    await api('/api/miniapp/update_position', 'POST', {
+      ticker:       _detailTicker,
+      stop_loss:    stopV  !== '' ? parseFloat(stopV)  : null,
+      target_price: targV !== '' ? parseFloat(targV) : null,
+    });
+    tg.HapticFeedback?.notificationOccurred('success');
+    closeOverlay('posdetail-overlay');
+    loadedTabs['portfolio'] = false;
+    if (curTab === 'portfolio') loadPortfolio();
+  } catch (e) {
+    btn.disabled    = false;
+    btn.textContent = 'Save';
+    tg.HapticFeedback?.notificationOccurred('error');
+  }
+}
+
 async function switchPortfolioMode(mode) {
   if (portfolioMode === mode) return;
   portfolioMode = mode;
   historyLoaded = false;
+  dividendsLoaded = false;
   tg.HapticFeedback?.selectionChanged();
   loadedTabs['portfolio'] = false;
   loadPortfolio();
@@ -1671,7 +1967,37 @@ async function loadStats() {
       });
     }
 
+    // Community section placeholder (loaded lazily after DOM is ready)
+    html += `<div class="community-card" id="community-section">
+      <div class="community-title">🌍 Community</div>
+      <div id="community-content" style="color:var(--hint);font-size:13px">Loading community stats…</div>
+    </div>`;
+
+    communityLoaded = false;
     body.innerHTML = html;
+
+    // Load community lazily
+    setTimeout(async () => {
+      if (communityLoaded) return;
+      communityLoaded = true;
+      const commEl = document.getElementById('community-content');
+      if (!commEl) return;
+      try {
+        const cdata = await api('/api/miniapp/community');
+        if (!cdata.ok || !cdata.stats) { commEl.textContent = 'No community data yet.'; return; }
+        const s = cdata.stats;
+        commEl.innerHTML = [
+          s.total_users    != null ? `<div class="community-stat-row"><span>Total users</span><span>${s.total_users}</span></div>` : '',
+          s.win_rate       != null ? `<div class="community-stat-row"><span>Win rate</span><span style="color:var(--green)">${parseFloat(s.win_rate).toFixed(1)}%</span></div>` : '',
+          s.avg_return     != null ? `<div class="community-stat-row"><span>Avg return</span><span style="color:${s.avg_return>=0?'var(--green)':'var(--red)'}">${s.avg_return>=0?'+':''}${parseFloat(s.avg_return).toFixed(1)}%</span></div>` : '',
+          s.vs_spy         != null ? `<div class="community-stat-row"><span>vs SPY</span><span style="color:${s.vs_spy>=0?'var(--green)':'var(--red)'}">${s.vs_spy>=0?'+':''}${parseFloat(s.vs_spy).toFixed(1)}%</span></div>` : '',
+          s.best_pick      ? `<div class="community-stat-row"><span>Best pick</span><span style="color:var(--green)">${s.best_pick}</span></div>` : '',
+          s.worst_pick     ? `<div class="community-stat-row"><span>Worst pick</span><span style="color:var(--red)">${s.worst_pick}</span></div>` : '',
+        ].filter(Boolean).join('') || 'Not enough data yet.';
+      } catch (e) {
+        if (commEl) commEl.textContent = 'Could not load community stats.';
+      }
+    }, 100);
 
     // Render charts after DOM is written
     setTimeout(() => {
@@ -1802,6 +2128,20 @@ function renderSettings() {
              onblur="saveBudget('crypto')"
              onkeydown="if(event.key==='Enter')this.blur()">
     </div>
+    <div class="setting-row">
+      <span class="setting-key">Default Stop %</span>
+      <input class="budget-input" type="number" id="stop-pct-input"
+             value="${cfg.stop_loss_pct || ''}" placeholder="—"
+             onblur="saveThreshold('stop_loss_pct')"
+             onkeydown="if(event.key==='Enter')this.blur()" step="0.1">
+    </div>
+    <div class="setting-row">
+      <span class="setting-key">Default Target %</span>
+      <input class="budget-input" type="number" id="target-pct-input"
+             value="${cfg.target_gain_pct || ''}" placeholder="—"
+             onblur="saveThreshold('target_gain_pct')"
+             onkeydown="if(event.key==='Enter')this.blur()" step="0.1">
+    </div>
   </div>`;
 
   html += `<div class="settings-card">
@@ -1868,6 +2208,19 @@ async function saveBudget(type) {
   const val = parseFloat(input.value);
   if (isNaN(val) || val <= 0) return;
   const key = type === 'stock' ? 'stock_budget' : 'crypto_budget';
+  _settCfg[key] = val;
+  try {
+    await api('/api/miniapp/update_settings', 'POST', { [key]: val });
+    tg.HapticFeedback?.notificationOccurred('success');
+  } catch (e) {}
+}
+
+async function saveThreshold(key) {
+  const inputId = key === 'stop_loss_pct' ? 'stop-pct-input' : 'target-pct-input';
+  const input   = document.getElementById(inputId);
+  if (!input) return;
+  const val = parseFloat(input.value);
+  if (isNaN(val) || val <= 0) return;
   _settCfg[key] = val;
   try {
     await api('/api/miniapp/update_settings', 'POST', { [key]: val });

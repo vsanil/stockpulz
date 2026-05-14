@@ -786,6 +786,8 @@ def miniapp_settings():
         "stock_budget":   ucfg.get("stock_budget"),
         "crypto_budget":  ucfg.get("crypto_budget"),
         "paused":         ucfg.get("paused", False),
+        "stop_loss_pct":  ucfg.get("stop_loss_pct"),
+        "target_gain_pct": ucfg.get("target_gain_pct"),
     }})
 
 
@@ -1023,8 +1025,162 @@ def miniapp_update_settings():
     if "crypto_budget" in body:
         try: ucfg["crypto_budget"] = float(body["crypto_budget"])
         except: pass
+    if "stop_loss_pct" in body:
+        try: ucfg["stop_loss_pct"] = float(body["stop_loss_pct"])
+        except: pass
+    if "target_gain_pct" in body:
+        try: ucfg["target_gain_pct"] = float(body["target_gain_pct"])
+        except: pass
     save_user_config(chat_id, ucfg)
     return jsonify({"ok": True})
+
+
+@app.route("/api/miniapp/live_prices")
+def miniapp_live_prices():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_picks
+    import yfinance as yf
+    picks_data = load_picks()
+    if not picks_data:
+        return jsonify({"ok": True, "prices": []})
+
+    # Collect all tickers from st_picks, lt_picks, crypto_picks, etf_picks, commodities
+    all_picks = []
+    stocks = picks_data.get("stocks", {})
+    for p in stocks.get("short_term", []):
+        ticker = (p.get("ticker") or p.get("symbol", "")).upper()
+        if ticker:
+            all_picks.append({"ticker": ticker, "entry": p.get("entry_price") or p.get("price"), "type": "st_picks"})
+    for p in stocks.get("long_term", []):
+        ticker = (p.get("ticker") or p.get("symbol", "")).upper()
+        if ticker:
+            all_picks.append({"ticker": ticker, "entry": p.get("entry_price") or p.get("price"), "type": "lt_picks"})
+    etfs = picks_data.get("etfs", {})
+    for p in etfs.get("short_term", []) + etfs.get("long_term", []):
+        ticker = (p.get("ticker") or p.get("symbol", "")).upper()
+        if ticker:
+            all_picks.append({"ticker": ticker, "entry": p.get("entry_price") or p.get("price"), "type": "etf_picks"})
+    comms = picks_data.get("commodities", {})
+    for p in comms.get("short_term", []) + comms.get("long_term", []):
+        ticker = (p.get("ticker") or p.get("symbol", "")).upper()
+        if ticker:
+            all_picks.append({"ticker": ticker, "entry": p.get("entry_price") or p.get("price"), "type": "commodities"})
+    crypto = picks_data.get("crypto", {})
+    for p in crypto.get("short_term", []) + crypto.get("long_term", []):
+        ticker = (p.get("ticker") or p.get("symbol", "")).upper()
+        if ticker:
+            all_picks.append({"ticker": ticker, "entry": p.get("entry_price") or p.get("price"), "type": "crypto"})
+
+    if not all_picks:
+        return jsonify({"ok": True, "prices": []})
+
+    tickers = [p["ticker"] for p in all_picks]
+    crypto_syms = {"BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC","LINK","UNI","ATOM","LTC"}
+    yf_tickers = [f"{t}-USD" if t in crypto_syms else t for t in tickers]
+
+    prices = {}
+    try:
+        data = yf.download(yf_tickers, period="1d", progress=False, auto_adjust=True)
+        close = data["Close"] if "Close" in data else data
+        for orig, yft in zip(tickers, yf_tickers):
+            try:
+                col = close[yft] if yft in close.columns else close
+                prices[orig] = float(col.dropna().iloc[-1])
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    result = []
+    for p in all_picks:
+        t = p["ticker"]
+        live = prices.get(t)
+        entry = p.get("entry")
+        pct = None
+        if live and entry:
+            try: pct = round((live - float(entry)) / float(entry) * 100, 2)
+            except: pass
+        result.append({"ticker": t, "entry": entry, "live": live, "pct": pct, "type": p["type"]})
+
+    return jsonify({"ok": True, "prices": result})
+
+
+@app.route("/api/miniapp/regime")
+def miniapp_regime():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from market_regime import get_market_regime
+    try:
+        r = get_market_regime()
+        return jsonify({"ok": True, "regime": r})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/miniapp/update_position", methods=["POST"])
+def miniapp_update_position():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_user_trade_log, save_user_trade_log
+    body = request.get_json(silent=True) or {}
+    ticker = (body.get("ticker") or "").strip().upper()
+    if not ticker: return jsonify({"error": "ticker required"}), 400
+    log = load_user_trade_log(chat_id)
+    updated = False
+    for t in log.get("open", []):
+        if t.get("ticker") == ticker:
+            if "stop_loss" in body:
+                val = body["stop_loss"]
+                t["stop_loss"] = float(val) if val not in (None, "", "null") else None
+            if "target_price" in body:
+                val = body["target_price"]
+                t["target_price"] = float(val) if val not in (None, "", "null") else None
+            updated = True
+            break
+    if not updated:
+        return jsonify({"error": "position not found"}), 404
+    save_user_trade_log(chat_id, log)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/miniapp/community")
+def miniapp_community():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import get_allowed_users, load_user_trade_log
+    from performance_tracker import build_community_stats
+    users = get_allowed_users()
+    owner = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
+    if owner and owner not in users:
+        users = list(users) + [owner]
+    logs = [load_user_trade_log(uid) for uid in users]
+    try:
+        stats = build_community_stats(logs)
+        return jsonify({"ok": True, "stats": stats})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/miniapp/dividends")
+def miniapp_dividends():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_user_trade_log
+    from dividends_checker import get_dividend_info
+    log = load_user_trade_log(chat_id)
+    stock_tickers = [
+        t["ticker"] for t in log.get("open", [])
+        if t.get("asset_type", "stock") == "stock"
+    ]
+    if not stock_tickers:
+        return jsonify({"ok": True, "dividends": []})
+    try:
+        divs = get_dividend_info(list(set(stock_tickers)))
+        paying = [d for d in divs if d.get("pays_dividend")]
+        return jsonify({"ok": True, "dividends": paying})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 @app.route("/api/miniapp/share_link")
