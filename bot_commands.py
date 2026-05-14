@@ -546,7 +546,8 @@ def handle_callback_query(callback_query: dict) -> None:
         "onboard_budget":     "✅ Got it!",
         "onboard_risk":       "✅ Got it!",
         "onboard_assets":     "✅ Setting up your account…",
-        "quickbuy":           "⏳ Logging position…",
+        "quickbuy":           "📝 Confirm below…",
+        "quickbuy_confirm":   "⏳ Logging position…",
         "chart":              "⏳ Generating chart…",
         "confirm_sell":       "⏳ Removing position…",
         "sold_pick":          "⏳ Loading…",
@@ -554,6 +555,7 @@ def handle_callback_query(callback_query: dict) -> None:
         "sold_confirm":       "⏳ Closing position…",
         "bought_confirm":     "⏳ Logging position…",
         "updatelevel_pick":   "⏳ Loading…",
+        "unalert_confirm":    "⏳ Removing alert…",
         "paper_reset_confirm":"⏳ Resetting…",
         "pause_confirm":      "⏳ Pausing picks…",
         "reset_confirm":      "⏳ Resetting settings…",
@@ -571,6 +573,24 @@ def handle_callback_query(callback_query: dict) -> None:
         return
 
     if action == "quickbuy":
+        # Show confirmation before logging — prevents accidental taps
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        live = _fetch_live_price(ticker)
+        price_hint = f"  <i>(live: <code>${_p(live)}</code>)</i>" if live else ""
+        send_inline_keyboard(
+            f"📝 <b>Log {ticker} as bought?</b>{price_hint}\n"
+            f"<i>This will add it to your portfolio and start tracking P&amp;L.</i>",
+            [[
+                {"text": f"✅ Yes, log {ticker}", "callback_data": f"quickbuy_confirm|{ticker}"},
+                {"text": "❌ Cancel",             "callback_data": "cancel_abort"},
+            ]],
+            chat_id=chat_id,
+        )
+        return
+
+    if action == "quickbuy_confirm":
         ticker = parts[1].upper() if len(parts) > 1 else ""
         if not ticker:
             return
@@ -585,7 +605,7 @@ def handle_callback_query(callback_query: dict) -> None:
             except Exception as exc:
                 print(f"[bot] buy count increment failed (non-critical): {exc}")
         except Exception as exc:
-            print(f"[bot] quickbuy failed for {ticker}: {exc}")
+            print(f"[bot] quickbuy_confirm failed for {ticker}: {exc}")
             send_message(f"⚠️ Couldn't log <b>{ticker}</b> — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
         return
 
@@ -1186,6 +1206,24 @@ def handle_callback_query(callback_query: dict) -> None:
 
     elif action == "cancel_abort":
         send_message("👍 Cancelled.", chat_id=chat_id)
+
+    elif action == "unalert_confirm":
+        # Execute alert removal after user confirmed
+        ticker    = parts[1].upper() if len(parts) > 1 else ""
+        price_enc = parts[2]         if len(parts) > 2 else ""
+        if not ticker:
+            send_message("⚠️ Missing ticker.", chat_id=chat_id)
+            return
+        import urllib.parse as _urlparse
+        price = None
+        if price_enc:
+            try:
+                price = float(_urlparse.unquote(price_enc))
+            except Exception:
+                pass
+        from price_alert_manager import remove_alert as _ra
+        result = _ra(chat_id, ticker, price)
+        send_message(result, chat_id=chat_id)
 
     elif action == "paper_reset_confirm":
         amount_raw = parts[1] if len(parts) > 1 else ""
@@ -2740,7 +2778,20 @@ def _cmd_alerts(text: str, original: str, chat_id: str) -> "str | None":
                 chat_id=chat_id,
             )
             return ""
-        return remove_alert(chat_id, ticker, price)
+        # Confirmation step — show what we're about to remove before executing
+        import urllib.parse as _urlparse
+        price_enc = _urlparse.quote(str(price) if price else "", safe="")
+        price_label = f" @ ${_p(price)}" if price else " (all levels)"
+        send_inline_keyboard(
+            f"🔕 <b>Remove alert for {ticker}?</b>{price_label}\n"
+            f"<i>You won't receive price notifications for this ticker.</i>",
+            [[
+                {"text": f"✅ Yes, remove {ticker}", "callback_data": f"unalert_confirm|{ticker}|{price_enc}"},
+                {"text": "❌ Cancel",                "callback_data": "cancel_abort"},
+            ]],
+            chat_id=chat_id,
+        )
+        return ""
 
     return None
 
