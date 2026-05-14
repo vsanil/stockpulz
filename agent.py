@@ -28,7 +28,7 @@ from config_manager import (
 )
 from etf_screener import run_etf_screener
 from trade_logger import check_and_close_trades
-from price_alert_manager import check_all_alerts
+from price_alert_manager import check_all_alerts, add_alert
 from screener import run_screener
 from crypto_screener import run_crypto_screener
 from ai_analyzer import analyze_with_claude, personalize_picks_batch, generate_trade_debrief
@@ -409,6 +409,12 @@ def run_morning(config: dict, now_et: datetime):
     # Auto-logging bot picks caused /positions to show positions the user never placed.
 
     _send_morning_personalised(picks, config, label="8:00 AM Morning Briefing")
+
+    # ── Auto stop-loss + entry alerts for morning picks ───────────────────────
+    try:
+        _auto_set_pick_alerts(picks, _all_recipients())
+    except Exception as exc:
+        print(f"[agent] _auto_set_pick_alerts wrapper failed (non-critical): {exc}")
 
     # ── Monday "Week Ahead" block ─────────────────────────────────────────────
     if now_et.weekday() == 0:   # Monday only
@@ -1230,6 +1236,45 @@ def _send_or_print(message: str, label: str = ""):
             success = send_message(message, chat_id=uid)
             if not success:
                 print(f"[agent] WARNING: Message failed to send to {uid}.")
+
+
+def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
+    """Auto-set stop-loss + entry alerts for morning picks. Silent — never raises."""
+    try:
+        all_sections = (
+            picks.get("stocks", {}).get("short_term", []) +
+            picks.get("stocks", {}).get("long_term",  []) +
+            picks.get("crypto", {}).get("short_term", []) +
+            picks.get("etfs",   {}).get("short_term", []) +
+            picks.get("etfs",   {}).get("long_term",  []) +
+            picks.get("commodities", {}).get("short_term", []) +
+            picks.get("commodities", {}).get("long_term",  [])
+        )
+        total_set = 0
+        for uid in recipients:
+            try:
+                log = load_user_trade_log(uid)
+                open_tickers = {t.get("ticker", "").upper() for t in log.get("open", [])}
+                for pick in all_sections:
+                    ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
+                    if not ticker or ticker in open_tickers:
+                        continue
+                    try:
+                        stop = pick.get("stop_loss")
+                        if stop:
+                            add_alert(uid, ticker, float(stop), direction="below")
+                            total_set += 1
+                        entry_low = pick.get("entry_low")
+                        if entry_low:
+                            add_alert(uid, ticker, float(entry_low), direction="below")
+                            total_set += 1
+                    except Exception as exc:
+                        print(f"[agent] _auto_set_pick_alerts: alert set failed for {ticker}/{uid}: {exc}")
+            except Exception as exc:
+                print(f"[agent] _auto_set_pick_alerts: user {uid} failed (non-critical): {exc}")
+        print(f"[agent] _auto_set_pick_alerts: set {total_set} alert(s) across {len(recipients)} user(s).")
+    except Exception as exc:
+        print(f"[agent] _auto_set_pick_alerts failed (non-critical): {exc}")
 
 
 def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""):

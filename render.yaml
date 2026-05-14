@@ -69,7 +69,7 @@ services:
   - type: cron
     name: stock-agent-morning
     runtime: python
-    schedule: "0 11 * * 1-5"       # 7:00 AM ET / 6:00 AM CDT (Mon–Fri) — morning briefing (arrives ~8:30 AM ET, 1 hour before open)
+    schedule: "30 8 * * 1-5"        # 4:30 AM ET (Mon–Fri) — pre-market delivery (arrives ~6:00 AM ET, well before open)
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
     envVars:

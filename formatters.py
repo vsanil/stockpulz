@@ -280,13 +280,22 @@ def format_daily_message(picks: dict, config: dict,
         window        = _entry_window(entry, stop=stop, budget=per_stock,
                                        is_long_term=False, is_crypto=False)
         window_line   = f"\n{window}" if window else ""
-        return (
+        lines = [
             f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
-            f"<i>{_esc(_short_company(s.get('company', '')))}</i>{earnings_tag}\n"
+            f"<i>{_esc(_short_company(s.get('company', '')))}</i>{earnings_tag}",
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}{window_line}\n"
-            f"<i>{_esc(s.get('thesis'))}</i>{personal_line}"
-        )
+            f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}{window_line}",
+            f"<i>{_esc(s.get('thesis'))}</i>",
+        ]
+        entry_low  = s.get('entry_low')
+        entry_high = s.get('entry_high')
+        if entry_low and entry_high:
+            lines.append(f"  📍 <i>Entry zone: ${entry_low:.2f}–${entry_high:.2f}  (don't chase above ${entry_high:.2f})</i>")
+        if s.get('invalidation'):
+            lines.append(f"  ⚠️ <i>Breaks if: {_esc(s['invalidation'])}</i>")
+        if personal_line:
+            lines.append(personal_line.lstrip("\n"))
+        return "\n".join(lines)
 
     def _pick_row_lt(i, s, personal_note: str = ""):
         entry, target = s.get("entry_price"), s.get("target_price")
@@ -299,13 +308,18 @@ def format_daily_message(picks: dict, config: dict,
         window        = _entry_window(entry, budget=per_stock,
                                        is_long_term=True, is_crypto=False)
         window_line   = f"\n{window}" if window else ""
-        return (
+        lines = [
             f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{social_badge}  "
-            f"<i>{_esc(_short_company(s.get('company', '')))}</i>\n"
+            f"<i>{_esc(_short_company(s.get('company', '')))}</i>",
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>  ·  {_esc(s.get('horizon'))}{alloc_str}{window_line}\n"
-            f"<i>{_esc(s.get('thesis'))}</i>{personal_line}"
-        )
+            f"<i>{_upside(entry, target)}</i>  ·  {_esc(s.get('horizon'))}{alloc_str}{window_line}",
+            f"<i>{_esc(s.get('thesis'))}</i>",
+        ]
+        if s.get('invalidation'):
+            lines.append(f"  ⚠️ <i>Breaks if: {_esc(s['invalidation'])}</i>")
+        if personal_line:
+            lines.append(personal_line.lstrip("\n"))
+        return "\n".join(lines)
 
     def _pick_row_cst(i, c, personal_note: str = "", streak: int = 0):
         entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
@@ -320,13 +334,22 @@ def format_daily_message(picks: dict, config: dict,
         window        = _entry_window(entry, stop=stop, budget=per_crypto,
                                        is_long_term=False, is_crypto=True)
         window_line   = f"\n{window}" if window else ""
-        return (
+        lines = [
             f"<b>{_esc(sym)}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
-            f"<i>{_esc(_short_company(c.get('name', '')))}</i>\n"
+            f"<i>{_esc(_short_company(c.get('name', '')))}</i>",
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}{window_line}\n"
-            f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
-        )
+            f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}{window_line}",
+            f"<i>{_esc(c.get('thesis'))}</i>",
+        ]
+        entry_low  = c.get('entry_low')
+        entry_high = c.get('entry_high')
+        if entry_low and entry_high:
+            lines.append(f"  📍 <i>Entry zone: ${entry_low:.2f}–${entry_high:.2f}  (don't chase above ${entry_high:.2f})</i>")
+        if c.get('invalidation'):
+            lines.append(f"  ⚠️ <i>Breaks if: {_esc(c['invalidation'])}</i>")
+        if personal_line:
+            lines.append(personal_line.lstrip("\n"))
+        return "\n".join(lines)
 
     def _pick_row_etf(i, e):
         entry, target, stop = e.get("entry_price"), e.get("target_price"), e.get("stop_loss")
@@ -336,13 +359,16 @@ def format_daily_message(picks: dict, config: dict,
         lt_label = "  <i>· long-term</i>" if is_lt else ""
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop and not is_lt else ""
         horizon  = f"  ·  {_esc(e.get('horizon', ''))}" if is_lt and e.get("horizon") else ""
-        return (
+        lines = [
             f"<b>{_esc(ticker)}</b>  {_stars(e.get('conviction', 3))}{badge}  "
-            f"<i>{_esc(_short_company(e.get('name', '')))}</i>{lt_label}\n"
+            f"<i>{_esc(_short_company(e.get('name', '')))}</i>{lt_label}",
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}\n"
-            f"<i>{_esc(e.get('thesis'))}</i>"
-        )
+            f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}",
+            f"<i>{_esc(e.get('thesis'))}</i>",
+        ]
+        if e.get('invalidation'):
+            lines.append(f"  ⚠️ <i>Breaks if: {_esc(e['invalidation'])}</i>")
+        return "\n".join(lines)
 
     def _pick_row_commodity(i, c):
         """Commodity ETF pick — same layout as ETF row."""
@@ -353,13 +379,16 @@ def format_daily_message(picks: dict, config: dict,
         lt_label = "  <i>· long-term</i>" if is_lt else ""
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop and not is_lt else ""
         horizon  = f"  ·  {_esc(c.get('horizon', ''))}" if is_lt and c.get("horizon") else ""
-        return (
+        lines = [
             f"<b>{_esc(ticker)}</b>  {_stars(c.get('conviction', 3))}{badge}  "
-            f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}\n"
+            f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}",
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}\n"
-            f"<i>{_esc(c.get('thesis'))}</i>"
-        )
+            f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}",
+            f"<i>{_esc(c.get('thesis'))}</i>",
+        ]
+        if c.get('invalidation'):
+            lines.append(f"  ⚠️ <i>Breaks if: {_esc(c['invalidation'])}</i>")
+        return "\n".join(lines)
 
     def _pick_row_options_play(i, o):
         """Simple directional options play tied to a high-conviction ST pick."""
@@ -656,6 +685,23 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
         lines += _section("🪙 Crypto", crypto_stats)
     elif show_crypto:
         lines += ["🪙 Crypto: no data this week"]
+
+    # ── Individual pick outcomes ───────────────────────────────────────────────
+    pick_outcomes = recap.get("pick_outcomes", [])
+    if pick_outcomes:
+        lines += ["", "📋 <b>This week's picks:</b>"]
+        # Group into rows of 3-4 items
+        row_items = []
+        for po in pick_outcomes:
+            ticker = po.get("ticker", "")
+            pct    = po.get("pct", 0)
+            icon   = "🟢" if pct > 0 else "🔴"
+            sign   = "+" if pct >= 0 else ""
+            row_items.append(f"{icon} {ticker} {sign}{pct}%")
+        # Output 3 per line
+        chunk_size = 3
+        for i in range(0, len(row_items), chunk_size):
+            lines.append("  " + "  ".join(row_items[i:i + chunk_size]))
 
     lines += [
         "",

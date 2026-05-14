@@ -495,6 +495,8 @@ SIGNAL GUIDANCE (use in thesis where relevant):
   - price_context: multi-day chart setup — breakout_today=True is a strong ST signal, consolidation_days≥10 means coiling energy.
   - sweep_detected (options): large block trade through single contract — institutional conviction, weight heavily.
   - analyst_target_mean / analyst_upside_pct: Wall Street consensus — large upside supports LT thesis.
+  - invalidation: one specific price level or event that would break the thesis (e.g. "closes below $145 support", "fails to hold 50-day MA", "earnings miss next week")
+  - entry_low / entry_high (ST stocks and crypto only): ideal buy zone. If entry is at a key level, set entry_low = entry_price * 0.99, entry_high = entry_price * 1.005. If chasing is a big risk (momentum stock, already up today), tighten: entry_high = entry_price * 1.002.
 
 Stock Candidates:
 {json.dumps(stock_candidates, indent=2)}
@@ -536,7 +538,10 @@ Return this exact JSON structure:
         "allocation": 12.50,
         "conviction": 4,
         "thesis": "one sentence why, max 15 words",
+        "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words",
+        "entry_low":  null,
+        "entry_high": null,
         "earnings_date": "Thu May 1 or omit if no earnings this week"
       }}
     ],
@@ -550,6 +555,7 @@ Return this exact JSON structure:
         "allocation": 16.67,
         "conviction": 5,
         "thesis": "one sentence why, max 15 words",
+        "invalidation": "one condition that breaks this setup, max 12 words",
         "horizon": "2-3 years",
         "earnings_date": "Thu May 1 or omit if no earnings this week"
       }}
@@ -568,7 +574,10 @@ Return this exact JSON structure:
         "allocation": 10.00,
         "conviction": 3,
         "thesis": "one sentence why, max 15 words",
-        "risk": "one sentence risk, max 10 words"
+        "invalidation": "one condition that breaks this setup, max 12 words",
+        "risk": "one sentence risk, max 10 words",
+        "entry_low":  null,
+        "entry_high": null
       }}
     ]
   }},
@@ -583,6 +592,7 @@ Return this exact JSON structure:
         "stop_loss": 427.50,
         "conviction": 3,
         "thesis": "one sentence why, max 15 words",
+        "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words"
       }}
     ],
@@ -595,6 +605,7 @@ Return this exact JSON structure:
         "target_price": 290.00,
         "conviction": 4,
         "thesis": "one sentence why, max 15 words",
+        "invalidation": "one condition that breaks this setup, max 12 words",
         "horizon": "1-3 years"
       }}
     ]
@@ -610,6 +621,7 @@ Return this exact JSON structure:
         "stop_loss": 209.00,
         "conviction": 4,
         "thesis": "one sentence why, max 15 words",
+        "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words"
       }}
     ],
@@ -622,6 +634,7 @@ Return this exact JSON structure:
         "target_price": 260.00,
         "conviction": 3,
         "thesis": "one sentence why, max 15 words",
+        "invalidation": "one condition that breaks this setup, max 12 words",
         "horizon": "6-12 months"
       }}
     ]

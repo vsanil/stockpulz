@@ -144,11 +144,32 @@ def build_weekly_recap() -> dict | None:
             "worst":      min(returns, key=lambda x: x[1]),
         }
 
+    # ── Individual pick outcomes (sorted by return, max 10) ──────────────────
+    pick_outcomes = []
+    for ticker, pct in sorted(stock_returns + crypto_returns, key=lambda x: x[1], reverse=True)[:10]:
+        asset_type = "crypto" if ticker in crypto_entries else "stock"
+        entries_list = (
+            stock_entries.get(ticker) or
+            (crypto_entries.get(ticker, {}).get("entries") if ticker in crypto_entries else None) or
+            []
+        )
+        avg_entry = sum(entries_list) / len(entries_list) if entries_list else None
+        cp = current.get(ticker)
+        pick_outcomes.append({
+            "ticker":  ticker,
+            "type":    asset_type,
+            "entry":   round(avg_entry, 2) if avg_entry is not None else None,
+            "current": round(cp, 2) if cp is not None else None,
+            "pct":     pct,
+            "status":  "▲" if pct > 0 else "▼",
+        })
+
     return {
-        "days_tracked": len(weekly),
-        "stocks":       stats(stock_returns),
-        "crypto":       stats(crypto_returns),
-        "spy_return":   round(spy_return, 1) if spy_return is not None else None,
+        "days_tracked":  len(weekly),
+        "stocks":        stats(stock_returns),
+        "crypto":        stats(crypto_returns),
+        "spy_return":    round(spy_return, 1) if spy_return is not None else None,
+        "pick_outcomes": pick_outcomes,
     }
 
 
