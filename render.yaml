@@ -75,6 +75,8 @@ services:
     envVars:
       - key: RUN_MODE
         value: morning
+      - key: RENDER_EXTERNAL_URL
+        value: https://stock-agent-enqx.onrender.com
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: FINNHUB_API_KEY
