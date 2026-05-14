@@ -866,6 +866,80 @@ def miniapp_toggle_paused():
     return jsonify({"ok": True, "paused": paused})
 
 
+@app.route("/api/miniapp/feedback", methods=["POST"])
+def miniapp_feedback():
+    """Submit feedback from the Mini App."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    body = request.get_json(silent=True) or {}
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "empty feedback"}), 400
+
+    from config_manager import add_feedback
+    # Fetch user profile for context
+    username, first_name = "", ""
+    try:
+        import requests as _req
+        r = _req.get(
+            f"{os.environ.get('TELEGRAM_API_BASE', 'https://api.telegram.org')}/bot{os.environ.get('TELEGRAM_BOT_TOKEN', '')}/getChat",
+            params={"chat_id": chat_id}, timeout=5,
+        )
+        result     = r.json().get("result", {})
+        first_name = result.get("first_name", "")
+        username   = result.get("username", "")
+    except Exception:
+        pass
+
+    add_feedback(chat_id, text, username=username, first_name=first_name)
+
+    # Notify admin
+    try:
+        from telegram_api import send_message as _send
+        admin_id  = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
+        name_str  = first_name or f"user {chat_id}"
+        uname_str = f"  @{username}" if username else ""
+        _send(
+            f"💬 <b>New feedback</b> (miniapp) from <b>{name_str}</b>{uname_str}\n\n{text}",
+            admin_id,
+        )
+    except Exception:
+        pass
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/miniapp/share_link")
+def miniapp_share_link():
+    """Return a shareable invite link for the current user."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    try:
+        import requests as _req
+        r = _req.get(
+            f"{os.environ.get('TELEGRAM_API_BASE', 'https://api.telegram.org')}/bot{os.environ.get('TELEGRAM_BOT_TOKEN', '')}/getMe",
+            timeout=5,
+        )
+        bot_username = r.json().get("result", {}).get("username", "")
+    except Exception:
+        bot_username = ""
+
+    if not bot_username:
+        return jsonify({"error": "could not fetch bot username"}), 500
+
+    deep_link = f"ref_{chat_id}"
+    bot_link  = f"https://t.me/{bot_username}?start={deep_link}"
+    share_text = (
+        "Hey! I'm using StockPulz — a personal AI stock advisor that sends daily stock & crypto picks, "
+        "price alerts, and weekly performance recaps.\n\nJoin here 👇\n" + bot_link
+    )
+    return jsonify({"ok": True, "url": bot_link, "text": share_text})
+
+
 # ── CLI webhook registration ──────────────────────────────────────────────────
 
 if __name__ == "__main__":
