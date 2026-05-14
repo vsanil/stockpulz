@@ -1308,6 +1308,48 @@ def miniapp_update_exclusions():
     return jsonify({"ok": True, "excluded_sectors": current})
 
 
+@app.route("/api/miniapp/paper_cancel", methods=["POST"])
+def miniapp_paper_cancel():
+    """Remove a paper position without recording it as a sale (cash refunded)."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    body   = request.get_json(silent=True) or {}
+    ticker = (body.get("ticker") or "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    from paper_trader import paper_cancel
+    try:
+        msg = paper_cancel(ticker, chat_id)
+        return jsonify({"ok": True, "message": msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/miniapp/paper_add_cash", methods=["POST"])
+def miniapp_paper_add_cash():
+    """Add cash to the user's paper portfolio."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    body   = request.get_json(silent=True) or {}
+    amount = body.get("amount")
+    if amount is None:
+        return jsonify({"error": "amount required"}), 400
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid amount"}), 400
+    if amount <= 0:
+        return jsonify({"error": "amount must be > 0"}), 400
+    from paper_trader import paper_add_cash
+    try:
+        msg = paper_add_cash(amount, chat_id)
+        return jsonify({"ok": True, "message": msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── CLI webhook registration ──────────────────────────────────────────────────
 
 if __name__ == "__main__":
