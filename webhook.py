@@ -16,7 +16,7 @@ from datetime import datetime as _dt, timedelta as _td
 from functools import wraps as _wraps
 
 import requests
-from flask import Flask, request, jsonify, session, redirect
+from flask import Flask, request, jsonify, session, redirect, send_from_directory
 
 from config_manager import get_config, get_allowed_users
 from telegram_notifier import handle_incoming_command, handle_callback_query, set_webhook, send_typing_action, typing_until_done, send_message
@@ -574,6 +574,211 @@ def admin_data():
         "cron":            cron,
         "last_morning_run": cfg.get("last_morning_run", ""),
     })
+
+
+# ── Mini App routes ───────────────────────────────────────────────────────────
+
+_MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "miniapp")
+
+
+@app.route("/miniapp")
+def miniapp_index():
+    """Serve the Telegram Mini App HTML."""
+    return send_from_directory(_MINIAPP_DIR, "index.html")
+
+
+def _miniapp_auth() -> str | None:
+    """
+    Extract and validate chat_id from the Mini App request.
+    Returns chat_id string if authorised, None otherwise.
+    The Mini App passes chat_id + init_data as query params (GET) or JSON body (POST).
+    We do a lightweight check: chat_id must be in allowed_users.
+    (Full Telegram initData HMAC validation can be added later.)
+    """
+    if request.method == "POST":
+        body    = request.get_json(silent=True) or {}
+        chat_id = str(body.get("chat_id", "")).strip()
+    else:
+        chat_id = str(request.args.get("chat_id", "")).strip()
+
+    if not chat_id:
+        return None
+    allowed = get_allowed_users()
+    # Also allow the owner even if not in allowed_users list
+    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if chat_id not in allowed and chat_id != owner:
+        return None
+    return chat_id
+
+
+@app.route("/api/miniapp/picks")
+def miniapp_picks():
+    """Return today's picks for the Mini App."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    from config_manager import load_picks, get_user_config
+    picks = load_picks() or {}
+    ucfg  = get_user_config(chat_id)
+
+    # Filter assets based on user preference
+    assets = ucfg.get("assets", "both")
+    if assets == "stocks":
+        picks.pop("crypto", None)
+    elif assets == "crypto":
+        picks.pop("stocks", None)
+        picks.pop("etfs", None)
+
+    return jsonify(picks)
+
+
+@app.route("/api/miniapp/positions")
+def miniapp_positions():
+    """Return open positions with live P&L for the Mini App."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    from config_manager import load_user_trade_log
+    from datetime import date as _date
+    import yfinance as _yf
+
+    log      = load_user_trade_log(chat_id)
+    open_pos = log.get("open", [])
+
+    _CRYPTO_SYMBOLS = {
+        "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
+        "LINK","UNI","ATOM","LTC","BCH","ALGO","XLM","VET","ICP","FIL",
+        "TRX","NEAR","OP","ARB","SUI","APT","INJ","SEI","TIA","HYPE",
+    }
+
+    def _price(ticker):
+        ticker = ticker.upper()
+        yf_sym = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
+        try:
+            fi = _yf.Ticker(yf_sym).fast_info
+            p  = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
+            if p: return float(p)
+        except Exception:
+            pass
+        return None
+
+    result = []
+    today  = _date.today()
+    for t in open_pos:
+        sym   = t["ticker"]
+        entry = t.get("entry_price")
+        cur   = _price(sym)
+        pnl   = None
+        if entry and cur:
+            pnl = round((cur - float(entry)) / float(entry) * 100, 2)
+        days = None
+        try:
+            days = (today - _date.fromisoformat(t.get("opened_date", ""))).days
+        except Exception:
+            pass
+        result.append({
+            "ticker":        sym,
+            "symbol":        sym,
+            "asset_type":    t.get("asset_type", "stock"),
+            "entry_price":   entry,
+            "current_price": round(cur, 4) if cur else None,
+            "target_price":  t.get("target_price"),
+            "stop_loss":     t.get("stop_loss"),
+            "pnl_pct":       pnl,
+            "days_held":     days,
+        })
+
+    return jsonify({"positions": result})
+
+
+@app.route("/api/miniapp/stats")
+def miniapp_stats():
+    """Return trade stats + closed trade history for the Mini App."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    from trade_logger import get_performance_stats
+    from config_manager import load_user_trade_log
+
+    stats  = get_performance_stats(chat_id) or {}
+    log    = load_user_trade_log(chat_id)
+    closed = sorted(
+        log.get("closed", []),
+        key=lambda t: t.get("closed_date", ""),
+        reverse=True,
+    )
+
+    # Map field names for the Mini App
+    mapped = {
+        "count":                 stats.get("count", 0),
+        "wins":                  stats.get("wins", 0),
+        "losses":                stats.get("losses", 0),
+        "win_rate":              stats.get("win_rate", 0),
+        "avg_gain":              stats.get("avg_gain", 0),
+        "avg_loss":              stats.get("avg_loss", 0),
+        "best":                  list(stats["best"])  if stats.get("best")  else ["—", 0],
+        "worst":                 list(stats["worst"]) if stats.get("worst") else ["—", 0],
+        "cumulative_return_pct": stats.get("cumulative_return_pct", 0),
+        "streak":                stats.get("streak", 0),
+    } if stats else {}
+
+    return jsonify({"stats": mapped, "closed": closed})
+
+
+@app.route("/api/miniapp/log_bought", methods=["POST"])
+def miniapp_log_bought():
+    """Log that the user bought a pick (same as /bought command)."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    body       = request.get_json(silent=True) or {}
+    ticker     = str(body.get("ticker", "")).upper().strip()
+    if not ticker:
+        return jsonify({"error": "missing ticker"}), 400
+
+    from trade_logger import add_holding
+    from config_manager import load_picks
+    picks = load_picks() or {}
+    trade, existed = add_holding(ticker, chat_id, picks=picks)
+    return jsonify({"ok": True, "existed": existed, "trade": trade})
+
+
+@app.route("/api/miniapp/settings")
+def miniapp_settings():
+    """Return the user's settings for the Mini App."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    from config_manager import get_user_config
+    ucfg = get_user_config(chat_id)
+    return jsonify({"settings": {
+        "risk_profile":   ucfg.get("risk_profile", "moderate"),
+        "assets":         ucfg.get("assets", "both"),
+        "stock_budget":   ucfg.get("stock_budget"),
+        "crypto_budget":  ucfg.get("crypto_budget"),
+        "paused":         ucfg.get("paused", False),
+    }})
+
+
+@app.route("/api/miniapp/toggle_paused", methods=["POST"])
+def miniapp_toggle_paused():
+    """Toggle the user's paused state from the Mini App."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    from config_manager import get_user_config, save_user_config
+    body   = request.get_json(silent=True) or {}
+    paused = bool(body.get("paused", False))
+    ucfg   = get_user_config(chat_id)
+    ucfg["paused"] = paused
+    save_user_config(chat_id, ucfg)
+    return jsonify({"ok": True, "paused": paused})
 
 
 # ── CLI webhook registration ──────────────────────────────────────────────────

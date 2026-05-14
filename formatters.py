@@ -7,6 +7,7 @@ any other module that needs to build a message string.
 """
 
 import html
+import os
 from datetime import date, datetime
 import pytz
 
@@ -484,6 +485,14 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     _add_section(lt_picks,  lambda s: s["ticker"], "stock",  "── 🏛 Long Term ──")
     _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──")
     _add_section(etf_picks, lambda e: e["ticker"], "stock",  "── 📦 ETFs ──")
+
+    # ── Mini App launch button ────────────────────────────────────────────────
+    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    if render_url:
+        buttons.append([{
+            "text":    "📊 Open Dashboard",
+            "web_app": {"url": f"{render_url}/miniapp"},
+        }])
 
     return buttons
 
