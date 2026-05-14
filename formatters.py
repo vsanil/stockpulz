@@ -227,6 +227,15 @@ def format_daily_message(picks: dict, config: dict,
     # Crypto — short-term only (LT crypto removed)
     cst_picks = crypto.get("short_term", []) if show_crypto else []
 
+    # Commodity picks
+    commodities  = picks.get("commodities", {})
+    comm_st      = commodities.get("short_term", []) if show_st else []
+    comm_lt      = [{**c, "_lt": True} for c in commodities.get("long_term", [])] if show_lt else []
+    comm_picks   = comm_st + comm_lt
+
+    # Options plays (top-level array)
+    options_plays = picks.get("options_plays", [])
+
     # Macro context line — conversational narrative
     m = picks.get("macro_context", {})
     macro_line = _macro_narrative_line(m)
@@ -335,6 +344,37 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_esc(e.get('thesis'))}</i>"
         )
 
+    def _pick_row_commodity(i, c):
+        """Commodity ETF pick — same layout as ETF row."""
+        entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
+        ticker   = c.get("ticker", "")
+        is_lt    = c.get("_lt", False)
+        badge    = _conviction_badge(c.get("conviction", 3))
+        lt_label = "  <i>· long-term</i>" if is_lt else ""
+        stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop and not is_lt else ""
+        horizon  = f"  ·  {_esc(c.get('horizon', ''))}" if is_lt and c.get("horizon") else ""
+        return (
+            f"<b>{_esc(ticker)}</b>  {_stars(c.get('conviction', 3))}{badge}  "
+            f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}\n"
+            f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
+            f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}\n"
+            f"<i>{_esc(c.get('thesis'))}</i>"
+        )
+
+    def _pick_row_options_play(i, o):
+        """Simple directional options play tied to a high-conviction ST pick."""
+        ticker = o.get("ticker", "")
+        action = o.get("action", "CALL").upper()
+        strike = o.get("strike")
+        expiry = o.get("expiry", "")
+        note   = o.get("note", "")
+        icon   = "📈" if action == "CALL" else "📉"
+        return (
+            f"{icon} <b>{_esc(ticker)}</b>  {_esc(action)}  "
+            f"strike <code>${_p(strike)}</code>  exp <i>{_esc(expiry)}</i>\n"
+            f"<i>{_esc(note)}</i>"
+        )
+
     pn = personal_notes or {}   # ticker/symbol → personal note string
     ps = pick_streaks   or {}   # ticker/symbol → consecutive-day count
     bc = buy_counts     or {}   # ticker/symbol → number of members who bought today
@@ -369,6 +409,20 @@ def format_daily_message(picks: dict, config: dict,
             for i, e in enumerate(etf_picks, 1)
         )
         lines += ["", f"<blockquote expandable>📦 <b>ETF PICKS</b>\n\n{body}</blockquote>"]
+
+    if comm_picks:
+        body = "\n\n".join(
+            _pick_row_commodity(i, c)
+            for i, c in enumerate(comm_picks, 1)
+        )
+        lines += ["", f"<blockquote expandable>🛢 <b>COMMODITIES</b>\n\n{body}</blockquote>"]
+
+    if options_plays:
+        body = "\n\n".join(
+            _pick_row_options_play(i, o)
+            for i, o in enumerate(options_plays, 1)
+        )
+        lines += ["", f"<blockquote expandable>🎯 <b>OPTIONS PLAYS</b>  <i>· illustrative only</i>\n\n{body}</blockquote>"]
 
     # Footer — sector concentration warning (only shown when picks are concentrated)
     sector_counts: dict = {}
@@ -451,11 +505,17 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         [e for e in etfs.get("short_term", []) if e.get("ticker")] +
         [e for e in etfs.get("long_term",  []) if e.get("ticker")]
     )
+    commodities = picks.get("commodities", {})
+    comm_picks  = (
+        [c for c in commodities.get("short_term", []) if c.get("ticker")] +
+        [c for c in commodities.get("long_term",  []) if c.get("ticker")]
+    )
 
     _add_section(st_picks,  lambda s: s["ticker"], "stock",  "── 📈 Short Term ──")
     _add_section(lt_picks,  lambda s: s["ticker"], "stock",  "── 🏛 Long Term ──")
     _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──")
     _add_section(etf_picks, lambda e: e["ticker"], "stock",  "── 📦 ETFs ──")
+    _add_section(comm_picks, lambda c: c["ticker"], "stock", "── 🛢 Commodities ──")
 
     # ── Mini App launch button ────────────────────────────────────────────────
     render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
@@ -527,6 +587,16 @@ def format_confirmation_message(picks: dict, current_prices: dict,
         lines += ["", "<b>🪙 Crypto</b>"]
         for c in cst:
             lines.append(price_line(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")))
+
+    comm     = picks.get("commodities", {})
+    comm_st  = comm.get("short_term", [])
+    comm_lt  = comm.get("long_term",  [])
+    if comm_st or comm_lt:
+        lines += ["", "<b>🛢 Commodities</b>"]
+        for c in comm_st:
+            lines.append(price_line(c.get("ticker", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")))
+        for c in comm_lt:
+            lines.append(price_line(c.get("ticker", ""), c.get("entry_price"), c.get("target_price"), None))
 
     lines += ["", "🔴 stop hit  ✅ on track  ⚠️ watch  🟡 flat", "<i>⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share  ·  💬 /feedback"]
     return "\n".join(lines)
@@ -643,14 +713,17 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
                 f"{change_str}  from <code>${_p(entry)}</code>{badge_str}{lbl}")
 
     etfs = picks.get("etfs", {})
-    st   = stocks.get("short_term", [])
-    lt   = stocks.get("long_term",  [])
-    cst  = crypto.get("short_term", [])
-    clt  = crypto.get("long_term",  [])
-    est  = etfs.get("short_term",   [])
-    elt  = etfs.get("long_term",    [])
+    comm = picks.get("commodities", {})
+    st      = stocks.get("short_term", [])
+    lt      = stocks.get("long_term",  [])
+    cst     = crypto.get("short_term", [])
+    clt     = crypto.get("long_term",  [])
+    est     = etfs.get("short_term",   [])
+    elt     = etfs.get("long_term",    [])
+    comm_st = comm.get("short_term",   [])
+    comm_lt = comm.get("long_term",    [])
 
-    if st or lt or cst or clt or est or elt:
+    if st or lt or cst or clt or est or elt or comm_st or comm_lt:
         any_picks = True
         lines.append("<b>Today's picks:</b>")
         for s in st:
@@ -665,12 +738,17 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
             lines.append(_row(e.get("ticker", ""), e.get("entry_price"), e.get("target_price"), e.get("stop_loss"), "ETF"))
         for e in elt:
             lines.append(_row(e.get("ticker", ""), e.get("entry_price"), e.get("target_price"), None, "ETF LT"))
+        for c in comm_st:
+            lines.append(_row(c.get("ticker", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss"), "🛢"))
+        for c in comm_lt:
+            lines.append(_row(c.get("ticker", ""), c.get("entry_price"), c.get("target_price"), None, "🛢 LT"))
 
     # User's portfolio holdings not already in picks
     pick_symbols = (
         {s.get("ticker") for s in st + lt} |
         {c.get("symbol") for c in cst + clt} |
-        {e.get("ticker") for e in est + elt}
+        {e.get("ticker") for e in est + elt} |
+        {c.get("ticker") for c in comm_st + comm_lt}
     )
     extra = [h for h in open_holdings if h.get("ticker") not in pick_symbols
              and h.get("entry_price") and current_prices.get(h["ticker"])]
@@ -710,14 +788,17 @@ def format_eod_full_summary(
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
     etfs   = picks.get("etfs",   {})
-    st  = stocks.get("short_term", [])
-    lt  = stocks.get("long_term",  [])
-    cst = crypto.get("short_term", [])
-    clt = crypto.get("long_term",  [])
-    est = etfs.get("short_term",   [])
-    elt = etfs.get("long_term",    [])
+    comm   = picks.get("commodities", {})
+    st      = stocks.get("short_term", [])
+    lt      = stocks.get("long_term",  [])
+    cst     = crypto.get("short_term", [])
+    clt     = crypto.get("long_term",  [])
+    est     = etfs.get("short_term",   [])
+    elt     = etfs.get("long_term",    [])
+    comm_st = comm.get("short_term",   [])
+    comm_lt = comm.get("long_term",    [])
 
-    if not any([st, lt, cst, clt, est, elt]):
+    if not any([st, lt, cst, clt, est, elt, comm_st, comm_lt]):
         return ""
 
     lines = [f"<u><b>📊 End of Day — {date_str}</b></u>", ""]
@@ -788,11 +869,24 @@ def format_eod_full_summary(
                           e.get("target_price"), None, "LT")
             lines.append(row)
 
+    # ── Commodities ───────────────────────────────────────────────────────────
+    if comm_st or comm_lt:
+        lines.append("<b>🛢 Commodities</b>")
+        for c in comm_st:
+            _, row = _row(c.get("ticker", ""), c.get("entry_price"),
+                          c.get("target_price"), c.get("stop_loss"))
+            lines.append(row)
+        for c in comm_lt:
+            _, row = _row(c.get("ticker", ""), c.get("entry_price"),
+                          c.get("target_price"), None, "LT")
+            lines.append(row)
+
     # ── User holdings not in today's picks ───────────────────────────────────
     pick_syms = (
         {s.get("ticker") for s in st + lt} |
         {c.get("symbol") for c in cst + clt} |
-        {e.get("ticker") for e in est + elt}
+        {e.get("ticker") for e in est + elt} |
+        {c.get("ticker") for c in comm_st + comm_lt}
     )
     extra = [h for h in open_holdings if h.get("ticker") not in pick_syms
              and h.get("entry_price") and current_prices.get(h["ticker"])]

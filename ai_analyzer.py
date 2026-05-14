@@ -17,7 +17,7 @@ from config_manager import (
     get_cached_signal, set_cached_signal,
 )
 
-MAX_TOKENS = 2500   # ~1500-2000 tokens actual output for stocks + crypto + ETFs; 2500 gives safe headroom
+MAX_TOKENS = 3500   # ~2500-3000 tokens with commodities + options plays; 3500 gives safe headroom
 
 
 # ── News via yfinance (no API key needed) ─────────────────────────────────────
@@ -250,6 +250,56 @@ def _build_crypto_candidates(crypto_results: dict) -> list[dict]:
     return candidates
 
 
+# ── Commodity candidates ──────────────────────────────────────────────────────
+
+_COMMODITY_TICKERS = [
+    ("GLD",  "SPDR Gold Shares",                                      "Gold"),
+    ("SLV",  "iShares Silver Trust",                                  "Silver"),
+    ("USO",  "United States Oil Fund",                                "Oil"),
+    ("WEAT", "Teucrium Wheat Fund",                                   "Wheat"),
+    ("GDX",  "VanEck Gold Miners ETF",                               "Gold Miners"),
+    ("UNG",  "United States Natural Gas Fund",                        "Natural Gas"),
+    ("PDBC", "Invesco Optimum Yield Diversified Commodity Strategy",  "Diversified"),
+]
+
+
+def _build_commodity_candidates() -> list[dict]:
+    """
+    Fetch current price + 14-day RSI for each commodity ETF via yfinance.
+    Returns lightweight candidate dicts — Claude picks 0-2 based on market context.
+    Called once per morning run; no screener required.
+    """
+    candidates = []
+    for ticker, name, commodity in _COMMODITY_TICKERS:
+        try:
+            fi    = yf.Ticker(ticker).fast_info
+            price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
+            if not price:
+                continue
+            rsi = None
+            try:
+                hist = yf.Ticker(ticker).history(period="3mo", interval="1d")
+                if len(hist) >= 15:
+                    delta = hist["Close"].diff()
+                    gain  = delta.clip(lower=0).rolling(14).mean()
+                    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+                    rs    = gain / loss
+                    rsi   = round(float((100 - 100 / (1 + rs)).iloc[-1]), 1)
+            except Exception:
+                pass
+            candidates.append({
+                "ticker":        ticker,
+                "name":          name,
+                "commodity":     commodity,
+                "current_price": round(float(price), 2),
+                "rsi":           rsi,
+            })
+        except Exception as exc:
+            print(f"[ai_analyzer] Commodity candidate error for {ticker}: {exc}")
+    print(f"[ai_analyzer] Built {len(candidates)} commodity candidates.")
+    return candidates
+
+
 # ── Claude prompts ────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = (
@@ -301,6 +351,7 @@ def _build_user_prompt(
     regime_info: dict | None = None,
     pick_mode: str = "both",
     etf_candidates: list[dict] | None = None,
+    commodity_candidates: list[dict] | None = None,
 ) -> str:
     # Pre-build conditional blocks (backslashes not allowed inside f-string expressions)
     if recent_losers:
@@ -429,6 +480,22 @@ Crypto Candidates:
 ETF Candidates:
 {json.dumps(etf_candidates or [], indent=2)}
 
+Commodity Candidates:
+{json.dumps(commodity_candidates or [], indent=2)}
+
+COMMODITIES (OPTIONAL — 0–2 picks):
+  Use only tickers from the commodity candidates above. Include a pick ONLY if there is a
+  clear macro or technical setup (e.g. gold breaking out on rate cut bets, oil supply shock,
+  silver momentum surge). Return [] for both short_term and long_term when no strong thesis exists.
+  Short-term: entry/target/stop, 2-4 week horizon.
+  Long-term: entry/target only, 3-12 month horizon.
+
+OPTIONS PLAYS (OPTIONAL — 0–2 plays):
+  For ST stock picks that have conviction 4 or 5, you may suggest a simple directional play.
+  Format: ticker, CALL or PUT, a slightly OTM strike, expiry ~2-3 weeks out, note under 12 words.
+  Return [] if no ST stock picks have conviction 4+.
+  These are illustrative / educational only — not buy recommendations.
+
 Return this exact JSON structure:
 {{
   "daily_summary": "one sentence overall market mood covering both stocks and crypto",
@@ -507,6 +574,42 @@ Return this exact JSON structure:
       }}
     ]
   }},
+  "commodities": {{
+    "short_term": [
+      {{
+        "ticker": "GLD",
+        "name": "SPDR Gold Shares",
+        "action": "BUY",
+        "entry_price": 220.00,
+        "target_price": 235.00,
+        "stop_loss": 209.00,
+        "conviction": 4,
+        "thesis": "one sentence why, max 15 words",
+        "risk": "one sentence risk, max 10 words"
+      }}
+    ],
+    "long_term": [
+      {{
+        "ticker": "GLD",
+        "name": "SPDR Gold Shares",
+        "action": "BUY",
+        "entry_price": 220.00,
+        "target_price": 260.00,
+        "conviction": 3,
+        "thesis": "one sentence why, max 15 words",
+        "horizon": "6-12 months"
+      }}
+    ]
+  }},
+  "options_plays": [
+    {{
+      "ticker": "NVDA",
+      "action": "CALL",
+      "strike": 900.00,
+      "expiry": "Jun 6, 2025",
+      "note": "Ride the ST breakout with defined risk"
+    }}
+  ],
   "disclaimer": "For informational purposes only. Not financial advice. Crypto is highly volatile."
 }}"""
 
@@ -607,18 +710,38 @@ def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
             "long_term":  _clean_section(etfs.get("long_term",  []), is_crypto=False),
         }
 
+    commodities = picks.get("commodities", {})
+    if commodities:
+        result["commodities"] = {
+            "short_term": _clean_section(commodities.get("short_term", []), is_crypto=False),
+            "long_term":  _clean_section(commodities.get("long_term",  []), is_crypto=False),
+        }
+
+    # Options plays: validate that referenced ticker is known
+    options_plays = picks.get("options_plays", [])
+    if options_plays:
+        clean_opts = []
+        for o in options_plays:
+            sym = (o.get("ticker") or "").upper().strip()
+            if sym and (sym in valid_stock_tickers or _is_valid_ticker(sym)):
+                clean_opts.append(o)
+            else:
+                print(f"[ai_analyzer] Dropped options play for unknown ticker: {sym}")
+        if clean_opts:
+            result["options_plays"] = clean_opts
+
     # Preserve any top-level keys Claude adds (macro_note, regime, etc.)
     for k, v in picks.items():
-        if k not in ("stocks", "crypto", "etfs"):
+        if k not in ("stocks", "crypto", "etfs", "commodities", "options_plays"):
             result[k] = v
 
     total_before = sum(
         len(picks.get(a, {}).get(s, []))
-        for a in ("stocks", "crypto", "etfs") for s in ("short_term", "long_term")
+        for a in ("stocks", "crypto", "etfs", "commodities") for s in ("short_term", "long_term")
     )
     total_after = sum(
         len(result.get(a, {}).get(s, []))
-        for a in ("stocks", "crypto", "etfs") for s in ("short_term", "long_term")
+        for a in ("stocks", "crypto", "etfs", "commodities") for s in ("short_term", "long_term")
     )
     if total_before != total_after:
         print(f"[ai_analyzer] Ticker validation: {total_before} picks → {total_after} after cleaning "
@@ -671,10 +794,14 @@ def analyze_with_claude(
             [{**e, "_lt": True} for e in etf_results.get("long_term", [])]
         )
 
+    print("[ai_analyzer] Building commodity candidates payload...")
+    commodity_candidates = _build_commodity_candidates()
+
     # Build valid ticker set for post-analysis validation
     valid_stock_tickers: set = (
         {c["ticker"].upper() for c in stock_candidates if c.get("ticker")} |
-        {e.get("ticker", "").upper() for e in etf_candidates if e.get("ticker")}
+        {e.get("ticker", "").upper() for e in etf_candidates if e.get("ticker")} |
+        {c["ticker"].upper() for c in commodity_candidates if c.get("ticker")}
     )
 
     # Pass market regime context from screener results if available
@@ -686,6 +813,7 @@ def analyze_with_claude(
         regime_info=regime_info,
         pick_mode=config.get("pick_mode", "both"),
         etf_candidates=etf_candidates or [],
+        commodity_candidates=commodity_candidates,
     )
 
     # Sonnet for main analysis — quality matters for picks
@@ -719,10 +847,12 @@ def _backfill_allocations(picks: dict, config: dict) -> None:
 
     if stock_budget:
         stock_picks = (
-            picks.get("stocks", {}).get("short_term", []) +
-            picks.get("stocks", {}).get("long_term",  []) +
-            picks.get("etfs",   {}).get("short_term", []) +
-            picks.get("etfs",   {}).get("long_term",  [])
+            picks.get("stocks",      {}).get("short_term", []) +
+            picks.get("stocks",      {}).get("long_term",  []) +
+            picks.get("etfs",        {}).get("short_term", []) +
+            picks.get("etfs",        {}).get("long_term",  []) +
+            picks.get("commodities", {}).get("short_term", []) +
+            picks.get("commodities", {}).get("long_term",  [])
         )
         n = len(stock_picks)
         if n:
@@ -762,12 +892,15 @@ def personalize_picks(picks: dict, open_positions: list[dict], risk_profile: str
     stocks = picks.get("stocks", {})
     crypto = picks.get("crypto", {})
     etfs   = picks.get("etfs", {})
+    comms  = picks.get("commodities", {})
     all_picks = (
         [p.get("ticker", "") for p in stocks.get("short_term", [])] +
         [p.get("ticker", "") for p in stocks.get("long_term",  [])] +
         [c.get("symbol", "") for c in crypto.get("short_term", [])] +
         [e.get("ticker", "") for e in etfs.get("short_term", [])] +
-        [e.get("ticker", "") for e in etfs.get("long_term",  [])]
+        [e.get("ticker", "") for e in etfs.get("long_term",  [])] +
+        [c.get("ticker", "") for c in comms.get("short_term", [])] +
+        [c.get("ticker", "") for c in comms.get("long_term",  [])]
     )
     all_picks = [t for t in all_picks if t]
     if not all_picks:
