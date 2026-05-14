@@ -274,6 +274,41 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None) -> tuple[d
     return trade, False
 
 
+def close_trade(ticker: str, chat_id: str, exit_price: float | None = None) -> dict | None:
+    """
+    Manually close an open trade, recording P&L in closed history.
+    Returns the closed trade dict, or None if ticker not found in open trades.
+    Called by the Mini App sell flow.
+    """
+    today  = date.today().isoformat()
+    log    = load_user_trade_log(chat_id)
+    ticker = ticker.upper()
+
+    for i, trade in enumerate(log["open"]):
+        if trade["ticker"] == ticker:
+            entry      = trade.get("entry_price")
+            return_pct = 0.0
+            gain_usd   = 0.0
+            if entry and exit_price:
+                return_pct = (float(exit_price) - float(entry)) / float(entry) * 100
+                allocation = float(trade.get("allocation") or 0)
+                gain_usd   = round(allocation * return_pct / 100, 2)
+            closed = {
+                **trade,
+                "closed_date":  today,
+                "closed_price": round(float(exit_price), 4) if exit_price else None,
+                "outcome":      "manual",
+                "return_pct":   round(return_pct, 2),
+                "gain_usd":     gain_usd,
+            }
+            log["open"].pop(i)
+            log["closed"].append(closed)
+            save_user_trade_log(chat_id, log)
+            print(f"[trade_logger] Closed {ticker} manually @ ${exit_price} ({return_pct:+.1f}%) for {chat_id}")
+            return closed
+    return None
+
+
 def remove_holding(ticker: str, chat_id: str) -> bool:
     """
     Remove a ticker from a user's portfolio.
