@@ -783,6 +783,67 @@ def miniapp_settings():
     }})
 
 
+_CHART_CRYPTO = {
+    "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
+    "LINK","UNI","ATOM","LTC","BCH","ALGO","XLM","VET","ICP","FIL",
+    "TRX","NEAR","OP","ARB","SUI","APT","INJ","SEI","TIA","HYPE",
+}
+
+
+@app.route("/api/miniapp/chart/<ticker>")
+def miniapp_chart(ticker):
+    """Return 3-month daily OHLCV data for the Mini App chart overlay."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    ticker     = ticker.upper()
+    asset_type = request.args.get("asset_type", "")
+    is_crypto  = asset_type == "crypto" or ticker in _CHART_CRYPTO
+    yf_sym     = f"{ticker}-USD" if is_crypto else ticker
+
+    try:
+        import yfinance as _yf
+        hist = _yf.Ticker(yf_sym).history(period="3mo", interval="1d")
+        if hist.empty:
+            return jsonify({"error": "no data", "ticker": ticker}), 404
+        data = []
+        for ts, row in hist.iterrows():
+            data.append({
+                "time":   ts.strftime("%Y-%m-%d"),
+                "open":   round(float(row["Open"]),  4),
+                "high":   round(float(row["High"]),  4),
+                "low":    round(float(row["Low"]),   4),
+                "close":  round(float(row["Close"]), 4),
+                "volume": int(row["Volume"]),
+            })
+        return jsonify({"ticker": ticker, "data": data})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/miniapp/close_position", methods=["POST"])
+def miniapp_close_position():
+    """Close (sell) an open position from the Mini App, recording P&L."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    body   = request.get_json(silent=True) or {}
+    ticker = str(body.get("ticker", "")).upper().strip()
+    price  = body.get("price")
+    if not ticker:
+        return jsonify({"error": "missing ticker"}), 400
+
+    exit_price = float(price) if price else None
+
+    from trade_logger import close_trade
+    result = close_trade(ticker, chat_id, exit_price=exit_price)
+    if result is None:
+        return jsonify({"ok": False, "error": "position not found"}), 404
+    return jsonify({"ok": True, "trade": result})
+
+
 @app.route("/api/miniapp/toggle_paused", methods=["POST"])
 def miniapp_toggle_paused():
     """Toggle the user's paused state from the Mini App."""
