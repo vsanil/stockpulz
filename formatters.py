@@ -224,35 +224,8 @@ def format_daily_message(picks: dict, config: dict,
     etf_lt     = [{**e, "_lt": True} for e in etfs.get("long_term", [])] if show_lt else []
     etf_picks  = etf_st + etf_lt
 
-    # Merge ST + LT crypto — tag LT picks, deduplicate by symbol (ST wins)
-    if show_crypto:
-        _cst = crypto.get("short_term", [])
-        _clt = [{**c, "_lt": True} for c in crypto.get("long_term", [])]
-        _seen: set = set()
-        cst_picks = []
-        for c in _cst + _clt:
-            sym = c.get("symbol", "")
-            if sym not in _seen:
-                _seen.add(sym)
-                cst_picks.append(c)
-    else:
-        cst_picks = []
-
-    # Apply per-user pick caps
-    max_s = config.get("max_stock_picks")
-    max_c = config.get("max_crypto_picks")
-    if max_s is not None and max_s > 0:
-        if show_st and show_lt:
-            n_st = max(1, round(max_s * 0.4))
-            n_lt = max(0, max_s - n_st)
-        elif show_st:
-            n_st, n_lt = max_s, 0
-        else:
-            n_st, n_lt = 0, max_s
-        st_picks = st_picks[:n_st]
-        lt_picks = lt_picks[:n_lt]
-    if max_c is not None and max_c > 0:
-        cst_picks = cst_picks[:max_c]
+    # Crypto — short-term only (LT crypto removed)
+    cst_picks = crypto.get("short_term", []) if show_crypto else []
 
     # Macro context line — conversational narrative
     m = picks.get("macro_context", {})
@@ -328,21 +301,19 @@ def format_daily_message(picks: dict, config: dict,
     def _pick_row_cst(i, c, personal_note: str = "", streak: int = 0):
         entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
         sym           = c.get("symbol", "")
-        is_lt         = c.get("_lt", False)
         alloc         = c.get("allocation")
         alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
         badge         = _conviction_badge(c.get("conviction", 3))
         streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
         social_badge  = _buy_badge(sym)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
-        lt_label      = "  <i>· long-term</i>" if is_lt else ""
-        stop_str      = f"  ·  stop <code>${_p(stop)}</code>" if not is_lt else ""
+        stop_str      = f"  ·  stop <code>${_p(stop)}</code>" if stop else ""
         window        = _entry_window(entry, stop=stop, budget=per_crypto,
-                                       is_long_term=is_lt, is_crypto=True)
+                                       is_long_term=False, is_crypto=True)
         window_line   = f"\n{window}" if window else ""
         return (
             f"<b>{_esc(sym)}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
-            f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}\n"
+            f"<i>{_esc(_short_company(c.get('name', '')))}</i>\n"
             f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
             f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}{window_line}\n"
             f"<i>{_esc(c.get('thesis'))}</i>{personal_line}"
