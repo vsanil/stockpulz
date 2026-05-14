@@ -549,6 +549,86 @@ body {
 }
 .btn-primary:active   { opacity: 0.85; }
 .btn-primary:disabled { opacity: 0.45; cursor: default; }
+
+/* ── Alerts tab ─────────────────────────────────────────────────────────── */
+.alert-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.alert-row:last-child { border-bottom: none; }
+.alert-ticker { font-size: 15px; font-weight: 700; min-width: 52px; }
+.alert-info   { flex: 1; min-width: 0; }
+.alert-price  { font-size: 14px; font-weight: 600; color: var(--text); }
+.alert-away   { font-size: 11px; color: var(--hint); margin-top: 2px; }
+.dir-badge {
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; flex-shrink: 0;
+}
+.dir-badge.above { background: rgba(48,209,88,.15);  color: var(--green); }
+.dir-badge.below { background: rgba(255,69,58,.15);  color: var(--red);   }
+.dir-badge.auto  { background: rgba(79,142,247,.15); color: var(--link);  }
+.alert-del {
+  background: transparent; border: none; color: var(--hint); font-size: 16px;
+  cursor: pointer; padding: 4px; flex-shrink: 0; transition: color 0.15s;
+}
+.alert-del:active { color: var(--red); }
+.alert-section-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; font-weight: 600; color: var(--hint);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 18px 0 8px;
+}
+.btn-add-alert {
+  background: rgba(79,142,247,.1); border: 1px solid rgba(79,142,247,.25);
+  color: var(--link); font-size: 13px; font-weight: 700;
+  padding: 6px 14px; border-radius: 20px; cursor: pointer; font-family: inherit;
+}
+.btn-add-alert:active { opacity: 0.75; }
+
+/* Alert sheet direction buttons */
+.dir-btn {
+  flex: 1; padding: 9px; border-radius: 10px;
+  border: 1px solid var(--border); color: var(--hint);
+  background: transparent; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all 0.15s;
+}
+.dir-btn.active { background: var(--btn); color: #fff; border-color: var(--btn); }
+
+/* ── Real/Paper toggle ───────────────────────────────────────────────────── */
+.rp-toggle {
+  display: flex; background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 3px; gap: 3px; margin-bottom: 14px;
+}
+.rp-btn {
+  flex: 1; padding: 8px; border-radius: 9px; border: none;
+  background: transparent; color: var(--hint);
+  font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  transition: all 0.2s;
+}
+.rp-btn.active { background: var(--btn); color: #fff; }
+
+/* ── History section header (collapsible) ───────────────────────────────── */
+.hist-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 0 8px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.hist-hdr-left  { font-size: 12px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: 0.06em; }
+.hist-toggle    { font-size: 13px; color: var(--hint); transition: transform 0.2s; }
+.hist-toggle.open { transform: rotate(180deg); }
+
+/* ── Editable settings ───────────────────────────────────────────────────── */
+.setting-tap {
+  font-size: 14px; color: var(--link); font-weight: 600;
+  cursor: pointer; display: flex; align-items: center; gap: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+.setting-tap:active { opacity: 0.7; }
+.setting-edit-icon { font-size: 12px; color: var(--hint); }
+.budget-input {
+  border: none; background: transparent; color: var(--link);
+  font-size: 14px; font-weight: 600; font-family: inherit;
+  text-align: right; outline: none; width: 90px;
+  border-bottom: 1px solid var(--btn);
+}
 </style>
 </head>
 
@@ -584,21 +664,29 @@ body {
     <div class="loading" id="sett-spinner"><div class="spinner"></div>Loading settings…</div>
     <div id="sett-body" style="display:none"></div>
   </div>
+
+  <div class="tab-pane" id="pane-alerts">
+    <div class="loading" id="alerts-spinner"><div class="spinner"></div>Loading alerts…</div>
+    <div id="alerts-body" style="display:none"></div>
+  </div>
 </div>
 
 <!-- ── Bottom nav ──────────────────────────────────────────────────────────── -->
 <nav class="bottom-nav">
   <div class="nav-item active" id="nav-picks"     onclick="gotoTab('picks')">
-    <div class="nav-icon">🔥</div><div class="nav-label">Picks</div>
+    <div class="nav-icon">🔥</div><div class="nav-label" style="font-size:9px">Picks</div>
   </div>
   <div class="nav-item"        id="nav-portfolio" onclick="gotoTab('portfolio')">
-    <div class="nav-icon">💼</div><div class="nav-label">Portfolio</div>
+    <div class="nav-icon">💼</div><div class="nav-label" style="font-size:9px">Portfolio</div>
+  </div>
+  <div class="nav-item"        id="nav-alerts"    onclick="gotoTab('alerts')">
+    <div class="nav-icon">🔔</div><div class="nav-label" style="font-size:9px">Alerts</div>
   </div>
   <div class="nav-item"        id="nav-stats"     onclick="gotoTab('stats')">
-    <div class="nav-icon">📊</div><div class="nav-label">Stats</div>
+    <div class="nav-icon">📊</div><div class="nav-label" style="font-size:9px">Stats</div>
   </div>
   <div class="nav-item"        id="nav-settings"  onclick="gotoTab('settings')">
-    <div class="nav-icon">⚙️</div><div class="nav-label">Settings</div>
+    <div class="nav-icon">⚙️</div><div class="nav-label" style="font-size:9px">Settings</div>
   </div>
 </nav>
 
@@ -668,6 +756,31 @@ body {
   </div>
 </div>
 
+<!-- ── Alert add overlay ───────────────────────────────────────────────────── -->
+<div id="alert-overlay" class="overlay" onclick="handleOverlayTap(event,'alert-overlay')">
+  <div class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">🔔 New Alert</div>
+      <button class="sheet-close" onclick="closeOverlay('alert-overlay')">✕</button>
+    </div>
+    <div class="sheet-body">
+      <input type="text" id="alert-ticker-input" class="ticker-input" placeholder="e.g. AAPL"
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             oninput="this.value=this.value.toUpperCase()">
+      <input type="number" id="alert-price-input" class="ticker-input" placeholder="Target price e.g. 200"
+             step="0.01" style="font-size:18px;letter-spacing:0">
+      <div id="alert-dir-row" style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="dir-btn active" id="dir-auto"  onclick="setAlertDir('auto')">Auto</button>
+        <button class="dir-btn"        id="dir-above" onclick="setAlertDir('above')">Above ↑</button>
+        <button class="dir-btn"        id="dir-below" onclick="setAlertDir('below')">Below ↓</button>
+      </div>
+      <button class="btn-primary" id="alert-submit-btn" onclick="submitAlert()">Set Alert</button>
+      <button class="btn-cancel" onclick="closeOverlay('alert-overlay')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── Telegram init ─────────────────────────────────────────────────────────────
 const tg       = window.Telegram.WebApp;
@@ -707,6 +820,7 @@ function gotoTab(name) {
     if (name === 'portfolio') loadPortfolio();
     if (name === 'stats')     loadStats();
     if (name === 'settings')  loadSettings();
+    if (name === 'alerts')    loadAlerts();
   }
 }
 
@@ -1090,10 +1204,17 @@ async function markBought(sym, assetType, tf) {
 // PORTFOLIO TAB
 // ═══════════════════════════════════════════════════════════════════════════════
 
+let portfolioMode = 'real'; // 'real' | 'paper'
+
 async function loadPortfolio() {
   document.getElementById('port-spinner').style.display = 'flex';
   const body = document.getElementById('port-body');
   body.style.display = 'none';
+
+  if (portfolioMode === 'paper') {
+    await loadPaperPortfolio();
+    return;
+  }
 
   try {
     const data = await api('/api/miniapp/positions');
@@ -1102,13 +1223,20 @@ async function loadPortfolio() {
     document.getElementById('port-spinner').style.display = 'none';
     body.style.display = 'block';
 
+    // Real/Paper toggle at top
+    let html = `<div class="rp-toggle">
+      <button class="rp-btn active" id="rp-real" onclick="switchPortfolioMode('real')">Real</button>
+      <button class="rp-btn"        id="rp-paper" onclick="switchPortfolioMode('paper')">Paper</button>
+    </div>`;
+
     if (!positionsCache.length) {
-      body.innerHTML = `<div class="empty">
+      html += `<div class="empty">
         <div class="empty-icon">💼</div>
         <div class="empty-title">No open positions</div>
         <div class="empty-sub">Tap "I Bought This" on any pick, or use the button below to add a position manually.</div>
       </div>
       <button class="btn-add-position" onclick="openAddPosition()">➕ Add Position</button>`;
+      body.innerHTML = html;
       return;
     }
 
@@ -1118,7 +1246,7 @@ async function loadPortfolio() {
       : 0;
     const winners = positionsCache.filter(p => (p.pnl_pct || 0) > 0).length;
 
-    let html = '<div class="summary-row">';
+    html += '<div class="summary-row">';
     html += `<div class="summary-box">
       <div class="summary-lbl">Positions</div>
       <div class="summary-val val-neu">${positionsCache.length}</div>
@@ -1176,10 +1304,284 @@ async function loadPortfolio() {
 
     html += `<button class="btn-add-position" onclick="openAddPosition()">➕ Add Position</button>`;
 
+    // Trade History section (collapsed by default)
+    html += `<div class="hist-hdr" onclick="toggleTradeHistory()">
+      <span class="hist-hdr-left">Trade History</span>
+      <span class="hist-toggle" id="hist-chevron">▼</span>
+    </div>
+    <div id="trade-history-section" style="display:none">
+      <div class="loading" id="hist-spinner" style="padding:30px 0"><div class="spinner"></div>Loading history…</div>
+      <div id="trade-history-rows"></div>
+    </div>`;
+
     body.innerHTML = html;
   } catch (e) {
     document.getElementById('port-spinner').innerHTML =
       '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load positions</div></div>';
+  }
+}
+
+let historyLoaded = false;
+
+async function toggleTradeHistory() {
+  const section = document.getElementById('trade-history-section');
+  const chevron = document.getElementById('hist-chevron');
+  if (!section) return;
+  tg.HapticFeedback?.impactOccurred('light');
+
+  const isOpen = section.style.display !== 'none';
+  section.style.display = isOpen ? 'none' : 'block';
+  if (chevron) chevron.classList.toggle('open', !isOpen);
+
+  if (!isOpen && !historyLoaded) {
+    historyLoaded = true;
+    try {
+      const data = await api('/api/miniapp/history');
+      const trades = data.trades || [];
+      const rows = document.getElementById('trade-history-rows');
+      const spinner = document.getElementById('hist-spinner');
+      if (spinner) spinner.style.display = 'none';
+      if (!rows) return;
+      if (!trades.length) {
+        rows.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-sub">No closed trades yet.</div></div>';
+        return;
+      }
+      rows.innerHTML = trades.slice(0, 20).map(t => {
+        const pct = parseFloat(t.return_pct || 0);
+        const sym = t.ticker || t.symbol || '?';
+        const outcomeIcon = t.outcome === 'target' ? '🎯' : t.outcome === 'stop' ? '🛑' : t.outcome === 'manual' ? '✋' : '📅';
+        return `<div class="trade-row">
+          <div>
+            <div class="trade-sym">${sym} ${outcomeIcon}</div>
+            <div class="trade-date">${(t.closed_date || '').slice(0,10)}</div>
+          </div>
+          <div class="trade-pct" style="color:${pct > 0 ? 'var(--green)' : pct < 0 ? 'var(--red)' : 'var(--hint)'}">${fmtPct(pct)}</div>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      const rows = document.getElementById('trade-history-rows');
+      if (rows) rows.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:12px 0">Could not load history.</div>';
+    }
+  }
+}
+
+async function switchPortfolioMode(mode) {
+  if (portfolioMode === mode) return;
+  portfolioMode = mode;
+  historyLoaded = false;
+  tg.HapticFeedback?.selectionChanged();
+  loadedTabs['portfolio'] = false;
+  loadPortfolio();
+}
+
+async function loadPaperPortfolio() {
+  try {
+    const data = await api('/api/miniapp/paper');
+    document.getElementById('port-spinner').style.display = 'none';
+    const body = document.getElementById('port-body');
+    body.style.display = 'block';
+
+    const positions = data.positions || [];
+    const history   = data.history   || [];
+    const cash      = data.cash      || 0;
+    const startCash = data.starting_cash || 10000;
+
+    const unrealPnl = positions.reduce((sum, p) => {
+      if (p.pnl_pct != null && p.entry_price && p.shares) {
+        return sum + (p.live_price - p.entry_price) * p.shares;
+      }
+      return sum;
+    }, 0);
+    const totalVal = cash + positions.reduce((s, p) => s + (p.live_price || p.entry_price || 0) * (p.shares || 0), 0);
+
+    // Real/Paper toggle at top
+    let html = `<div class="rp-toggle">
+      <button class="rp-btn"        id="rp-real" onclick="switchPortfolioMode('real')">Real</button>
+      <button class="rp-btn active" id="rp-paper" onclick="switchPortfolioMode('paper')">Paper</button>
+    </div>`;
+
+    html += `<div class="summary-row">
+      <div class="summary-box">
+        <div class="summary-lbl">Cash</div>
+        <div class="summary-val val-neu">$${Math.round(cash).toLocaleString()}</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-lbl">Unrealized</div>
+        <div class="summary-val ${unrealPnl >= 0 ? 'val-pos' : 'val-neg'}">${unrealPnl >= 0 ? '+' : ''}$${Math.abs(unrealPnl).toFixed(0)}</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-lbl">Total Value</div>
+        <div class="summary-val val-neu">$${Math.round(totalVal).toLocaleString()}</div>
+      </div>
+    </div>`;
+
+    html += '<div class="section-hdr">Paper Positions</div>';
+
+    if (!positions.length) {
+      html += '<div class="empty" style="padding:30px 0"><div class="empty-sub">No paper positions yet.</div></div>';
+    } else {
+      const sortedPaper = [...positions].sort((a, b) => (b.pnl_pct || 0) - (a.pnl_pct || 0));
+      sortedPaper.forEach(p => {
+        const sym   = p.ticker || '??';
+        const pct   = p.pnl_pct || 0;
+        const cls   = pct > 0 ? 'val-pos' : pct < 0 ? 'val-neg' : 'val-neu';
+        const init  = sym.slice(0, 2).toUpperCase();
+        const entry = p.entry_price ? `$${fmtPrice(p.entry_price)}` : '—';
+        const cur   = p.live_price  ? `$${fmtPrice(p.live_price)}`  : '';
+        const aType = p.asset_type  || 'stock';
+        html += `<div class="pos-card">
+          <div class="pos-main">
+            <div class="pos-avatar">${init}</div>
+            <div class="pos-body">
+              <div class="pos-sym">${sym}</div>
+              <div class="pos-sub">${entry}${cur ? ` → ${cur}` : ''}</div>
+            </div>
+            <div class="pos-right">
+              <div class="pos-pct ${cls}">${fmtPct(pct)}</div>
+            </div>
+          </div>
+          <div class="pos-actions">
+            <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}')">📊 Chart</button>
+          </div>
+        </div>`;
+      });
+    }
+
+    if (history.length) {
+      html += '<div class="section-hdr" style="padding-top:18px">Paper History</div>';
+      html += history.slice(0, 15).map(t => {
+        const pct = parseFloat(t.return_pct || 0);
+        const sym = t.ticker || t.symbol || '?';
+        return `<div class="trade-row">
+          <div>
+            <div class="trade-sym">${sym}</div>
+            <div class="trade-date">${(t.closed_date || '').slice(0,10)}</div>
+          </div>
+          <div class="trade-pct" style="color:${pct > 0 ? 'var(--green)' : pct < 0 ? 'var(--red)' : 'var(--hint)'}">${fmtPct(pct)}</div>
+        </div>`;
+      }).join('');
+    }
+
+    body.innerHTML = html;
+  } catch (e) {
+    document.getElementById('port-spinner').innerHTML =
+      '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load paper portfolio</div></div>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALERTS TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let alertDirection = 'auto';
+
+function setAlertDir(dir) {
+  alertDirection = dir;
+  ['auto','above','below'].forEach(d => {
+    const btn = document.getElementById('dir-' + d);
+    if (btn) btn.classList.toggle('active', d === dir);
+  });
+}
+
+async function loadAlerts() {
+  document.getElementById('alerts-spinner').style.display = 'flex';
+  const body = document.getElementById('alerts-body');
+  body.style.display = 'none';
+
+  try {
+    const data   = await api('/api/miniapp/alerts');
+    const alerts = data.alerts || [];
+
+    document.getElementById('alerts-spinner').style.display = 'none';
+    body.style.display = 'block';
+
+    let html = `<div class="alert-section-hdr">
+      <span>Price Alerts</span>
+      <button class="btn-add-alert" onclick="openAddAlert()">+ Add Alert</button>
+    </div>`;
+
+    if (!alerts.length) {
+      html += `<div class="empty">
+        <div class="empty-icon">🔔</div>
+        <div class="empty-title">No alerts set</div>
+        <div class="empty-sub">Tap "+ Add Alert" to get notified when a stock or crypto hits your target price.</div>
+      </div>`;
+    } else {
+      html += '<div class="settings-card" style="padding:0 16px">';
+      alerts.forEach((a, idx) => {
+        const dirCls  = a.direction === 'above' ? 'above' : a.direction === 'below' ? 'below' : 'auto';
+        const dirTxt  = a.direction === 'above' ? 'Above' : a.direction === 'below' ? 'Below' : 'Auto';
+        let awayHtml  = '';
+        if (a.price_at_set && a.target) {
+          const pct = ((a.target - a.price_at_set) / a.price_at_set * 100).toFixed(1);
+          awayHtml = `<div class="alert-away">${pct >= 0 ? '+' : ''}${pct}% from set price $${fmtPrice(a.price_at_set)}</div>`;
+        }
+        html += `<div class="alert-row">
+          <div class="alert-ticker">${a.ticker}</div>
+          <div class="alert-info">
+            <div class="alert-price">$${fmtPrice(a.target)}</div>
+            ${awayHtml}
+          </div>
+          <span class="dir-badge ${dirCls}">${dirTxt}</span>
+          <button class="alert-del" onclick="deleteAlert('${a.ticker}',${a.target})" title="Delete">🗑</button>
+        </div>`;
+      });
+      html += '</div>';
+    }
+
+    body.innerHTML = html;
+  } catch (e) {
+    document.getElementById('alerts-spinner').innerHTML =
+      '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load alerts</div></div>';
+  }
+}
+
+function openAddAlert() {
+  const ti = document.getElementById('alert-ticker-input');
+  const pi = document.getElementById('alert-price-input');
+  if (ti) ti.value = '';
+  if (pi) pi.value = '';
+  setAlertDir('auto');
+  const btn = document.getElementById('alert-submit-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Set Alert'; }
+  openOverlay('alert-overlay');
+  tg.HapticFeedback?.impactOccurred('light');
+  setTimeout(() => { if (ti) ti.focus(); }, 250);
+}
+
+async function submitAlert() {
+  const ticker = (document.getElementById('alert-ticker-input')?.value || '').trim().toUpperCase();
+  const target = parseFloat(document.getElementById('alert-price-input')?.value);
+  if (!ticker || isNaN(target)) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    return;
+  }
+  const btn = document.getElementById('alert-submit-btn');
+  btn.disabled    = true;
+  btn.textContent = '⏳ Setting…';
+  try {
+    await api('/api/miniapp/add_alert', 'POST', { ticker, target, direction: alertDirection });
+    tg.HapticFeedback?.notificationOccurred('success');
+    closeOverlay('alert-overlay');
+    // Refresh alerts tab
+    loadedTabs['alerts'] = false;
+    loadAlerts();
+  } catch (e) {
+    btn.disabled    = false;
+    btn.textContent = 'Set Alert';
+    tg.HapticFeedback?.notificationOccurred('error');
+  }
+}
+
+async function deleteAlert(ticker, target) {
+  tg.HapticFeedback?.impactOccurred('medium');
+  try {
+    await api('/api/miniapp/remove_alert', 'POST', { ticker, target });
+    tg.HapticFeedback?.notificationOccurred('success');
+    loadedTabs['alerts'] = false;
+    loadAlerts();
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
   }
 }
 
@@ -1342,92 +1744,135 @@ async function loadStats() {
 // SETTINGS TAB
 // ═══════════════════════════════════════════════════════════════════════════════
 
+let _settCfg = {};
+
+const RISK_CYCLE   = ['conservative', 'moderate', 'aggressive', 'degen'];
+const ASSETS_CYCLE = ['stocks', 'crypto', 'both'];
+const riskLabels   = { conservative: '🛡 Conservative', moderate: '⚖️ Moderate', aggressive: '🔥 Aggressive', degen: '🎰 Degen' };
+const assetLabels  = { stocks: '📈 Stocks only', crypto: '₿ Crypto only', both: '📈 + ₿ Both' };
+
 async function loadSettings() {
   try {
     const data = await api('/api/miniapp/settings');
-    const cfg  = data.settings || {};
+    _settCfg   = data.settings || {};
 
     document.getElementById('sett-spinner').style.display = 'none';
     const body = document.getElementById('sett-body');
     body.style.display = 'block';
 
-    const riskLabels = {
-      conservative: '🛡 Conservative',
-      moderate:     '⚖️ Moderate',
-      aggressive:   '🔥 Aggressive',
-      degen:        '🎰 Degen',
-    };
-    const assetLabels = {
-      stocks: '📈 Stocks only',
-      crypto: '₿ Crypto only',
-      both:   '📈 + ₿ Both',
-    };
-
-    const paused = !!cfg.paused;
-    let html = `<div class="settings-card">
-      <div class="setting-row">
-        <span class="setting-key">Risk Profile</span>
-        <span class="setting-value">${riskLabels[cfg.risk_profile] || '⚖️ Moderate'}</span>
-      </div>
-      <div class="setting-row">
-        <span class="setting-key">Assets</span>
-        <span class="setting-value">${assetLabels[cfg.assets] || '📈 + ₿ Both'}</span>
-      </div>`;
-
-    if (cfg.stock_budget) {
-      html += `<div class="setting-row">
-        <span class="setting-key">Stock Budget</span>
-        <span class="setting-value">$${Number(cfg.stock_budget).toLocaleString()}</span>
-      </div>`;
-    }
-    if (cfg.crypto_budget) {
-      html += `<div class="setting-row">
-        <span class="setting-key">Crypto Budget</span>
-        <span class="setting-value">$${Number(cfg.crypto_budget).toLocaleString()}</span>
-      </div>`;
-    }
-    html += `</div>`;
-
-    html += `<div class="settings-card">
-      <div class="setting-row">
-        <span class="setting-key">Daily Picks</span>
-        <div class="toggle${paused ? '' : ' on'}" id="pause-toggle" onclick="togglePaused(${paused})"></div>
-      </div>
-    </div>
-
-    <div class="settings-card">
-      <div class="action-row" onclick="openHelp()">
-        <div class="action-row-left">
-          <span class="action-icon">📋</span>
-          <span class="action-label">Help &amp; Commands</span>
-        </div>
-        <span class="action-chevron">›</span>
-      </div>
-      <div class="action-row" onclick="openFeedbackSheet()">
-        <div class="action-row-left">
-          <span class="action-icon">💬</span>
-          <span class="action-label">Send Feedback</span>
-        </div>
-        <span class="action-chevron">›</span>
-      </div>
-      <div class="action-row" onclick="shareApp()">
-        <div class="action-row-left">
-          <span class="action-icon">📲</span>
-          <span class="action-label">Share StockPulz</span>
-        </div>
-        <span class="action-chevron">›</span>
-      </div>
-    </div>
-
-    <div class="settings-hint">
-      Use /setup in the bot chat to update your risk profile, budget, or asset preferences.
-    </div>`;
-
-    body.innerHTML = html;
+    renderSettings();
   } catch (e) {
     document.getElementById('sett-spinner').innerHTML =
       '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load settings</div></div>';
   }
+}
+
+function renderSettings() {
+  const body   = document.getElementById('sett-body');
+  if (!body) return;
+  const cfg    = _settCfg;
+  const paused = !!cfg.paused;
+
+  let html = `<div class="settings-card">
+    <div class="setting-row">
+      <span class="setting-key">Risk Profile</span>
+      <span class="setting-tap" onclick="cycleRisk()">
+        ${riskLabels[cfg.risk_profile] || '⚖️ Moderate'}
+        <span class="setting-edit-icon">✏️</span>
+      </span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-key">Assets</span>
+      <span class="setting-tap" onclick="cycleAssets()">
+        ${assetLabels[cfg.assets] || '📈 + ₿ Both'}
+        <span class="setting-edit-icon">✏️</span>
+      </span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-key">Stock Budget</span>
+      <input class="budget-input" type="number" id="stock-budget-input"
+             value="${cfg.stock_budget || ''}" placeholder="—"
+             onblur="saveBudget('stock')"
+             onkeydown="if(event.key==='Enter')this.blur()">
+    </div>
+    <div class="setting-row">
+      <span class="setting-key">Crypto Budget</span>
+      <input class="budget-input" type="number" id="crypto-budget-input"
+             value="${cfg.crypto_budget || ''}" placeholder="—"
+             onblur="saveBudget('crypto')"
+             onkeydown="if(event.key==='Enter')this.blur()">
+    </div>
+  </div>`;
+
+  html += `<div class="settings-card">
+    <div class="setting-row">
+      <span class="setting-key">Daily Picks</span>
+      <div class="toggle${paused ? '' : ' on'}" id="pause-toggle" onclick="togglePaused(${paused})"></div>
+    </div>
+  </div>
+
+  <div class="settings-card">
+    <div class="action-row" onclick="openHelp()">
+      <div class="action-row-left">
+        <span class="action-icon">📋</span>
+        <span class="action-label">Help &amp; Commands</span>
+      </div>
+      <span class="action-chevron">›</span>
+    </div>
+    <div class="action-row" onclick="openFeedbackSheet()">
+      <div class="action-row-left">
+        <span class="action-icon">💬</span>
+        <span class="action-label">Send Feedback</span>
+      </div>
+      <span class="action-chevron">›</span>
+    </div>
+    <div class="action-row" onclick="shareApp()">
+      <div class="action-row-left">
+        <span class="action-icon">📲</span>
+        <span class="action-label">Share StockPulz</span>
+      </div>
+      <span class="action-chevron">›</span>
+    </div>
+  </div>`;
+
+  body.innerHTML = html;
+}
+
+async function cycleRisk() {
+  const cur = _settCfg.risk_profile || 'moderate';
+  const idx = RISK_CYCLE.indexOf(cur);
+  const next = RISK_CYCLE[(idx + 1) % RISK_CYCLE.length];
+  _settCfg.risk_profile = next;
+  tg.HapticFeedback?.selectionChanged();
+  renderSettings();
+  try {
+    await api('/api/miniapp/update_settings', 'POST', { risk_profile: next });
+  } catch (e) {}
+}
+
+async function cycleAssets() {
+  const cur = _settCfg.assets || 'both';
+  const idx = ASSETS_CYCLE.indexOf(cur);
+  const next = ASSETS_CYCLE[(idx + 1) % ASSETS_CYCLE.length];
+  _settCfg.assets = next;
+  tg.HapticFeedback?.selectionChanged();
+  renderSettings();
+  try {
+    await api('/api/miniapp/update_settings', 'POST', { assets: next });
+  } catch (e) {}
+}
+
+async function saveBudget(type) {
+  const input = document.getElementById(type + '-budget-input');
+  if (!input) return;
+  const val = parseFloat(input.value);
+  if (isNaN(val) || val <= 0) return;
+  const key = type === 'stock' ? 'stock_budget' : 'crypto_budget';
+  _settCfg[key] = val;
+  try {
+    await api('/api/miniapp/update_settings', 'POST', { [key]: val });
+    tg.HapticFeedback?.notificationOccurred('success');
+  } catch (e) {}
 }
 
 async function togglePaused(currentlyPaused) {
