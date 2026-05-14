@@ -911,6 +911,122 @@ def miniapp_feedback():
     return jsonify({"ok": True})
 
 
+@app.route("/api/miniapp/history")
+def miniapp_history():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_user_trade_log
+    log = load_user_trade_log(chat_id)
+    closed = sorted(log.get("closed", []), key=lambda t: t.get("closed_date",""), reverse=True)
+    return jsonify({"ok": True, "trades": closed})
+
+
+@app.route("/api/miniapp/alerts")
+def miniapp_alerts():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from price_alert_manager import _load_alerts
+    all_alerts = _load_alerts()
+    alerts = all_alerts.get(str(chat_id), [])
+    return jsonify({"ok": True, "alerts": alerts})
+
+
+@app.route("/api/miniapp/add_alert", methods=["POST"])
+def miniapp_add_alert():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from price_alert_manager import add_alert
+    body = request.get_json(silent=True) or {}
+    ticker = (body.get("ticker") or "").strip().upper()
+    target = body.get("target")
+    direction = body.get("direction", "auto")
+    if not ticker or target is None:
+        return jsonify({"error": "ticker and target required"}), 400
+    try:
+        msg = add_alert(chat_id, ticker, float(target), direction)
+        return jsonify({"ok": True, "message": msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/miniapp/remove_alert", methods=["POST"])
+def miniapp_remove_alert():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from price_alert_manager import remove_alert
+    body = request.get_json(silent=True) or {}
+    ticker = (body.get("ticker") or "").strip().upper()
+    target = body.get("target")
+    if not ticker: return jsonify({"error": "ticker required"}), 400
+    try:
+        msg = remove_alert(chat_id, ticker, float(target) if target is not None else None)
+        return jsonify({"ok": True, "message": msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/miniapp/paper")
+def miniapp_paper():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_user_paper
+    data = load_user_paper(chat_id)
+    # Enrich positions with live prices
+    import yfinance as yf
+    positions = data.get("positions", [])
+    tickers = list({p["ticker"] for p in positions})
+    prices = {}
+    if tickers:
+        try:
+            raw = yf.download(tickers, period="1d", progress=False, auto_adjust=True)
+            close = raw["Close"] if "Close" in raw else raw
+            for tk in tickers:
+                try:
+                    col = close[tk] if tk in close.columns else close
+                    prices[tk] = float(col.dropna().iloc[-1])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    for p in positions:
+        p["live_price"] = prices.get(p["ticker"])
+        if p.get("live_price") and p.get("entry_price"):
+            p["pnl_pct"] = round((p["live_price"] - p["entry_price"]) / p["entry_price"] * 100, 2)
+        else:
+            p["pnl_pct"] = None
+    history = sorted(data.get("history", []), key=lambda t: t.get("closed_date",""), reverse=True)
+    return jsonify({
+        "ok": True,
+        "positions": positions,
+        "history":   history,
+        "cash":      data.get("cash", 0),
+        "starting_cash": data.get("starting_cash", 10000),
+    })
+
+
+@app.route("/api/miniapp/update_settings", methods=["POST"])
+def miniapp_update_settings():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import get_user_config, save_user_config
+    body = request.get_json(silent=True) or {}
+    ucfg = get_user_config(chat_id)
+    allowed_risk = ("conservative", "moderate", "aggressive", "degen")
+    allowed_assets = ("stocks", "crypto", "both")
+    if "risk_profile" in body and body["risk_profile"] in allowed_risk:
+        ucfg["risk_profile"] = body["risk_profile"]
+    if "assets" in body and body["assets"] in allowed_assets:
+        ucfg["assets"] = body["assets"]
+    if "stock_budget" in body:
+        try: ucfg["stock_budget"] = float(body["stock_budget"])
+        except: pass
+    if "crypto_budget" in body:
+        try: ucfg["crypto_budget"] = float(body["crypto_budget"])
+        except: pass
+    save_user_config(chat_id, ucfg)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/miniapp/share_link")
 def miniapp_share_link():
     """Return a shareable invite link for the current user."""
