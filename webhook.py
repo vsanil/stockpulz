@@ -539,16 +539,20 @@ def admin_data():
             print(f"[admin/data] user {uid} failed: {exc}")
 
     picks_raw = load_picks() or {}
-    stocks = picks_raw.get("stocks", {})
-    crypto = picks_raw.get("crypto", {})
-    etfs   = picks_raw.get("etfs",   {})
-    st  = stocks.get("short_term", [])
-    lt  = stocks.get("long_term",  [])
-    cst = crypto.get("short_term", [])
-    clt = crypto.get("long_term",  [])
-    est = etfs.get("short_term",   [])
-    elt = etfs.get("long_term",    [])
-    total_picks = len(st) + len(lt) + len(cst) + len(clt) + len(est) + len(elt)
+    stocks = picks_raw.get("stocks",      {})
+    crypto = picks_raw.get("crypto",      {})
+    etfs   = picks_raw.get("etfs",        {})
+    comms  = picks_raw.get("commodities", {})
+    st      = stocks.get("short_term", [])
+    lt      = stocks.get("long_term",  [])
+    cst     = crypto.get("short_term", [])
+    clt     = crypto.get("long_term",  [])
+    est     = etfs.get("short_term",   [])
+    elt     = etfs.get("long_term",    [])
+    comm_st = comms.get("short_term",  [])
+    comm_lt = comms.get("long_term",   [])
+    opts    = picks_raw.get("options_plays", [])
+    total_picks = len(st) + len(lt) + len(cst) + len(clt) + len(est) + len(elt) + len(comm_st) + len(comm_lt)
 
     cron_keys = [
         "prescreener", "premarket", "morning", "confirmation",
@@ -566,9 +570,11 @@ def admin_data():
         },
         "users": users,
         "picks": {
-            "stocks_st": st,  "stocks_lt": lt,
-            "crypto_st": cst, "crypto_lt": clt,
-            "etfs_st":   est, "etfs_lt":   elt,
+            "stocks_st":      st,      "stocks_lt": lt,
+            "crypto_st":      cst,     "crypto_lt": clt,
+            "etfs_st":        est,     "etfs_lt":   elt,
+            "commodities_st": comm_st, "commodities_lt": comm_lt,
+            "options_plays":  opts,
         },
         "feedback":        load_feedback()[:20],
         "cron":            cron,
