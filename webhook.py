@@ -591,22 +591,40 @@ def _miniapp_auth() -> str | None:
     """
     Extract and validate chat_id from the Mini App request.
     Returns chat_id string if authorised, None otherwise.
-    The Mini App passes chat_id + init_data as query params (GET) or JSON body (POST).
-    We do a lightweight check: chat_id must be in allowed_users.
-    (Full Telegram initData HMAC validation can be added later.)
+
+    Priority:
+    1. chat_id param passed explicitly from JS (initDataUnsafe.user.id)
+    2. Parse user.id out of the raw init_data string (URL-encoded, Telegram-signed)
     """
     if request.method == "POST":
-        body    = request.get_json(silent=True) or {}
-        chat_id = str(body.get("chat_id", "")).strip()
+        body      = request.get_json(silent=True) or {}
+        chat_id   = str(body.get("chat_id", "")).strip()
+        init_data = body.get("init_data", "")
     else:
-        chat_id = str(request.args.get("chat_id", "")).strip()
+        chat_id   = str(request.args.get("chat_id", "")).strip()
+        init_data = request.args.get("init_data", "")
 
-    if not chat_id:
+    # Fallback: parse user id from initData if chat_id missing/zero
+    if (not chat_id or chat_id == "0") and init_data:
+        try:
+            from urllib.parse import parse_qs
+            import json as _json
+            params    = parse_qs(init_data)
+            user_json = params.get("user", ["{}"])[0]
+            user_obj  = _json.loads(user_json)
+            chat_id   = str(user_obj.get("id", "")).strip()
+        except Exception as exc:
+            print(f"[miniapp_auth] init_data parse failed: {exc}")
+
+    print(f"[miniapp_auth] chat_id={chat_id!r}")
+
+    if not chat_id or chat_id == "0":
         return None
+
     allowed = get_allowed_users()
-    # Also allow the owner even if not in allowed_users list
-    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+    owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
     if chat_id not in allowed and chat_id != owner:
+        print(f"[miniapp_auth] {chat_id} not in allowed list {allowed}")
         return None
     return chat_id
 
