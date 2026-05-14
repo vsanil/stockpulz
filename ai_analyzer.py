@@ -12,6 +12,8 @@ import yfinance as yf
 from sentiment_analyzer import get_sentiment
 from options_flow import get_options_signal
 from insider_tracker import get_insider_signal
+from price_context import get_price_context
+from performance_context import get_performance_context
 from config_manager import (
     load_signal_cache, save_signal_cache,
     get_cached_signal, set_cached_signal,
@@ -132,6 +134,21 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
 
         if ticker not in seen:
             entry["news_headlines"] = _get_news_headlines(ticker)
+
+            # ── Price context: multi-day chart setup ──────────────────────────
+            # Fetches 6-month history once and computes MA position,
+            # consolidation, breakout, support/resistance, trends.
+            try:
+                ctx = get_price_context(ticker)
+                if ctx.get("context_str"):
+                    entry["price_context"] = ctx["context_str"]
+                    # Surface breakout as a top-level flag Claude can weight heavily
+                    if ctx.get("breakout"):
+                        entry["breakout_today"] = True
+                    if ctx.get("consolidation_days", 0) >= 10:
+                        entry["consolidation_days"] = ctx["consolidation_days"]
+            except Exception as exc:
+                print(f"[ai_analyzer] Price context error for {ticker}: {exc}")
 
             # ── Sentiment + insider: use cache (5-day TTL) ────────────────────
             cached = get_cached_signal(signal_cache, ticker)
@@ -354,6 +371,12 @@ def _build_user_prompt(
     commodity_candidates: list[dict] | None = None,
 ) -> str:
     # Pre-build conditional blocks (backslashes not allowed inside f-string expressions)
+    # Performance feedback: aggregate closed trade track record
+    try:
+        perf_context = get_performance_context(lookback_days=30)
+    except Exception:
+        perf_context = ""
+
     if recent_losers:
         losers_block = (
             "AVOID REPEAT LOSERS (HARD RULE):\n"
@@ -419,7 +442,7 @@ def _build_user_prompt(
     stocks_block += stock_alloc_note
 
     return f"""Analyze these stock AND crypto candidates for a personal investor.
-{f"{mode_note}" + chr(10) if mode_note else ""}
+{f"{mode_note}" + chr(10) if mode_note else ""}{(perf_context + chr(10) + chr(10)) if perf_context else ""}
 STOCKS:
 {stocks_block}
 
@@ -469,6 +492,8 @@ SIGNAL GUIDANCE (use in thesis where relevant):
   - social_sentiment: StockTwits + Reddit signal. Label "bullish"/"hot" supports picks; "bearish" is a red flag.
   - options_flow: unusual call volume or low put/call ratio confirms bullish bets by institutional traders.
   - insider_activity: recent open-market buys by CEO/CFO are a strong conviction signal — always mention in thesis.
+  - price_context: multi-day chart setup — breakout_today=True is a strong ST signal, consolidation_days≥10 means coiling energy.
+  - sweep_detected (options): large block trade through single contract — institutional conviction, weight heavily.
   - analyst_target_mean / analyst_upside_pct: Wall Street consensus — large upside supports LT thesis.
 
 Stock Candidates:
