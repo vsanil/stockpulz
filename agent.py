@@ -446,20 +446,25 @@ def run_morning(config: dict, now_et: datetime):
 
     # ── Admin run summary ─────────────────────────────────────────────────────
     try:
-        stocks   = picks.get("stocks", {})
-        crypto   = picks.get("crypto", {})
-        etfs     = picks.get("etfs", {})
+        stocks = picks.get("stocks", {})
+        crypto = picks.get("crypto", {})
+        etfs   = picks.get("etfs", {})
+        comms  = picks.get("commodities", {})
         n_st     = len(stocks.get("short_term", []))
         n_lt     = len(stocks.get("long_term",  []))
         n_crypto = len(crypto.get("short_term", [])) + len(crypto.get("long_term", []))
         n_etf    = len(etfs.get("short_term", [])) + len(etfs.get("long_term", []))
+        n_comm   = len(comms.get("short_term", [])) + len(comms.get("long_term", []))
+        n_opts   = len(picks.get("options_plays", []))
         n_users  = len(_all_recipients())
         _alert(
             f"✅ <b>Morning run complete</b>\n"
             f"Sent to {n_users} user(s)  ·  "
             f"📈 {n_st} ST + {n_lt} LT stocks  ·  "
             f"🪙 {n_crypto} crypto  ·  "
-            f"📦 {n_etf} ETFs",
+            f"📦 {n_etf} ETFs  ·  "
+            f"🛢 {n_comm} commodities  ·  "
+            f"🎯 {n_opts} options plays",
             admin_only=True,
         )
         # Save timestamp for /dashboard
