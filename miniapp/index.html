@@ -866,6 +866,26 @@ body {
   </div>
 </div>
 
+<!-- ── Add Cash overlay ──────────────────────────────────────────────────── -->
+<div id="addcash-overlay" class="overlay" onclick="handleOverlayTap(event,'addcash-overlay')">
+  <div class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">💵 Add Paper Cash</div>
+      <button class="sheet-close" onclick="closeOverlay('addcash-overlay')">✕</button>
+    </div>
+    <div class="sheet-body">
+      <p class="sheet-hint">Add funds to your paper trading account.</p>
+      <input type="number" id="addcash-input" class="ticker-input"
+             placeholder="e.g. 5000" step="100" min="1"
+             style="font-size:20px;letter-spacing:0"
+             onkeydown="if(event.key==='Enter')confirmAddCash()">
+      <button class="btn-primary" id="addcash-btn" onclick="confirmAddCash()">Add Cash</button>
+      <button class="btn-cancel" onclick="closeOverlay('addcash-overlay')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Feedback overlay ──────────────────────────────────────────────────── -->
 <div id="feedback-overlay" class="overlay" onclick="handleOverlayTap(event,'feedback-overlay')">
   <div class="bottom-sheet">
@@ -1790,10 +1810,16 @@ async function loadPaperPortfolio() {
           </div>
           <div class="pos-actions">
             <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}')">📊 Chart</button>
+            <button class="pos-btn" style="color:var(--red)" onclick="cancelPaperPosition('${sym}')">🗑 Cancel</button>
           </div>
         </div>`;
       });
     }
+
+    // Add Cash button
+    html += `<div style="text-align:center;padding:10px 0 4px">
+      <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--btn);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="openAddCashSheet()">💵 Add Cash</button>
+    </div>`;
 
     if (history.length) {
       html += '<div class="section-hdr" style="padding-top:18px">Paper History</div>';
@@ -2508,6 +2534,61 @@ function _renderExclusionChips() {
       sel.innerHTML = '<option value="">+ Add sector to exclude…</option>' +
         availSectors.map(s => `<option value="${s}">${s}</option>`).join('');
     }
+  }
+}
+
+// ── Paper: cancel position + add cash ────────────────────────────────────────
+
+async function cancelPaperPosition(ticker) {
+  tg.HapticFeedback?.impactOccurred('medium');
+  const confirmed = await new Promise(resolve => {
+    tg.showPopup({
+      title:   `Remove ${ticker}?`,
+      message: 'Cash will be refunded. Not counted as a sale.',
+      buttons: [
+        { id: 'yes', type: 'destructive', text: 'Remove' },
+        { id: 'no',  type: 'cancel' },
+      ],
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
+  try {
+    await api('/api/miniapp/paper_cancel', 'POST', { ticker });
+    tg.HapticFeedback?.notificationOccurred('success');
+    loadPortfolio();   // refresh paper view
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    tg.showPopup?.({ message: 'Could not remove position — try again.' });
+  }
+}
+
+function openAddCashSheet() {
+  tg.HapticFeedback?.impactOccurred('light');
+  const inp = document.getElementById('addcash-input');
+  if (inp) inp.value = '';
+  const btn = document.getElementById('addcash-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Add Cash'; }
+  openOverlay('addcash-overlay');
+  setTimeout(() => { if (inp) inp.focus(); }, 300);
+}
+
+async function confirmAddCash() {
+  const inp = document.getElementById('addcash-input');
+  const btn = document.getElementById('addcash-btn');
+  const amount = parseFloat(inp?.value || '0');
+  if (!amount || amount <= 0) { inp?.focus(); return; }
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+  try {
+    await api('/api/miniapp/paper_add_cash', 'POST', { amount });
+    tg.HapticFeedback?.notificationOccurred('success');
+    closeOverlay('addcash-overlay');
+    loadPortfolio();   // refresh with new cash balance
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Add Cash';
+    tg.HapticFeedback?.notificationOccurred('error');
+    tg.showPopup?.({ message: 'Could not add cash — try again.' });
   }
 }
 
