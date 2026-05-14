@@ -272,7 +272,7 @@ RISK PROFILE: conservative
   - Only pick candidates with conviction ★★★★ or higher — skip borderline setups.
   - Favour low-volatility sectors: Consumer Staples, Utilities, Health Care, Financials.
   - Stop-losses: set 4% below entry (tighter than default).
-  - Maximum 1 short-term stock pick regardless of budget.
+  - Short-term stocks: maximum 1 pick (skip if no strong setup exists).
   - Reduce crypto allocations by 50%; skip crypto short-term entirely if alternatives exist.
   - Long-term picks only from companies with positive revenue growth and D/E < 0.5."""
     if profile == "aggressive":
@@ -281,7 +281,7 @@ RISK PROFILE: aggressive
   - Include picks with conviction ★★★ and above — strong setup counts even if risky.
   - All sectors welcome including high-beta: Technology, Energy, Consumer Discretionary.
   - Stop-losses: set 8% below entry (wider room to breathe).
-  - Maximise pick counts within budget — fill all slots.
+  - Push toward the higher end of the allowed ranges — more picks when setups are available.
   - Full crypto allocations; include higher-risk coins with strong momentum.
   - Short-term targets can be 10-15% above entry for high-momentum plays."""
     # moderate (default)
@@ -351,38 +351,20 @@ def _build_user_prompt(
         "both": "",
     }.get(pick_mode, "")
 
-    # ── Compute per-pick allocations in code (equal split, not Claude's job) ────
+    # ── Budget notes (allocation filled in post-processing after pick count is known) ─
     stock_budget  = config.get("stock_budget")   # None = unset
     crypto_budget = config.get("crypto_budget")  # None = unset
 
-    max_stock_picks  = config.get("max_short_picks", 2) + config.get("max_long_picks", 3)
-    max_crypto_picks = config.get("max_crypto_short_picks", 2) + config.get("max_crypto_long_picks", 2)
-
-    if stock_budget:
-        per_stock = round(float(stock_budget) / max(max_stock_picks, 1), 2)
-        stock_alloc_note = (
-            f"  Budget: ${stock_budget} total for stocks today, split equally → "
-            f"${per_stock} per pick. Set 'allocation' to {per_stock} for every stock pick.\n"
-        )
-    else:
-        per_stock = None
-        stock_alloc_note = "  No budget set — set 'allocation' to null for all stock picks.\n"
-
-    if crypto_budget:
-        per_crypto = round(float(crypto_budget) / max(max_crypto_picks, 1), 2)
-        crypto_alloc_note = (
-            f"  Budget: ${crypto_budget} total for crypto today, split equally → "
-            f"${per_crypto} per pick. Set 'allocation' to {per_crypto} for every crypto pick.\n"
-        )
-    else:
-        per_crypto = None
-        crypto_alloc_note = "  No budget set — set 'allocation' to null for all crypto picks.\n"
+    stock_alloc_note  = (f"  Budget: ${stock_budget} total for stocks — set 'allocation' to null, it will be calculated automatically.\n"
+                         if stock_budget else "  No budget set — set 'allocation' to null for all stock picks.\n")
+    crypto_alloc_note = (f"  Budget: ${crypto_budget} total for crypto — set 'allocation' to null, it will be calculated automatically.\n"
+                         if crypto_budget else "  No budget set — set 'allocation' to null for all crypto picks.\n")
 
     stocks_block = ""
     if show_st:
-        stocks_block += f"  Short-term: Keep best {config.get('max_short_picks', 2)} stocks (target gains within 1-4 weeks)\n"
+        stocks_block += "  Short-term: 1–3 picks (target gains within 1-4 weeks). Only include if conviction ★★★ or higher — do NOT pad with weak setups.\n"
     if show_lt:
-        stocks_block += f"  Long-term: Keep best {config.get('max_long_picks', 3)} stocks (dollar-cost average over 1-5 years)\n"
+        stocks_block += "  Long-term: 1–4 picks (dollar-cost average over 1-5 years). Quality over quantity — fewer strong picks beat many mediocre ones.\n"
     stocks_block += stock_alloc_note
 
     return f"""Analyze these stock AND crypto candidates for a personal investor.
@@ -390,19 +372,14 @@ def _build_user_prompt(
 STOCKS:
 {stocks_block}
 
-ALLOCATION RULE (STRICTLY ENFORCE):
-  - Allocation values are pre-calculated and given to you above. Do NOT change them.
-  - Every stock pick must use the exact same allocation value (or null if no budget set).
-  - Do NOT weight by conviction — conviction affects selection only, not allocation size.
+ALLOCATION RULE:
+  - Set 'allocation' to null for every pick — it is calculated automatically after selection.
 
 SECTOR DIVERSITY RULE (STRICTLY ENFORCE):
-  - Short-term: the 2 picks MUST be from different sectors. No exceptions.
-    If the top 2 are from the same sector, drop the lower-scored one and take the next
-    highest-scored stock from a different sector.
-  - Long-term: no 2 of the 3 picks may share the same sector. If the top 3 by score
-    include duplicates, replace the lower-scored duplicate with the best-scored stock
-    from an unrepresented sector. A pick at 60% score from a new sector beats a pick
-    at 65% score from an already-represented sector.
+  - No two picks in the same category (short-term or long-term) may share the same sector.
+  - If the top candidates by score include sector duplicates, drop the lower-scored duplicate
+    and substitute the best-scored stock from an unrepresented sector.
+  - A pick at 60% score from a new sector beats a pick at 65% from an already-represented sector.
 
 EARNINGS RISK RULES (HARD RULE — ZERO EXCEPTIONS):
   - If a candidate has "earnings_date" within 1-2 days: DO NOT include it in short-term picks.
@@ -426,8 +403,8 @@ LONG-TERM TARGET PRICE RULES (STRICTLY ENFORCE):
     of ATH distance or past performance. Do NOT set crypto LT targets implying 100-200%+ gains.
 
 CRYPTO:
-{"  Short-term: Keep best " + str(config.get('max_crypto_short_picks', 2)) + " crypto (target gains within 1-2 weeks, high risk)" if show_st else ""}
-{"  Long-term: Keep best " + str(config.get('max_crypto_long_picks', 2)) + " crypto (hold 6-24 months)" if show_lt else ""}
+{"  Short-term: 1–2 picks (target gains within 1-2 weeks, high risk). Skip entirely if no strong setup — do NOT force picks." if show_st else ""}
+{"  Long-term: 1–2 picks (hold 6-24 months). Only include if genuine multi-month thesis exists." if show_lt else ""}
 {crypto_alloc_note}
 
 CRYPTO RULE: Each crypto symbol may appear AT MOST ONCE in short_term. No duplicates.
@@ -719,18 +696,55 @@ def analyze_with_claude(
     try:
         picks = _call_claude(SYSTEM_PROMPT, user_prompt, model="claude-sonnet-4-6")
         print("[ai_analyzer] Claude response parsed successfully.")
-        return _validate_and_clean_picks(picks, valid_stock_tickers)
+        picks = _validate_and_clean_picks(picks, valid_stock_tickers)
     except (json.JSONDecodeError, KeyError, IndexError) as exc:
         print(f"[ai_analyzer] Parse error on first attempt ({exc}). Retrying with Haiku...")
+        try:
+            picks = _call_claude(STRICT_RETRY_SYSTEM, user_prompt, model="claude-haiku-4-5-20251001")
+            print("[ai_analyzer] Haiku retry succeeded.")
+            picks = _validate_and_clean_picks(picks, valid_stock_tickers)
+        except Exception as exc2:
+            print(f"[ai_analyzer] Claude analysis failed after retry: {exc2}")
+            raise RuntimeError(f"Claude analysis failed: {exc2}") from exc2
 
-    # Haiku for retry — just JSON reformatting, not fresh analysis
-    try:
-        picks = _call_claude(STRICT_RETRY_SYSTEM, user_prompt, model="claude-haiku-4-5-20251001")
-        print("[ai_analyzer] Haiku retry succeeded.")
-        return _validate_and_clean_picks(picks, valid_stock_tickers)
-    except Exception as exc2:
-        print(f"[ai_analyzer] Claude analysis failed after retry: {exc2}")
-        raise RuntimeError(f"Claude analysis failed: {exc2}") from exc2
+    # Fill in allocations now that we know actual pick counts
+    _backfill_allocations(picks, config)
+    return picks
+
+
+def _backfill_allocations(picks: dict, config: dict) -> None:
+    """
+    After Claude returns picks, divide budget equally across actual pick count.
+    Mutates picks in-place. Claude always returns allocation=null; we fill it here.
+    """
+    stock_budget  = config.get("stock_budget")
+    crypto_budget = config.get("crypto_budget")
+
+    if stock_budget:
+        stock_picks = (
+            picks.get("stocks", {}).get("short_term", []) +
+            picks.get("stocks", {}).get("long_term",  []) +
+            picks.get("etfs",   {}).get("short_term", []) +
+            picks.get("etfs",   {}).get("long_term",  [])
+        )
+        n = len(stock_picks)
+        if n:
+            per = round(float(stock_budget) / n, 2)
+            for p in stock_picks:
+                p["allocation"] = per
+            print(f"[ai_analyzer] Stock allocation: ${stock_budget} / {n} picks = ${per} each")
+
+    if crypto_budget:
+        crypto_picks = (
+            picks.get("crypto", {}).get("short_term", []) +
+            picks.get("crypto", {}).get("long_term",  [])
+        )
+        n = len(crypto_picks)
+        if n:
+            per = round(float(crypto_budget) / n, 2)
+            for p in crypto_picks:
+                p["allocation"] = per
+            print(f"[ai_analyzer] Crypto allocation: ${crypto_budget} / {n} picks = ${per} each")
 
 
 # ── Personalization helpers ───────────────────────────────────────────────────
