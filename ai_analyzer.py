@@ -362,9 +362,9 @@ def _build_user_prompt(
 
     stocks_block = ""
     if show_st:
-        stocks_block += "  Short-term: 1–3 picks (target gains within 1-4 weeks). Only include if conviction ★★★ or higher — do NOT pad with weak setups.\n"
+        stocks_block += "  Short-term: 2–3 picks (target gains within 1-4 weeks). Only include if conviction ★★★ or higher — do NOT pad with weak setups.\n"
     if show_lt:
-        stocks_block += "  Long-term: 1–4 picks (dollar-cost average over 1-5 years). Quality over quantity — fewer strong picks beat many mediocre ones.\n"
+        stocks_block += "  Long-term: 2–4 picks (dollar-cost average over 1-5 years). Quality over quantity — fewer strong picks beat many mediocre ones.\n"
     stocks_block += stock_alloc_note
 
     return f"""Analyze these stock AND crypto candidates for a personal investor.
@@ -395,19 +395,16 @@ LONG-TERM TARGET PRICE RULES (STRICTLY ENFORCE):
   - Annualised return benchmarks by type:
       Tech / growth stocks:    12-18% per year
       Value / defensive stocks: 8-12% per year
-      Crypto long-term:        20-40% per year (higher volatility)
   - Example: a 2-3 year tech pick at $424 entry → realistic target $560-650, NOT $800+
   - Do NOT extrapolate recent momentum into long-term targets.
   - If a stock's target implies >25% annualised return, reduce it to 20% max.
-  - CRYPTO LONG-TERM CAP: Maximum total return of 50% over the full horizon regardless
-    of ATH distance or past performance. Do NOT set crypto LT targets implying 100-200%+ gains.
 
 CRYPTO:
-{"  Short-term: 1–2 picks (target gains within 1-2 weeks, high risk). Skip entirely if no strong setup — do NOT force picks." if show_st else ""}
-{"  Long-term: 1–2 picks (hold 6-24 months). Only include if genuine multi-month thesis exists." if show_lt else ""}
+{"  Short-term only: 1–2 picks (target gains within 1-2 weeks, high risk). Skip entirely if no strong setup — do NOT force picks." if show_st else "  No crypto picks requested."}
+  Always return an empty array [] for crypto long_term — crypto long-term picks are not used.
 {crypto_alloc_note}
 
-CRYPTO RULE: Each crypto symbol may appear AT MOST ONCE in short_term. No duplicates.
+CRYPTO RULE: Each crypto symbol may appear AT MOST ONCE. No duplicates. long_term must always be [].
 
 {regime_block}
 
@@ -602,7 +599,7 @@ def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
     if crypto:
         result["crypto"] = {
             "short_term": _clean_section(crypto.get("short_term", []), is_crypto=True),
-            "long_term":  _clean_section(crypto.get("long_term",  []), is_crypto=True),
+            "long_term":  [],   # crypto long-term picks are not used
         }
     if etfs:
         result["etfs"] = {
@@ -735,10 +732,7 @@ def _backfill_allocations(picks: dict, config: dict) -> None:
             print(f"[ai_analyzer] Stock allocation: ${stock_budget} / {n} picks = ${per} each")
 
     if crypto_budget:
-        crypto_picks = (
-            picks.get("crypto", {}).get("short_term", []) +
-            picks.get("crypto", {}).get("long_term",  [])
-        )
+        crypto_picks = picks.get("crypto", {}).get("short_term", [])
         n = len(crypto_picks)
         if n:
             per = round(float(crypto_budget) / n, 2)
