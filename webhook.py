@@ -781,13 +781,15 @@ def miniapp_settings():
     from config_manager import get_user_config
     ucfg = get_user_config(chat_id)
     return jsonify({"settings": {
-        "risk_profile":   ucfg.get("risk_profile", "moderate"),
-        "assets":         ucfg.get("assets", "both"),
-        "stock_budget":   ucfg.get("stock_budget"),
-        "crypto_budget":  ucfg.get("crypto_budget"),
-        "paused":         ucfg.get("paused", False),
-        "stop_loss_pct":  ucfg.get("stop_loss_pct"),
+        "risk_profile":    ucfg.get("risk_profile", "moderate"),
+        "assets":          ucfg.get("assets", "both"),
+        "stock_budget":    ucfg.get("stock_budget"),
+        "crypto_budget":   ucfg.get("crypto_budget"),
+        "paused":          ucfg.get("paused", False),
+        "stop_loss_pct":   ucfg.get("stop_loss_pct"),
         "target_gain_pct": ucfg.get("target_gain_pct"),
+        "watchlist":       ucfg.get("watchlist", []),
+        "excluded_sectors": ucfg.get("excluded_sectors", []),
     }})
 
 
@@ -1210,6 +1212,100 @@ def miniapp_share_link():
         "price alerts, and weekly performance recaps.\n\nJoin here 👇\n" + bot_link
     )
     return jsonify({"ok": True, "url": bot_link, "text": share_text})
+
+
+@app.route("/api/miniapp/status")
+def miniapp_status():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import get_config, get_user_config
+    import pytz
+    from datetime import datetime, timedelta
+
+    global_cfg = get_config()
+    user_cfg   = get_user_config(chat_id)
+
+    bot_active  = bool(global_cfg.get("enabled", True))
+    pick_active = not bool(user_cfg.get("paused", False))
+
+    # Compute next scheduled event (ET)
+    ET  = pytz.timezone("America/New_York")
+    now = datetime.now(ET)
+    schedule = [
+        ("Morning picks",         8,  30),
+        ("10:30 AM confirmation", 10, 30),
+        ("3:30 PM close check",   15, 30),
+    ]
+    next_event = None
+    min_mins   = None
+    for name, h, m in schedule:
+        candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        for days in range(8):
+            t = candidate + timedelta(days=days)
+            if t > now and t.weekday() < 5:
+                mins = int((t - now).total_seconds() / 60)
+                if min_mins is None or mins < min_mins:
+                    min_mins   = mins
+                    next_event = {"name": name, "time": t.strftime("%-I:%M %p ET"), "mins": mins}
+                break
+
+    return jsonify({
+        "ok":          True,
+        "bot_active":  bot_active,
+        "pick_active": pick_active,
+        "next_event":  next_event,
+    })
+
+
+@app.route("/api/miniapp/update_watchlist", methods=["POST"])
+def miniapp_update_watchlist():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import get_user_config, save_user_config
+    body    = request.get_json(silent=True) or {}
+    ucfg    = get_user_config(chat_id)
+    # action: "add" | "remove" | "set"
+    action  = body.get("action", "set")
+    ticker  = (body.get("ticker") or "").strip().upper()
+    tickers = body.get("tickers")   # for "set" action
+
+    current = ucfg.get("watchlist", [])
+    if action == "add" and ticker:
+        if ticker not in current:
+            current = current + [ticker]
+    elif action == "remove" and ticker:
+        current = [t for t in current if t != ticker]
+    elif action == "set" and isinstance(tickers, list):
+        current = [t.strip().upper() for t in tickers if t.strip()]
+
+    ucfg["watchlist"] = current
+    save_user_config(chat_id, ucfg)
+    return jsonify({"ok": True, "watchlist": current})
+
+
+@app.route("/api/miniapp/update_exclusions", methods=["POST"])
+def miniapp_update_exclusions():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import get_user_config, save_user_config
+    body    = request.get_json(silent=True) or {}
+    ucfg    = get_user_config(chat_id)
+    action  = body.get("action", "set")
+    sector  = (body.get("sector") or "").strip()
+    sectors = body.get("sectors")
+
+    current = ucfg.get("excluded_sectors", [])
+    if action == "add" and sector:
+        if sector not in current:
+            current = current + [sector]
+    elif action == "remove" and sector:
+        current = [s for s in current if s != sector]
+    elif action == "set" and isinstance(sectors, list):
+        current = sectors
+
+    ucfg["excluded_sectors"] = current
+    save_user_config(chat_id, ucfg)
+    return jsonify({"ok": True, "excluded_sectors": current})
 
 
 # ── CLI webhook registration ──────────────────────────────────────────────────

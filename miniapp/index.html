@@ -700,6 +700,58 @@ body {
 .div-row:last-child { border-bottom: none; }
 .div-ticker { font-weight: 700; }
 .div-yield { color: var(--green); font-weight: 600; }
+
+/* Status card */
+.status-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px;
+}
+.status-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 0; font-size: 14px;
+}
+.status-dot-active { color: var(--green); font-size: 10px; margin-right: 4px; }
+.status-dot-paused { color: var(--hint); font-size: 10px; margin-right: 4px; }
+.next-run-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--hint); }
+
+/* Chip tags */
+.chips-container { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 0 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 20px; padding: 4px 10px; font-size: 13px; font-weight: 600;
+}
+.chip-remove {
+  background: none; border: none; color: var(--hint);
+  cursor: pointer; font-size: 14px; padding: 0; line-height: 1;
+}
+.chip-remove:active { color: var(--red); }
+
+/* Inline ticker add row */
+.chip-add-row { display: flex; align-items: center; gap: 8px; padding: 8px 0 4px; }
+.chip-input {
+  flex: 1; padding: 8px 12px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font-size: 14px; font-weight: 700;
+  font-family: inherit; text-transform: uppercase; outline: none;
+  max-width: 120px;
+}
+.chip-input:focus { border-color: var(--btn); }
+.chip-add-btn {
+  padding: 8px 14px; border-radius: 8px; border: none;
+  background: var(--btn); color: var(--btn-text);
+  font-size: 13px; font-weight: 700; cursor: pointer;
+  font-family: inherit;
+}
+.chip-add-btn:active { opacity: 0.8; }
+
+/* Sector select */
+.sector-select {
+  width: 100%; padding: 10px 12px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font-size: 14px; font-family: inherit;
+  outline: none; margin-top: 6px; cursor: pointer;
+}
 </style>
 </head>
 
@@ -2077,10 +2129,16 @@ const ASSETS_CYCLE = ['stocks', 'crypto', 'both'];
 const riskLabels   = { conservative: '🛡 Conservative', moderate: '⚖️ Moderate', aggressive: '🔥 Aggressive', degen: '🎰 Degen' };
 const assetLabels  = { stocks: '📈 Stocks only', crypto: '₿ Crypto only', both: '📈 + ₿ Both' };
 
+let _statusData = null;
+
 async function loadSettings() {
   try {
-    const data = await api('/api/miniapp/settings');
-    _settCfg   = data.settings || {};
+    const [settData, statusData] = await Promise.all([
+      api('/api/miniapp/settings'),
+      api('/api/miniapp/status').catch(() => null),
+    ]);
+    _settCfg    = settData.settings || {};
+    _statusData = statusData;
 
     document.getElementById('sett-spinner').style.display = 'none';
     const body = document.getElementById('sett-body');
@@ -2093,13 +2151,39 @@ async function loadSettings() {
   }
 }
 
+const ALL_SECTORS = [
+  'Technology','Healthcare','Financials','Energy',
+  'Consumer Discretionary','Consumer Staples','Industrials',
+  'Materials','Utilities','Real Estate','Communication Services',
+];
+
 function renderSettings() {
   const body   = document.getElementById('sett-body');
   if (!body) return;
   const cfg    = _settCfg;
   const paused = !!cfg.paused;
 
-  let html = `<div class="settings-card">
+  // ── Status card ────────────────────────────────────────────────────────────
+  let html = '';
+  const sd = _statusData;
+  if (sd && sd.ok) {
+    const botDot  = sd.bot_active  ? '<span class="status-dot-active">●</span>' : '<span class="status-dot-paused">●</span>';
+    const pickDot = sd.pick_active ? '<span class="status-dot-active">●</span>' : '<span class="status-dot-paused">●</span>';
+    const botTxt  = sd.bot_active  ? '<span style="color:var(--green)">Active</span>' : '<span style="color:var(--hint)">Paused</span>';
+    const pickTxt = sd.pick_active ? '<span style="color:var(--green)">Active</span>' : '<span style="color:var(--hint)">Paused</span>';
+    let nextHtml = '';
+    if (sd.next_event) {
+      const ne = sd.next_event;
+      nextHtml = `<div class="next-run-row">Next run: <strong style="color:var(--text)">${ne.name}</strong> at ${ne.time} · in ${ne.mins < 60 ? ne.mins + 'm' : Math.round(ne.mins/60) + 'h'}</div>`;
+    }
+    html += `<div class="status-card">
+      <div class="status-row"><span>${botDot} Bot</span>${botTxt}</div>
+      <div class="status-row"><span>${pickDot} Your Picks</span>${pickTxt}</div>
+      ${nextHtml}
+    </div>`;
+  }
+
+  html += `<div class="settings-card">
     <div class="setting-row">
       <span class="setting-key">Risk Profile</span>
       <span class="setting-tap" onclick="cycleRisk()">
@@ -2149,9 +2233,42 @@ function renderSettings() {
       <span class="setting-key">Daily Picks</span>
       <div class="toggle${paused ? '' : ' on'}" id="pause-toggle" onclick="togglePaused(${paused})"></div>
     </div>
-  </div>
+  </div>`;
 
-  <div class="settings-card">
+  // ── Watch List card ────────────────────────────────────────────────────────
+  const watchlist = cfg.watchlist || [];
+  const watchChips = watchlist.map(t =>
+    `<span class="chip">${t}<button class="chip-remove" onclick="removeWatchTicker('${t}')">✕</button></span>`
+  ).join('');
+  html += `<div class="settings-card" style="padding:14px 16px">
+    <div class="card-title">👁 Watch List</div>
+    <div class="chips-container" id="watchlist-chips">${watchChips || '<span style="font-size:13px;color:var(--hint)">No tickers yet</span>'}</div>
+    <div class="chip-add-row">
+      <input type="text" id="watch-ticker-input" class="chip-input" placeholder="e.g. NVDA"
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             oninput="this.value=this.value.toUpperCase()"
+             onkeydown="if(event.key==='Enter')addWatchTicker()">
+      <button class="chip-add-btn" onclick="addWatchTicker()">+ Add</button>
+    </div>
+  </div>`;
+
+  // ── Excluded Sectors card ──────────────────────────────────────────────────
+  const excluded = cfg.excluded_sectors || [];
+  const exclChips = excluded.map(s =>
+    `<span class="chip">${s}<button class="chip-remove" onclick="removeExclusion('${s.replace(/'/g, "\\'")}')">✕</button></span>`
+  ).join('');
+  const availSectors = ALL_SECTORS.filter(s => !excluded.includes(s));
+  const sectorOptions = availSectors.map(s => `<option value="${s}">${s}</option>`).join('');
+  html += `<div class="settings-card" style="padding:14px 16px">
+    <div class="card-title">🚫 Excluded Sectors</div>
+    <div class="chips-container" id="exclusions-chips">${exclChips || '<span style="font-size:13px;color:var(--hint)">None excluded</span>'}</div>
+    ${availSectors.length ? `<select class="sector-select" onchange="addExclusion(this.value); this.value=''">
+      <option value="">+ Add sector to exclude…</option>
+      ${sectorOptions}
+    </select>` : '<div style="font-size:13px;color:var(--hint);padding-top:4px">All sectors excluded</div>'}
+  </div>`;
+
+  html += `<div class="settings-card">
     <div class="action-row" onclick="openHelp()">
       <div class="action-row-left">
         <span class="action-icon">📋</span>
@@ -2294,6 +2411,102 @@ async function shareApp() {
   } catch (e) {
     if (e.name !== 'AbortError') {
       tg.showPopup?.({ message: 'Could not generate share link — try again.' });
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WATCH LIST
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function addWatchTicker() {
+  const input = document.getElementById('watch-ticker-input');
+  if (!input) return;
+  const ticker = (input.value || '').replace(/[^A-Z]/g, '').trim();
+  if (!ticker) { input.focus(); return; }
+  tg.HapticFeedback?.selectionChanged();
+  try {
+    const res = await api('/api/miniapp/update_watchlist', 'POST', { action: 'add', ticker });
+    _settCfg.watchlist = res.watchlist || [];
+    input.value = '';
+    _renderWatchlistChips();
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+  }
+}
+
+async function removeWatchTicker(ticker) {
+  tg.HapticFeedback?.selectionChanged();
+  try {
+    const res = await api('/api/miniapp/update_watchlist', 'POST', { action: 'remove', ticker });
+    _settCfg.watchlist = res.watchlist || [];
+    _renderWatchlistChips();
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+  }
+}
+
+function _renderWatchlistChips() {
+  const container = document.getElementById('watchlist-chips');
+  if (!container) return;
+  const watchlist = _settCfg.watchlist || [];
+  if (!watchlist.length) {
+    container.innerHTML = '<span style="font-size:13px;color:var(--hint)">No tickers yet</span>';
+    return;
+  }
+  container.innerHTML = watchlist.map(t =>
+    `<span class="chip">${t}<button class="chip-remove" onclick="removeWatchTicker('${t}')">✕</button></span>`
+  ).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXCLUDED SECTORS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function addExclusion(sector) {
+  if (!sector) return;
+  tg.HapticFeedback?.selectionChanged();
+  try {
+    const res = await api('/api/miniapp/update_exclusions', 'POST', { action: 'add', sector });
+    _settCfg.excluded_sectors = res.excluded_sectors || [];
+    _renderExclusionChips();
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+  }
+}
+
+async function removeExclusion(sector) {
+  tg.HapticFeedback?.selectionChanged();
+  try {
+    const res = await api('/api/miniapp/update_exclusions', 'POST', { action: 'remove', sector });
+    _settCfg.excluded_sectors = res.excluded_sectors || [];
+    _renderExclusionChips();
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+  }
+}
+
+function _renderExclusionChips() {
+  const container = document.getElementById('exclusions-chips');
+  if (!container) return;
+  const excluded = _settCfg.excluded_sectors || [];
+  if (!excluded.length) {
+    container.innerHTML = '<span style="font-size:13px;color:var(--hint)">None excluded</span>';
+  } else {
+    container.innerHTML = excluded.map(s =>
+      `<span class="chip">${s}<button class="chip-remove" onclick="removeExclusion('${s.replace(/'/g, "\\'")}')">✕</button></span>`
+    ).join('');
+  }
+  // Also refresh the select dropdown
+  const sel = container.parentElement?.querySelector('.sector-select');
+  if (sel) {
+    const availSectors = ALL_SECTORS.filter(s => !excluded.includes(s));
+    if (!availSectors.length) {
+      sel.style.display = 'none';
+    } else {
+      sel.style.display = '';
+      sel.innerHTML = '<option value="">+ Add sector to exclude…</option>' +
+        availSectors.map(s => `<option value="${s}">${s}</option>`).join('');
     }
   }
 }
