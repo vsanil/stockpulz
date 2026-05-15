@@ -51,7 +51,7 @@ from formatters import (
 # ── Import all extracted helpers and command handlers ─────────────────────────
 from cmd_helpers import (
     _is_number, _CRYPTO_SYMBOLS, _is_admin,
-    _anthropic_client, _get_client,
+    _get_client,
     ADMIN_INVITE_TTL_HOURS, _make_admin_invite_token, _verify_admin_invite_token,
     _fetch_live_price, _resolve_ticker_candidates, _resolve_ticker_and_price,
     _nl_param, _send_release_broadcast,
