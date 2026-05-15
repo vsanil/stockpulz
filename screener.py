@@ -768,6 +768,7 @@ def run_screener(
             auto_adjust=True,
             threads=True,
             progress=False,
+            timeout=30,
         )
     except Exception as exc:
         print(f"[screener] Bulk download failed: {exc}")
@@ -786,7 +787,7 @@ def run_screener(
         if "SPY" in available:
             spy_close = raw["SPY"]["Close"].dropna()
         else:
-            spy_close = yf.Ticker("SPY").history(period="2mo")["Close"].dropna()
+            spy_close = yf.Ticker("SPY").history(period="2mo", timeout=10)["Close"].dropna()
         if len(spy_close) >= 21:
             spy_20d_return = round(
                 (float(spy_close.iloc[-1]) - float(spy_close.iloc[-21])) / float(spy_close.iloc[-21]) * 100, 1
@@ -1024,9 +1025,12 @@ def run_screener(
         futures = {pool.submit(_enrich_one, c): c["ticker"] for c in all_candidates}
         for future in concurrent.futures.as_completed(futures):
             try:
-                ticker, entry = future.result()
+                ticker, entry = future.result(timeout=45)   # 45s cap — prevent yfinance hangs
                 if entry is not None:
                     enriched[ticker] = entry
+            except concurrent.futures.TimeoutError:
+                t = futures[future]
+                print(f"[screener] Enrichment timed out for {t} — skipping.")
             except Exception as exc:
                 t = futures[future]
                 print(f"[screener] Enrichment failed for {t}: {exc}")

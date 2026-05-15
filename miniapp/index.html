@@ -787,6 +787,11 @@ body {
     <div id="stats-body" style="display:none"></div>
   </div>
 
+  <div class="tab-pane" id="pane-performance">
+    <div class="loading" id="perf-spinner"><div class="spinner"></div>Loading track record…</div>
+    <div id="perf-body" style="display:none"></div>
+  </div>
+
   <div class="tab-pane" id="pane-settings">
     <div class="loading" id="sett-spinner"><div class="spinner"></div>Loading settings…</div>
     <div id="sett-body" style="display:none"></div>
@@ -804,6 +809,9 @@ body {
   </div>
   <div class="nav-item"        id="nav-stats"     onclick="gotoTab('stats')">
     <div class="nav-icon">📊</div><div class="nav-label">Stats</div>
+  </div>
+  <div class="nav-item"        id="nav-performance" onclick="gotoTab('performance')">
+    <div class="nav-icon">🏆</div><div class="nav-label">Record</div>
   </div>
   <div class="nav-item"        id="nav-settings"  onclick="gotoTab('settings')">
     <div class="nav-icon">⚙️</div><div class="nav-label">Settings</div>
@@ -1042,9 +1050,10 @@ function gotoTab(name) {
   tg.HapticFeedback?.selectionChanged();
   if (!loadedTabs[name]) {
     loadedTabs[name] = true;
-    if (name === 'portfolio') loadPortfolio();
-    if (name === 'stats')     loadStats();
-    if (name === 'settings')  loadSettings();
+    if (name === 'portfolio')   loadPortfolio();
+    if (name === 'stats')       loadStats();
+    if (name === 'performance') loadPerformance();
+    if (name === 'settings')    loadSettings();
   }
 }
 
@@ -2207,6 +2216,127 @@ const RISK_CYCLE   = ['conservative', 'moderate', 'aggressive', 'degen'];
 const ASSETS_CYCLE = ['stocks', 'crypto', 'both'];
 const riskLabels   = { conservative: '🛡 Conservative', moderate: '⚖️ Moderate', aggressive: '🔥 Aggressive', degen: '🎰 Degen' };
 const assetLabels  = { stocks: '📈 Stocks only', crypto: '₿ Crypto only', both: '📈 + ₿ Both' };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PERFORMANCE TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function buildPeriodTable(periodStats) {
+  const periods = [
+    { key: '30d', label: '30 Days' },
+    { key: '60d', label: '60 Days' },
+    { key: '90d', label: '90 Days' },
+  ];
+
+  // Check if we have any data at all
+  const hasData = periods.some(p => periodStats[p.key] && periodStats[p.key].trades);
+  if (!hasData) {
+    return `<div style="font-size:13px;opacity:.5;text-align:center;padding:10px 0">Not enough trades yet to show period breakdown.</div>`;
+  }
+
+  const sign = n => parseFloat(n) >= 0 ? '+' : '';
+  const wrColor = wr => parseFloat(wr) >= 60 ? 'var(--green)' : parseFloat(wr) >= 50 ? 'var(--text)' : 'var(--red)';
+  const retColor = r => parseFloat(r) >= 0 ? 'var(--green)' : 'var(--red)';
+
+  const headerCells = periods.map(p =>
+    `<th style="text-align:center;font-size:12px;opacity:.55;font-weight:600;padding:0 6px 10px">${p.label}</th>`
+  ).join('');
+
+  const makeRow = (label, valueFn) => {
+    const cells = periods.map(p => {
+      const s = periodStats[p.key];
+      if (!s || !s.trades) return `<td style="text-align:center;opacity:.35;font-size:12px">—</td>`;
+      return `<td style="text-align:center">${valueFn(s)}</td>`;
+    }).join('');
+    return `<tr><td style="font-size:12px;opacity:.6;padding:5px 0;white-space:nowrap">${label}</td>${cells}</tr>`;
+  };
+
+  const rows = [
+    makeRow('Win Rate', s =>
+      `<span style="font-size:13px;font-weight:700;color:${wrColor(s.win_rate)}">${s.win_rate.toFixed(0)}%</span>`),
+    makeRow('Avg Return', s =>
+      `<span style="font-size:13px;font-weight:700;color:${retColor(s.avg_ret)}">${sign(s.avg_ret)}${s.avg_ret.toFixed(1)}%</span>`),
+    makeRow('Trades', s =>
+      `<span style="font-size:12px">${s.wins}W / ${s.losses}L</span>`),
+  ];
+
+  return `
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr><th></th>${headerCells}</tr></thead>
+      <tbody>${rows.join('')}</tbody>
+    </table>`;
+}
+
+async function loadPerformance() {
+  const spinner = document.getElementById('perf-spinner');
+  const body    = document.getElementById('perf-body');
+  try {
+    const data  = await api('/api/miniapp/performance');
+    const stats = data.stats || {};
+    spinner.style.display = 'none';
+    body.style.display    = 'block';
+
+    if (!stats.total_trades || stats.total_trades < 3) {
+      body.innerHTML = `
+        <div style="text-align:center;padding:40px 20px;opacity:.6">
+          <div style="font-size:48px;margin-bottom:12px">📭</div>
+          <div style="font-weight:600;margin-bottom:8px">No track record yet</div>
+          <div style="font-size:13px">Log your first trade with /bought, then /sold to start tracking performance here.</div>
+        </div>`;
+      return;
+    }
+
+    const wr      = (stats.win_rate        || 0).toFixed(0);
+    const avgRet  = (stats.avg_return      || 0).toFixed(1);
+    const trades  = stats.total_trades     || 0;
+    const wins    = stats.total_wins       || 0;
+    const losses  = stats.total_losses     || 0;
+    const spy30   = stats.spy_return_30d   != null ? stats.spy_return_30d.toFixed(1)  : null;
+    const alpha   = stats.alpha            != null ? stats.alpha.toFixed(1)           : null;
+    const best    = stats.best_pick        || null;
+    const worst   = stats.worst_pick       || null;
+
+    const wrColor  = wr >= 60 ? 'var(--green)' : wr >= 50 ? 'var(--text)' : 'var(--red)';
+    const retColor = avgRet >= 0 ? 'var(--green)' : 'var(--red)';
+    const sign     = n => parseFloat(n) >= 0 ? '+' : '';
+
+    const spyRow   = spy30   != null ? `<div class="stat-row"><span>S&P 500 (30d)</span><span>${sign(spy30)}${spy30}%</span></div>` : '';
+    const alphaRow = alpha   != null ? `<div class="stat-row"><span>Alpha vs S&P</span><span style="color:${parseFloat(alpha)>=0?'var(--green)':'var(--red)'}"><b>${sign(alpha)}${alpha}%</b></span></div>` : '';
+    const bestRow  = best    ? `<div class="stat-row"><span>🏆 Best pick</span><span style="color:var(--green)"><b>${best[0]}</b> ${sign(best[1])}${best[1].toFixed(1)}%</span></div>` : '';
+    const worstRow = worst   ? `<div class="stat-row"><span>💔 Worst pick</span><span style="color:var(--red)"><b>${worst[0]}</b> ${sign(worst[1])}${worst[1].toFixed(1)}%</span></div>` : '';
+
+    body.innerHTML = `
+      <div style="padding:6px 0 16px">
+        <div style="text-align:center;padding:20px 0 10px">
+          <div style="font-size:13px;opacity:.6;margin-bottom:4px">Win Rate</div>
+          <div style="font-size:48px;font-weight:700;color:${wrColor}">${wr}%</div>
+          <div style="font-size:13px;opacity:.6;margin-top:4px">${wins}W / ${losses}L  ·  ${trades} trades</div>
+        </div>
+
+        <div style="background:var(--secondary);border-radius:12px;padding:14px;margin:0 0 14px">
+          <div class="stat-row"><span>Avg return / trade</span><span style="color:${retColor}"><b>${sign(avgRet)}${avgRet}%</b></span></div>
+          ${spyRow}
+          ${alphaRow}
+          ${bestRow}
+          ${worstRow}
+        </div>
+
+        <div style="background:var(--secondary);border-radius:12px;padding:14px;margin:0 0 14px">
+          <div style="font-size:12px;font-weight:600;opacity:.5;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Period Breakdown</div>
+          ${buildPeriodTable(data.period_stats || {})}
+        </div>
+
+        <div style="text-align:center;font-size:12px;opacity:.45;padding-bottom:4px">
+          Based on trades logged by StockPulz users.<br>Past performance does not guarantee future results.
+        </div>
+      </div>`;
+  } catch(e) {
+    spinner.style.display = 'none';
+    body.style.display    = 'block';
+    body.innerHTML = `<div style="text-align:center;padding:40px;opacity:.5">Could not load performance data.</div>`;
+  }
+}
+
 
 let _statusData = null;
 

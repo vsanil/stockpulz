@@ -305,6 +305,7 @@ def _correlation_warnings(picks: dict) -> list[str]:
             auto_adjust=True,
             progress=False,
             threads=True,
+            timeout=15,
         )
 
         # Handle both single-ticker (Series) and multi-ticker (DataFrame) results

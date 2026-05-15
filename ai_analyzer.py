@@ -30,7 +30,7 @@ MAX_TOKENS = 3500   # ~2500-3000 tokens with commodities + options plays; 3500 g
 # Falls back to yfinance automatically if the key is absent or the call fails.
 # User count has zero impact — news is fetched per-ticker, not per-user.
 
-FINNHUB_NEWS_MIN_SCORE = 55   # Only use Finnhub news for high-confidence candidates
+FINNHUB_NEWS_MIN_SCORE = 0    # Always use Finnhub news when key is available
 _FINNHUB_NEWS_URL      = "https://finnhub.io/api/v1/company-news"
 _FINNHUB_NEWS_DELAY    = 0.3  # seconds between Finnhub news calls
 
@@ -428,7 +428,7 @@ RISK PROFILE: conservative
     if profile == "aggressive":
         return """
 RISK PROFILE: aggressive
-  - Include picks with conviction ★★★ and above — strong setup counts even if risky.
+  - Conviction threshold ★★★ minimum — strong setup counts even if higher risk.
   - All sectors welcome including high-beta: Technology, Energy, Consumer Discretionary.
   - Stop-losses: set 8% below entry (wider room to breathe).
   - Push toward the higher end of the allowed ranges — more picks when setups are available.
@@ -437,7 +437,7 @@ RISK PROFILE: aggressive
     # moderate (default)
     return """
 RISK PROFILE: moderate (default)
-  - Standard conviction threshold ★★★ minimum.
+  - Conviction threshold ★★★★ minimum — only include picks you are genuinely confident about.
   - Balanced sector exposure — no preference.
   - Stop-losses: 5% below entry.
   - Standard pick counts and crypto allocations."""
@@ -546,6 +546,14 @@ STOCKS:
 
 ALLOCATION RULE:
   - Set 'allocation' to null for every pick — it is calculated automatically after selection.
+
+CONVICTION GATE (HARD RULE — MOST IMPORTANT RULE):
+  - The minimum conviction for any pick to be included is determined by the risk profile above.
+  - Do NOT pad with weak setups to hit pick count targets. Fewer genuine picks is ALWAYS better
+    than more filler picks. If only 1 stock qualifies, return 1 stock. If none qualify, return [].
+  - A pick that barely passes the threshold should be dropped, not included.
+  - Quality over quantity — every pick broadcast to users must be something you would stake
+    your reputation on. Empty arrays are acceptable and often correct.
 
 SECTOR DIVERSITY RULE (STRICTLY ENFORCE):
   - No two picks in the same category (short-term or long-term) may share the same sector.
