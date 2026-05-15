@@ -7,6 +7,7 @@ Imported by bot_commands.py and re-exported through telegram_notifier.py.
 """
 
 import os
+import re
 import time
 import threading
 import requests
@@ -16,6 +17,11 @@ TELEGRAM_API       = "https://api.telegram.org/bot{token}/{method}"
 MAX_MESSAGE_LENGTH = 4096   # Telegram hard limit
 MAX_RETRIES        = 3
 RETRY_DELAY        = 5      # seconds between retries
+
+
+def _strip_html(text: str) -> str:
+    """Strip all HTML tags — used as fallback when Telegram rejects HTML."""
+    return re.sub(r"<[^>]+>", "", text)
 
 
 # ── Credentials ───────────────────────────────────────────────────────────────
@@ -69,12 +75,28 @@ def send_message(text: str, chat_id: str | None = None) -> bool:
             "text":       chunk,
             "parse_mode": "HTML",   # supports <b>, <i>, <code> tags
         }
+        sent = False
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 resp = requests.post(url, json=payload, timeout=15)
                 if resp.status_code == 200:
                     print(f"[telegram] Message chunk sent (attempt {attempt}).")
+                    sent = True
                     break
+                elif resp.status_code == 400 and "parse entities" in resp.text:
+                    # Malformed HTML — strip tags and retry once as plain text
+                    print(f"[telegram] HTML parse error — retrying as plain text.")
+                    plain_payload = {
+                        "chat_id": chat_id,
+                        "text":    _strip_html(chunk),
+                    }
+                    resp2 = requests.post(url, json=plain_payload, timeout=15)
+                    if resp2.status_code == 200:
+                        print(f"[telegram] Message chunk sent as plain text (fallback).")
+                        sent = True
+                    else:
+                        print(f"[telegram] Plain text fallback also failed: {resp2.status_code}")
+                    break   # don't retry after HTML fallback attempt
                 else:
                     print(f"[telegram] Attempt {attempt} failed: HTTP {resp.status_code} — {resp.text}")
             except Exception as exc:
@@ -82,7 +104,8 @@ def send_message(text: str, chat_id: str | None = None) -> bool:
 
             if attempt < MAX_RETRIES:
                 time.sleep(RETRY_DELAY)
-        else:
+
+        if not sent:
             print("[telegram] All send attempts failed for a chunk.")
             return False
 
@@ -106,6 +129,12 @@ def send_inline_keyboard(text: str, buttons: list[list[dict]],
             resp = requests.post(url, json=payload, timeout=15)
             if resp.status_code == 200:
                 return True
+            elif resp.status_code == 400 and "parse entities" in resp.text:
+                print(f"[telegram] send_inline_keyboard HTML error — retrying as plain text.")
+                payload["text"] = _strip_html(payload["text"])
+                payload.pop("parse_mode", None)
+                resp2 = requests.post(url, json=payload, timeout=15)
+                return resp2.status_code == 200
             print(f"[telegram] send_inline_keyboard attempt {attempt} failed: HTTP {resp.status_code}")
         except Exception as exc:
             print(f"[telegram] send_inline_keyboard attempt {attempt} exception: {exc}")
@@ -306,6 +335,18 @@ def broadcast_all(payloads: list[dict]) -> dict[str, bool]:
                                 break
                             body = await resp.text()
                             print(f"[telegram/async] {chat_id} attempt {attempt}: HTTP {resp.status} — {body[:120]}")
+                            if resp.status == 400 and "parse entities" in body:
+                                # HTML rejected — fall back to plain text immediately
+                                plain = dict(payload)
+                                plain["text"] = _strip_html(chunk)
+                                plain.pop("parse_mode", None)
+                                async with session.post(send_url, json=plain, timeout=aiohttp.ClientTimeout(total=15)) as r2:
+                                    if r2.status == 200:
+                                        print(f"[telegram/async] {chat_id}: plain text fallback succeeded.")
+                                    else:
+                                        print(f"[telegram/async] {chat_id}: plain text fallback failed: {r2.status}")
+                                        success = False
+                                break   # don't retry after fallback
                     except Exception as exc:
                         print(f"[telegram/async] {chat_id} attempt {attempt}: {exc}")
                     if attempt < MAX_RETRIES:
