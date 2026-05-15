@@ -7,8 +7,8 @@ import os
 import json
 import time
 import requests
-import anthropic
 import yfinance as yf
+from llm_client import _get_client
 
 from sentiment_analyzer import get_sentiment
 from options_flow import get_options_signal
@@ -793,15 +793,6 @@ def _strip_fences(raw: str) -> str:
     return raw
 
 
-_anthropic_client: anthropic.Anthropic | None = None
-
-
-def _get_client() -> anthropic.Anthropic:
-    """Return a cached Anthropic client (created once per process)."""
-    global _anthropic_client
-    if _anthropic_client is None:
-        _anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    return _anthropic_client
 
 
 # ── Ticker validator ──────────────────────────────────────────────────────────

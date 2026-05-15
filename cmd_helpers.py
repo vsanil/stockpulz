@@ -8,11 +8,10 @@ import time
 import hmac
 import hashlib
 import json
-import anthropic
-
 from telegram_api import send_message
 from config_manager import get_allowed_users
 from formatters import _esc
+from llm_client import _get_client
 
 
 def _is_number(s: str) -> bool:
@@ -35,16 +34,6 @@ def _is_admin(chat_id: str | None = None) -> bool:
     resolved = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
     return str(resolved) == str(os.environ.get("TELEGRAM_CHAT_ID", ""))
 
-
-# ── Anthropic client singleton ────────────────────────────────────────────────
-_anthropic_client: anthropic.Anthropic | None = None
-
-def _get_client() -> anthropic.Anthropic:
-    """Return a shared Anthropic client, created lazily on first call."""
-    global _anthropic_client
-    if _anthropic_client is None:
-        _anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    return _anthropic_client
 
 # ── Admin invite token (HMAC-signed, time-limited) ───────────────────────────
 
