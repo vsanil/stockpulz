@@ -23,6 +23,7 @@ import ta
 
 from earnings_checker import get_upcoming_earnings
 from market_regime import get_market_regime, regime_pick_multiplier
+from congressional_tracker import get_all_congressional_trades, get_congressional_signal
 
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 
@@ -244,10 +245,183 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
         if not pd.isna(lower_band) and current_price <= lower_band * 1.05:
             score += 15
 
+        # OBV slope — positive = smart money accumulating (+10 pts)
+        # Positive OBV slope means up-day volume dominates down-day volume.
+        try:
+            obv       = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+            obv_clean = obv.dropna()
+            if len(obv_clean) >= 10:
+                obv_slope = float(obv_clean.tail(10).diff().mean())
+                metrics["obv_positive"] = obv_slope > 0
+                if obv_slope > 0:
+                    score += 10
+        except Exception:
+            pass
+
+        # ATR (14-day) — average true range as % of price.
+        # Used to suggest a professional stop-loss distance (1.5× ATR is standard).
+        # No scoring impact — purely informational for Claude's risk guidance.
+        try:
+            high  = hist["High"].squeeze()
+            low   = hist["Low"].squeeze()
+            atr_s = ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range()
+            atr_v = float(atr_s.iloc[-1])
+            if not pd.isna(atr_v) and current_price > 0:
+                atr_pct = round(atr_v / current_price * 100, 2)
+                metrics["atr_pct"]            = atr_pct
+                metrics["suggested_stop_pct"] = round(atr_pct * 1.5, 1)
+        except Exception:
+            pass
+
+        # Candlestick + chart patterns — expert-level visual signals.
+        # Bull flag and bullish engulfing are the highest-conviction ST patterns.
+        patterns = _detect_patterns(hist)
+        if patterns:
+            metrics["patterns"] = list(patterns.keys())
+            if patterns.get("bull_flag"):
+                score += 15
+            if patterns.get("bullish_engulfing"):
+                score += 15
+            if patterns.get("three_white_soldiers"):
+                score += 10
+            if patterns.get("hammer"):
+                score += 10
+            if patterns.get("morning_star"):
+                score += 10
+
     except Exception as exc:
         print(f"[screener] Short-term indicator error: {exc}")
 
     return score, metrics
+
+
+# ── Candlestick pattern detection ────────────────────────────────────────────
+
+def _detect_patterns(hist: pd.DataFrame) -> dict:
+    """
+    Detect key bullish candlestick and chart patterns from OHLCV data.
+    Uses only data already in the bulk download — zero extra API calls.
+
+    Patterns detected:
+      bullish_engulfing  — today's green candle body engulfs yesterday's red body
+      hammer             — small body, long lower wick (potential reversal)
+      three_white_soldiers — 3 consecutive higher-closing green candles
+      bull_flag          — strong 5-day move followed by tight 3-day consolidation
+      morning_star       — 3-bar bullish reversal (red → small → green)
+
+    Returns dict of pattern name → True (only present keys are active patterns).
+    """
+    patterns: dict[str, bool] = {}
+    try:
+        if len(hist) < 10:
+            return patterns
+
+        o = hist["Open"].squeeze().astype(float)
+        h = hist["High"].squeeze().astype(float)
+        l = hist["Low"].squeeze().astype(float)
+        c = hist["Close"].squeeze().astype(float)
+
+        # Current and previous candle values
+        c0, o0, h0, l0 = c.iloc[-1], o.iloc[-1], h.iloc[-1], l.iloc[-1]
+        c1, o1         = c.iloc[-2], o.iloc[-2]
+        c2, o2         = c.iloc[-3], o.iloc[-3]
+
+        body0      = abs(c0 - o0)
+        body1      = abs(c1 - o1)
+        range0     = h0 - l0
+        lower_wick = min(o0, c0) - l0
+        upper_wick = h0 - max(o0, c0)
+
+        # Bullish Engulfing: yesterday red, today green, today body engulfs yesterday's
+        if c1 < o1 and c0 > o0 and o0 <= c1 and c0 >= o1 and body0 > body1 * 0.8:
+            patterns["bullish_engulfing"] = True
+
+        # Hammer: small body in upper portion, lower wick ≥ 2× body, tiny upper wick
+        if (range0 > 0 and body0 > 0
+                and lower_wick >= 2.0 * body0
+                and upper_wick <= body0 * 0.5):
+            patterns["hammer"] = True
+
+        # Three White Soldiers: 3 consecutive green candles, each closing higher
+        if (c0 > o0 and c1 > o1 and c2 > o2
+                and c0 > c1 > c2
+                and o0 > o1):
+            patterns["three_white_soldiers"] = True
+
+        # Bull Flag: ≥5% move over 5 days → tight ≤3% range over last 3 days
+        if len(c) >= 9:
+            base   = float(c.iloc[-9])
+            peak   = float(c.iloc[-4])
+            flag_h = float(h.iloc[-4:-1].max())
+            flag_l = float(l.iloc[-4:-1].min())
+            if base > 0 and (peak - base) / base * 100 >= 5:
+                flag_range = (flag_h - flag_l) / peak * 100 if peak > 0 else 999
+                if flag_range <= 3.5:
+                    patterns["bull_flag"] = True
+
+        # Morning Star: big red → small body (doji-like) → big green
+        if (c2 < o2 and body1 < body0 * 0.4 and body1 < abs(c2 - o2) * 0.4
+                and c0 > o0 and c0 > (o2 + c2) / 2):
+            patterns["morning_star"] = True
+
+    except Exception as exc:
+        print(f"[screener] Pattern detection error: {exc}")
+
+    return patterns
+
+
+# ── Alpaca real-time price snapshot ──────────────────────────────────────────
+
+def _get_alpaca_snapshots(tickers: list[str]) -> dict[str, float]:
+    """
+    Fetch real-time latest prices for a list of tickers via Alpaca free tier.
+    Requires ALPACA_KEY_ID + ALPACA_SECRET_KEY env vars (free paper account).
+    Returns {ticker: price} — only for tickers successfully fetched.
+    Falls back silently to empty dict if keys absent or call fails.
+    """
+    key    = os.environ.get("ALPACA_KEY_ID", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if not key or not secret:
+        return {}
+
+    prices: dict[str, float] = {}
+    # Alpaca allows up to 1000 symbols per snapshot call
+    chunk_size = 500
+    headers = {
+        "APCA-API-KEY-ID":     key,
+        "APCA-API-SECRET-KEY": secret,
+        "Accept":              "application/json",
+    }
+    url = "https://data.alpaca.markets/v2/stocks/snapshots"
+
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i:i + chunk_size]
+        try:
+            resp = requests.get(
+                url,
+                headers=headers,
+                params={"symbols": ",".join(chunk), "feed": "iex"},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                print(f"[screener] Alpaca snapshot error: {resp.status_code}")
+                continue
+            data = resp.json()
+            for ticker, snap in data.items():
+                try:
+                    price = (snap.get("latestTrade") or {}).get("p") or \
+                            (snap.get("latestQuote") or {}).get("ap") or \
+                            (snap.get("dailyBar") or {}).get("c")
+                    if price:
+                        prices[ticker.upper()] = float(price)
+                except Exception:
+                    pass
+        except Exception as exc:
+            print(f"[screener] Alpaca snapshot chunk failed: {exc}")
+
+    if prices:
+        print(f"[screener] Alpaca real-time prices: {len(prices)} tickers fetched.")
+    return prices
 
 
 # ── Finnhub fundamental metrics ───────────────────────────────────────────────
@@ -306,6 +480,102 @@ def _get_analyst_target(ticker: str) -> dict:
             "analyst_target_low":  round(float(data.get("targetLow", 0)), 2),
         }
     except Exception:
+        return {}
+
+
+# ── Finnhub EPS surprise history ─────────────────────────────────────────────
+
+def _get_eps_surprises(ticker: str) -> dict:
+    """
+    Fetch last 4 quarters of EPS surprise from Finnhub /stock/earnings (free tier).
+    Called for LT candidates only — adds meaningful fundamental context.
+    Returns beat/miss pattern and most recent surprise %, or {} on failure.
+    """
+    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not api_key:
+        return {}
+    try:
+        resp = requests.get(
+            f"{FINNHUB_BASE}/stock/earnings",
+            params={"symbol": ticker, "limit": 4, "token": api_key},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return {}
+        data = resp.json() or []
+        if not data:
+            return {}
+
+        beats  = sum(1 for q in data if (q.get("surprise") or 0) > 0)
+        misses = len(data) - beats
+
+        # Most recent quarter surprise %
+        last_pct = None
+        if data[0].get("surprisePercent") is not None:
+            last_pct = round(float(data[0]["surprisePercent"]), 1)
+
+        return {
+            "eps_beats":            beats,
+            "eps_misses":           misses,
+            "eps_quarters_checked": len(data),
+            "last_eps_surprise_pct": last_pct,
+        }
+    except Exception as exc:
+        print(f"[screener] EPS surprise error for {ticker}: {exc}")
+        return {}
+
+
+# ── Finnhub analyst buy/hold/sell count ───────────────────────────────────────
+
+def _get_analyst_recommendations(ticker: str) -> dict:
+    """
+    Fetch analyst buy/hold/sell consensus from Finnhub /stock/recommendation (free tier).
+    Called for LT candidates only — buy/sell ratio is a meaningful LT signal.
+    Returns analyst_buy, analyst_hold, analyst_sell, analyst_consensus, or {} on failure.
+    """
+    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not api_key:
+        return {}
+    try:
+        resp = requests.get(
+            f"{FINNHUB_BASE}/stock/recommendation",
+            params={"symbol": ticker, "token": api_key},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return {}
+        data = resp.json() or []
+        if not data:
+            return {}
+
+        # Finnhub returns newest first
+        latest     = data[0]
+        strong_buy = int(latest.get("strongBuy",  0) or 0)
+        buy        = int(latest.get("buy",         0) or 0)
+        hold       = int(latest.get("hold",        0) or 0)
+        sell       = int(latest.get("sell",        0) or 0)
+        strong_sell = int(latest.get("strongSell", 0) or 0)
+
+        total_buy  = strong_buy + buy
+        total_sell = strong_sell + sell
+        total      = total_buy + hold + total_sell
+
+        if total == 0:
+            return {}
+
+        buy_pct  = total_buy  / total
+        sell_pct = total_sell / total
+        consensus = "buy" if buy_pct >= 0.60 else ("sell" if sell_pct >= 0.30 else "hold")
+
+        return {
+            "analyst_buy":       total_buy,
+            "analyst_hold":      hold,
+            "analyst_sell":      total_sell,
+            "analyst_total":     total,
+            "analyst_consensus": consensus,
+        }
+    except Exception as exc:
+        print(f"[screener] Analyst recommendation error for {ticker}: {exc}")
         return {}
 
 
@@ -508,6 +778,23 @@ def run_screener(
     else:
         available = set(tickers[:1])
 
+    # ── SPY 20-day return — computed once as RS baseline ──────────────────────
+    # Relative strength vs SPY = stock 20d return minus SPY 20d return.
+    # Positive = outperforming market; negative = lagging.
+    spy_20d_return = None
+    try:
+        if "SPY" in available:
+            spy_close = raw["SPY"]["Close"].dropna()
+        else:
+            spy_close = yf.Ticker("SPY").history(period="2mo")["Close"].dropna()
+        if len(spy_close) >= 21:
+            spy_20d_return = round(
+                (float(spy_close.iloc[-1]) - float(spy_close.iloc[-21])) / float(spy_close.iloc[-21]) * 100, 1
+            )
+            print(f"[screener] SPY 20d return: {spy_20d_return:+.1f}% (RS baseline)")
+    except Exception as exc:
+        print(f"[screener] SPY 20d return fetch failed: {exc}")
+
     # ── Step 2: Score all tickers + compute dollar volume ─────────────────────
     all_scored: list[dict] = []
     for ticker in tickers:
@@ -530,6 +817,16 @@ def run_screener(
                 continue
 
             st_score, st_metrics = _short_term_score(hist)
+
+            # Relative strength vs SPY — stock 20d return minus market 20d return
+            if spy_20d_return is not None:
+                try:
+                    close_s = hist["Close"].dropna()
+                    if len(close_s) >= 21:
+                        stock_20d = (float(close_s.iloc[-1]) - float(close_s.iloc[-21])) / float(close_s.iloc[-21]) * 100
+                        st_metrics["rs_vs_spy"] = round(stock_20d - spy_20d_return, 1)
+                except Exception:
+                    pass
 
             # Dollar volume = avg(close × volume) over last 30 days
             # High dollar volume ≈ large, liquid, established company
@@ -573,19 +870,39 @@ def run_screener(
     all_pool_tickers = list({s["ticker"] for s in st_pool + lt_pool})
     upcoming_earnings = get_upcoming_earnings(all_pool_tickers, days_ahead=5)
 
-    # ── Step 5: Fetch .info for union of both pools (deduplicated) ────────────
-    seen_tickers: set[str] = set()
-    enriched: dict[str, dict] = {}   # ticker → enriched entry
+    # ── Step 4b: Alpaca real-time prices (replaces yfinance close for current price) ──
+    # Falls back to bulk-download close price if Alpaca keys absent or call fails.
+    alpaca_prices = _get_alpaca_snapshots(all_pool_tickers)
+
+    # ── Step 4c: Congressional trading (one fetch, cached 24h) ───────────────
+    congressional_trades = get_all_congressional_trades()
+    print(f"[screener] Congressional data: {len(congressional_trades)} tickers tracked.")
+
+    # ── Step 5: Fetch .info for union of both pools (concurrent, deduplicated) ──
+    # ThreadPoolExecutor gives ~5-8× speedup over sequential calls.
+    # max_workers=8 keeps Finnhub well within 60 req/min free-tier limit.
+    import concurrent.futures, threading
 
     all_candidates = st_pool + [c for c in lt_pool if c["ticker"] not in {s["ticker"] for s in st_pool}]
-    print(f"[screener] Fetching fundamentals for {len(all_candidates)} unique candidates...")
+    # Deduplicate preserving order
+    _seen: set[str] = set()
+    all_candidates = [c for c in all_candidates if not (_seen.add(c["ticker"]) or c["ticker"] in _seen - {c["ticker"]})]
+    # Simpler dedup:
+    _deduped: list = []
+    _deduped_set: set[str] = set()
+    for _c in all_candidates:
+        if _c["ticker"] not in _deduped_set:
+            _deduped.append(_c)
+            _deduped_set.add(_c["ticker"])
+    all_candidates = _deduped
+    print(f"[screener] Fetching fundamentals for {len(all_candidates)} unique candidates (parallel)...")
 
-    for candidate in all_candidates:
+    lt_pool_tickers: set[str] = {c["ticker"] for c in lt_pool}
+    _finnhub_lock = threading.Semaphore(4)   # max 4 concurrent Finnhub calls → stays under 60/min
+
+    def _enrich_one(candidate: dict) -> tuple[str, dict | None]:
+        """Enrich a single candidate. Returns (ticker, entry_dict | None)."""
         ticker = candidate["ticker"]
-        if ticker in seen_tickers:
-            continue
-        seen_tickers.add(ticker)
-
         try:
             info    = yf.Ticker(ticker).info or {}
             company = info.get("longName", ticker)
@@ -594,15 +911,52 @@ def run_screener(
             print(f"[screener] yfinance info failed for {ticker}: {exc}")
             info, company, sector = {}, ticker, "Unknown"
 
-        try:
-            fh_metrics = _get_finnhub_metrics(ticker)
-        except Exception:
-            fh_metrics = {}
+        # Override current price with Alpaca real-time if available
+        if ticker in alpaca_prices:
+            candidate = {**candidate, "current_price": round(alpaca_prices[ticker], 2)}
 
-        try:
-            analyst = _get_analyst_target(ticker)
-        except Exception:
-            analyst = {}
+        week52_high = info.get("fiftyTwoWeekHigh")
+        week52_low  = info.get("fiftyTwoWeekLow")
+        pct_below_52w_high = None
+        if week52_high and candidate["current_price"] > 0 and week52_high > 0:
+            pct_below_52w_high = round(
+                (week52_high - candidate["current_price"]) / week52_high * 100, 1
+            )
+
+        short_float_raw = info.get("shortPercentOfFloat")
+        short_float_pct = round(float(short_float_raw) * 100, 1) if short_float_raw is not None else None
+        short_ratio_raw = info.get("shortRatio")
+        days_to_cover   = round(float(short_ratio_raw), 1) if short_ratio_raw is not None else None
+
+        inst_own_raw = info.get("institutionPercentHeld")
+        inst_own_pct = round(float(inst_own_raw) * 100, 1) if inst_own_raw is not None else None
+
+        with _finnhub_lock:
+            try:
+                fh_metrics = _get_finnhub_metrics(ticker)
+            except Exception:
+                fh_metrics = {}
+            try:
+                analyst = _get_analyst_target(ticker)
+            except Exception:
+                analyst = {}
+
+        is_lt_candidate = ticker in lt_pool_tickers
+        eps_surprise = {}
+        analyst_rec  = {}
+        if is_lt_candidate:
+            with _finnhub_lock:
+                try:
+                    eps_surprise = _get_eps_surprises(ticker)
+                except Exception:
+                    pass
+                try:
+                    analyst_rec = _get_analyst_recommendations(ticker)
+                    time.sleep(0.1)
+                except Exception:
+                    pass
+
+        congress = get_congressional_signal(ticker, congressional_trades)
 
         try:
             lt_score, lt_metrics = _long_term_score(info, fh_metrics)
@@ -610,43 +964,108 @@ def run_screener(
             print(f"[screener] LT score failed for {ticker}: {exc}")
             lt_score, lt_metrics = 0, {}
 
-        # Boost score slightly if analyst consensus target is >10% above current price
         if analyst.get("analyst_target_mean") and candidate["current_price"] > 0:
             upside = (analyst["analyst_target_mean"] - candidate["current_price"]) / candidate["current_price"]
             analyst["analyst_upside_pct"] = round(upside * 100, 1)
             if upside > 0.10:
                 lt_score = min(100, lt_score + 5)
 
-        entry = {
+        if eps_surprise.get("eps_beats", 0) >= 3 and eps_surprise.get("eps_quarters_checked", 0) >= 3:
+            lt_score = min(100, lt_score + 5)
+
+        if congress.get("congress_score", 0) >= 6:
+            lt_score = min(100, lt_score + 8)
+        elif congress.get("congress_score", 0) >= 3:
+            lt_score = min(100, lt_score + 4)
+
+        st_metrics_extra = {k: v for k, v in candidate.items()
+                            if k not in ("ticker", "current_price", "score", "avg_dollar_vol")}
+        if pct_below_52w_high is not None:
+            st_metrics_extra["pct_below_52w_high"] = pct_below_52w_high
+
+        entry: dict = {
             "ticker":        ticker,
             "company":       company,
             "sector":        sector,
             "current_price": candidate["current_price"],
             "st_score":      candidate["score"],
             "lt_score":      lt_score,
-            "st_metrics":    {k: v for k, v in candidate.items()
-                              if k not in ("ticker", "current_price", "score", "avg_dollar_vol")},
-            "lt_metrics":    {**lt_metrics, **analyst},
+            "st_metrics":    st_metrics_extra,
+            "lt_metrics":    {**lt_metrics, **analyst, **eps_surprise, **analyst_rec,
+                              **{k: v for k, v in congress.items() if congress.get("congress_score", 0) > 0}},
         }
+        if week52_high is not None:
+            entry["week52_high"] = round(week52_high, 2)
+        if week52_low is not None:
+            entry["week52_low"]  = round(week52_low, 2)
+        if pct_below_52w_high is not None:
+            entry["pct_below_52w_high"] = pct_below_52w_high
+
+        days_to_earnings = None
         if ticker in upcoming_earnings:
             entry["earnings_date"] = upcoming_earnings[ticker]
+            try:
+                from datetime import date as _date, datetime as _dt
+                ed = upcoming_earnings[ticker]
+                ed_parsed = _dt.strptime(str(ed)[:10], "%Y-%m-%d").date() if isinstance(ed, str) else ed
+                days_to_earnings = (ed_parsed - _date.today()).days
+            except Exception:
+                pass
 
-        enriched[ticker] = entry
-        time.sleep(SLEEP_INFO)
+        if short_float_pct  is not None: entry["short_float_pct"]   = short_float_pct
+        if days_to_cover    is not None: entry["days_to_cover"]      = days_to_cover
+        if inst_own_pct     is not None: entry["inst_own_pct"]       = inst_own_pct
+        if days_to_earnings is not None: entry["days_to_earnings"]   = days_to_earnings
+
+        return ticker, entry
+
+    enriched: dict[str, dict] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_enrich_one, c): c["ticker"] for c in all_candidates}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                ticker, entry = future.result()
+                if entry is not None:
+                    enriched[ticker] = entry
+            except Exception as exc:
+                t = futures[future]
+                print(f"[screener] Enrichment failed for {t}: {exc}")
+
 
     # ── Step 6: Build final top-5 lists ───────────────────────────────────────
     def _opt_earnings(e: dict) -> dict:
         return {"earnings_date": e["earnings_date"]} if "earnings_date" in e else {}
 
+    def _opt_extra(e: dict) -> dict:
+        """Include all optional top-level context fields if present."""
+        out = {}
+        for field in (
+            "week52_high", "week52_low", "pct_below_52w_high",
+            "short_float_pct", "days_to_cover",
+            "inst_own_pct", "days_to_earnings",
+        ):
+            if e.get(field) is not None:
+                out[field] = e[field]
+        return out
+
+    def _opt_congress(e: dict) -> dict:
+        """Include congressional signal if score > 0."""
+        lt = e.get("lt_metrics", {})
+        if lt.get("congress_score", 0) > 0:
+            return {k: lt[k] for k in
+                    ("congress_buys", "congress_members", "congress_score",
+                     "is_cluster", "note") if k in lt}
+        return {}
+
     def _flatten_short(e: dict) -> dict:
         return {"ticker": e["ticker"], "company": e["company"], "sector": e["sector"],
                 "current_price": e["current_price"], "score": e["st_score"],
-                **e["st_metrics"], **_opt_earnings(e)}
+                **e["st_metrics"], **_opt_earnings(e), **_opt_extra(e)}
 
     def _flatten_long(e: dict) -> dict:
         return {"ticker": e["ticker"], "company": e["company"], "sector": e["sector"],
                 "current_price": e["current_price"], "score": e["lt_score"],
-                **e["lt_metrics"], **_opt_earnings(e)}
+                **e["lt_metrics"], **_opt_earnings(e), **_opt_extra(e), **_opt_congress(e)}
 
     # Apply sector exclusions
     if excluded_sectors:

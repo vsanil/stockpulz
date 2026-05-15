@@ -2089,7 +2089,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "start":
         return _parse_and_execute("START", original="/start", chat_id=chat_id)
 
-    if command == "share":
+    if command in ("share", "invite"):
         return _parse_and_execute("SHARE", original="/share", chat_id=chat_id)
 
     if command == "adduser":
@@ -3134,7 +3134,7 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
             "\n/next — When's the next scheduled pick"
             "\n/reset — Reset all settings to defaults"
             "\n/dividends — Dividend yield &amp; next ex-date for your positions"
-            "\n/share — Get your invite link"
+            "\n/share — Get your invite link (also /invite)"
             "\n/feedback — Send feedback to the team"
             "\n/guide — Quick reference: daily schedule, /bought, /stats explained"
             "\n/setup — Re-run the setup wizard (budget, risk, assets)\n"
@@ -3334,12 +3334,60 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
             _start_onboarding_wizard(chat_id)
             return ""   # wizard already sent above
 
+        # ── Referral link → auto-approve immediately, notify referrer ───────────
+        if deep_param.startswith("ref_"):
+            referrer_id = deep_param[4:]
+            # Fetch profile for welcome message
+            first_name, username = "", ""
+            try:
+                resp = requests.get(
+                    TELEGRAM_API.format(token=_bot_token(), method="getChat"),
+                    params={"chat_id": chat_id}, timeout=5,
+                ).json().get("result", {})
+                first_name = resp.get("first_name", "")
+                username   = resp.get("username", "")
+            except Exception:
+                pass
+            # Auto-approve — no admin queue for referred users
+            from config_manager import add_allowed_user
+            add_allowed_user(chat_id)
+            remove_pending_user(chat_id)
+            # Track referral count on the referrer's profile
+            try:
+                ref_cfg   = get_user_config(referrer_id)
+                ref_count = ref_cfg.get("referral_count", 0) + 1
+                update_user_config(referrer_id, "referral_count", ref_count)
+            except Exception:
+                ref_count = 1
+            # Notify referrer
+            try:
+                joiner_name = _esc(first_name or chat_id)
+                send_message(
+                    f"🎉 <b>Your invite worked!</b>\n\n"
+                    f"{joiner_name} just joined StockPulz via your link.\n"
+                    f"You've now referred <b>{ref_count}</b> friend{'s' if ref_count != 1 else ''}. "
+                    f"Thanks for growing the community! 🙌",
+                    chat_id=referrer_id,
+                )
+            except Exception:
+                pass
+            # Notify admin silently
+            owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+            if owner and owner != chat_id:
+                send_message(
+                    f"🔔 <code>{chat_id}</code> auto-approved via referral from <code>{referrer_id}</code>.",
+                    chat_id=owner,
+                )
+            # Start onboarding for the new user
+            _start_onboarding_wizard(chat_id)
+            return ""
+
         # ── Normal flow — add to pending, notify admin ────────────────────────
         pending = get_pending_users()
         if chat_id in pending:
             return (
                 "⏳ <b>Your request is already pending.</b>\n"
-                "You'll be notified as soon as the admin approves your access."
+                "You'll be notified as soon as you're approved — usually within a few hours."
             )
         # Fetch their Telegram profile for the admin notification
         first_name, username = "", ""
@@ -3355,17 +3403,11 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
         add_pending_user(chat_id, first_name=first_name, username=username)
         # Notify admin with a one-tap approve button
         owner = os.environ.get("TELEGRAM_CHAT_ID", "")
-        # If referred by a user, mention who referred them
-        referrer_str = ""
-        if deep_param.startswith("ref_"):
-            referrer_id = deep_param[4:]
-            referrer_str = f"\nReferred by user: <code>{referrer_id}</code>"
         admin_msg = (
             f"🔔 <b>New access request</b>\n\n"
             f"Name: <b>{_esc(first_name)}</b>"
             + (f"  (@{_esc(username)})" if username else "") +
-            f"\nChat ID: <code>{chat_id}</code>"
-            f"{referrer_str}\n\n"
+            f"\nChat ID: <code>{chat_id}</code>\n\n"
             f"Tap to approve 👇"
         )
         if owner:
@@ -3381,8 +3423,7 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
             )
         return (
             "👋 <b>Welcome to StockPulz!</b>\n\n"
-            "Your access request has been sent to the admin.\n"
-            "You'll be notified as soon as you're approved — usually within a few hours.\n\n"
+            "Your access request has been sent. You'll be notified as soon as you're approved — usually within a few hours.\n\n"
             "<i>StockPulz delivers daily AI-curated stock &amp; crypto picks, price alerts, and weekly performance recaps.</i>\n\n"
             "📖 <a href=\"https://stockpulz.com\">Learn more at stockpulz.com →</a>"
         )

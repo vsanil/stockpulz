@@ -6,6 +6,7 @@ Accepts screener candidates, enriches stocks with Finnhub news, returns structur
 import os
 import json
 import time
+import requests
 import anthropic
 import yfinance as yf
 
@@ -22,15 +23,59 @@ from config_manager import (
 MAX_TOKENS = 3500   # ~2500-3000 tokens with commodities + options plays; 3500 gives safe headroom
 
 
-# ── News via yfinance (no API key needed) ─────────────────────────────────────
+# ── News: Finnhub primary, yfinance fallback ──────────────────────────────────
+# Finnhub /company-news returns categorised, higher-quality headlines than
+# yfinance. Only called for candidates with score >= FINNHUB_NEWS_MIN_SCORE to
+# stay well within the free-tier 60 req/min combined with fundamentals calls.
+# Falls back to yfinance automatically if the key is absent or the call fails.
+# User count has zero impact — news is fetched per-ticker, not per-user.
 
-def _get_news_headlines(ticker: str, max_headlines: int = 3) -> list[str]:
-    """Fetch recent news headlines for a ticker via yfinance (free, no key)."""
+FINNHUB_NEWS_MIN_SCORE = 55   # Only use Finnhub news for high-confidence candidates
+_FINNHUB_NEWS_URL      = "https://finnhub.io/api/v1/company-news"
+_FINNHUB_NEWS_DELAY    = 0.3  # seconds between Finnhub news calls
+
+
+def _get_news_headlines(ticker: str, max_headlines: int = 3, score: float = 0) -> list[str]:
+    """
+    Fetch recent news headlines for a ticker.
+
+    Strategy:
+      - score >= FINNHUB_NEWS_MIN_SCORE + FINNHUB_API_KEY present → Finnhub /company-news
+      - otherwise → yfinance (free, no key)
+
+    Returns list of headline strings (same interface regardless of source).
+    Never raises.
+    """
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
+
+    # ── Finnhub path ──────────────────────────────────────────────────────────
+    if finnhub_key and score >= FINNHUB_NEWS_MIN_SCORE:
+        try:
+            from datetime import date, timedelta
+            today     = date.today().isoformat()
+            week_ago  = (date.today() - timedelta(days=7)).isoformat()
+            resp = requests.get(
+                _FINNHUB_NEWS_URL,
+                params={"symbol": ticker, "from": week_ago, "to": today, "token": finnhub_key},
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                articles = resp.json() or []
+                headlines = [a.get("headline", "") for a in articles[:max_headlines]
+                             if a.get("headline")]
+                if headlines:
+                    time.sleep(_FINNHUB_NEWS_DELAY)
+                    return headlines
+        except Exception as exc:
+            print(f"[ai_analyzer] Finnhub news error for {ticker}: {exc}")
+        # Fall through to yfinance on any failure
+
+    # ── yfinance fallback ─────────────────────────────────────────────────────
     try:
         news = yf.Ticker(ticker).news or []
         return [n.get("title", "") for n in news[:max_headlines] if n.get("title")]
     except Exception as exc:
-        print(f"[ai_analyzer] News fetch error for {ticker}: {exc}")
+        print(f"[ai_analyzer] yfinance news error for {ticker}: {exc}")
         return []
 
 
@@ -121,19 +166,37 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
             "rsi":           stock.get("rsi"),
             "macd_crossover":stock.get("macd_crossover"),
             "volume_ratio":  stock.get("volume_ratio"),
+            "obv_positive":  stock.get("obv_positive"),
             "pe_ratio":      stock.get("pe_ratio"),
             "revenue_growth":stock.get("revenue_growth"),
             "debt_to_equity":stock.get("debt_to_equity"),
             "market_cap":    stock.get("market_cap"),
             "news_headlines":[],
         }
+        # New enrichment fields — include only if present (not all candidates have all fields)
+        for _field in (
+            "pct_below_52w_high", "week52_high", "week52_low",
+            "analyst_target_mean", "analyst_upside_pct",
+            "analyst_buy", "analyst_hold", "analyst_sell", "analyst_consensus",
+            "eps_beats", "eps_misses", "eps_quarters_checked", "last_eps_surprise_pct",
+            "atr_pct", "suggested_stop_pct",
+            "rs_vs_spy",
+            "short_float_pct", "days_to_cover",
+            "inst_own_pct",
+            "days_to_earnings",
+            "patterns",
+            "congress_buys", "congress_members", "congress_score", "is_cluster",
+        ):
+            _val = stock.get(_field)
+            if _val is not None:
+                entry[_field] = _val
 
         # Earnings within 5 days — pass through to Claude
         if stock.get("earnings_date"):
             entry["earnings_date"] = stock["earnings_date"]
 
         if ticker not in seen:
-            entry["news_headlines"] = _get_news_headlines(ticker)
+            entry["news_headlines"] = _get_news_headlines(ticker, score=stock.get("score", 0))
 
             # ── Price context: multi-day chart setup ──────────────────────────
             # Fetches 6-month history once and computes MA position,
@@ -398,20 +461,35 @@ def _build_user_prompt(
 
     risk_block = _build_risk_profile_block(config.get("risk_profile", "moderate"))
 
-    # Market regime block
+    # Market regime block — enriched with Fear & Greed, rates, sector rotation
     if regime_info and regime_info.get("regime"):
-        r = regime_info
+        r  = regime_info
+        fg = r.get("fear_greed") or {}
+        rt = r.get("rate_trend") or {}
+        sr = r.get("sector_rotation") or {}
+
+        fg_line  = f"  Fear & Greed: {fg.get('label', 'N/A')} ({fg.get('value', '?')}) — trend: {fg.get('trend', '?')}\n" if fg else ""
+        rt_line  = f"  Rates: {rt.get('summary', 'N/A')} ({rt.get('rate_regime', '?')} rate environment)\n" if rt else ""
+
+        sr_line = ""
+        if sr.get("leaders") or sr.get("laggards"):
+            leaders  = ", ".join(sr.get("leaders",  [])) or "none"
+            laggards = ", ".join(sr.get("laggards", [])) or "none"
+            sr_line  = f"  Sector rotation — Leading: {leaders} | Lagging: {laggards}\n"
+
         regime_block = (
             f"MARKET REGIME: {r['regime'].upper()}\n"
             f"  VIX: {r.get('vix', 'N/A')} | SPY above 50MA: {r.get('spy_above_50ma')} "
             f"| SPY above 200MA: {r.get('spy_above_200ma')}\n"
+            f"{fg_line}{rt_line}{sr_line}"
             f"  Note: {r.get('note', '')}\n"
             f"  Adjust pick aggressiveness accordingly:\n"
             f"    bull → normal operation\n"
             f"    neutral → normal, add brief caution note\n"
             f"    volatile → prefer lower-beta picks, mention risk in thesis\n"
             f"    bear → defensive sectors only (Utilities, Consumer Staples, Health Care), "
-            f"skip high-momentum plays"
+            f"skip high-momentum plays\n"
+            f"  Use sector rotation to favour picks in leading sectors and avoid lagging ones."
         )
     else:
         regime_block = ""
@@ -488,14 +566,29 @@ CRYPTO RULE: Each crypto symbol may appear AT MOST ONCE. No duplicates. long_ter
 
 {excluded_block}
 
-SIGNAL GUIDANCE (use in thesis where relevant):
+SIGNAL GUIDANCE (use in thesis and catalyst where relevant):
   - social_sentiment: StockTwits + Reddit signal. Label "bullish"/"hot" supports picks; "bearish" is a red flag.
   - options_flow: unusual call volume or low put/call ratio confirms bullish bets by institutional traders.
   - insider_activity: recent open-market buys by CEO/CFO are a strong conviction signal — always mention in thesis.
   - price_context: multi-day chart setup — breakout_today=True is a strong ST signal, consolidation_days≥10 means coiling energy.
+  - obv_positive=True: On-Balance Volume rising — smart money accumulating. Confirm with volume_ratio.
   - sweep_detected (options): large block trade through single contract — institutional conviction, weight heavily.
   - analyst_target_mean / analyst_upside_pct: Wall Street consensus — large upside supports LT thesis.
+  - analyst_buy / analyst_hold / analyst_sell: count of Wall Street ratings — high buy count reinforces LT conviction.
+  - analyst_consensus: "buy" | "hold" | "sell" — Wall Street consensus in one word.
+  - eps_beats / eps_misses: EPS beat/miss pattern last 4 quarters — consistent beaters (3+/4) have follow-through momentum; mention in LT thesis.
+  - last_eps_surprise_pct: how much the company beat or missed last quarter — large beats are bullish catalysts.
+  - pct_below_52w_high: distance from 52-week high. Near 0% = at highs (momentum), near 30%+ = deep discount (value play or troubled).
+  - rs_vs_spy: 20-day return vs SPY. Positive = outperforming market (strength); negative = lagging (headwind). Always mention if >+5% or <-5%.
+  - short_float_pct / days_to_cover: % of float sold short and days to cover. >15% float short = heavily shorted — either squeeze fuel or fundamental red flag. Mention if >10%.
+  - inst_own_pct: institutional ownership %. >60% = smart money conviction; <20% = retail-dominated or undiscovered. Note if unusually high or low.
+  - atr_pct / suggested_stop_pct: ATR as % of price and 1.5× ATR stop suggestion. Always include suggested_stop_pct in ST picks as the stop-loss level (e.g. "stop: -X% from entry").
+  - days_to_earnings: days until next earnings. <5 days = binary risk — flag as "⚠️ earnings in X days" in the thesis. Never pick a stock 1-2 days before earnings without flagging it prominently.
+  - patterns: list of detected chart patterns from OHLCV data. "bull_flag" and "bullish_engulfing" are strong ST signals — always mention by name in the thesis if present. "three_white_soldiers" signals sustained buying pressure. "hammer" near support signals reversal. "morning_star" confirms trend reversal after pullback. Multiple patterns on the same ticker = high-conviction ST setup.
+  - congress_score / congress_buys / congress_members / is_cluster: congressional STOCK Act purchase disclosures (30-45 day lag). is_cluster=True means 2+ members bought — this is a rare, high-conviction signal; always highlight in LT thesis as "Congressional cluster buy". Single buy (score=3) adds modest weight; cluster buy (score=10) is a significant LT catalyst. Note the disclosure lag — trades already happened, this is confirmation not prediction.
+  - sector rotation leaders/laggards from regime context: favour picks in leading sectors; flag lagging sectors as headwinds.
   - invalidation: one specific price level or event that would break the thesis (e.g. "closes below $145 support", "fails to hold 50-day MA", "earnings miss next week")
+  - catalyst: the single most important upcoming trigger for this pick (e.g. "Q2 earnings May 28 — 4/4 beats history", "Fed rate decision June 12", "breakout above $840 52-week high", "product launch next week"). For LT picks use a fundamental catalyst.
   - entry_low / entry_high (ST stocks and crypto only): ideal buy zone. If entry is at a key level, set entry_low = entry_price * 0.99, entry_high = entry_price * 1.005. If chasing is a big risk (momentum stock, already up today), tighten: entry_high = entry_price * 1.002.
 
 Stock Candidates:
@@ -537,7 +630,8 @@ Return this exact JSON structure:
         "stop_loss": 173.38,
         "allocation": 12.50,
         "conviction": 4,
-        "thesis": "one sentence why, max 15 words",
+        "thesis": "what's happening technically + fundamental reason, max 25 words",
+        "catalyst": "single most important upcoming trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words",
         "entry_low":  null,
@@ -554,7 +648,8 @@ Return this exact JSON structure:
         "target_price": 500.00,
         "allocation": 16.67,
         "conviction": 5,
-        "thesis": "one sentence why, max 15 words",
+        "thesis": "fundamental strength + growth driver + valuation context, max 25 words",
+        "catalyst": "single most important upcoming fundamental trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "horizon": "2-3 years",
         "earnings_date": "Thu May 1 or omit if no earnings this week"
@@ -573,7 +668,8 @@ Return this exact JSON structure:
         "stop_loss": 61750,
         "allocation": 10.00,
         "conviction": 3,
-        "thesis": "one sentence why, max 15 words",
+        "thesis": "momentum + on-chain or macro driver, max 25 words",
+        "catalyst": "single most important upcoming trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words",
         "entry_low":  null,
@@ -591,7 +687,8 @@ Return this exact JSON structure:
         "target_price": 475.00,
         "stop_loss": 427.50,
         "conviction": 3,
-        "thesis": "one sentence why, max 15 words",
+        "thesis": "technical setup + sector driver, max 25 words",
+        "catalyst": "single most important upcoming trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words"
       }}
@@ -604,7 +701,8 @@ Return this exact JSON structure:
         "entry_price": 250.00,
         "target_price": 290.00,
         "conviction": 4,
-        "thesis": "one sentence why, max 15 words",
+        "thesis": "macro + valuation basis for long-term allocation, max 25 words",
+        "catalyst": "single most important upcoming fundamental trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "horizon": "1-3 years"
       }}
@@ -620,7 +718,8 @@ Return this exact JSON structure:
         "target_price": 235.00,
         "stop_loss": 209.00,
         "conviction": 4,
-        "thesis": "one sentence why, max 15 words",
+        "thesis": "macro driver + technical setup for commodity, max 25 words",
+        "catalyst": "single most important upcoming macro trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words"
       }}
@@ -633,7 +732,8 @@ Return this exact JSON structure:
         "entry_price": 220.00,
         "target_price": 260.00,
         "conviction": 3,
-        "thesis": "one sentence why, max 15 words",
+        "thesis": "macro driver + long-term supply/demand context, max 25 words",
+        "catalyst": "single most important upcoming macro trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "horizon": "6-12 months"
       }}

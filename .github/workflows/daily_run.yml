@@ -1,27 +1,48 @@
-name: Daily Stock & Crypto Picks
+name: StockPulz Scheduled Runs
+
+# All weekday + weekend cron jobs live here.
+# Price alerts (every 30 min during market hours) are in price_alerts.yml.
+#
+# Each schedule maps to a RUN_MODE — resolved in the "Set run mode" step.
+# Render cron jobs have been retired; only the webhook web service stays on Render.
+#
+# GitHub Actions free tier:
+#   Public repos  → unlimited minutes
+#   Private repos → 2000 min/month (these jobs use ~1400 min/month combined)
 
 on:
-  # Scheduling moved to Render cron (fires on exact UTC time, no GitHub Actions delay).
-  # Keep workflow_dispatch for manual runs and testing only.
+  schedule:
+    # ── Weekday runs (Mon–Fri, UTC times) ──────────────────────────────────────
+    - cron: "0 3 * * 1-5"       # 11:00 PM ET  — overnight prescreener (scores 600 tickers)
+    - cron: "45 12 * * 1-5"     #  8:45 AM ET  — pre-market pulse for open positions
+    - cron: "30 8 * * 1-5"      #  4:30 AM ET  — morning picks delivery (pre-market)
+    - cron: "30 14 * * 1-5"     # 10:30 AM ET  — confirmation run (1h after open)
+    - cron: "30 19 * * 1-5"     #  3:30 PM ET  — EOD close check (30 min before close)
+    - cron: "15 20 * * 1-5"     #  4:15 PM ET  — full EOD wrap-up (after close)
+    # ── Weekend runs ────────────────────────────────────────────────────────────
+    - cron: "0 12 * * 6"        #  8:00 AM ET Saturday — crypto picks + weekly recap
+    - cron: "0 12 * * 0"        #  8:00 AM ET Sunday   — Week Ahead briefing
+
+  # Manual trigger — useful for testing individual modes without waiting for schedule
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Skip sending message (true/false)'
-        required: false
-        default: 'false'
-      mock_data:
-        description: 'Use mock data, skip live screeners — fast test (true/false)'
-        required: false
-        default: 'false'
       run_mode:
-        description: 'Force run mode: morning or confirmation (leave blank for auto)'
+        description: "Force run mode (leave blank = auto from schedule)"
         required: false
-        default: ''
+        default: ""
+      dry_run:
+        description: "true = print only, do not send Telegram messages"
+        required: false
+        default: "false"
+      mock_data:
+        description: "true = skip live screeners, fast test"
+        required: false
+        default: "false"
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -30,7 +51,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Cache pip dependencies
         uses: actions/cache@v4
@@ -43,15 +64,52 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Map each cron expression to the correct RUN_MODE.
+      # Manual dispatch can override with run_mode input.
+      - name: Set run mode
+        id: set_mode
+        run: |
+          MANUAL="${{ github.event.inputs.run_mode }}"
+          SCHEDULE="${{ github.event.schedule }}"
+
+          if [[ -n "$MANUAL" ]]; then
+            MODE="$MANUAL"
+          elif [[ "$SCHEDULE" == "0 3 * * 1-5" ]]; then
+            MODE="prescreener"
+          elif [[ "$SCHEDULE" == "45 12 * * 1-5" ]]; then
+            MODE="premarket"
+          elif [[ "$SCHEDULE" == "30 8 * * 1-5" ]]; then
+            MODE="morning"
+          elif [[ "$SCHEDULE" == "30 14 * * 1-5" ]]; then
+            MODE="confirmation"
+          elif [[ "$SCHEDULE" == "30 19 * * 1-5" ]]; then
+            MODE="close_check"
+          elif [[ "$SCHEDULE" == "15 20 * * 1-5" ]]; then
+            MODE="eod_summary"
+          elif [[ "$SCHEDULE" == "0 12 * * 6" ]]; then
+            MODE="weekly"
+          elif [[ "$SCHEDULE" == "0 12 * * 0" ]]; then
+            MODE="week_ahead"
+          else
+            echo "Unknown schedule '$SCHEDULE' — defaulting to morning"
+            MODE="morning"
+          fi
+
+          echo "RUN_MODE=$MODE" >> $GITHUB_ENV
+          echo "Resolved RUN_MODE=$MODE"
+
       - name: Run agent
         run: python agent.py
         env:
+          RUN_MODE: ${{ env.RUN_MODE }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          MOCK_DATA: ${{ github.event.inputs.mock_data || 'false' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_GIST_TOKEN: ${{ secrets.GH_GIST_TOKEN }}
           GIST_ID: ${{ secrets.GIST_ID }}
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-          MOCK_DATA: ${{ github.event.inputs.mock_data || 'false' }}
-          RUN_MODE: ${{ github.event.inputs.run_mode || '' }}
+          ALPACA_KEY_ID: ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}

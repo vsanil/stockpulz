@@ -94,6 +94,7 @@ PRICE_ALERTS_FILE      = "price_alerts.json"    # User price alerts (already per
 SIGNAL_CACHE_FILE      = "signal_cache.json"    # Cached sentiment + insider signals (5-day TTL)
 SCREENER_CACHE_FILE    = "screener_cache.json"  # Pre-scored candidates from midnight run
 BUY_COUNTS_FILE        = "buy_counts.json"      # Social: how many members bought each pick today
+MACRO_CACHE_FILE       = "macro_cache.json"     # Fear & Greed + FRED rates (4h TTL, shared across all users)
 # ── Per-user data files (keyed by chat_id inside the JSON) ───────────────────
 USER_CONFIGS_FILE      = "user_configs.json"    # Per-user settings (risk, watchlist, budget…)
 USER_TRADES_FILE       = "user_trades.json"     # Per-user trade logs (open + closed)
@@ -535,6 +536,54 @@ def increment_buy_count(ticker: str) -> int:
     return data["counts"][ticker]
 
 
+# ── Macro cache (Fear & Greed + FRED rates, shared across all users) ─────────
+# Fetched ONCE per morning run, cached in Gist with 4h TTL.
+# User count never affects fetch volume — all users read from same cached data.
+
+MACRO_CACHE_TTL_HOURS = 4
+
+
+def load_macro_cache() -> dict | None:
+    """
+    Load macro signals cache from Gist.
+    Returns None if missing or older than MACRO_CACHE_TTL_HOURS.
+    Structure: { "cached_at": ISO str, "fear_greed": {...}, "rate_trend": {...} }
+    """
+    from datetime import datetime, timedelta
+    data = _load_gist_file(MACRO_CACHE_FILE)
+    if not data:
+        return None
+    try:
+        cached_at = datetime.fromisoformat(data["cached_at"])
+        if datetime.utcnow() - cached_at > timedelta(hours=MACRO_CACHE_TTL_HOURS):
+            print(f"[config_manager] Macro cache expired ({datetime.utcnow() - cached_at} old).")
+            return None
+        return data
+    except Exception as exc:
+        print(f"[config_manager] Macro cache invalid ({exc}).")
+        return None
+
+
+def save_macro_cache(
+    fear_greed: dict | None,
+    rate_trend: dict | None,
+    sector_rotation: dict | None = None,
+) -> None:
+    """Save macro signals to Gist with current UTC timestamp."""
+    from datetime import datetime
+    payload = {
+        "cached_at":       datetime.utcnow().isoformat(),
+        "fear_greed":      fear_greed,
+        "rate_trend":      rate_trend,
+        "sector_rotation": sector_rotation,
+    }
+    try:
+        _write_gist_file(MACRO_CACHE_FILE, payload)
+        print("[config_manager] Macro cache saved.")
+    except Exception as exc:
+        print(f"[config_manager] WARNING: Could not save macro cache ({exc}).")
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _write_config(config: dict) -> None:
@@ -545,22 +594,21 @@ def _write_config(config: dict) -> None:
 
 def _load_gist_file(filename: str) -> dict | None:
     """
-    Fetch and parse a JSON file from the Gist.
-    Checks in-memory cache first — saves a GitHub round-trip on cache hits.
+    Fetch and parse a JSON file from the active storage backend.
+    Checks in-memory cache first — saves a round-trip on cache hits.
     Returns None on any error.
+
+    Routing: get_storage_backend() auto-selects Gist or Supabase based on env vars.
+    Callers never change — swap storage by setting SUPABASE_URL + SUPABASE_KEY.
     """
     cached = _cache_get(filename)
     if cached is not None:
         return cached
     try:
-        url  = f"https://api.github.com/gists/{_gist_id()}"
-        resp = requests.get(url, headers=_gist_headers(), timeout=10)
-        resp.raise_for_status()
-        files = resp.json().get("files", {})
-        if filename not in files:
-            return None
-        result = json.loads(files[filename]["content"])
-        _cache_set(filename, result)
+        from storage import get_storage_backend
+        result = get_storage_backend().read(filename)
+        if result is not None:
+            _cache_set(filename, result)
         return result
     except Exception as exc:
         print(f"[config_manager] WARNING: Could not load {filename} ({exc}).")
@@ -568,12 +616,15 @@ def _load_gist_file(filename: str) -> dict | None:
 
 
 def _write_gist_file(filename: str, data: dict) -> None:
-    """Write any dict as a JSON file to the Gist. Always invalidates the cache."""
+    """
+    Write any dict as a JSON blob via the active storage backend.
+    Always invalidates the in-memory cache before writing.
+
+    Routing: get_storage_backend() auto-selects Gist or Supabase based on env vars.
+    """
     _cache_invalidate(filename)   # invalidate before write so stale data is never served
-    url     = f"https://api.github.com/gists/{_gist_id()}"
-    payload = {"files": {filename: {"content": json.dumps(data, indent=2)}}}
-    resp    = requests.patch(url, headers=_gist_headers(), json=payload, timeout=10)
-    resp.raise_for_status()
+    from storage import get_storage_backend
+    get_storage_backend().write(filename, data)
 
 
 # ── Pending conversation state (multi-step commands) ─────────────────────────
