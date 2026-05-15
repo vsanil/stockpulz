@@ -37,7 +37,7 @@ from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
     format_eod_summary, format_eod_full_summary, format_week_ahead, build_picks_keyboard, _p,
 )
-from telegram_api import send_message, send_inline_keyboard
+from telegram_api import send_message, send_inline_keyboard, broadcast_all
 
 ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
@@ -1232,10 +1232,7 @@ def _send_or_print(message: str, label: str = ""):
     else:
         recipients = _all_recipients()
         print(f"[agent] Broadcasting {label} to {len(recipients)} user(s)...")
-        for uid in recipients:
-            success = send_message(message, chat_id=uid)
-            if not success:
-                print(f"[agent] WARNING: Message failed to send to {uid}.")
+        broadcast_all([{"chat_id": uid, "text": message} for uid in recipients])
 
 
 def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
@@ -1350,6 +1347,8 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
     except Exception as exc:
         print(f"[agent] recent_stats failed (non-critical): {exc}")
 
+    # ── Build all per-user payloads first (CPU-bound, fast), then broadcast concurrently ──
+    outbox: list[dict] = []
     for uid in recipients:
         try:
             user_cfg = {**global_config, **get_user_config(uid)}
@@ -1371,12 +1370,8 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
                     user_log = load_user_trade_log(uid).get("open", [])
                 except Exception:
                     user_log = []
-            log_obj      = load_user_trade_log(uid) if uid in user_positions_cache else {"open": user_log, "closed": []}
-            has_no_trades = (
-                len(log_obj.get("open", [])) == 0 and
-                len(log_obj.get("closed", [])) == 0
-            )
-            if has_no_trades:
+            log_obj = load_user_trade_log(uid) if uid in user_positions_cache else {"open": user_log, "closed": []}
+            if len(log_obj.get("open", [])) == 0 and len(log_obj.get("closed", [])) == 0:
                 message += (
                     "\n\n<i>💡 New here? If you place a trade, send <code>/bought TICKER</code> "
                     "— e.g. <code>/bought NVDA</code>. That's how your win rate and P&amp;L get tracked in /stats.</i>"
@@ -1385,13 +1380,14 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             if DRY_RUN:
                 print(f"\n{'=' * 60}\nDRY RUN — {label} for {uid}:\n{'=' * 60}\n{message}\n")
             else:
-                kb      = build_picks_keyboard(picks, user_cfg)
-                success = (send_inline_keyboard(message, kb, chat_id=uid)
-                           if kb else send_message(message, chat_id=uid))
-                if not success:
-                    print(f"[agent] WARNING: Morning message failed to send to {uid}.")
+                kb = build_picks_keyboard(picks, user_cfg)
+                outbox.append({"chat_id": uid, "text": message, "keyboard": kb or None})
         except Exception as exc:
-            print(f"[agent] WARNING: Could not send morning message to {uid}: {exc}")
+            print(f"[agent] WARNING: Could not prepare morning message for {uid}: {exc}")
+
+    # Fire all messages concurrently — 1000 users in ~3-5 s instead of ~500 s
+    if outbox:
+        broadcast_all(outbox)
 
 
 def _alert(text: str, admin_only: bool = False):
@@ -1408,8 +1404,7 @@ def _alert(text: str, admin_only: bool = False):
         if owner:
             send_message(text, chat_id=owner)
     else:
-        for uid in _all_recipients():
-            send_message(text, chat_id=uid)
+        broadcast_all([{"chat_id": uid, "text": text} for uid in _all_recipients()])
 
 
 if __name__ == "__main__":

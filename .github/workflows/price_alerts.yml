@@ -1,0 +1,54 @@
+name: Price Alerts (Market Hours)
+
+# Runs every 30 minutes during US market hours Mon–Fri.
+# Lightweight job — only checks price alerts, no screener or Claude calls.
+# Estimated runtime: ~1-2 min per run = ~60-120 min/month total.
+
+on:
+  schedule:
+    - cron: "*/30 13-19 * * 1-5"   # Every 30 min, 9:00 AM–3:30 PM ET (Mon–Fri)
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = print only, do not send alerts"
+        required: false
+        default: "false"
+
+jobs:
+  price-alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run price alerts
+        run: python agent.py
+        env:
+          RUN_MODE: price_alerts
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_GIST_TOKEN: ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ALPACA_KEY_ID: ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
