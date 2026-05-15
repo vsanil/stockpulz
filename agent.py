@@ -32,6 +32,7 @@ from price_alert_manager import check_all_alerts, add_alert
 from screener import run_screener
 from crypto_screener import run_crypto_screener
 from ai_analyzer import analyze_with_claude, personalize_picks_batch, generate_trade_debrief
+from position_sizer import apply_portfolio_sizing, portfolio_summary
 from price_checker import get_current_prices
 from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
@@ -396,6 +397,19 @@ def run_morning(config: dict, now_et: datetime):
     if macro_context:
         picks["macro_context"] = macro_context
 
+    # ── Position sizing ───────────────────────────────────────────────────────
+    # Only run if the user has configured a portfolio_size.
+    # Attaches a "sizing" dict to every pick and returns portfolio-level warnings.
+    if config.get("portfolio", {}).get("portfolio_size"):
+        try:
+            picks, sizing_warnings = apply_portfolio_sizing(picks, config)
+            picks["portfolio_summary"] = portfolio_summary(picks, config)
+            if sizing_warnings:
+                print(f"[agent] Sizing warnings: {sizing_warnings}")
+                picks["sizing_warnings"] = sizing_warnings
+        except Exception as exc:
+            print(f"[agent] Position sizing failed (non-critical): {exc}")
+
     # Save picks to Gist for 10:30 AM confirmation run + weekly recap
     save_picks(picks)
     if not now_et.weekday() >= 5:   # Don't count weekend crypto-only as a "week day"
@@ -661,6 +675,65 @@ def run_confirmation():
             print(f"[agent] Could not stamp confirmation sent flag (non-critical): {exc}")
 
 
+# ── Auto-stop alerts for AI picks ────────────────────────────────────────────
+
+def _check_picks_stop_loss(current_prices: dict, picks: dict, uid: str) -> None:
+    """
+    Compare current prices against the stop_loss on today's AI picks.
+    Fires a Telegram alert when a pick's current price falls below its stop.
+
+    Uses stop_price from the sizing dict (ATR-based) if available, else stop_loss
+    from the pick directly. Only alerts for stock/ETF/commodity picks — crypto
+    is volatile enough that a separate threshold is impractical.
+
+    Deduplication: uses the in-memory _ALERTED_STOPS set (pick + date) so a
+    user sees at most one alert per ticker per day from this function.
+    """
+    today_str = date.today().isoformat()
+    cfg = get_user_config(uid)
+    if cfg.get("paused"):
+        return
+
+    for cat in ("short_term", "long_term", "etf", "commodities"):
+        for pick in picks.get(cat, []):
+            ticker = (pick.get("ticker") or "").upper()
+            if not ticker:
+                continue
+
+            # Determine stop price
+            sizing     = pick.get("sizing") or {}
+            stop_price = sizing.get("stop_price") or pick.get("stop_loss")
+            if not stop_price or stop_price <= 0:
+                continue
+
+            current = current_prices.get(ticker)
+            if not current or current <= 0:
+                continue
+
+            alert_key = f"{uid}:{ticker}:{today_str}"
+            if alert_key in _ALERTED_STOPS:
+                continue
+
+            if current < stop_price:
+                _ALERTED_STOPS.add(alert_key)
+                drop_pct = round((stop_price - current) / stop_price * 100, 1)
+                try:
+                    send_message(
+                        f"🔴 <b>Stop Alert — {ticker}</b>\n"
+                        f"Current price <code>${current:,.2f}</code> has breached today's "
+                        f"suggested stop of <code>${stop_price:,.2f}</code> (↓{drop_pct}%).\n"
+                        f"<i>Review your position — stop levels exist to protect capital.</i>",
+                        chat_id=uid,
+                    )
+                    print(f"[agent] Stop alert fired: {ticker} @ ${current:.2f} < stop ${stop_price:.2f} for {uid}")
+                except Exception as exc:
+                    print(f"[agent] Stop alert send failed for {uid}/{ticker} (non-critical): {exc}")
+
+
+# In-memory dedup set — one alert per pick per user per calendar day
+_ALERTED_STOPS: set[str] = set()
+
+
 # ── Close check (3:30 PM — silent unless a trade closed) ─────────────────────
 
 def run_close_check():
@@ -679,6 +752,13 @@ def run_close_check():
         return
 
     _broadcast_trade_closes(current_prices)
+
+    # ── Auto-stop alerts for today's AI picks ────────────────────────────────
+    for uid in _all_recipients():
+        try:
+            _check_picks_stop_loss(current_prices, picks, uid)
+        except Exception as exc:
+            print(f"[agent] Auto-stop check failed for {uid} (non-critical): {exc}")
 
     # ── Trailing stop nudges ──────────────────────────────────────────────────
     for uid in _all_recipients():
@@ -1112,6 +1192,19 @@ def run_price_alerts():
                 )
         except Exception as exc:
             print(f"[agent] Intraday trade check failed for {uid} (non-critical): {exc}")
+
+    # ── Auto-stop alerts for today's AI picks ────────────────────────────────
+    picks = load_picks()
+    if picks:
+        try:
+            picks_prices = get_current_prices(picks)
+            for uid in _all_recipients():
+                try:
+                    _check_picks_stop_loss(picks_prices, picks, uid)
+                except Exception as exc:
+                    print(f"[agent] Auto-stop (price_alerts) failed for {uid} (non-critical): {exc}")
+        except Exception as exc:
+            print(f"[agent] Price fetch for auto-stop check failed (non-critical): {exc}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

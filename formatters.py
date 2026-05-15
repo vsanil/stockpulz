@@ -267,6 +267,48 @@ def format_daily_message(picks: dict, config: dict,
         n = bc.get(ticker, 0)
         return f"  <i>👥 {n} bought</i>" if n >= 2 else ""
 
+    def _sizing_line(pick: dict) -> str:
+        """Return a compact sizing line if sizing data is present, else empty string."""
+        sz = pick.get("sizing")
+        if not sz or not sz.get("dollar_amount"):
+            return ""
+        shares    = sz.get("shares")
+        dollar    = sz.get("dollar_amount")
+        risk_d    = sz.get("risk_dollars")
+        risk_pct  = sz.get("risk_pct")
+        stop_p    = sz.get("stop_price")
+        capped    = sz.get("capped_by")
+        cap_tag   = f" <i>·  capped</i>" if capped else ""
+        if shares:
+            return (
+                f"  📐 <i>{shares} shares · ${dollar:,.0f} · "
+                f"risk ${risk_d:,.0f} ({risk_pct}%) · stop ${stop_p:.2f}</i>{cap_tag}"
+            )
+        else:
+            return (
+                f"  📐 <i>${dollar:,.0f} · "
+                f"risk ${risk_d:,.0f} ({risk_pct}%) · stop ${stop_p:.4g}</i>{cap_tag}"
+            )
+
+    def _iv_line(pick: dict) -> str:
+        """
+        Return a compact IV rank line only for ELEVATED / EXTREME reads — silence on
+        LOW/NORMAL to avoid noise on every pick.
+        Example: "  🌡 IV: ELEVATED (rank 74)  ·  ATM IV ~38%  ·  RV 28%"
+        """
+        of = pick.get("options_flow") or {}
+        iv_label = of.get("iv_label")
+        iv_rank  = of.get("iv_rank")
+        iv_pct   = of.get("iv_pct")
+        if not iv_label or iv_label in ("NORMAL", "LOW") or iv_rank is None:
+            return ""
+        emoji = "🔴" if iv_label == "EXTREME" else "🟡"
+        iv_str  = f"  ·  ATM IV ~{iv_pct}%" if iv_pct else ""
+        rv_pct  = of.get("rv_pct")
+        rv_str  = f"  ·  RV {rv_pct}%" if rv_pct else ""
+        crush   = "  <i>(IV crush risk — avoid naked buys)</i>" if iv_label == "EXTREME" else ""
+        return f"  {emoji} <i>IV: {iv_label} (rank {iv_rank}){iv_str}{rv_str}{crush}</i>"
+
     def _pick_row_st(i, s, personal_note: str = "", streak: int = 0):
         entry, target, stop = s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
         ticker        = s.get("ticker", "")
@@ -277,6 +319,8 @@ def format_daily_message(picks: dict, config: dict,
         streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
         social_badge  = _buy_badge(ticker)
         personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
+        sizing_line   = _sizing_line(s)
+        iv_line       = _iv_line(s)
         window        = _entry_window(entry, stop=stop, budget=per_stock,
                                        is_long_term=False, is_crypto=False)
         window_line   = f"\n{window}" if window else ""
@@ -287,6 +331,10 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}{window_line}",
             f"<i>{_esc(s.get('thesis'))}</i>",
         ]
+        if sizing_line:
+            lines.append(sizing_line)
+        if iv_line:
+            lines.append(iv_line)
         entry_low  = s.get('entry_low')
         entry_high = s.get('entry_high')
         if entry_low and entry_high:
@@ -334,6 +382,8 @@ def format_daily_message(picks: dict, config: dict,
         window        = _entry_window(entry, stop=stop, budget=per_crypto,
                                        is_long_term=False, is_crypto=True)
         window_line   = f"\n{window}" if window else ""
+        sizing_line   = _sizing_line(c)
+        iv_line       = _iv_line(c)
         lines = [
             f"<b>{_esc(sym)}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
             f"<i>{_esc(_short_company(c.get('name', '')))}</i>",
@@ -341,6 +391,10 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}{window_line}",
             f"<i>{_esc(c.get('thesis'))}</i>",
         ]
+        if sizing_line:
+            lines.append(sizing_line)
+        if iv_line:
+            lines.append(iv_line)
         entry_low  = c.get('entry_low')
         entry_high = c.get('entry_high')
         if entry_low and entry_high:
@@ -470,6 +524,15 @@ def format_daily_message(picks: dict, config: dict,
                 f"⚠️ <i>{top_count} of {total_picks} picks are {_esc(top_sector)} "
                 f"— consider sizing down to manage sector risk.</i>"
             )
+
+    # Portfolio sizing summary (only shown when position_sizer has run)
+    portfolio_summary_line = picks.get("portfolio_summary", "")
+    if portfolio_summary_line:
+        lines += ["", portfolio_summary_line]
+
+    # Sizing warnings from position_sizer (sector concentration, total risk, etc.)
+    for warn in (picks.get("sizing_warnings") or []):
+        lines += ["", warn]
 
     lines += [
         "",
