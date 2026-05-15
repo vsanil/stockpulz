@@ -508,18 +508,30 @@ def run_command_tests():
         # ── /unalert ──────────────────────────────────────────────────────────
         header("Command: /unalert")
 
-        with patch("price_alert_manager.remove_alert", return_value="✅ Removed") as mock_rem:
+        # /unalert now shows a confirmation keyboard before removing — check for that
+        with patch("price_alert_manager.remove_alert", return_value="✅ Removed"):
+            _SENT.clear()
             reply = _run_cmd("UNALERT NVDA")
-            R.record("/unalert exact ticker",
-                     mock_rem.called,
-                     f"called={mock_rem.called}")
+            # Expect a confirmation inline keyboard (not direct removal)
+            has_confirm_kb = any(
+                s["type"] == "keyboard" and "NVDA" in s.get("text", "")
+                for s in _SENT
+            )
+            R.record("/unalert exact ticker → shows confirmation keyboard",
+                     has_confirm_kb,
+                     f"sent={[s.get('text','')[:40] for s in _SENT]}")
 
         if HAS_API_KEY:
-            with patch("price_alert_manager.remove_alert", return_value="✅ Removed") as mock_rem:
+            with patch("price_alert_manager.remove_alert", return_value="✅ Removed"):
+                _SENT.clear()
                 reply = _run_cmd("UNALERT stop alerting me about apple")
-                R.record("/unalert NL sentence",
-                         mock_rem.called,
-                         f"called={mock_rem.called}")
+                has_confirm_kb = any(
+                    s["type"] == "keyboard" and "AAPL" in s.get("text", "")
+                    for s in _SENT
+                )
+                R.record("/unalert NL sentence → shows confirmation keyboard",
+                         has_confirm_kb,
+                         f"sent={[s.get('text','')[:40] for s in _SENT]}")
 
         # ── /paper_buy ────────────────────────────────────────────────────────
         header("Command: /paper_buy")
