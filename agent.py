@@ -39,10 +39,73 @@ from formatters import (
     format_eod_summary, format_eod_full_summary, format_week_ahead, build_picks_keyboard, _p,
 )
 from telegram_api import send_message, send_inline_keyboard, broadcast_all
+from cache_layer import cache_get, cache_set
 
 ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
 MOCK_DATA = os.environ.get("MOCK_DATA", "false").lower() == "true"
+
+# Default conviction threshold — picks below this are filtered before broadcast.
+# Users can lower to 3 in /settings (aggressive mode already allows ★★★).
+DEFAULT_MIN_CONVICTION = 4
+
+
+# ── Conviction gate ───────────────────────────────────────────────────────────
+
+def _filter_by_conviction(picks: dict, min_conviction: int) -> dict:
+    """
+    Remove any pick with conviction < min_conviction from every section.
+    Modifies a shallow copy — does not mutate the original.
+    Returns the filtered picks dict.
+    """
+    def _clean(lst: list) -> list:
+        return [p for p in lst if int(p.get("conviction") or 0) >= min_conviction]
+
+    result = dict(picks)   # shallow copy — preserve macro_context, etc.
+
+    if "stocks" in result:
+        s = result["stocks"]
+        result["stocks"] = {
+            "short_term": _clean(s.get("short_term", [])),
+            "long_term":  _clean(s.get("long_term",  [])),
+        }
+    if "crypto" in result:
+        c = result["crypto"]
+        result["crypto"] = {
+            "short_term": _clean(c.get("short_term", [])),
+            "long_term":  _clean(c.get("long_term",  [])),
+        }
+    if "etfs" in result:
+        e = result["etfs"]
+        result["etfs"] = {
+            "short_term": _clean(e.get("short_term", [])),
+            "long_term":  _clean(e.get("long_term",  [])),
+        }
+    if "commodities" in result:
+        cm = result["commodities"]
+        result["commodities"] = {
+            "short_term": _clean(cm.get("short_term", [])),
+            "long_term":  _clean(cm.get("long_term",  [])),
+        }
+    # options_plays: only keep if their parent stock pick survived
+    surviving_tickers = {
+        p.get("ticker") for section in ("short_term", "long_term")
+        for p in result.get("stocks", {}).get(section, [])
+    }
+    result["options_plays"] = [
+        op for op in picks.get("options_plays", [])
+        if op.get("ticker") in surviving_tickers
+    ]
+    return result
+
+
+def _picks_are_empty(picks: dict) -> bool:
+    """Return True if every category in picks has no entries after filtering."""
+    for key in ("stocks", "crypto", "etfs", "commodities"):
+        section = picks.get(key, {})
+        if section.get("short_term") or section.get("long_term"):
+            return False
+    return True
 
 
 def _log_cron_run(mode: str) -> None:
@@ -410,6 +473,39 @@ def run_morning(config: dict, now_et: datetime):
         except Exception as exc:
             print(f"[agent] Position sizing failed (non-critical): {exc}")
 
+    # ── Conviction gate — filter before saving or broadcasting ───────────────
+    min_conviction = int(config.get("min_conviction", DEFAULT_MIN_CONVICTION))
+    picks_before   = picks
+    picks          = _filter_by_conviction(picks, min_conviction)
+
+    n_filtered = sum(
+        len(picks_before.get(k, {}).get(s, [])) - len(picks.get(k, {}).get(s, []))
+        for k in ("stocks", "crypto", "etfs", "commodities")
+        for s in ("short_term", "long_term")
+    )
+    if n_filtered:
+        print(f"[agent] Conviction gate dropped {n_filtered} pick(s) below ★{min_conviction}.")
+
+    if _picks_are_empty(picks):
+        no_picks_msg = (
+            "📭 <b>No high-conviction setups today</b>\n\n"
+            "The model screened the market but didn't find picks that meet the quality bar "
+            f"(conviction ★★★★+). Cash is a position too — waiting for the right setup "
+            "protects your capital.\n\n"
+            "<i>Alerts and watchlist monitoring remain active.</i>"
+        )
+        for uid in _all_recipients():
+            try:
+                if not get_user_config(uid).get("paused"):
+                    send_message(no_picks_msg, chat_id=uid)
+            except Exception:
+                pass
+        _alert(
+            f"📭 <b>Morning run: no picks broadcast</b> — all filtered below ★{min_conviction}.",
+            admin_only=True,
+        )
+        return
+
     # Save picks to Gist for 10:30 AM confirmation run + weekly recap
     save_picks(picks)
     if not now_et.weekday() >= 5:   # Don't count weekend crypto-only as a "week day"
@@ -686,8 +782,9 @@ def _check_picks_stop_loss(current_prices: dict, picks: dict, uid: str) -> None:
     from the pick directly. Only alerts for stock/ETF/commodity picks — crypto
     is volatile enough that a separate threshold is impractical.
 
-    Deduplication: uses the in-memory _ALERTED_STOPS set (pick + date) so a
-    user sees at most one alert per ticker per day from this function.
+    Deduplication: persisted via cache_layer (Redis/Upstash when available,
+    in-memory otherwise) so a user sees at most one alert per ticker per day
+    even across bot restarts.
     """
     today_str = date.today().isoformat()
     cfg = get_user_config(uid)
@@ -711,11 +808,11 @@ def _check_picks_stop_loss(current_prices: dict, picks: dict, uid: str) -> None:
                 continue
 
             alert_key = f"{uid}:{ticker}:{today_str}"
-            if alert_key in _ALERTED_STOPS:
+            if _is_alerted(alert_key):
                 continue
 
             if current < stop_price:
-                _ALERTED_STOPS.add(alert_key)
+                _mark_alerted(alert_key)
                 drop_pct = round((stop_price - current) / stop_price * 100, 1)
                 try:
                     send_message(
@@ -730,8 +827,26 @@ def _check_picks_stop_loss(current_prices: dict, picks: dict, uid: str) -> None:
                     print(f"[agent] Stop alert send failed for {uid}/{ticker} (non-critical): {exc}")
 
 
-# In-memory dedup set — one alert per pick per user per calendar day
-_ALERTED_STOPS: set[str] = set()
+# ── Persistent stop-alert deduplication ──────────────────────────────────────
+# Keys are stored in cache_layer (Redis via Upstash when configured, in-memory
+# otherwise).  TTL = 28 hours so stale keys never survive past overnight.
+
+_ALERTED_STOPS_CACHE_KEY = "alerted_stops"
+_ALERTED_STOPS_TTL       = 28 * 3600  # 28 hours
+
+
+def _is_alerted(key: str) -> bool:
+    """Return True if we have already fired an alert for this key today."""
+    alerted: list = cache_get(_ALERTED_STOPS_CACHE_KEY) or []
+    return key in alerted
+
+
+def _mark_alerted(key: str) -> None:
+    """Persist alert dedup key so restarts don't resend the same alert."""
+    alerted: list = cache_get(_ALERTED_STOPS_CACHE_KEY) or []
+    if key not in alerted:
+        alerted.append(key)
+    cache_set(_ALERTED_STOPS_CACHE_KEY, alerted, ttl_seconds=_ALERTED_STOPS_TTL)
 
 
 # ── Close check (3:30 PM — silent unless a trade closed) ─────────────────────

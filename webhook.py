@@ -1164,6 +1164,37 @@ def miniapp_community():
         return jsonify({"ok": False, "error": str(e)})
 
 
+@app.route("/api/miniapp/performance")
+def miniapp_performance():
+    """Return bot track record for the Mini App performance tab."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import get_allowed_users, load_user_trade_log
+    from performance_tracker import build_community_stats
+    from performance_context import get_performance_context, get_performance_stats
+    try:
+        users = get_allowed_users()
+        owner = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
+        if owner and owner not in users:
+            users = list(users) + [owner]
+        logs  = [load_user_trade_log(uid) for uid in users]
+        stats = build_community_stats(logs) or {}
+        ctx30 = get_performance_context(lookback_days=30)
+        period_stats = {
+            "30d": get_performance_stats(30),
+            "60d": get_performance_stats(60),
+            "90d": get_performance_stats(90),
+        }
+        return jsonify({
+            "ok":           True,
+            "stats":        stats,
+            "context_30d":  ctx30,
+            "period_stats": period_stats,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
 @app.route("/api/miniapp/dividends")
 def miniapp_dividends():
     chat_id = _miniapp_auth()

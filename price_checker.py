@@ -4,6 +4,7 @@ Uses yfinance for stocks and CoinGecko for crypto (single bulk call each),
 with a yfinance fallback for crypto in case CoinGecko fails or ids are missing.
 """
 
+import concurrent.futures
 import requests
 import yfinance as yf
 
@@ -60,25 +61,38 @@ def get_current_prices(picks: dict) -> dict:
             if s.get("ticker"):
                 stock_tickers.add(s["ticker"])
 
+    def _fetch_stock_price(ticker: str) -> tuple[str, float | None]:
+        """Fetch current price for one stock. Returns (ticker, price|None)."""
+        try:
+            info  = yf.Ticker(ticker).fast_info
+            price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
+            if price:
+                return ticker, round(float(price), 2)
+        except Exception:
+            pass
+        # Fallback: 1-min history with explicit timeout
+        try:
+            hist = yf.Ticker(ticker).history(period="1d", interval="1m", timeout=8)
+            if not hist.empty:
+                return ticker, round(float(hist["Close"].iloc[-1]), 2)
+        except Exception:
+            pass
+        print(f"[price_checker] Could not fetch price for {ticker}")
+        return ticker, None
+
     if stock_tickers:
-        for ticker in stock_tickers:
-            try:
-                info  = yf.Ticker(ticker).fast_info
-                price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
-                if price:
-                    prices[ticker] = round(float(price), 2)
-                    continue
-            except Exception:
-                pass
-            # Fallback: 1-min history
-            try:
-                hist = yf.Ticker(ticker).history(period="1d", interval="1m")
-                if not hist.empty:
-                    prices[ticker] = round(float(hist["Close"].iloc[-1]), 2)
-                    continue
-            except Exception:
-                pass
-            print(f"[price_checker] Could not fetch price for {ticker}")
+        # Parallel fetch — 8 threads, 20s hard cap per ticker
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            futs = {pool.submit(_fetch_stock_price, t): t for t in stock_tickers}
+            for future in concurrent.futures.as_completed(futs):
+                try:
+                    ticker, price = future.result(timeout=20)
+                    if price is not None:
+                        prices[ticker] = price
+                except concurrent.futures.TimeoutError:
+                    print(f"[price_checker] Timeout fetching price for {futs[future]} — skipping.")
+                except Exception as exc:
+                    print(f"[price_checker] Error fetching price for {futs[future]}: {exc}")
 
     # ── Crypto prices via CoinGecko (one bulk call) ───────────────────────────
     # Build symbol→id map from picks, filling any gaps with the fallback table

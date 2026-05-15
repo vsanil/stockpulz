@@ -385,7 +385,7 @@ def get_iv_rank(ticker: str) -> dict:
 
         # 1-year daily history for realised vol distribution
         try:
-            hist = tk.history(period="1y", interval="1d", auto_adjust=True)
+            hist = tk.history(period="1y", interval="1d", auto_adjust=True, timeout=10)
         except Exception:
             return null
 

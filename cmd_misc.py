@@ -1,0 +1,85 @@
+"""
+cmd_misc.py — Help, status, utility commands extracted from bot_commands.py.
+"""
+
+from telegram_api import send_message, send_inline_keyboard
+from cmd_helpers import _is_admin
+
+
+def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
+    """Help, status and utility commands."""
+    if text in ("HELP", "START"):
+        is_admin = _is_admin(chat_id)
+        msg = (
+            "📋 <b>StockPulz Commands</b>\n"
+            "📖 <a href=\"https://stockpulz.com/commands\">Full guide with examples →</a>\n"
+            "\n<b>📈 Daily Picks</b>"
+            "\n/today — Today's stock &amp; crypto picks"
+            "\n/prices — Live prices vs entry for today's picks"
+            "\n/explain — Ask any market question or why a stock was picked"
+            "\n/chart — Candlestick chart for any ticker\n"
+            "\n<b>💼 My Portfolio</b>"
+            "\n/bought — Log a position you entered"
+            "\n/sold — Close a position &amp; record P&amp;L"
+            "\n/positions — Open positions with live P&amp;L &amp; exposure"
+            "\n/summary — Portfolio health: win rate, open P&amp;L, risk warnings"
+            "\n/stats — Your win rate, expectancy &amp; P&amp;L breakdown"
+            "\n/history — Full trade history (open &amp; closed)"
+            "\n/updatestop — Move a stop-loss (e.g. to breakeven)"
+            "\n/updatetarget — Adjust a price target"
+            "\n/fixticker — Rename a wrongly stored ticker (e.g. COSTCO → COST)\n"
+            "\n<b>🧪 Paper Trading</b>"
+            "\n/paper_buy — Simulate a buy (no real money)"
+            "\n/paper_sell — Simulate a sell"
+            "\n/paper_cancel — Remove a paper position without recording a sale"
+            "\n/paper_portfolio — Virtual portfolio, cash &amp; unrealised P&amp;L"
+            "\n/paper_perf — Paper trading performance vs SPY"
+            "\n/paper_history — All past paper trades"
+            "\n/paper_add_cash — Add cash to your paper account"
+            "\n/paper_reset — Wipe paper portfolio and start fresh\n"
+            "\n<b>🔔 Price Alerts</b>"
+            "\n/alert — Set a price alert (e.g. NVDA above 1000)"
+            "\n/alerts — View all your active alerts"
+            "\n/unalert — Remove an alert\n"
+            "\n<b>🌍 Market</b>"
+            "\n/regime — Current market conditions (Bull / Bear / Caution)"
+            "\n/performance — Bot track record: win rate, avg return, vs S&amp;P"
+            "\n/community — All StockPulz users' performance vs S&amp;P 500"
+            "\n/backtest — How the strategy performed historically\n"
+            "\n<b>⚙️ Settings</b>"
+            "\n/settings — All preferences in one interactive panel"
+            "\n/set_risk — Risk profile: conservative / moderate / aggressive"
+            "\n/set_budget — Per-trade budget (e.g. stocks 200 crypto 50)"
+            "\n/set_thresholds — Stop loss &amp; target gain % (e.g. stop 7 target 15)"
+            "\n/watch — Always include specific tickers in your picks"
+            "\n/exclude — Exclude a sector (e.g. Energy, Utilities)"
+            "\n/pause — Pause daily briefings"
+            "\n/resume — Resume daily briefings"
+            "\n/status — Check if picks are active and when the next one runs"
+            "\n/next — When's the next scheduled pick"
+            "\n/reset — Reset all settings to defaults"
+            "\n/dividends — Dividend yield &amp; next ex-date for your positions"
+            "\n/share — Get your invite link (also /invite)"
+            "\n/feedback — Send feedback to the team"
+            "\n/guide — Quick reference: daily schedule, /bought, /stats explained"
+            "\n/setup — Re-run the setup wizard (budget, risk, assets)\n"
+            "\n<i>💬 You can also just type naturally — e.g. \"why was NVDA picked?\", "
+            "\"set my risk to aggressive\", or \"alert me when BTC hits 100k\".</i>\n"
+        )
+        if is_admin:
+            msg += (
+                "\n<b>🔑 Admin</b>"
+                "\n/dashboard — Overview: users, positions, top performer, last run"
+                "\n/test — Live NL + routing self-test (reports ✅/❌ in Telegram)"
+                "\n/feedbacks — View all user feedback"
+                "\n/users — List all allowed users"
+                "\n/pending — Users awaiting approval"
+                "\n/broadcast — Send a message to all users"
+                "\n/release — Send a release note to all users"
+                "\n/admin_perf — Performance across all users"
+                "\n/bot_pause · /bot_resume — Global kill switch"
+                "\n/bot_crypto_on · /bot_crypto_off — Toggle crypto globally\n"
+            )
+        return msg
+
+    return None

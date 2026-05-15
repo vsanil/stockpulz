@@ -12,6 +12,43 @@ from datetime import date, timedelta
 from config_manager import get_allowed_users, load_user_trade_log
 
 
+def get_performance_stats(lookback_days: int = 30) -> dict:
+    """
+    Return structured performance stats for a given lookback window.
+    Used by the Mini App for the 30/60/90-day comparison table.
+    Returns {} if fewer than 5 trades.
+    """
+    cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
+    all_trades: list[dict] = []
+    try:
+        for uid in get_allowed_users():
+            log = load_user_trade_log(uid)
+            for t in log.get("closed", []):
+                if t.get("closed_date", "") >= cutoff:
+                    all_trades.append(t)
+    except Exception as exc:
+        print(f"[performance_context] get_performance_stats error: {exc}")
+        return {}
+
+    returns = [float(t["return_pct"]) for t in all_trades if "return_pct" in t]
+    if len(returns) < 5:
+        return {}
+
+    wins     = [r for r in returns if r > 0]
+    losses   = [r for r in returns if r <= 0]
+    win_rate = round(len(wins) / len(returns) * 100, 1)
+    avg_ret  = round(sum(returns) / len(returns), 2)
+
+    return {
+        "lookback_days": lookback_days,
+        "trades":        len(returns),
+        "wins":          len(wins),
+        "losses":        len(losses),
+        "win_rate":      win_rate,
+        "avg_ret":       avg_ret,
+    }
+
+
 def get_performance_context(lookback_days: int = 30) -> str:
     """
     Aggregate closed trades from all users over the last N days.
