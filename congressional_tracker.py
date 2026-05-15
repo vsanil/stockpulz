@@ -105,18 +105,28 @@ def get_all_congressional_trades() -> dict[str, dict]:
         return {}
 
     for item in data:
-        # Only purchases, not sales
-        tx_type = str(item.get("type", "") or item.get("transaction_type", "")).lower()
+        # Support both House Stock Watcher and Quiver Quantitative field names
+        tx_type = str(
+            item.get("Transaction") or item.get("type") or
+            item.get("transaction_type") or ""
+        ).lower()
         if not any(kw in tx_type for kw in ("purchase", "buy", "p -")):
             continue
 
-        ticker = str(item.get("ticker", "") or item.get("Ticker", "") or "").upper().strip()
+        ticker = str(
+            item.get("Ticker") or item.get("ticker") or ""
+        ).upper().strip()
+        # Strip option suffixes like "AAPL230120C00150000"
+        if len(ticker) > 5:
+            ticker = ticker[:5].rstrip("0123456789")
         if not ticker or not ticker.replace("-", "").isalpha() or len(ticker) > 5:
             continue
 
-        # Parse date — skip if too old
-        raw_date = (item.get("transaction_date") or item.get("TransactionDate")
-                    or item.get("disclosure_date") or "")
+        # Parse date — support both "Date" (Quiver) and "transaction_date" (House)
+        raw_date = (
+            item.get("Date") or item.get("transaction_date") or
+            item.get("TransactionDate") or item.get("disclosure_date") or ""
+        )
         try:
             tx_date = datetime.strptime(str(raw_date)[:10], "%Y-%m-%d").date()
         except Exception:
@@ -125,10 +135,10 @@ def get_all_congressional_trades() -> dict[str, dict]:
             continue
 
         member = str(
-            item.get("representative") or item.get("Representative")
-            or item.get("senator") or "Unknown"
+            item.get("Representative") or item.get("representative") or
+            item.get("senator") or "Unknown"
         )
-        amount = str(item.get("amount") or item.get("Amount") or "")
+        amount = str(item.get("Range") or item.get("amount") or item.get("Amount") or "")
 
         if ticker not in trades:
             trades[ticker] = {

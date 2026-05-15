@@ -138,8 +138,9 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
         # Price sanity check — second line of defence after screener.py's check.
         # Catches stale cache entries with yfinance data glitches (e.g. MU at $576
         # instead of $85). Fetch a fresh close and compare; drop if >3x or <1/3.
+        # Skip for known crypto symbols — they're not on Yahoo Finance as equities.
         raw_price = stock.get("current_price")
-        if raw_price and raw_price > 0:
+        if raw_price and raw_price > 0 and ticker not in _KNOWN_CRYPTO:
             try:
                 import yfinance as yf
                 live = yf.Ticker(ticker).fast_info.get("last_price") or yf.Ticker(ticker).fast_info.get("previous_close")
@@ -201,17 +202,19 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
             # ── Price context: multi-day chart setup ──────────────────────────
             # Fetches 6-month history once and computes MA position,
             # consolidation, breakout, support/resistance, trends.
-            try:
-                ctx = get_price_context(ticker)
-                if ctx.get("context_str"):
-                    entry["price_context"] = ctx["context_str"]
-                    # Surface breakout as a top-level flag Claude can weight heavily
-                    if ctx.get("breakout"):
-                        entry["breakout_today"] = True
-                    if ctx.get("consolidation_days", 0) >= 10:
-                        entry["consolidation_days"] = ctx["consolidation_days"]
-            except Exception as exc:
-                print(f"[ai_analyzer] Price context error for {ticker}: {exc}")
+            # Skip for known crypto symbols — they're not on Yahoo Finance as equities.
+            if ticker not in _KNOWN_CRYPTO:
+                try:
+                    ctx = get_price_context(ticker)
+                    if ctx.get("context_str"):
+                        entry["price_context"] = ctx["context_str"]
+                        # Surface breakout as a top-level flag Claude can weight heavily
+                        if ctx.get("breakout"):
+                            entry["breakout_today"] = True
+                        if ctx.get("consolidation_days", 0) >= 10:
+                            entry["consolidation_days"] = ctx["consolidation_days"]
+                except Exception as exc:
+                    print(f"[ai_analyzer] Price context error for {ticker}: {exc}")
 
             # ── Sentiment + insider: use cache (5-day TTL) ────────────────────
             cached = get_cached_signal(signal_cache, ticker)
