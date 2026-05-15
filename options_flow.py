@@ -69,6 +69,9 @@ def _get_polygon_options(ticker: str) -> dict | None:
     while url and pages_fetched < 3:   # cap at 3 pages (750 contracts) — enough signal
         try:
             resp = requests.get(url, params=params, timeout=8)
+            if resp.status_code == 403:
+                # Free tier doesn't include options snapshot — fall through to yfinance
+                return None
             resp.raise_for_status()
             data = resp.json()
         except Exception as exc:

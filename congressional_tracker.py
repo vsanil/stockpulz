@@ -1,9 +1,12 @@
 """
-congressional_tracker.py — Track congressional stock purchases via House Stock Watcher.
+congressional_tracker.py — Track congressional stock purchases.
 
 Congressional stock disclosures (STOCK Act) are public law. Members of Congress
-must report trades within 45 days. House Stock Watcher aggregates these filings
-into a free public API — no key required.
+must report trades within 45 days.
+
+Sources (tried in order):
+  1. Quiver Quantitative — reliable API, no key required for free tier
+  2. House Stock Watcher — fallback, may be blocked from some CI environments
 
 Why this matters: congressional members have historically outperformed the market
 significantly, with studies showing ~6-12% annualised alpha. Cluster buys
@@ -18,6 +21,7 @@ from datetime import date, datetime, timedelta
 
 from config_manager import load_signal_cache, save_signal_cache
 
+QUIVER_API    = "https://api.quiverquant.com/beta/live/congresstrading"
 HOUSE_API     = "https://housestockwatcher.com/api"
 CACHE_KEY     = "__congressional__"
 CACHE_TTL_HRS = 24
@@ -49,6 +53,37 @@ def _is_cache_fresh(cache: dict) -> bool:
         return False
 
 
+def _fetch_raw() -> list:
+    """
+    Try Quiver Quantitative first, then House Stock Watcher.
+    Returns raw list of trade dicts, or [] on total failure.
+    """
+    # 1. Quiver Quantitative
+    try:
+        resp = requests.get(QUIVER_API, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and data:
+                print(f"[congressional] Quiver Quantitative: {len(data)} records.")
+                return data
+    except Exception as exc:
+        print(f"[congressional] Quiver fetch failed: {exc}")
+
+    # 2. House Stock Watcher fallback
+    try:
+        resp = requests.get(HOUSE_API, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and data:
+                print(f"[congressional] House Stock Watcher: {len(data)} records.")
+                return data
+    except Exception as exc:
+        print(f"[congressional] House Stock Watcher fetch failed: {exc}")
+
+    print("[congressional] All sources failed — no congressional data available.")
+    return []
+
+
 def get_all_congressional_trades() -> dict[str, dict]:
     """
     Fetch all recent congressional purchases from House Stock Watcher.
@@ -61,73 +96,67 @@ def get_all_congressional_trades() -> dict[str, dict]:
         print(f"[congressional] Loaded {len(trades)} tickers from cache.")
         return trades
 
-    print("[congressional] Cache miss — fetching live from House Stock Watcher...")
+    print("[congressional] Cache miss — fetching live...")
     trades: dict[str, dict] = {}
     cutoff = date.today() - timedelta(days=LOOKBACK_DAYS)
 
-    try:
-        resp = requests.get(HOUSE_API, headers=HEADERS, timeout=15)
-        if resp.status_code != 200:
-            print(f"[congressional] API returned {resp.status_code}")
-            return {}
-
-        data = resp.json()
-        if not isinstance(data, list):
-            return {}
-
-        for item in data:
-            # Only purchases, not sales
-            tx_type = str(item.get("type", "") or item.get("transaction_type", "")).lower()
-            if not any(kw in tx_type for kw in ("purchase", "buy", "p -")):
-                continue
-
-            ticker = str(item.get("ticker", "") or "").upper().strip()
-            if not ticker or not ticker.replace("-", "").isalpha() or len(ticker) > 5:
-                continue
-
-            # Parse date — skip if too old
-            raw_date = item.get("transaction_date") or item.get("disclosure_date") or ""
-            try:
-                tx_date = datetime.strptime(str(raw_date)[:10], "%Y-%m-%d").date()
-            except Exception:
-                continue
-            if tx_date < cutoff:
-                continue
-
-            member = str(item.get("representative") or item.get("senator") or "Unknown")
-            amount = str(item.get("amount") or "")
-
-            if ticker not in trades:
-                trades[ticker] = {
-                    "count":       0,
-                    "members":     [],
-                    "latest_date": str(tx_date),
-                    "amounts":     [],
-                }
-
-            trades[ticker]["count"] += 1
-            if member not in trades[ticker]["members"]:
-                trades[ticker]["members"].append(member)
-            trades[ticker]["amounts"].append(amount)
-            if str(tx_date) > trades[ticker]["latest_date"]:
-                trades[ticker]["latest_date"] = str(tx_date)
-
-        # Add cluster flag
-        for t in trades:
-            trades[t]["is_cluster"] = len(trades[t]["members"]) >= 2
-
-        # Save to signal cache
-        cache[CACHE_KEY] = {
-            "cached_at": datetime.utcnow().isoformat(),
-            "trades":    trades,
-        }
-        save_signal_cache(cache)
-        print(f"[congressional] Fetched {len(trades)} tickers with recent buys.")
-        return trades
-
-    except Exception as exc:
-        print(f"[congressional] Fetch failed: {exc}")
+    data = _fetch_raw()
+    if not data:
         return {}
+
+    for item in data:
+        # Only purchases, not sales
+        tx_type = str(item.get("type", "") or item.get("transaction_type", "")).lower()
+        if not any(kw in tx_type for kw in ("purchase", "buy", "p -")):
+            continue
+
+        ticker = str(item.get("ticker", "") or item.get("Ticker", "") or "").upper().strip()
+        if not ticker or not ticker.replace("-", "").isalpha() or len(ticker) > 5:
+            continue
+
+        # Parse date — skip if too old
+        raw_date = (item.get("transaction_date") or item.get("TransactionDate")
+                    or item.get("disclosure_date") or "")
+        try:
+            tx_date = datetime.strptime(str(raw_date)[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if tx_date < cutoff:
+            continue
+
+        member = str(
+            item.get("representative") or item.get("Representative")
+            or item.get("senator") or "Unknown"
+        )
+        amount = str(item.get("amount") or item.get("Amount") or "")
+
+        if ticker not in trades:
+            trades[ticker] = {
+                "count":       0,
+                "members":     [],
+                "latest_date": str(tx_date),
+                "amounts":     [],
+            }
+
+        trades[ticker]["count"] += 1
+        if member not in trades[ticker]["members"]:
+            trades[ticker]["members"].append(member)
+        trades[ticker]["amounts"].append(amount)
+        if str(tx_date) > trades[ticker]["latest_date"]:
+            trades[ticker]["latest_date"] = str(tx_date)
+
+    # Add cluster flag
+    for t in trades:
+        trades[t]["is_cluster"] = len(trades[t]["members"]) >= 2
+
+    # Save to signal cache
+    cache[CACHE_KEY] = {
+        "cached_at": datetime.utcnow().isoformat(),
+        "trades":    trades,
+    }
+    save_signal_cache(cache)
+    print(f"[congressional] Fetched {len(trades)} tickers with recent buys.")
+    return trades
 
 
 def get_congressional_signal(ticker: str,
