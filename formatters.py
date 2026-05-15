@@ -306,7 +306,7 @@ def format_daily_message(picks: dict, config: dict,
         iv_str  = f"  ·  ATM IV ~{iv_pct}%" if iv_pct else ""
         rv_pct  = of.get("rv_pct")
         rv_str  = f"  ·  RV {rv_pct}%" if rv_pct else ""
-        crush   = "  <i>(IV crush risk — avoid naked buys)</i>" if iv_label == "EXTREME" else ""
+        crush   = "  ⚠️ (IV crush risk — avoid naked buys)" if iv_label == "EXTREME" else ""
         return f"  {emoji} <i>IV: {iv_label} (rank {iv_rank}){iv_str}{rv_str}{crush}</i>"
 
     def _pick_row_st(i, s, personal_note: str = "", streak: int = 0):
