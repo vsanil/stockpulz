@@ -1078,12 +1078,16 @@ def handle_callback_query(callback_query: dict) -> None:
         # Start a pending state and ask for typed input
         sub = parts[1] if len(parts) > 1 else ""
         prompts = {
-            "budget_stock":  ("settings_budget_stock",  "💰 <b>Stock budget per trade?</b>\n<i>e.g. <code>200</code> or <code>off</code> to clear</i>"),
-            "budget_crypto": ("settings_budget_crypto", "₿ <b>Crypto budget per trade?</b>\n<i>e.g. <code>50</code> or <code>off</code> to clear</i>"),
-            "stop":          ("settings_stop",          "🛑 <b>Stop loss %?</b>\n<i>e.g. <code>7</code> for 7%</i>"),
-            "target":        ("settings_target",        "🎯 <b>Target gain %?</b>\n<i>e.g. <code>15</code> for 15%</i>"),
-            "watchlist":     ("watch",                  "👀 <b>Watchlist tickers?</b>\n<i>e.g. <code>TSLA MSFT NVDA</code>  ·  blank to clear</i>"),
-            "exclude":       ("exclude",                "🚫 <b>Sectors to exclude?</b>\n<i>e.g. <code>Energy Utilities</code>  ·  blank to clear</i>"),
+            "budget_stock":     ("settings_budget_stock",     "💰 <b>Stock budget per trade?</b>\n<i>e.g. <code>200</code> or <code>off</code> to clear</i>"),
+            "budget_crypto":    ("settings_budget_crypto",    "₿ <b>Crypto budget per trade?</b>\n<i>e.g. <code>50</code> or <code>off</code> to clear</i>"),
+            "stop":             ("settings_stop",             "🛑 <b>Stop loss %?</b>\n<i>e.g. <code>7</code> for 7%</i>"),
+            "target":           ("settings_target",           "🎯 <b>Target gain %?</b>\n<i>e.g. <code>15</code> for 15%</i>"),
+            "watchlist":        ("watch",                     "👀 <b>Watchlist tickers?</b>\n<i>e.g. <code>TSLA MSFT NVDA</code>  ·  blank to clear</i>"),
+            "exclude":          ("exclude",                   "🚫 <b>Sectors to exclude?</b>\n<i>e.g. <code>Energy Utilities</code>  ·  blank to clear</i>"),
+            "portfolio_size":       ("settings_portfolio_size",       "💼 <b>Total portfolio capital?</b>\n<i>Enables position sizing on every pick.\ne.g. <code>25000</code> or <code>25k</code>  ·  <code>off</code> to disable</i>"),
+            "portfolio_risk":       ("settings_portfolio_risk",       "⚖️ <b>Risk per trade (% of capital)?</b>\n<i>1% is standard; 0.5%–2% is the typical range.\ne.g. <code>1</code> for 1% risk per trade</i>"),
+            "portfolio_max_pos":    ("settings_portfolio_max_pos",    "🎯 <b>Max single position size (% of capital)?</b>\n<i>Default 10% — prevents any one pick from dominating.\ne.g. <code>10</code> for 10%</i>"),
+            "portfolio_max_sector": ("settings_portfolio_max_sector", "🏭 <b>Max sector concentration (% of capital)?</b>\n<i>Default 35% — warns when one sector dominates.\ne.g. <code>35</code> for 35%</i>"),
         }
         if sub in prompts:
             cmd, prompt_text = prompts[sub]
@@ -1354,6 +1358,17 @@ def _send_settings_panel(chat_id: str) -> None:
     skip_wl     = bool(cfg.get("skip_watchlist_alerts", False))
     skip_pre    = bool(cfg.get("skip_premarket",        False))
 
+    # Portfolio sizing config
+    portfolio_cfg  = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+    cap_size        = portfolio_cfg.get("portfolio_size")
+    risk_per_trade  = portfolio_cfg.get("risk_per_trade_pct", 1.0)
+    max_pos_pct     = portfolio_cfg.get("max_position_pct", 10.0)
+    max_sec_pct     = portfolio_cfg.get("max_sector_pct",   35.0)
+    cap_label       = f"${int(cap_size):,}" if cap_size else "not set"
+    risk_pt_label   = f"{risk_per_trade}%"
+    max_pos_label   = f"{max_pos_pct}%"
+    max_sec_label   = f"{max_sec_pct}%"
+
     # Labels
     risk_emoji  = {"conservative": "🛡", "moderate": "⚖️", "aggressive": "🔥"}.get(risk, "⚖️")
     mode_label  = {"st": "ST only", "lt": "LT only", "both": "Both"}.get(mode, mode)
@@ -1373,6 +1388,7 @@ def _send_settings_panel(chat_id: str) -> None:
         f"📈 Stock picks: <b>{ms_label}</b>   🪙 Crypto picks: <b>{mc_label}</b>\n"
         f"🛑 Stop loss: <b>{sl_pct}%</b>   🎯 Target: <b>{tg_pct}%</b>\n"
         f"👀 Watchlist: <b>{wl_label}</b>   🚫 Excluded: <b>{ex_label}</b>\n"
+        f"💼 Portfolio capital: <b>{cap_label}</b>   ⚖️ Risk/trade: <b>{risk_pt_label}</b>   🎯 Max pos: <b>{max_pos_label}</b>   🏭 Max sector: <b>{max_sec_label}</b>\n"
         f"📨 10:30 confirm: <b>{'off' if skip_conf else 'on'}</b>   "
         f"🌅 EOD summary: <b>{'off' if skip_eod else 'on'}</b>   "
         f"👁 WL alerts: <b>{'off' if skip_wl else 'on'}</b>   "
@@ -1426,7 +1442,17 @@ def _send_settings_panel(chat_id: str) -> None:
             {"text": f"🌅 Pre-market {'✅' if not skip_pre else '🔕 off'}",
              "callback_data": "settings_toggle|skip_premarket"},
         ],
-        # Row 8: reset
+        # Row 8a: portfolio sizing — capital + risk
+        [
+            {"text": f"💼 Capital: {cap_label}",        "callback_data": "settings_prompt|portfolio_size"},
+            {"text": f"⚖️ Risk/trade: {risk_pt_label}",  "callback_data": "settings_prompt|portfolio_risk"},
+        ],
+        # Row 8b: portfolio caps — max position + max sector
+        [
+            {"text": f"🎯 Max pos: {max_pos_label}",    "callback_data": "settings_prompt|portfolio_max_pos"},
+            {"text": f"🏭 Max sector: {max_sec_label}", "callback_data": "settings_prompt|portfolio_max_sector"},
+        ],
+        # Row 9: reset
         [
             {"text": "🔄 Reset all settings", "callback_data": "settings_reset_ask"},
         ],
@@ -1903,6 +1929,70 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             send_message(f"✅ Target gain → <b>{val}%</b>", chat_id=chat_id)
         except ValueError:
             send_message("⚠️ Couldn't parse that. Try a number like <code>15</code>.", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+        return ""
+
+    if command == "settings_portfolio_size":
+        raw = text.strip().lower().replace(",", "")
+        if raw in ("off", "0", "none", "clear", ""):
+            existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+            existing.pop("portfolio_size", None)
+            update_user_config(chat_id, "portfolio", existing)
+            send_message("✅ Portfolio capital cleared — position sizing disabled.", chat_id=chat_id)
+        else:
+            try:
+                val = float(raw.rstrip("k")) * (1000 if raw.endswith("k") else 1)
+                existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+                update_user_config(chat_id, "portfolio", {**existing, "portfolio_size": val})
+                send_message(
+                    f"✅ Portfolio capital → <b>${int(val):,}</b>\n"
+                    f"Position sizing is now active — each pick will include share counts and risk $.",
+                    chat_id=chat_id,
+                )
+            except ValueError:
+                send_message("⚠️ Couldn't parse that. Try a number like <code>25000</code> or <code>25k</code>.", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+        return ""
+
+    if command == "settings_portfolio_risk":
+        raw = text.strip().replace("%", "")
+        try:
+            val = float(raw)
+            if not (0.1 <= val <= 5.0):
+                raise ValueError("out of range")
+            existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+            update_user_config(chat_id, "portfolio", {**existing, "risk_per_trade_pct": val})
+            send_message(f"✅ Risk per trade → <b>{val}%</b> of portfolio capital per pick.", chat_id=chat_id)
+        except ValueError:
+            send_message("⚠️ Enter a number between 0.1 and 5 (e.g. <code>1</code> = 1% risk per trade).", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+        return ""
+
+    if command == "settings_portfolio_max_pos":
+        raw = text.strip().replace("%", "")
+        try:
+            val = float(raw)
+            if not (1.0 <= val <= 50.0):
+                raise ValueError("out of range")
+            existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+            update_user_config(chat_id, "portfolio", {**existing, "max_position_pct": val})
+            send_message(f"✅ Max position size → <b>{val}%</b> of portfolio per pick.", chat_id=chat_id)
+        except ValueError:
+            send_message("⚠️ Enter a number between 1 and 50 (e.g. <code>10</code> = 10% max per position).", chat_id=chat_id)
+        _send_settings_panel(chat_id)
+        return ""
+
+    if command == "settings_portfolio_max_sector":
+        raw = text.strip().replace("%", "")
+        try:
+            val = float(raw)
+            if not (5.0 <= val <= 100.0):
+                raise ValueError("out of range")
+            existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+            update_user_config(chat_id, "portfolio", {**existing, "max_sector_pct": val})
+            send_message(f"✅ Max sector concentration → <b>{val}%</b>.", chat_id=chat_id)
+        except ValueError:
+            send_message("⚠️ Enter a number between 5 and 100 (e.g. <code>35</code> = 35% max per sector).", chat_id=chat_id)
         _send_settings_panel(chat_id)
         return ""
 

@@ -275,14 +275,31 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
             if score >= 50:
                 try:
                     opts = get_options_signal(ticker)
-                    if opts.get("unusual") or opts.get("bullish_flow") or opts.get("bearish_flow"):
-                        entry["options_flow"] = {
-                            "unusual":        opts["unusual"],
-                            "put_call_ratio": opts["put_call_ratio"],
-                            "bullish_flow":   opts["bullish_flow"],
-                            "bearish_flow":   opts["bearish_flow"],
-                            "note":           opts["note"],
+                    has_flow = (
+                        opts.get("unusual") or opts.get("bullish_flow") or
+                        opts.get("bearish_flow") or opts.get("sweep_detected")
+                    )
+                    has_iv = opts.get("iv_rank") is not None
+                    if has_flow or has_iv:
+                        flow_entry = {
+                            "unusual":         opts["unusual"],
+                            "put_call_ratio":  opts["put_call_ratio"],
+                            "bullish_flow":    opts["bullish_flow"],
+                            "bearish_flow":    opts["bearish_flow"],
+                            "sweep_detected":  opts.get("sweep_detected", False),
+                            "expiries_loaded": opts.get("expiries_loaded", 1),
+                            "note":            opts["note"],
                         }
+                        # Include gamma pin when price is near peak-OI strike
+                        if opts.get("gamma_pin") and opts.get("gamma_pin_strike"):
+                            flow_entry["gamma_pin_strike"]   = opts["gamma_pin_strike"]
+                            flow_entry["gamma_pin_dist_pct"] = opts["gamma_pin_dist_pct"]
+                        # Include IV rank when available
+                        if has_iv:
+                            flow_entry["iv_rank"]  = opts["iv_rank"]
+                            flow_entry["iv_pct"]   = opts["iv_pct"]
+                            flow_entry["iv_label"] = opts["iv_label"]
+                        entry["options_flow"] = flow_entry
                 except Exception:
                     pass
 
@@ -571,11 +588,13 @@ CRYPTO RULE: Each crypto symbol may appear AT MOST ONCE. No duplicates. long_ter
 
 SIGNAL GUIDANCE (use in thesis and catalyst where relevant):
   - social_sentiment: StockTwits + Reddit signal. Label "bullish"/"hot" supports picks; "bearish" is a red flag.
-  - options_flow: unusual call volume or low put/call ratio confirms bullish bets by institutional traders.
+  - options_flow: aggregated across up to 4 near-term expiries — more accurate P/C ratio than single-expiry. Low P/C (<0.7) = calls dominating (bullish). High P/C (>1.5) = puts dominating (bearish).
+  - sweep_detected (options): large block trade through single contract — institutional conviction, weight heavily.
+  - gamma_pin_strike: the strike with highest aggregate open interest across all expiries. When price is within 2% (gamma_pin=True), market makers must hedge by buying/selling as price moves, creating a magnetic pull toward this level near expiry. Use as short-term price target or support/resistance.
+  - iv_rank (0-100): where current implied volatility sits vs. its 1-year historical range. <25 = LOW (options cheap, consider debit spreads / buying calls). 25-60 = NORMAL. 60-80 = ELEVATED (premium rich, better to sell spreads or use defined-risk entries). >80 = EXTREME (IV crush risk — avoid buying naked options unless expecting a major move). Always mention iv_label ("LOW"/"ELEVATED"/"EXTREME") when present in the thesis.
   - insider_activity: recent open-market buys by CEO/CFO are a strong conviction signal — always mention in thesis.
   - price_context: multi-day chart setup — breakout_today=True is a strong ST signal, consolidation_days≥10 means coiling energy.
   - obv_positive=True: On-Balance Volume rising — smart money accumulating. Confirm with volume_ratio.
-  - sweep_detected (options): large block trade through single contract — institutional conviction, weight heavily.
   - analyst_target_mean / analyst_upside_pct: Wall Street consensus — large upside supports LT thesis.
   - analyst_buy / analyst_hold / analyst_sell: count of Wall Street ratings — high buy count reinforces LT conviction.
   - analyst_consensus: "buy" | "hold" | "sell" — Wall Street consensus in one word.
