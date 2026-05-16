@@ -24,9 +24,15 @@ import yfinance as yf
 from config_manager import load_macro_cache, save_macro_cache
 
 # VIX thresholds
-VIX_LOW      = 15   # calm market
-VIX_ELEVATED = 20   # caution zone
-VIX_HIGH     = 30   # high fear / volatile regime
+VIX_LOW           = 15   # calm market
+VIX_CAUTION       = 20   # bull → neutral edge; above this VIX bull regime ends
+VIX_ELEVATED_RISK = 22   # elevated regime: uptrend intact but risk rising
+VIX_HIGH          = 28   # volatile regime: extreme fear (was 30 — lowered for earlier warning)
+
+# Hysteresis band: SPY must be this % ABOVE/BELOW a moving average to confirm
+# a bull or bear regime transition.  Prevents daily whipsawing when price
+# straddles the MA by a few cents.
+MA_HYSTERESIS_PCT = 0.005   # 0.5% band on each side of the MA
 
 # External API endpoints
 _FNG_URL  = "https://api.alternative.me/fng/?limit=2"
@@ -173,9 +179,10 @@ def _get_sector_rotation() -> dict | None:
     """
     try:
         tickers = list(SECTOR_ETFS.keys())
+        # 30d window: enough for a 20-trading-day lookback even after weekends/holidays
         hist = yf.download(
             tickers,
-            period="10d",
+            period="30d",
             group_by="ticker",
             auto_adjust=True,
             threads=True,
@@ -190,34 +197,59 @@ def _get_sector_rotation() -> dict | None:
                 else:
                     # Single-ticker fallback
                     closes = hist["Close"].dropna()
-                if len(closes) >= 5:
-                    pct = (float(closes.iloc[-1]) - float(closes.iloc[-5])) / float(closes.iloc[-5]) * 100
-                    perf[ticker] = {"name": name, "pct_5d": round(pct, 1)}
+                if len(closes) < 5:
+                    continue
+
+                pct_5d = (float(closes.iloc[-1]) - float(closes.iloc[-5])) / float(closes.iloc[-5]) * 100
+
+                # 20-day window — blends in the medium-term trend to smooth noise
+                pct_20d: float | None = None
+                if len(closes) >= 20:
+                    pct_20d = (float(closes.iloc[-1]) - float(closes.iloc[-20])) / float(closes.iloc[-20]) * 100
+
+                # Blended score: 40% recent (5d) + 60% medium-term (20d)
+                # The 60/40 split gives stable trend signal while preserving
+                # near-term sensitivity. Falls back to 5d only if 20d unavailable.
+                if pct_20d is not None:
+                    blended = 0.4 * pct_5d + 0.6 * pct_20d
+                else:
+                    blended = pct_5d
+
+                perf[ticker] = {
+                    "name":    name,
+                    "pct_5d":  round(pct_5d, 1),
+                    "pct_20d": round(pct_20d, 1) if pct_20d is not None else None,
+                    "blended": round(blended, 1),
+                }
             except Exception:
                 pass
 
         if not perf:
             return None
 
-        sorted_items = sorted(perf.items(), key=lambda x: x[1]["pct_5d"], reverse=True)
-        leaders  = [f"{v['name']} {v['pct_5d']:+.1f}%" for _, v in sorted_items[:3] if v["pct_5d"] > 0]
-        laggards = [f"{v['name']} {v['pct_5d']:+.1f}%" for _, v in reversed(sorted_items[-3:]) if v["pct_5d"] < 0]
+        # Sort by blended score — more stable than pure 5d ranking
+        sorted_items = sorted(perf.items(), key=lambda x: x[1]["blended"], reverse=True)
+        leaders  = [f"{v['name']} {v['blended']:+.1f}%" for _, v in sorted_items[:3] if v["blended"] > 0]
+        laggards = [f"{v['name']} {v['blended']:+.1f}%" for _, v in reversed(sorted_items[-3:]) if v["blended"] < 0]
 
-        best  = sorted_items[0][1]  if sorted_items     else None
-        worst = sorted_items[-1][1] if sorted_items     else None
+        best  = sorted_items[0][1]  if sorted_items else None
+        worst = sorted_items[-1][1] if sorted_items else None
 
         summary_parts = []
-        if best  and best["pct_5d"]  > 0.5:
-            summary_parts.append(f"{best['name']} leading ({best['pct_5d']:+.1f}% 5d)")
-        if worst and worst["pct_5d"] < -0.5:
-            summary_parts.append(f"{worst['name']} lagging ({worst['pct_5d']:+.1f}% 5d)")
+        if best  and best["blended"]  > 0.5:
+            summary_parts.append(f"{best['name']} leading ({best['blended']:+.1f}% blended)")
+        if worst and worst["blended"] < -0.5:
+            summary_parts.append(f"{worst['name']} lagging ({worst['blended']:+.1f}% blended)")
         summary = " | ".join(summary_parts) if summary_parts else "sector rotation flat"
 
         print(f"[market_regime] Sector rotation: {summary}")
         return {
             "leaders":  leaders,
             "laggards": laggards,
-            "all":      {k: v["pct_5d"] for k, v in perf.items()},
+            "all":      {k: v["blended"] for k, v in perf.items()},
+            "all_5d":   {k: v["pct_5d"]  for k, v in perf.items()},
+            "all_20d":  {k: v["pct_20d"] for k, v in perf.items()
+                         if v["pct_20d"] is not None},
             "summary":  summary,
         }
     except Exception as exc:
@@ -293,18 +325,51 @@ def get_market_regime() -> dict:
         sector_rotation = _get_sector_rotation()
         save_macro_cache(fear_greed, rate_trend, sector_rotation)
 
+    # ── Hysteresis: require SPY to be clearly above/below MA before transitioning ──
+    # This prevents daily regime flipping when price straddles the moving average.
+    # "firmly above 200MA" = price > MA200 × 1.005 (0.5% buffer)
+    # "firmly below 200MA" = price < MA200 × 0.995
+    spy_firmly_above_200 = (
+        spy_price is not None and spy_ma200 is not None
+        and spy_price > spy_ma200 * (1 + MA_HYSTERESIS_PCT)
+    )
+    spy_firmly_below_200 = (
+        spy_price is not None and spy_ma200 is not None
+        and spy_price < spy_ma200 * (1 - MA_HYSTERESIS_PCT)
+    )
+
     # ── Classify regime ───────────────────────────────────────────────────────
+    # Priority: volatile > bear > elevated > bull > neutral
     if vix is not None and vix >= VIX_HIGH:
         regime = "volatile"
         note   = f"VIX={vix:.1f} — extreme fear, tighten stops, reduce size"
-    elif spy_above_200 is False:
+
+    elif spy_firmly_below_200:
         regime = "bear"
-        note   = (f"SPY below 200-day MA (${spy_price:.0f} vs MA ${spy_ma200:.0f}) "
+        note   = (f"SPY decisively below 200-day MA (${spy_price:.0f} vs MA ${spy_ma200:.0f}) "
                   "— defensive posture, avoid momentum plays")
-    elif spy_above_50 is True and spy_above_200 is True and (vix is None or vix < VIX_ELEVATED):
-        regime = "bull"
+
+    elif spy_above_200 is False and not spy_firmly_below_200:
+        # SPY just barely below MA200 (within 0.5%) — treat as neutral, not full bear
+        regime = "neutral"
         vix_str = f", VIX={vix:.1f}" if vix else ""
-        note    = f"SPY in uptrend{vix_str} — favorable conditions"
+        note    = f"SPY near 200-day MA{vix_str} — mixed signals, cautious stance"
+
+    elif spy_firmly_above_200 and spy_above_50 is True:
+        # SPY is clearly in uptrend — check VIX for exact regime
+        vix_str = f"VIX={vix:.1f}" if vix else ""
+        if vix is not None and vix >= VIX_ELEVATED_RISK:
+            regime = "elevated"
+            note   = (f"SPY in uptrend but {vix_str} elevated risk — "
+                      "reduce position size, favour quality setups")
+        elif vix is None or vix < VIX_CAUTION:
+            regime = "bull"
+            note   = f"SPY in uptrend{', ' + vix_str if vix_str else ''} — favorable conditions"
+        else:
+            # VIX_CAUTION <= VIX < VIX_ELEVATED_RISK: slight caution
+            regime = "neutral"
+            note   = f"SPY in uptrend but {vix_str} caution — monitor closely"
+
     else:
         regime = "neutral"
         vix_str = f", VIX={vix:.1f}" if vix else ""
@@ -324,9 +389,11 @@ def get_market_regime() -> dict:
         "spy_price":       round(spy_price, 2) if spy_price else None,
         "spy_ma50":        round(spy_ma50, 2) if spy_ma50 else None,
         "spy_ma200":       round(spy_ma200, 2) if spy_ma200 else None,
-        "spy_above_50ma":  spy_above_50,
-        "spy_above_200ma": spy_above_200,
-        "note":            note,
+        "spy_above_50ma":       spy_above_50,
+        "spy_above_200ma":      spy_above_200,
+        "spy_firmly_above_200": spy_firmly_above_200,
+        "spy_firmly_below_200": spy_firmly_below_200,
+        "note":                 note,
         "fear_greed":      fear_greed,
         "rate_trend":      rate_trend,
         "sector_rotation": sector_rotation,
@@ -337,17 +404,27 @@ def regime_pick_multiplier(regime: str) -> float:
     """
     Return a multiplier (0.5–1.0) to scale down pick counts in risky regimes.
     Screener multiplies max_picks by this before selecting candidates.
+
+    elevated: new intermediate regime — VIX rising but SPY still in uptrend.
+              Use 0.8× to reduce exposure without going full defensive.
     """
     return {
         "bull":     1.0,
         "neutral":  1.0,
+        "elevated": 0.8,   # VIX elevated but uptrend intact — trim size
         "volatile": 0.6,
         "bear":     0.5,
     }.get(regime, 1.0)
 
 
 def regime_emoji(regime: str) -> str:
-    return {"bull": "🐂", "bear": "🐻", "volatile": "⚡", "neutral": "➡️"}.get(regime, "")
+    return {
+        "bull":     "🐂",
+        "bear":     "🐻",
+        "volatile": "⚡",
+        "elevated": "⚠️",
+        "neutral":  "➡️",
+    }.get(regime, "")
 
 
 if __name__ == "__main__":

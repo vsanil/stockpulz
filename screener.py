@@ -47,7 +47,9 @@ SECTOR_MEDIAN_PE = {
 
 MAX_TICKERS    = 600   # S&P 500 + NASDAQ 100 + MidCap 400, deduped, capped here
 ST_CANDIDATE_N = 30    # Top N by technical score  → short-term pool
-LT_CANDIDATE_N = 30    # Top N by dollar volume    → long-term pool (independent)
+LT_CANDIDATE_N = 50    # Top N (by dollar volume, after liquidity gate) → long-term pool
+                        # Larger pool gives fundamental scoring more quality options to pick from
+MIN_LT_DOLLAR_VOL = 50_000_000  # $50M/day avg — filters out small/micro-caps from LT pool
 SLEEP_INFO     = 0.1   # Delay between individual .info calls
 
 
@@ -654,17 +656,27 @@ def _deduplicate_by_correlation(
 
 # ── Fundamental scoring (long-term) ──────────────────────────────────────────
 
-def _long_term_score(info: dict, fh: dict) -> tuple[int, dict]:
+def _long_term_score(
+    info: dict,
+    fh: dict,
+    dynamic_sector_pe: dict | None = None,
+) -> tuple[int, dict]:
     """
     Score a ticker for long-term investing (out of 100).
     Prioritises Finnhub metrics (fh) — more reliable than yfinance info.
     Falls back to yfinance info fields when Finnhub returns None.
+
+    dynamic_sector_pe — live sector median P/E computed from the screened universe.
+    When provided this replaces the hardcoded SECTOR_MEDIAN_PE dict, giving a
+    market-conditions-aware benchmark rather than a fixed historical average.
     """
     score   = 0
     metrics = {}
 
     sector    = info.get("sector", "Unknown")
-    median_pe = SECTOR_MEDIAN_PE.get(sector, SECTOR_MEDIAN_PE["Unknown"])
+    # Use dynamic PE table if provided and has data for this sector; fall back to hardcoded
+    pe_table  = dynamic_sector_pe if dynamic_sector_pe else SECTOR_MEDIAN_PE
+    median_pe = pe_table.get(sector, SECTOR_MEDIAN_PE.get(sector, SECTOR_MEDIAN_PE["Unknown"]))
 
     # ── P/E vs sector median (30 pts) ────────────────────────────────────────
     pe = fh.get("peBasicExclExtraTTM") or info.get("trailingPE")
@@ -849,8 +861,19 @@ def run_screener(
     # ST pool: highest technical scores (momentum/breakout plays)
     st_pool = sorted(all_scored, key=lambda x: x["score"], reverse=True)[:ST_CANDIDATE_N]
 
-    # LT pool: highest dollar volume (large caps worth holding long term)
-    lt_pool = sorted(all_scored, key=lambda x: x["avg_dollar_vol"], reverse=True)[:LT_CANDIDATE_N]
+    # LT pool: apply minimum liquidity gate first, then sort by dollar volume.
+    # This ensures we never evaluate fundamentals for micro-caps or illiquid names.
+    # Fundamental scoring in Step 5 then re-ranks the pool by quality — so the
+    # final picks are both liquid AND fundamentally sound.
+    lt_liquid = [s for s in all_scored if s["avg_dollar_vol"] >= MIN_LT_DOLLAR_VOL]
+    if len(lt_liquid) < 20:
+        # Threshold too strict (e.g. market stress day) — fall back to all tickers
+        print(f"[screener] LT liquidity gate yielded only {len(lt_liquid)} tickers — "
+              "relaxing threshold to all scored tickers.")
+        lt_liquid = all_scored
+    lt_pool = sorted(lt_liquid, key=lambda x: x["avg_dollar_vol"], reverse=True)[:LT_CANDIDATE_N]
+    print(f"[screener] LT pool: {len(lt_pool)} liquid candidates "
+          f"(${MIN_LT_DOLLAR_VOL/1e6:.0f}M+ avg daily vol)")
 
     # Watchlist bypass — ensure watchlist tickers are in both pools
     if watchlist:
@@ -900,6 +923,11 @@ def run_screener(
 
     lt_pool_tickers: set[str] = {c["ticker"] for c in lt_pool}
     _finnhub_lock = threading.Semaphore(4)   # max 4 concurrent Finnhub calls → stays under 60/min
+
+    # dynamic_sector_pe is populated AFTER the first enrichment pass (Step 5b below).
+    # _enrich_one reads it via closure — first-pass calls see None (→ hardcoded fallback),
+    # LT re-score pass sees the live medians.
+    _dynamic_sector_pe: dict | None = None
 
     def _enrich_one(candidate: dict) -> tuple[str, dict | None]:
         """Enrich a single candidate. Returns (ticker, entry_dict | None)."""
@@ -960,7 +988,7 @@ def run_screener(
         congress = get_congressional_signal(ticker, congressional_trades)
 
         try:
-            lt_score, lt_metrics = _long_term_score(info, fh_metrics)
+            lt_score, lt_metrics = _long_term_score(info, fh_metrics, _dynamic_sector_pe)
         except Exception as exc:
             print(f"[screener] LT score failed for {ticker}: {exc}")
             lt_score, lt_metrics = 0, {}
@@ -1035,6 +1063,55 @@ def run_screener(
                 t = futures[future]
                 print(f"[screener] Enrichment failed for {t}: {exc}")
 
+
+    # ── Step 5b: Compute dynamic sector PE medians + re-score LT candidates ─────
+    # The hardcoded SECTOR_MEDIAN_PE dict uses historical averages that drift
+    # from current market conditions (e.g. Tech was 28× in 2019, 35×+ in 2021).
+    # We compute live medians from the enriched universe and re-score LT picks.
+    # This re-score only adjusts the PE component (30 pts) — other signals unchanged.
+
+    _sector_pe_data: dict[str, list[float]] = {}
+    for _e in enriched.values():
+        _s  = _e.get("sector", "Unknown")
+        _pe = _e.get("lt_metrics", {}).get("pe_ratio")
+        if _pe and 0 < _pe < 200:   # cap at 200× to exclude distorted outliers
+            _sector_pe_data.setdefault(_s, []).append(_pe)
+
+    if len(_sector_pe_data) >= 3:
+        # Build dynamic table: median PE per sector from the screened universe
+        _dynamic_sector_pe = {}
+        for _s, _pes in _sector_pe_data.items():
+            _sorted = sorted(_pes)
+            _dynamic_sector_pe[_s] = round(_sorted[len(_sorted) // 2], 1)
+        # Fill any gaps (sectors not in the enriched universe) from the static table
+        for _s, _v in SECTOR_MEDIAN_PE.items():
+            _dynamic_sector_pe.setdefault(_s, _v)
+        print(f"[screener] Dynamic sector PE medians (from {len(enriched)} tickers): "
+              f"{_dynamic_sector_pe}")
+
+        # Re-score LT candidates with dynamic medians.
+        # Only the PE comparison changes; other components stay as-is.
+        for _ticker, _entry in enriched.items():
+            if _ticker not in lt_pool_tickers:
+                continue
+            _sector      = _entry.get("sector", "Unknown")
+            _pe          = _entry.get("lt_metrics", {}).get("pe_ratio")
+            _static_med  = SECTOR_MEDIAN_PE.get(_sector, SECTOR_MEDIAN_PE["Unknown"])
+            _dynamic_med = _dynamic_sector_pe.get(_sector, _static_med)
+            if _pe and 0 < _pe and _static_med != _dynamic_med:
+                _was_good = 0 < _pe < _static_med
+                _now_good = 0 < _pe < _dynamic_med
+                if _now_good and not _was_good:
+                    _entry["lt_score"] = min(100, _entry["lt_score"] + 30)
+                    print(f"[screener] {_ticker}: PE {_pe:.1f} now below dynamic median "
+                          f"{_dynamic_med:.1f} (was above {_static_med}) → +30 pts")
+                elif _was_good and not _now_good:
+                    _entry["lt_score"] = max(0, _entry["lt_score"] - 30)
+                    print(f"[screener] {_ticker}: PE {_pe:.1f} now above dynamic median "
+                          f"{_dynamic_med:.1f} (was below {_static_med}) → -30 pts")
+    else:
+        print(f"[screener] Insufficient sector PE data ({len(_sector_pe_data)} sectors) — "
+              "using hardcoded SECTOR_MEDIAN_PE.")
 
     # ── Step 6: Build final top-5 lists ───────────────────────────────────────
     def _opt_earnings(e: dict) -> dict:
