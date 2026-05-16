@@ -408,20 +408,35 @@ def get_dynamic_pick_counts(config: dict) -> dict:
 
 SIGNAL_CACHE_TTL_DAYS = 5
 
+# Bump when options_flow or other signal fields change shape so stale entries
+# (missing new fields like nearest_otm_call) are automatically discarded.
+SIGNAL_CACHE_SCHEMA_VERSION = 2   # v2: nearest_otm_call + nearest_call_expiry added
+
 
 def load_signal_cache() -> dict:
     """
     Load the signal cache from Gist.
-    Cache structure: { ticker: { "sentiment": {...}, "insider": {...}, "cached_date": "YYYY-MM-DD" } }
-    Returns {} if missing.
+    Cache structure: { "_schema": int, ticker: { "sentiment": {...}, "insider": {...},
+                                                  "cached_date": "YYYY-MM-DD" } }
+    Returns {} if missing or schema mismatch.
     """
-    return _load_gist_file(SIGNAL_CACHE_FILE) or {}
+    data = _load_gist_file(SIGNAL_CACHE_FILE) or {}
+    if data.get("_schema", 1) != SIGNAL_CACHE_SCHEMA_VERSION:
+        print(
+            f"[config_manager] Signal cache schema v{data.get('_schema', 1)} != "
+            f"current v{SIGNAL_CACHE_SCHEMA_VERSION} — discarding."
+        )
+        return {}
+    return data
 
 
 def save_signal_cache(cache: dict) -> None:
-    """Write signal cache to Gist."""
+    """Write signal cache to Gist, stamping the current schema version."""
+    cache["_schema"] = SIGNAL_CACHE_SCHEMA_VERSION
     _write_gist_file(SIGNAL_CACHE_FILE, cache)
-    print(f"[config_manager] Signal cache saved ({len(cache)} ticker(s)).")
+    # Subtract 1 for the "_schema" sentinel key when reporting ticker count
+    ticker_count = max(0, len(cache) - 1)
+    print(f"[config_manager] Signal cache saved ({ticker_count} ticker(s), schema v{SIGNAL_CACHE_SCHEMA_VERSION}).")
 
 
 def get_cached_signal(cache: dict, ticker: str) -> dict | None:
@@ -431,8 +446,10 @@ def get_cached_signal(cache: dict, ticker: str) -> dict | None:
     repeated Gist fetches.
     """
     from datetime import date
+    if ticker == "_schema":
+        return None   # sentinel key — not a ticker entry
     entry = cache.get(ticker)
-    if not entry:
+    if not entry or not isinstance(entry, dict):
         return None
     try:
         cached_date = date.fromisoformat(entry.get("cached_date", ""))
