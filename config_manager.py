@@ -462,6 +462,10 @@ def set_cached_signal(cache: dict, ticker: str, sentiment: dict | None,
 
 SCREENER_CACHE_MAX_AGE_HOURS = 10   # midnight ET → 8 AM ET = 8h; 10h gives buffer
 
+# Bump this integer whenever the screener scoring logic changes materially
+# (new signals, changed thresholds, new fields) so stale caches are rejected.
+SCREENER_CACHE_SCHEMA_VERSION = 2   # v2: LT quality gate + dynamic sector PE + vol guard
+
 
 def save_screener_cache(stock_results: dict, crypto_results: dict) -> None:
     """
@@ -470,9 +474,10 @@ def save_screener_cache(stock_results: dict, crypto_results: dict) -> None:
     """
     from datetime import datetime
     payload = {
-        "cached_at":  datetime.utcnow().isoformat(),
-        "stocks":     stock_results,
-        "crypto":     crypto_results,
+        "schema_version": SCREENER_CACHE_SCHEMA_VERSION,
+        "cached_at":      datetime.utcnow().isoformat(),
+        "stocks":         stock_results,
+        "crypto":         crypto_results,
     }
     _write_gist_file(SCREENER_CACHE_FILE, payload)
     print("[config_manager] Screener cache saved to Gist.")
@@ -480,20 +485,31 @@ def save_screener_cache(stock_results: dict, crypto_results: dict) -> None:
 
 def load_screener_cache() -> dict | None:
     """
-    Load the midnight screener cache if it exists and is fresh (< 10h old).
-    Returns the cache dict {cached_at, stocks, crypto} or None if stale/missing.
+    Load the midnight screener cache if it exists, is fresh (< 10h old),
+    and matches the current schema version.  Returns the cache dict
+    {schema_version, cached_at, stocks, crypto} or None if invalid.
     """
     from datetime import datetime, timedelta
     data = _load_gist_file(SCREENER_CACHE_FILE)
     if not data:
         return None
     try:
+        # Reject caches written by an older screener version — they may be
+        # missing quality-gate fields (avg_dollar_vol, dynamic_sector_pe, etc.)
+        cached_version = data.get("schema_version", 1)
+        if cached_version != SCREENER_CACHE_SCHEMA_VERSION:
+            print(
+                f"[config_manager] Screener cache schema v{cached_version} != "
+                f"current v{SCREENER_CACHE_SCHEMA_VERSION} — discarding."
+            )
+            return None
+
         cached_at = datetime.fromisoformat(data["cached_at"])
         age = datetime.utcnow() - cached_at
         if age > timedelta(hours=SCREENER_CACHE_MAX_AGE_HOURS):
             print(f"[config_manager] Screener cache is {age} old — too stale, ignoring.")
             return None
-        print(f"[config_manager] Screener cache hit — {age} old.")
+        print(f"[config_manager] Screener cache hit — schema v{cached_version}, {age} old.")
         return data
     except Exception as exc:
         print(f"[config_manager] Screener cache invalid ({exc}).")

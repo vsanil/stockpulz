@@ -199,17 +199,46 @@ def _get_yfinance_options(ticker: str) -> dict | None:
                 abs(gamma_pin_strike - current_price) / current_price * 100, 2
             )
 
+        # Nearest OTM call strike + a suitable expiry 2-4 weeks out.
+        # Used by the AI to recommend a concrete options play without fabricating
+        # strikes.  We look for the first call strike above current price, from
+        # the nearest expiry with > 0 call volume.
+        nearest_otm_call   = None
+        nearest_call_expiry = None
+        if current_price and current_price > 0:
+            from datetime import date as _date
+            today = _date.today()
+            for exp in exps[:_MAX_EXPIRIES]:
+                try:
+                    chain = tk.option_chain(exp)
+                    calls = chain.calls
+                    if calls.empty:
+                        continue
+                    otm_calls = calls[
+                        (calls["strike"] > current_price) &
+                        (calls["volume"].fillna(0) > 0)
+                    ].sort_values("strike")
+                    if otm_calls.empty:
+                        continue
+                    nearest_otm_call = float(otm_calls.iloc[0]["strike"])
+                    nearest_call_expiry = exp   # ISO date string e.g. "2025-05-16"
+                    break
+                except Exception:
+                    continue
+
         return {
-            "call_volume":       total_call_vol,
-            "put_volume":        total_put_vol,
-            "call_oi":           total_call_oi,
-            "put_oi":            total_put_oi,
-            "max_single_vol":    max_single_vol,
-            "gamma_pin_strike":  gamma_pin_strike,
-            "gamma_pin_dist_pct": gamma_pin_dist_pct,
-            "current_price":     current_price,
-            "expiries_loaded":   min(len(exps), _MAX_EXPIRIES),
-            "source":            "yfinance",
+            "call_volume":         total_call_vol,
+            "put_volume":          total_put_vol,
+            "call_oi":             total_call_oi,
+            "put_oi":              total_put_oi,
+            "max_single_vol":      max_single_vol,
+            "gamma_pin_strike":    gamma_pin_strike,
+            "gamma_pin_dist_pct":  gamma_pin_dist_pct,
+            "nearest_otm_call":    nearest_otm_call,
+            "nearest_call_expiry": nearest_call_expiry,
+            "current_price":       current_price,
+            "expiries_loaded":     min(len(exps), _MAX_EXPIRIES),
+            "source":              "yfinance",
         }
     except Exception:
         return None
@@ -235,9 +264,11 @@ def _compute_signal(raw: dict) -> dict:
     max_vol  = raw.get("max_single_vol", 0)
     source   = raw.get("source", "unknown")
 
-    gamma_pin_strike   = raw.get("gamma_pin_strike")
-    gamma_pin_dist_pct = raw.get("gamma_pin_dist_pct")
-    expiries_loaded    = raw.get("expiries_loaded", 1)
+    gamma_pin_strike    = raw.get("gamma_pin_strike")
+    gamma_pin_dist_pct  = raw.get("gamma_pin_dist_pct")
+    nearest_otm_call    = raw.get("nearest_otm_call")
+    nearest_call_expiry = raw.get("nearest_call_expiry")
+    expiries_loaded     = raw.get("expiries_loaded", 1)
 
     total_vol = call_vol + put_vol
     total_oi  = call_oi  + put_oi
@@ -290,21 +321,23 @@ def _compute_signal(raw: dict) -> dict:
     note = ", ".join(notes) if notes else f"P/C={put_call_ratio}, vol/OI={vol_oi_ratio}"
 
     return {
-        "unusual":            unusual,
-        "put_call_ratio":     put_call_ratio,
-        "vol_oi_ratio":       vol_oi_ratio,
-        "call_volume":        call_vol,
-        "put_volume":         put_vol,
-        "bullish_flow":       bool(bullish_flow),
-        "bearish_flow":       bool(bearish_flow),
-        "sweep_detected":     sweep_detected,
-        "gamma_pin":          gamma_pin,
-        "gamma_pin_strike":   gamma_pin_strike,
-        "gamma_pin_dist_pct": gamma_pin_dist_pct,
-        "expiries_loaded":    expiries_loaded,
-        "signal_score":       max(-5, min(5, score)),
-        "note":               note,
-        "source":             source,
+        "unusual":             unusual,
+        "put_call_ratio":      put_call_ratio,
+        "vol_oi_ratio":        vol_oi_ratio,
+        "call_volume":         call_vol,
+        "put_volume":          put_vol,
+        "bullish_flow":        bool(bullish_flow),
+        "bearish_flow":        bool(bearish_flow),
+        "sweep_detected":      sweep_detected,
+        "gamma_pin":           gamma_pin,
+        "gamma_pin_strike":    gamma_pin_strike,
+        "gamma_pin_dist_pct":  gamma_pin_dist_pct,
+        "nearest_otm_call":    nearest_otm_call,
+        "nearest_call_expiry": nearest_call_expiry,
+        "expiries_loaded":     expiries_loaded,
+        "signal_score":        max(-5, min(5, score)),
+        "note":                note,
+        "source":              source,
     }
 
 

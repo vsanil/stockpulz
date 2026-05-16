@@ -20,8 +20,9 @@ RETRY_DELAY        = 5      # seconds between retries
 
 
 def _strip_html(text: str) -> str:
-    """Strip all HTML tags — used as fallback when Telegram rejects HTML."""
-    return re.sub(r"<[^>]+>", "", text)
+    """Strip all HTML tags and unescape entities — used as fallback when Telegram rejects HTML."""
+    import html as _html
+    return _html.unescape(re.sub(r"<[^>]+>", "", text))
 
 
 # ── Credentials ───────────────────────────────────────────────────────────────
@@ -336,7 +337,9 @@ def broadcast_all(payloads: list[dict]) -> dict[str, bool]:
                             body = await resp.text()
                             print(f"[telegram/async] {chat_id} attempt {attempt}: HTTP {resp.status} — {body[:120]}")
                             if resp.status == 400 and "parse entities" in body:
-                                # HTML rejected — fall back to plain text immediately
+                                # HTML rejected — log the bad chunk for debugging
+                                print(f"[telegram/async] HTML rejected for {chat_id} — bad chunk (first 300 chars): {chunk[:300]!r}")
+                                # Fall back to plain text immediately
                                 plain = dict(payload)
                                 plain["text"] = _strip_html(chunk)
                                 plain.pop("parse_mode", None)

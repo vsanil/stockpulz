@@ -240,11 +240,14 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
             if ema_val <= current_price <= week_high:
                 score += 15
 
-        # Near Bollinger lower band (potential bounce)
+        # Near Bollinger lower band (potential bounce) — volume guard prevents
+        # scoring dead-cat-bounce on declining volume (false support)
         bb         = ta.volatility.BollingerBands(close, window=20, window_dev=2)
         lower_band = float(bb.bollinger_lband().iloc[-1])
         metrics["bb_lower"] = round(lower_band, 2)
-        if not pd.isna(lower_band) and current_price <= lower_band * 1.05:
+        if (not pd.isna(lower_band)
+                and current_price <= lower_band * 1.05
+                and vol_ratio and vol_ratio > 1.2):
             score += 15
 
         # OBV slope — positive = smart money accumulating (+10 pts)

@@ -294,6 +294,11 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
                         if opts.get("gamma_pin") and opts.get("gamma_pin_strike"):
                             flow_entry["gamma_pin_strike"]   = opts["gamma_pin_strike"]
                             flow_entry["gamma_pin_dist_pct"] = opts["gamma_pin_dist_pct"]
+                        # Include nearest real OTM call strike — lets the AI quote
+                        # an actual strike instead of fabricating one
+                        if opts.get("nearest_otm_call"):
+                            flow_entry["nearest_otm_call"]    = opts["nearest_otm_call"]
+                            flow_entry["nearest_call_expiry"]  = opts.get("nearest_call_expiry")
                         # Include IV rank when available
                         if has_iv:
                             flow_entry["iv_rank"]  = opts["iv_rank"]
@@ -619,6 +624,7 @@ SIGNAL GUIDANCE (use in thesis and catalyst where relevant):
   - social_sentiment: StockTwits + Reddit signal. Label "bullish"/"hot" supports picks; "bearish" is a red flag.
   - options_flow: aggregated across up to 4 near-term expiries — more accurate P/C ratio than single-expiry. Low P/C (<0.7) = calls dominating (bullish). High P/C (>1.5) = puts dominating (bearish).
   - sweep_detected (options): large block trade through single contract — institutional conviction, weight heavily.
+  - nearest_otm_call + nearest_call_expiry: the REAL nearest out-of-the-money call strike with active volume, from live options data. When suggesting an options play (e.g. "consider the $185 call expiring 2025-05-23"), ALWAYS use nearest_otm_call as the strike and nearest_call_expiry as the expiry. NEVER invent or estimate strikes. If nearest_otm_call is absent, describe the trade directionally without specifying a strike.
   - gamma_pin_strike: the strike with highest aggregate open interest across all expiries. When price is within 2% (gamma_pin=True), market makers must hedge by buying/selling as price moves, creating a magnetic pull toward this level near expiry. Use as short-term price target or support/resistance.
   - iv_rank (0-100): where current implied volatility sits vs. its 1-year historical range. <25 = LOW (options cheap, consider debit spreads / buying calls). 25-60 = NORMAL. 60-80 = ELEVATED (premium rich, better to sell spreads or use defined-risk entries). >80 = EXTREME (IV crush risk — avoid buying naked options unless expecting a major move). Always mention iv_label ("LOW"/"ELEVATED"/"EXTREME") when present in the thesis.
   - insider_activity: recent open-market buys by CEO/CFO are a strong conviction signal — always mention in thesis.
