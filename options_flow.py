@@ -159,12 +159,17 @@ def _get_yfinance_options(ticker: str) -> dict | None:
         # {strike: total_oi} across all expiries — for gamma pin detection
         strike_oi: dict[float, int] = {}
 
+        # Cache chains so the OTM-strike scan below can reuse them without
+        # re-fetching from Yahoo (each option_chain() is a network round-trip).
+        fetched_chains: list[tuple[str, object]] = []   # [(exp, chain), ...]
+
         for exp in exps[:_MAX_EXPIRIES]:
             try:
                 chain = tk.option_chain(exp)
             except Exception:
                 continue
 
+            fetched_chains.append((exp, chain))
             calls = chain.calls
             puts  = chain.puts
 
@@ -199,32 +204,24 @@ def _get_yfinance_options(ticker: str) -> dict | None:
                 abs(gamma_pin_strike - current_price) / current_price * 100, 2
             )
 
-        # Nearest OTM call strike + a suitable expiry 2-4 weeks out.
-        # Used by the AI to recommend a concrete options play without fabricating
-        # strikes.  We look for the first call strike above current price, from
-        # the nearest expiry with > 0 call volume.
-        nearest_otm_call   = None
+        # Nearest OTM call strike + expiry — reuse already-fetched chains.
+        # The AI uses these to cite a real strike instead of fabricating one.
+        nearest_otm_call    = None
         nearest_call_expiry = None
         if current_price and current_price > 0:
-            from datetime import date as _date
-            today = _date.today()
-            for exp in exps[:_MAX_EXPIRIES]:
-                try:
-                    chain = tk.option_chain(exp)
-                    calls = chain.calls
-                    if calls.empty:
-                        continue
-                    otm_calls = calls[
-                        (calls["strike"] > current_price) &
-                        (calls["volume"].fillna(0) > 0)
-                    ].sort_values("strike")
-                    if otm_calls.empty:
-                        continue
-                    nearest_otm_call = float(otm_calls.iloc[0]["strike"])
-                    nearest_call_expiry = exp   # ISO date string e.g. "2025-05-16"
-                    break
-                except Exception:
+            for exp, chain in fetched_chains:
+                calls = chain.calls
+                if calls.empty:
                     continue
+                otm_calls = calls[
+                    (calls["strike"] > current_price) &
+                    (calls["volume"].fillna(0) > 0)
+                ].sort_values("strike")
+                if otm_calls.empty:
+                    continue
+                nearest_otm_call    = float(otm_calls.iloc[0]["strike"])
+                nearest_call_expiry = exp   # ISO date string e.g. "2025-05-16"
+                break
 
         return {
             "call_volume":         total_call_vol,
@@ -475,6 +472,7 @@ _BASE_RESULT = {
     "bullish_flow": False, "bearish_flow": False,
     "sweep_detected": False,
     "gamma_pin": False, "gamma_pin_strike": None, "gamma_pin_dist_pct": None,
+    "nearest_otm_call": None, "nearest_call_expiry": None,
     "expiries_loaded": 0,
     "signal_score": 0,
     "iv_rank": None, "iv_pct": None, "iv_label": None, "rv_pct": None,
@@ -482,19 +480,70 @@ _BASE_RESULT = {
 }
 
 
+def _yfinance_otm_strike(ticker: str) -> tuple[float | None, str | None]:
+    """
+    Lightweight yfinance call to find the nearest OTM call strike with active
+    volume.  Used to supplement Polygon results, which only return aggregate
+    vol/OI and have no per-strike data on the free tier.
+
+    Returns (nearest_otm_call, nearest_call_expiry) or (None, None) on failure.
+    """
+    try:
+        tk   = yf.Ticker(ticker)
+        exps = tk.options
+        if not exps:
+            return None, None
+        try:
+            current_price = tk.fast_info.get("last_price") or tk.fast_info.get("previous_close")
+        except Exception:
+            return None, None
+        if not current_price or current_price <= 0:
+            return None, None
+        for exp in exps[:_MAX_EXPIRIES]:
+            try:
+                calls = tk.option_chain(exp).calls
+                if calls.empty:
+                    continue
+                otm = calls[
+                    (calls["strike"] > current_price) &
+                    (calls["volume"].fillna(0) > 0)
+                ].sort_values("strike")
+                if otm.empty:
+                    continue
+                return float(otm.iloc[0]["strike"]), exp
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None, None
+
+
 def get_options_signal(ticker: str) -> dict:
     """
     Return options flow signal + IV rank for a ticker.
     Tries Polygon first (if POLYGON_API_KEY set), falls back to yfinance.
     IV rank is computed via yfinance regardless of which flow source is used.
+
+    When Polygon provides the vol/OI data it has no per-strike breakdown on
+    the free tier, so we make a separate lightweight yfinance call to fetch
+    the nearest OTM call strike — keeping strike recommendations grounded in
+    real data regardless of which flow source is active.
     """
     raw = _get_polygon_options(ticker) or _get_yfinance_options(ticker)
     if not raw:
         return dict(_BASE_RESULT)
     try:
-        result   = _compute_signal(raw)
-        iv_data  = get_iv_rank(ticker)
+        result  = _compute_signal(raw)
+        iv_data = get_iv_rank(ticker)
         result.update(iv_data)
+
+        # Polygon path: supplement with a yfinance OTM strike lookup so the AI
+        # always has a real strike to cite, regardless of flow source.
+        if result.get("source") == "polygon" and result.get("nearest_otm_call") is None:
+            otm_call, otm_expiry = _yfinance_otm_strike(ticker)
+            result["nearest_otm_call"]    = otm_call
+            result["nearest_call_expiry"] = otm_expiry
+
         return result
     except Exception as exc:
         return {**_BASE_RESULT, "note": f"signal compute error: {exc}"}
