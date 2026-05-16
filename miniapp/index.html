@@ -428,6 +428,28 @@ body {
 .empty-icon  { font-size: 44px; margin-bottom: 12px; }
 .empty-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
 .empty-sub   { font-size: 13px; color: var(--hint); line-height: 1.55; }
+.btn-retry {
+  margin-top: 18px; padding: 11px 26px;
+  background: rgba(79,142,247,.12); border: 1px solid rgba(79,142,247,.3);
+  color: var(--link); border-radius: 12px;
+  font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit;
+  transition: opacity 0.15s;
+}
+.btn-retry:active { opacity: 0.7; }
+
+/* Smooth drag-to-close transition on bottom sheets */
+.bottom-sheet { will-change: transform; }
+
+/* ── Bought pick card ────────────────────────────────────────────────────── */
+.pick-card.bought { opacity: 0.55; }
+.pick-card.bought::before { background: var(--hint) !important; }
+.pick-card.bought::after {
+  content: '✓ Bought';
+  position: absolute; top: 11px; right: 12px;
+  font-size: 10px; font-weight: 800; color: var(--green);
+  background: rgba(48,209,88,.1); border: 1px solid rgba(48,209,88,.2);
+  padding: 2px 7px; border-radius: 20px;
+}
 
 /* ── Overlay backdrop ────────────────────────────────────────────────────── */
 .overlay {
@@ -678,9 +700,11 @@ body {
 .expand-row {
   display: flex; align-items: center; justify-content: space-between;
   padding: 13px 0; cursor: pointer;
+  border-top: 1px solid var(--border); margin-top: 6px;
 }
+.expand-row:first-of-type { border-top: none; margin-top: 0; }
 .expand-row-title { font-size: 15px; font-weight: 600; }
-.expand-arrow { color: var(--hint); font-size: 13px; transition: transform 0.2s; }
+.expand-arrow { color: var(--hint); font-size: 11px; transition: transform 0.2s; }
 .expand-arrow.open { transform: rotate(90deg); }
 
 /* Community card */
@@ -752,6 +776,93 @@ body {
   color: var(--text); font-size: 14px; font-family: inherit;
   outline: none; margin-top: 6px; cursor: pointer;
 }
+
+/* ── Toast notification ──────────────────────────────────────────────────── */
+.toast {
+  position: fixed; bottom: calc(var(--nav-h) + 14px); left: 50%;
+  transform: translateX(-50%) translateY(14px);
+  background: rgba(22,24,30,0.96); color: var(--text);
+  padding: 10px 18px 10px 14px; border-radius: 12px;
+  font-size: 13px; font-weight: 600;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  opacity: 0; transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none; z-index: 500;
+  white-space: nowrap; max-width: 300px;
+  border-left: 3px solid transparent;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.toast-success { border-left-color: var(--green); }
+.toast.toast-error   { border-left-color: var(--red); }
+
+/* ── Pull-to-refresh indicator ───────────────────────────────────────────── */
+#ptr-indicator {
+  position: fixed; top: 54px; left: 0; right: 0;
+  display: flex; align-items: center; justify-content: center;
+  height: 0; overflow: hidden; z-index: 40;
+  transition: height 0.15s ease;
+}
+#ptr-indicator.visible { height: 46px; }
+.ptr-spinner {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--btn);
+  animation: spin 0.7s linear infinite;
+  display: none;
+}
+.ptr-arrow {
+  font-size: 18px; transition: transform 0.2s ease;
+  color: var(--hint);
+}
+.ptr-arrow.ready  { transform: rotate(180deg); color: var(--btn); }
+@keyframes spin { to { transform: rotate(360deg); } }
+#ptr-indicator.loading .ptr-arrow  { display: none; }
+#ptr-indicator.loading .ptr-spinner { display: block; }
+
+/* ── Animated nav indicator ──────────────────────────────────────────────── */
+.nav-indicator {
+  position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 5px);
+  width: 20px; height: 3px; border-radius: 2px;
+  background: var(--btn);
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+/* ── Nav badge ───────────────────────────────────────────────────────────── */
+.nav-badge {
+  position: absolute; top: 5px; right: calc(50% - 20px);
+  min-width: 16px; height: 16px; padding: 0 4px;
+  background: var(--green); color: #000;
+  font-size: 9px; font-weight: 900; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1; pointer-events: none;
+}
+
+/* ── Skeleton shimmer ────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  from { background-position: -200% center; }
+  to   { background-position:  200% center; }
+}
+.skeleton-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 15px; margin-bottom: 10px;
+}
+.skeleton-line {
+  border-radius: 6px;
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.09) 50%,
+    rgba(255,255,255,0.04) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ── Sticky section headers (picks tab only) ─────────────────────────────── */
+#picks-body .expand-row {
+  position: sticky;
+  top: 54px;
+  background: var(--bg);
+  z-index: 5;
+}
 </style>
 </head>
 
@@ -760,7 +871,7 @@ body {
 <!-- ── Header ──────────────────────────────────────────────────────────────── -->
 <div class="header">
   <div class="header-left">
-    <span class="header-logo">📈 StockPulz</span>
+    <span class="header-logo" onclick="window.scrollTo({top:0,behavior:'smooth'});tg.HapticFeedback?.impactOccurred('light')" style="cursor:pointer">📈 StockPulz</span>
     <div class="live-dot"></div>
   </div>
   <div class="header-date" id="hdr-date"></div>
@@ -773,7 +884,63 @@ body {
 <!-- ── Tab panes ───────────────────────────────────────────────────────────── -->
 <div class="content">
   <div class="tab-pane active" id="pane-picks">
-    <div class="loading" id="picks-spinner"><div class="spinner"></div>Loading today's picks…</div>
+    <div id="picks-spinner">
+      <div style="height:14px"></div>
+      <!-- Skeleton card 1 -->
+      <div class="skeleton-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="skeleton-line" style="width:72px;height:24px"></div>
+          <div class="skeleton-line" style="width:64px;height:18px;border-radius:12px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+          <div class="skeleton-line" style="height:36px"></div>
+          <div class="skeleton-line" style="height:36px"></div>
+          <div class="skeleton-line" style="height:36px"></div>
+        </div>
+        <div class="skeleton-line" style="height:4px;margin-bottom:10px"></div>
+        <div class="skeleton-line" style="width:88%;height:11px;margin-bottom:5px"></div>
+        <div class="skeleton-line" style="width:65%;height:11px;margin-bottom:14px"></div>
+        <div style="display:flex;gap:8px">
+          <div class="skeleton-line" style="width:78px;height:38px;border-radius:10px"></div>
+          <div class="skeleton-line" style="flex:1;height:38px;border-radius:10px"></div>
+        </div>
+      </div>
+      <!-- Skeleton card 2 -->
+      <div class="skeleton-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="skeleton-line" style="width:56px;height:24px"></div>
+          <div class="skeleton-line" style="width:76px;height:18px;border-radius:12px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+          <div class="skeleton-line" style="height:36px"></div>
+          <div class="skeleton-line" style="height:36px"></div>
+          <div class="skeleton-line" style="height:36px"></div>
+        </div>
+        <div class="skeleton-line" style="height:4px;margin-bottom:10px"></div>
+        <div class="skeleton-line" style="width:75%;height:11px;margin-bottom:14px"></div>
+        <div style="display:flex;gap:8px">
+          <div class="skeleton-line" style="width:78px;height:38px;border-radius:10px"></div>
+          <div class="skeleton-line" style="flex:1;height:38px;border-radius:10px"></div>
+        </div>
+      </div>
+      <!-- Skeleton card 3 -->
+      <div class="skeleton-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="skeleton-line" style="width:96px;height:24px"></div>
+          <div class="skeleton-line" style="width:54px;height:18px;border-radius:12px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+          <div class="skeleton-line" style="height:36px"></div>
+          <div class="skeleton-line" style="height:36px"></div>
+          <div class="skeleton-line" style="height:36px"></div>
+        </div>
+        <div class="skeleton-line" style="height:4px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px">
+          <div class="skeleton-line" style="width:78px;height:38px;border-radius:10px"></div>
+          <div class="skeleton-line" style="flex:1;height:38px;border-radius:10px"></div>
+        </div>
+      </div>
+    </div>
     <div id="picks-body" style="display:none"></div>
   </div>
 
@@ -799,24 +966,36 @@ body {
 
 </div>
 
+<!-- ── Pull-to-refresh indicator ────────────────────────────────────────── -->
+<div id="ptr-indicator">
+  <div class="ptr-arrow">↓</div>
+  <div class="ptr-spinner"></div>
+</div>
+
 <!-- ── Bottom nav ──────────────────────────────────────────────────────────── -->
-<nav class="bottom-nav">
-  <div class="nav-item active" id="nav-picks"     onclick="gotoTab('picks')">
-    <div class="nav-icon">🔥</div><div class="nav-label">Picks</div>
+<nav class="bottom-nav" style="position:relative">
+  <div class="nav-indicator" id="nav-indicator"></div>
+  <div class="nav-item active" id="nav-picks" onclick="gotoTab('picks')" style="position:relative">
+    <div class="nav-icon">🔥</div>
+    <span class="nav-badge" id="picks-badge" style="display:none">0</span>
+    <div class="nav-label">Picks</div>
   </div>
-  <div class="nav-item"        id="nav-portfolio" onclick="gotoTab('portfolio')">
+  <div class="nav-item" id="nav-portfolio" onclick="gotoTab('portfolio')">
     <div class="nav-icon">💼</div><div class="nav-label">Portfolio</div>
   </div>
-  <div class="nav-item"        id="nav-stats"     onclick="gotoTab('stats')">
+  <div class="nav-item" id="nav-stats" onclick="gotoTab('stats')">
     <div class="nav-icon">📊</div><div class="nav-label">Stats</div>
   </div>
-  <div class="nav-item"        id="nav-performance" onclick="gotoTab('performance')">
+  <div class="nav-item" id="nav-performance" onclick="gotoTab('performance')">
     <div class="nav-icon">🏆</div><div class="nav-label">Record</div>
   </div>
-  <div class="nav-item"        id="nav-settings"  onclick="gotoTab('settings')">
+  <div class="nav-item" id="nav-settings" onclick="gotoTab('settings')">
     <div class="nav-icon">⚙️</div><div class="nav-label">Settings</div>
   </div>
 </nav>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div class="toast" id="toast"></div>
 
 <!-- ── Chart overlay ───────────────────────────────────────────────────────── -->
 <div id="chart-overlay" class="overlay" onclick="handleOverlayTap(event,'chart-overlay')">
@@ -1025,6 +1204,7 @@ document.getElementById('hdr-date').textContent =
 // ── App state ─────────────────────────────────────────────────────────────────
 let curTab        = 'picks';
 let picksCache    = null;
+let picksLoadedAt = null;
 let positionsCache= [];
 let activeFilter  = 'all';
 let boughtSet     = new Set(JSON.parse(sessionStorage.getItem('sp_bought') || '[]'));
@@ -1041,13 +1221,36 @@ let communityLoaded   = false;
 let _detailTicker     = null;
 
 // ── Tab routing ───────────────────────────────────────────────────────────────
+const _scrollPos  = {};
+const _TAB_ORDER  = ['picks', 'portfolio', 'stats', 'performance', 'settings'];
+
+function _moveNavIndicator(name) {
+  const indicator = document.getElementById('nav-indicator');
+  const navEl     = document.getElementById('nav-' + name);
+  if (!indicator || !navEl) return;
+  const navRect  = navEl.parentElement.getBoundingClientRect();
+  const itemRect = navEl.getBoundingClientRect();
+  const center   = itemRect.left - navRect.left + itemRect.width / 2;
+  indicator.style.left = (center - 10) + 'px';   // center the 20px-wide bar
+}
+
 function gotoTab(name) {
+  // Save current scroll
+  _scrollPos[curTab] = window.scrollY;
+
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('pane-' + name).classList.add('active');
   document.getElementById('nav-'  + name).classList.add('active');
   curTab = name;
   tg.HapticFeedback?.selectionChanged();
+
+  // Slide nav indicator
+  _moveNavIndicator(name);
+
+  // Restore scroll (after paint so layout is ready)
+  requestAnimationFrame(() => window.scrollTo(0, _scrollPos[name] || 0));
+
   if (!loadedTabs[name]) {
     loadedTabs[name] = true;
     if (name === 'portfolio')   loadPortfolio();
@@ -1072,6 +1275,78 @@ async function api(path, method = 'GET', body = null) {
   return r.json();
 }
 
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let _toastTimer = null;
+function showToast(msg, type = 'default') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'toast' + (type === 'success' ? ' toast-success' : type === 'error' ? ' toast-error' : '');
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ── Confetti burst ────────────────────────────────────────────────────────────
+function spawnConfetti(anchorEl) {
+  const rect = anchorEl.getBoundingClientRect();
+  const cx   = rect.left + rect.width / 2;
+  const cy   = rect.top  + rect.height / 2;
+  const cvs  = document.createElement('canvas');
+  cvs.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9999';
+  cvs.width  = window.innerWidth;
+  cvs.height = window.innerHeight;
+  document.body.appendChild(cvs);
+  const ctx    = cvs.getContext('2d');
+  const colors = ['#30d158','#4f8ef7','#ffd60a','#bf5af2','#ff9f0a','#ff453a'];
+  const pts    = Array.from({ length: 44 }, () => ({
+    x: cx, y: cy,
+    vx: (Math.random() - 0.5) * 9,
+    vy: -(Math.random() * 7 + 2.5),
+    r:  Math.random() * 4 + 2,
+    color: colors[Math.floor(Math.random() * colors.length)],
+    alpha: 1,
+    rot: Math.random() * Math.PI * 2,
+    spin: (Math.random() - 0.5) * 0.22,
+  }));
+  let raf;
+  const tick = () => {
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    let alive = false;
+    pts.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.28;
+      p.alpha -= 0.02; p.rot += p.spin;
+      if (p.alpha <= 0) return;
+      alive = true;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.alpha);
+      ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.r, -p.r * 0.4, p.r * 2, p.r * 0.8);
+      ctx.restore();
+    });
+    if (alive) raf = requestAnimationFrame(tick);
+    else { cancelAnimationFrame(raf); cvs.remove(); }
+  };
+  raf = requestAnimationFrame(tick);
+}
+
+// ── Copy ticker to clipboard ──────────────────────────────────────────────────
+function copyTicker(sym) {
+  const done = () => { showToast(`📋 ${sym} copied`); tg.HapticFeedback?.impactOccurred('light'); };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(sym).then(done).catch(() => {});
+  } else {
+    // Legacy fallback
+    const el = Object.assign(document.createElement('textarea'), {
+      value: sym, style: 'position:fixed;opacity:0'
+    });
+    document.body.appendChild(el); el.select();
+    try { document.execCommand('copy'); done(); } catch (_) {}
+    document.body.removeChild(el);
+  }
+}
+
 // ── Overlay helpers ───────────────────────────────────────────────────────────
 function openOverlay(id)  { document.getElementById(id).classList.add('open');    document.body.style.overflow = 'hidden'; }
 function closeOverlay(id) { document.getElementById(id).classList.remove('open'); document.body.style.overflow = ''; }
@@ -1085,9 +1360,10 @@ function fmtPrice(v) {
   if (v == null || v === '') return '—';
   const n = parseFloat(v);
   if (isNaN(n)) return '—';
-  if (n >= 10000) return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
-  if (n >= 100)   return n.toFixed(2);
-  if (n >= 1)     return n.toFixed(3);
+  if (n >= 100000) return (n / 1000).toFixed(1) + 'K';   // e.g. $104.4K for BTC
+  if (n >= 10000)  return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  if (n >= 100)    return n.toFixed(2);
+  if (n >= 1)      return n.toFixed(3);
   return n.toFixed(4);
 }
 function fmtPct(v, showPlus = true) {
@@ -1330,14 +1606,59 @@ async function loadPicks() {
   });
   try {
     const data = await api('/api/miniapp/picks');
-    picksCache = data;
+    picksCache    = data;
+    picksLoadedAt = Date.now();
     renderPicksView();
   } catch (e) {
     document.getElementById('picks-spinner').innerHTML =
       '<div class="empty"><div class="empty-icon">😕</div>' +
       '<div class="empty-title">Couldn\'t load picks</div>' +
-      '<div class="empty-sub">Make sure you\'re using the bot. Try closing and re-opening.</div></div>';
+      '<div class="empty-sub">Check your connection and try again.</div>' +
+      '<button class="btn-retry" onclick="retryLoadPicks()">↻ Try Again</button></div>';
   }
+}
+
+function retryLoadPicks() {
+  const spinner = document.getElementById('picks-spinner');
+  spinner.innerHTML = '';
+  // Re-inject skeleton cards
+  spinner.innerHTML = `
+    <div style="height:14px"></div>
+    <div class="skeleton-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="skeleton-line" style="width:72px;height:24px"></div>
+        <div class="skeleton-line" style="width:64px;height:18px;border-radius:12px"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <div class="skeleton-line" style="height:36px"></div>
+        <div class="skeleton-line" style="height:36px"></div>
+        <div class="skeleton-line" style="height:36px"></div>
+      </div>
+      <div class="skeleton-line" style="height:4px;margin-bottom:14px"></div>
+      <div style="display:flex;gap:8px">
+        <div class="skeleton-line" style="width:78px;height:38px;border-radius:10px"></div>
+        <div class="skeleton-line" style="flex:1;height:38px;border-radius:10px"></div>
+      </div>
+    </div>
+    <div class="skeleton-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="skeleton-line" style="width:56px;height:24px"></div>
+        <div class="skeleton-line" style="width:76px;height:18px;border-radius:12px"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <div class="skeleton-line" style="height:36px"></div>
+        <div class="skeleton-line" style="height:36px"></div>
+        <div class="skeleton-line" style="height:36px"></div>
+      </div>
+      <div class="skeleton-line" style="height:4px;margin-bottom:14px"></div>
+      <div style="display:flex;gap:8px">
+        <div class="skeleton-line" style="width:78px;height:38px;border-radius:10px"></div>
+        <div class="skeleton-line" style="flex:1;height:38px;border-radius:10px"></div>
+      </div>
+    </div>`;
+  spinner.style.display = 'block';
+  document.getElementById('picks-body').style.display = 'none';
+  loadPicks();
 }
 
 function renderPicksView() {
@@ -1402,6 +1723,86 @@ function switchPicksView(view) {
   renderPicksView();
 }
 
+function renderPickCard(p) {
+  const sym      = p._sym;
+  const isBought = boughtSet.has(sym);
+  const conv     = (p.conviction || '').toLowerCase();
+  const convCls  = conv.includes('high') ? 'conv-high' : conv.includes('low') ? 'conv-low' : 'conv-medium';
+  const convIcon = conv.includes('high') ? '🔥' : conv.includes('low') ? '⚡' : '✨';
+  const cardCls  = (p._type === 'crypto' ? ' crypto' : p._type === 'etf' ? ' etf' : '') + (isBought ? ' bought' : '');
+
+  let tagCls = 'tag-st', tagTxt = '⚡ Short-Term';
+  if (p._type === 'crypto')   { tagCls = 'tag-crypto'; tagTxt = '₿ Crypto'; }
+  else if (p._type === 'etf') { tagCls = 'tag-etf';    tagTxt = '🗂 ETF'; }
+  else if (p._tf === 'LT')    { tagCls = 'tag-lt';     tagTxt = '🏛 Long-Term'; }
+
+  let upsidePct = 0;
+  if (p.entry_price && p.target_price) {
+    upsidePct = Math.min(100, Math.max(0,
+      ((parseFloat(p.target_price) - parseFloat(p.entry_price)) / parseFloat(p.entry_price)) * 400));
+  }
+
+  // Live % delta from entry — shown if prices view has been loaded
+  let liveChip = '';
+  if (livePricesCache) {
+    const lp = livePricesCache.find(x => (x.ticker || x.symbol || '').toUpperCase() === sym.toUpperCase());
+    if (lp && lp.pct != null) {
+      const pctColor = lp.pct >= 0 ? 'var(--green)' : 'var(--red)';
+      const pctSign  = lp.pct >= 0 ? '+' : '';
+      liveChip = `<span style="font-size:11px;font-weight:700;color:${pctColor};background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:6px;margin-left:4px">${pctSign}${lp.pct.toFixed(1)}%</span>`;
+    }
+  }
+
+  return `<div class="pick-card${cardCls}">
+    <div class="pick-top">
+      <div class="pick-ticker-wrap">
+        <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}
+        ${conv ? `<span class="conv-tag ${convCls}">${convIcon} ${p.conviction}</span>` : ''}
+      </div>
+      <span class="type-tag ${tagCls}">${tagTxt}</span>
+    </div>
+    <div class="price-grid">
+      <div class="price-cell">
+        <div class="price-lbl">Entry</div>
+        <div class="price-num num-entry">$${fmtPrice(p.entry_price)}</div>
+      </div>
+      <div class="price-cell">
+        <div class="price-lbl">Target</div>
+        <div class="price-num num-target">$${fmtPrice(p.target_price)}</div>
+      </div>
+      <div class="price-cell">
+        <div class="price-lbl">Stop</div>
+        <div class="price-num num-stop">$${fmtPrice(p.stop_loss)}</div>
+      </div>
+    </div>
+    <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
+    ${p.thesis || p.reason ? `<div class="pick-thesis">${p.thesis || p.reason}</div>` : ''}
+    <div class="pick-actions">
+      <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}')">📊 Chart</button>
+      <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
+              onclick="markBought('${sym}','${p._type}','${p._tf}')">
+        ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
+      </button>
+    </div>
+  </div>`;
+}
+
+function toggleSection(id) {
+  const section = document.getElementById(id);
+  const arrow   = document.getElementById(id + '-arrow');
+  if (!section) return;
+  const isOpen = section.style.display !== 'none';
+  section.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.classList.toggle('open', !isOpen);
+  tg.HapticFeedback?.selectionChanged();
+  // Persist collapsed state across tab switches
+  try {
+    const collapsed = new Set(JSON.parse(sessionStorage.getItem('sp_collapsed') || '[]'));
+    isOpen ? collapsed.add(id) : collapsed.delete(id);
+    sessionStorage.setItem('sp_collapsed', JSON.stringify([...collapsed]));
+  } catch (_) {}
+}
+
 function renderPicks(filter) {
   if (!picksCache) return;
   activeFilter = filter;
@@ -1410,17 +1811,32 @@ function renderPicks(filter) {
   const crypto = picksCache.crypto || {};
   const etfs   = picksCache.etfs   || {};
 
-  let all = [];
-  (stocks.short_term || []).forEach(p => all.push({...p, _type:'stock',  _tf:'ST', _sym: p.ticker || ''}));
-  (stocks.long_term  || []).forEach(p => all.push({...p, _type:'stock',  _tf:'LT', _sym: p.ticker || ''}));
-  (crypto.short_term || []).forEach(p => all.push({...p, _type:'crypto', _tf:'ST', _sym: p.symbol || ''}));
-  (crypto.long_term  || []).forEach(p => all.push({...p, _type:'crypto', _tf:'LT', _sym: p.symbol || ''}));
-  (etfs.short_term   || []).forEach(p => all.push({...p, _type:'etf',    _tf:'ST', _sym: p.ticker || ''}));
-  (etfs.long_term    || []).forEach(p => all.push({...p, _type:'etf',    _tf:'LT', _sym: p.ticker || ''}));
+  const stStocks  = (stocks.short_term || []).map(p => ({...p, _type:'stock',  _tf:'ST', _sym: p.ticker || ''}));
+  const ltStocks  = (stocks.long_term  || []).map(p => ({...p, _type:'stock',  _tf:'LT', _sym: p.ticker || ''}));
+  const allCrypto = [
+    ...(crypto.short_term || []).map(p => ({...p, _type:'crypto', _tf:'ST', _sym: p.symbol || ''})),
+    ...(crypto.long_term  || []).map(p => ({...p, _type:'crypto', _tf:'LT', _sym: p.symbol || ''})),
+  ];
+  const allEtfs = [
+    ...(etfs.short_term || []).map(p => ({...p, _type:'etf', _tf:'ST', _sym: p.ticker || ''})),
+    ...(etfs.long_term  || []).map(p => ({...p, _type:'etf', _tf:'LT', _sym: p.ticker || ''})),
+  ];
 
-  const filtered = filter === 'all' ? all : all.filter(p => p._type === filter);
-  const counts   = { stock: 0, crypto: 0, etf: 0 };
-  all.forEach(p => counts[p._type] = (counts[p._type] || 0) + 1);
+  // Sort each group: High conviction first, then Medium, then Low
+  const _convRank = p => {
+    const c = (p.conviction || '').toLowerCase();
+    if (c.includes('high'))   return 0;
+    if (c.includes('medium')) return 1;
+    return 2;
+  };
+  [stStocks, ltStocks, allCrypto, allEtfs].forEach(arr => arr.sort((a, b) => _convRank(a) - _convRank(b)));
+
+  const all    = [...stStocks, ...ltStocks, ...allCrypto, ...allEtfs];
+  const counts = { stock: stStocks.length + ltStocks.length, crypto: allCrypto.length, etf: allEtfs.length };
+
+  // Update Picks nav badge
+  const _badge = document.getElementById('picks-badge');
+  if (_badge) { _badge.textContent = all.length; _badge.style.display = all.length > 0 ? 'flex' : 'none'; }
 
   const pillDefs = [
     ['all',    `All (${all.length})`],
@@ -1436,70 +1852,59 @@ function renderPicks(filter) {
   </div>`;
   html += renderRegimePill(regimeCache);
 
+  // "Updated X ago" freshness line
+  if (picksLoadedAt) {
+    const mins = Math.floor((Date.now() - picksLoadedAt) / 60000);
+    const ago  = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins/60)}h ago`;
+    html += `<div style="font-size:11px;color:var(--hint);text-align:center;padding:0 0 6px">Updated ${ago}</div>`;
+  }
+
   html += '<div class="filter-row">';
   pillDefs.forEach(([f, lbl]) => {
     html += `<button class="pill${filter === f ? ' on' : ''}" onclick="renderPicks('${f}')">${lbl}</button>`;
   });
   html += '</div>';
 
-  if (!filtered.length) {
+  // Define collapsible sections per filter
+  let allSections = [];
+  if (filter === 'all') {
+    allSections = [
+      { id: 'sec-st-stock', title: '⚡ Short-Term Stocks', picks: stStocks  },
+      { id: 'sec-lt-stock', title: '🏛 Long-Term Stocks',  picks: ltStocks  },
+      { id: 'sec-crypto',   title: '₿ Crypto',             picks: allCrypto },
+      { id: 'sec-etf',      title: '🗂 ETFs',               picks: allEtfs   },
+    ];
+  } else if (filter === 'stock') {
+    allSections = [
+      { id: 'sec-st-stock', title: '⚡ Short-Term Stocks', picks: stStocks },
+      { id: 'sec-lt-stock', title: '🏛 Long-Term Stocks',  picks: ltStocks },
+    ];
+  } else if (filter === 'crypto') {
+    allSections = [{ id: 'sec-crypto', title: '₿ Crypto', picks: allCrypto }];
+  } else if (filter === 'etf') {
+    allSections = [{ id: 'sec-etf', title: '🗂 ETFs', picks: allEtfs }];
+  }
+
+  const sections = allSections.filter(s => s.picks.length > 0);
+
+  if (!sections.length) {
     html += `<div class="empty">
       <div class="empty-icon">📭</div>
       <div class="empty-title">No picks yet today</div>
       <div class="empty-sub">Analysis runs every market day. Check back after 9 AM ET.</div>
     </div>`;
   } else {
-    filtered.forEach(p => {
-      const sym      = p._sym;
-      const isBought = boughtSet.has(sym);
-      const conv     = (p.conviction || '').toLowerCase();
-      const convCls  = conv.includes('high') ? 'conv-high' : conv.includes('low') ? 'conv-low' : 'conv-medium';
-      const convIcon = conv.includes('high') ? '🔥' : conv.includes('low') ? '⚡' : '✨';
-      const cardCls  = p._type === 'crypto' ? ' crypto' : p._type === 'etf' ? ' etf' : '';
-
-      let tagCls = 'tag-st', tagTxt = '⚡ Short-Term';
-      if (p._type === 'crypto')      { tagCls = 'tag-crypto'; tagTxt = '₿ Crypto'; }
-      else if (p._type === 'etf')    { tagCls = 'tag-etf';    tagTxt = '🗂 ETF'; }
-      else if (p._tf === 'LT')       { tagCls = 'tag-lt';     tagTxt = '🏛 Long-Term'; }
-
-      let upsidePct = 0;
-      if (p.entry_price && p.target_price) {
-        upsidePct = Math.min(100, Math.max(0,
-          ((parseFloat(p.target_price) - parseFloat(p.entry_price)) / parseFloat(p.entry_price)) * 400));
-      }
-
-      html += `<div class="pick-card${cardCls}">
-        <div class="pick-top">
-          <div class="pick-ticker-wrap">
-            <span class="pick-ticker">${sym}</span>
-            ${conv ? `<span class="conv-tag ${convCls}">${convIcon} ${p.conviction}</span>` : ''}
-          </div>
-          <span class="type-tag ${tagCls}">${tagTxt}</span>
+    const _collapsed = new Set(JSON.parse(sessionStorage.getItem('sp_collapsed') || '[]'));
+    sections.forEach(({ id, title, picks }) => {
+      const isOpen = !_collapsed.has(id);
+      html += `
+        <div class="expand-row" onclick="toggleSection('${id}')">
+          <span class="expand-row-title">${title} <span style="color:var(--hint);font-weight:400;font-size:13px">(${picks.length})</span></span>
+          <span class="expand-arrow${isOpen ? ' open' : ''}" id="${id}-arrow">▶</span>
         </div>
-        <div class="price-grid">
-          <div class="price-cell">
-            <div class="price-lbl">Entry</div>
-            <div class="price-num num-entry">$${fmtPrice(p.entry_price)}</div>
-          </div>
-          <div class="price-cell">
-            <div class="price-lbl">Target</div>
-            <div class="price-num num-target">$${fmtPrice(p.target_price)}</div>
-          </div>
-          <div class="price-cell">
-            <div class="price-lbl">Stop</div>
-            <div class="price-num num-stop">$${fmtPrice(p.stop_loss)}</div>
-          </div>
-        </div>
-        <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
-        ${p.thesis || p.reason ? `<div class="pick-thesis">${p.thesis || p.reason}</div>` : ''}
-        <div class="pick-actions">
-          <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}')">📊 Chart</button>
-          <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
-                  onclick="markBought('${sym}','${p._type}','${p._tf}')">
-            ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
-          </button>
-        </div>
-      </div>`;
+        <div id="${id}"${isOpen ? '' : ' style="display:none"'}>`;
+      picks.forEach(p => { html += renderPickCard(p); });
+      html += `</div>`;
     });
   }
 
@@ -1522,12 +1927,15 @@ async function markBought(sym, assetType, tf) {
     btn.innerHTML = '<span>✅</span> Bought';
     btn.classList.add('done');
     tg.HapticFeedback?.notificationOccurred('success');
+    spawnConfetti(btn);
+    showToast(`✅ ${sym} logged`, 'success');
     // Invalidate portfolio so it reloads fresh
     loadedTabs['portfolio'] = false;
   } catch (e) {
     btn.disabled = false;
     btn.innerHTML = '<span>✓</span> I Bought This';
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast(`Couldn't log ${sym} — try again`, 'error');
   }
 }
 
@@ -2808,8 +3216,113 @@ async function confirmAddCash() {
   }
 }
 
+// ── Pull-to-refresh (picks tab only) ─────────────────────────────────────────
+(function() {
+  let ptrStartY = 0, ptrDelta = 0, ptrActive = false, ptrRefreshing = false;
+  const ptr     = document.getElementById('ptr-indicator');
+  const content = document.querySelector('.content');
+  if (!ptr || !content) return;
+
+  content.addEventListener('touchstart', e => {
+    if (curTab !== 'picks' || window.scrollY > 2) return;
+    ptrStartY = e.touches[0].clientY;
+    ptrActive = true; ptrDelta = 0;
+  }, { passive: true });
+
+  content.addEventListener('touchmove', e => {
+    if (!ptrActive || ptrRefreshing) return;
+    ptrDelta = e.touches[0].clientY - ptrStartY;
+    if (ptrDelta <= 0) { ptr.classList.remove('visible'); return; }
+    ptr.classList.add('visible');
+    const arrow = ptr.querySelector('.ptr-arrow');
+    if (arrow) arrow.classList.toggle('ready', ptrDelta > 55);
+  }, { passive: true });
+
+  content.addEventListener('touchend', () => {
+    if (!ptrActive) return;
+    ptrActive = false;
+    if (ptrRefreshing || ptrDelta < 55) { ptr.classList.remove('visible'); return; }
+    ptrRefreshing = true;
+    ptr.classList.add('loading');
+    picksCache = null; picksLoadedAt = null;
+    document.getElementById('picks-spinner').style.display = 'block';
+    document.getElementById('picks-body').style.display    = 'none';
+    loadPicks().finally(() => {
+      ptrRefreshing = false;
+      ptr.classList.remove('visible', 'loading');
+      tg.HapticFeedback?.notificationOccurred('success');
+    });
+  }, { passive: true });
+})();
+
+// ── Swipe left/right to navigate tabs ────────────────────────────────────────
+(function() {
+  let sx = 0, sy = 0;
+  const content = document.querySelector('.content');
+  if (!content) return;
+  content.addEventListener('touchstart', e => {
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+  }, { passive: true });
+  content.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - sx;
+    const dy = e.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) < 65 || Math.abs(dy) > Math.abs(dx) * 0.7) return;
+    const idx = _TAB_ORDER.indexOf(curTab);
+    if (dx < 0 && idx < _TAB_ORDER.length - 1) gotoTab(_TAB_ORDER[idx + 1]);
+    if (dx > 0 && idx > 0)                     gotoTab(_TAB_ORDER[idx - 1]);
+  }, { passive: true });
+})();
+
+// After live prices load, refresh pick cards so live % chips appear
+const _origRenderPricesView = renderPricesView;
+renderPricesView = async function() {
+  await _origRenderPricesView.apply(this, arguments);
+  // If we previously loaded picks and are now back on picks view, patch in live chips
+  if (picksCache && picksView !== 'prices') renderPicks(activeFilter);
+};
+
+// ── Bottom sheet drag-to-close ────────────────────────────────────────────────
+(function() {
+  let sheetEl = null, overlayEl = null, startY = 0, startT = 0;
+
+  document.addEventListener('touchstart', e => {
+    const sheet   = e.target.closest('.bottom-sheet');
+    const overlay = e.target.closest('.overlay.open');
+    if (!sheet || !overlay) return;
+    sheetEl   = sheet;
+    overlayEl = overlay;
+    startY    = e.touches[0].clientY;
+    startT    = Date.now();
+    sheetEl.style.transition = 'none';
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!sheetEl) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) return;
+    sheetEl.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    if (!sheetEl) return;
+    const dy  = e.changedTouches[0].clientY - startY;
+    const vel = dy / Math.max(1, Date.now() - startT); // px/ms
+    sheetEl.style.transition = '';
+    sheetEl.style.transform  = '';
+    if (dy > 110 || (dy > 40 && vel > 0.45)) {
+      overlayEl.classList.remove('open');
+      document.body.style.overflow = '';
+      tg.HapticFeedback?.impactOccurred('light');
+    }
+    sheetEl = null; overlayEl = null;
+  }, { passive: true });
+})();
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 loadedTabs['picks'] = true;
+// Position nav indicator on the initial tab after layout settles
+requestAnimationFrame(() => _moveNavIndicator('picks'));
 loadPicks();
 </script>
 </body>

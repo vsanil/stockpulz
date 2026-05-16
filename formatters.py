@@ -1089,6 +1089,7 @@ def format_week_ahead(earnings_this_week: dict, regime: dict | None = None) -> s
             "bear":     "🐻 Bear regime — stay defensive, smaller sizes.",
             "volatile": "⚡ High volatility — tighten stops, reduce exposure.",
             "neutral":  "🟡 Mixed signals — follow entries, respect stops.",
+            "elevated": "⚠️ VIX elevated but uptrend intact — reduce size, favour quality.",
         }.get(r, "")
         if regime_note:
             lines += ["", regime_note]

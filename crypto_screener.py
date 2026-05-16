@@ -147,16 +147,21 @@ def _short_term_score(coin: dict, prices: list[float]) -> tuple[int, dict]:
     metrics = {}
     current_price = coin.get("current_price", 0)
 
-    # RSI — needs price history (25 pts)
-    rsi = _simple_rsi(prices[-30:], period=14) if prices else None
+    # RSI — use all fetched prices (up to 168 hourly points for 7d).
+    # Previously used only prices[-30:] which is just 30 hours — far too noisy
+    # and causes RSI to be computed over an unrepresentative recent spike/dip.
+    rsi = _simple_rsi(prices, period=14) if prices else None
     metrics["rsi"] = rsi
     if rsi and 40 <= rsi <= 65:
         score += 25
 
-    # 24h price change > 2% (20 pts)
+    # 24h price change > 2% — volume guard: momentum must come with turnover,
+    # not a low-liquidity pump.  $50M/day is already scored separately; here we
+    # just gate the momentum bonus on $10M to exclude micro-cap spikes.
     chg_24h = coin.get("price_change_percentage_24h_in_currency", 0) or 0
+    vol_24h = coin.get("total_volume", 0) or 0
     metrics["price_change_24h_pct"] = round(chg_24h, 2)
-    if chg_24h > 2:
+    if chg_24h > 2 and vol_24h >= 10_000_000:
         score += 20
 
     # Price above 48h MA — needs price history (20 pts)
