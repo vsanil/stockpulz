@@ -140,11 +140,12 @@ def run_etf_screener() -> dict:
                 score -= 3    # too extended downside
 
             scores.append({
-                "ticker":    ticker,
-                "price":     round(price, 2),
-                "ret_1m":    round(ret_1m, 2),
-                "rsi":       round(rsi_val, 1),
-                "score":     round(score, 3),
+                "ticker":      ticker,
+                "price":       round(price, 2),
+                "ret_1m":      round(ret_1m, 2),
+                "rsi":         round(rsi_val, 1),
+                "vol_ratio":   round(vol_ratio, 2),
+                "score":       round(score, 3),
                 "lt_eligible": ticker in LT_ELIGIBLE,
             })
         except Exception as exc:
@@ -176,7 +177,8 @@ def run_etf_screener() -> dict:
             "ticker":     ticker,
             "price":      s["price"],
             "ret_1m":     s["ret_1m"],
-            "rsi":        s["rsi"],
+            "rsi":        round(s["rsi"], 1),
+            "vol_ratio":  round(s.get("vol_ratio", 1.0), 2),
             "thesis":     thesis,
             "asset_type": "etf",
         }

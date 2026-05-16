@@ -148,32 +148,34 @@ def _short_term_score(coin: dict, prices: list[float]) -> tuple[int, dict]:
     current_price = coin.get("current_price", 0)
 
     # RSI — use all fetched prices (up to 168 hourly points for 7d).
-    # Previously used only prices[-30:] which is just 30 hours — far too noisy
-    # and causes RSI to be computed over an unrepresentative recent spike/dip.
+    # Tighter window (42-62) vs the original 40-65: filters out borderline
+    # overbought (>62) and borderline oversold (<42) which have lower follow-through.
     rsi = _simple_rsi(prices, period=14) if prices else None
     metrics["rsi"] = rsi
-    if rsi and 40 <= rsi <= 65:
+    if rsi and 42 <= rsi <= 62:
         score += 25
 
-    # 24h price change > 2% — volume guard: momentum must come with turnover,
-    # not a low-liquidity pump.  $50M/day is already scored separately; here we
-    # just gate the momentum bonus on $10M to exclude micro-cap spikes.
+    # 24h price change > 3% with volume guard — raised from 2% to reduce noise.
+    # A 2% daily move in crypto is near the median; 3% filters for genuine momentum.
     chg_24h = coin.get("price_change_percentage_24h_in_currency", 0) or 0
     vol_24h = coin.get("total_volume", 0) or 0
     metrics["price_change_24h_pct"] = round(chg_24h, 2)
-    if chg_24h > 2 and vol_24h >= 10_000_000:
+    if chg_24h > 3 and vol_24h >= 10_000_000:
         score += 20
 
-    # Price above 48h MA — needs price history (20 pts)
-    ma48 = _simple_ma(prices, 48) if prices else None
-    metrics["ma48"] = ma48
-    if ma48 and current_price > ma48:
+    # Price above 168h MA (7-day hourly MA) — replaces 48h (2-day) which was far
+    # too short and easily flipped by a single intraday move.  7-day MA is the
+    # standard short-term trend baseline for crypto.
+    ma168 = _simple_ma(prices, 168) if prices and len(prices) >= 168 else _simple_ma(prices, len(prices)) if prices else None
+    metrics["ma168"] = ma168
+    if ma168 and current_price > ma168:
         score += 20
 
-    # 7d change positive but < 30% (20 pts)
+    # 7d change positive but < 25% (20 pts) — upper cap tightened from 30%: a
+    # coin up 25-30% in one week is already extended and carry-on risk is high.
     chg_7d = coin.get("price_change_percentage_7d_in_currency", 0) or 0
     metrics["price_change_7d_pct"] = round(chg_7d, 2)
-    if 0 < chg_7d < 30:
+    if 0 < chg_7d < 25:
         score += 20
 
     # 24h volume above $50M (15 pts)
@@ -192,29 +194,35 @@ def _long_term_score(coin: dict, prices: list[float]) -> tuple[int, dict]:
     market_cap    = coin.get("market_cap", 0)
     ath           = coin.get("ath", 0)
 
-    # Market cap > $10B (30 pts)
+    # Market cap tiered (30 pts max) — large caps are more likely to recover
+    # and attract institutional buying vs mid-caps riding a hype cycle.
     metrics["market_cap_usd"] = market_cap
-    if market_cap and market_cap > 10_000_000_000:
+    if market_cap and market_cap > 50_000_000_000:    # >$50B: top tier (BTC, ETH, etc.)
         score += 30
+    elif market_cap and market_cap > 10_000_000_000:  # >$10B: solid mid-cap
+        score += 20
 
-    # Price above 7-day MA — needs price history (25 pts)
-    ma_7d = _simple_ma(prices, len(prices)) if prices else None
+    # Price above 7-day MA — use 168-hour MA (same as ST scorer) for consistency
+    ma_7d = _simple_ma(prices, 168) if prices and len(prices) >= 168 else _simple_ma(prices, len(prices)) if prices else None
     metrics["ma7d"] = ma_7d
     if ma_7d and current_price > ma_7d:
         score += 25
 
-    # 30d price change positive (20 pts)
+    # 30d price change > 5% (raised from > 0%) — filters coins just barely
+    # positive that may be noise; requires genuine medium-term momentum.
     chg_30d = coin.get("price_change_percentage_30d_in_currency", 0) or 0
     metrics["price_change_30d_pct"] = round(chg_30d, 2)
-    if chg_30d > 0:
+    if chg_30d > 5:
         score += 20
 
-    # Within 60% of ATH (15 pts)
+    # Within 50% of ATH (tightened from 60%) — coins 50-60% below ATH often
+    # have structural damage (project issues, narrative shift) vs coins in the
+    # 0-50% range which are more likely in a normal correction cycle.
     metrics["ath_usd"] = ath
     if ath and current_price > 0:
         pct_from_ath = ((ath - current_price) / ath) * 100
         metrics["pct_below_ath"] = round(pct_from_ath, 1)
-        if pct_from_ath < 60:
+        if pct_from_ath < 50:
             score += 15
 
     # Room to grow — ATH > 30% above current (10 pts)
@@ -289,11 +297,21 @@ def run_crypto_screener() -> dict:
             "score": st_score, **st_metrics,
         })
 
+        lt_score, lt_metrics = _long_term_score(coin, prices)
+        long_results.append({
+            "id": coin["id"], "symbol": symbol, "name": name,
+            "current_price": current_price,
+            "market_cap": coin.get("market_cap"),
+            "score": lt_score, **lt_metrics,
+        })
+
     short_top = sorted(short_results, key=lambda x: x["score"], reverse=True)[:TOP_N]
+    long_top  = sorted(long_results,  key=lambda x: x["score"], reverse=True)[:TOP_N]
 
     print(f"[crypto_screener] Top short-term: {[c['symbol'] for c in short_top]}")
+    print(f"[crypto_screener] Top long-term:  {[c['symbol'] for c in long_top]}")
 
-    return {"short_term": short_top}
+    return {"short_term": short_top, "long_term": long_top}
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────

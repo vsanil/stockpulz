@@ -10,21 +10,46 @@
 <style>
 /* ── CSS Variables ────────────────────────────────────────────────────────── */
 :root {
-  --bg:       var(--tg-theme-bg-color, #111216);
-  --bg2:      var(--tg-theme-secondary-bg-color, #1c1e24);
-  --text:     var(--tg-theme-text-color, #f0f2f5);
-  --hint:     var(--tg-theme-hint-color, #8a909e);
-  --link:     var(--tg-theme-link-color, #4f8ef7);
-  --btn:      var(--tg-theme-button-color, #4f8ef7);
-  --btn-text: var(--tg-theme-button-text-color, #ffffff);
+  --bg:         var(--tg-theme-bg-color, #111216);
+  --bg2:        var(--tg-theme-secondary-bg-color, #1c1e24);
+  --text:       var(--tg-theme-text-color, #f0f2f5);
+  --hint:       var(--tg-theme-hint-color, #8a909e);
+  --link:       var(--tg-theme-link-color, #4f8ef7);
+  --btn:        var(--tg-theme-button-color, #4f8ef7);
+  --btn-text:   var(--tg-theme-button-text-color, #ffffff);
   --green:  #30d158;
   --red:    #ff453a;
   --amber:  #ffd60a;
   --purple: #bf5af2;
-  --card:   rgba(255,255,255,0.055);
-  --border: rgba(255,255,255,0.08);
+  /* Dark-mode surfaces (default) */
+  --card:       rgba(255,255,255,0.058);
+  --border:     rgba(255,255,255,0.09);
+  --card-hi:    rgba(255,255,255,0.06);   /* inset top highlight */
+  --avatar-bg:  rgba(255,255,255,0.09);
+  --header-bg:  rgba(17,18,22,0.88);
+  --skel-lo:    rgba(255,255,255,0.05);
+  --skel-hi:    rgba(255,255,255,0.11);
   --radius: 14px;
   --nav-h:  64px;
+  --tg-h:   100dvh;   /* overridden by JS via tg.viewportStableHeight */
+}
+
+/* ── Light-mode overrides (applied via JS when tg.colorScheme === 'light') ── */
+body.tg-light {
+  --card:       rgba(0,0,0,0.048);
+  --border:     rgba(0,0,0,0.10);
+  --card-hi:    rgba(255,255,255,0.55);
+  --avatar-bg:  rgba(0,0,0,0.07);
+  --header-bg:  rgba(245,245,247,0.90);
+  --skel-lo:    rgba(0,0,0,0.04);
+  --skel-hi:    rgba(0,0,0,0.09);
+  --green:  #1a9e3f;   /* darken green for contrast on white */
+}
+/* Logo text: white gradient is invisible on light bg — override to dark */
+body.tg-light .header-logo-text {
+  background: linear-gradient(130deg, #111 0%, #444 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 *, *::before, *::after {
@@ -36,7 +61,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
   background: var(--bg);
   color: var(--text);
-  min-height: 100vh;
+  min-height: var(--tg-h, 100dvh);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   padding-bottom: var(--nav-h);
@@ -45,13 +70,20 @@ body {
 /* ── Header ───────────────────────────────────────────────────────────────── */
 .header {
   position: sticky; top: 0; z-index: 50;
-  background: var(--bg);
+  background: var(--header-bg);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   border-bottom: 1px solid var(--border);
   padding: 14px 18px 12px;
   display: flex; align-items: center; justify-content: space-between;
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .header-logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.header-logo-text {
+  background: linear-gradient(130deg, #fff 0%, rgba(255,255,255,0.75) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
 .live-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--green);
@@ -88,6 +120,7 @@ body {
 .tab-pane.active {
   display: block;
   animation: fadeUp 0.22s ease;
+  min-height: calc(var(--tg-h, 100dvh) - 60px - var(--nav-h));
 }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(8px); }
@@ -127,25 +160,42 @@ body {
   border: 1px solid var(--border); color: var(--hint);
   background: transparent; transition: all 0.15s;
 }
-.pill.on { background: var(--btn); color: #fff; border-color: var(--btn); }
+.pill.on { background: var(--btn); color: #fff; border-color: var(--btn); box-shadow: 0 2px 10px rgba(79,142,247,0.32); }
 
 /* ── Pick card ───────────────────────────────────────────────────────────── */
 .pick-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 15px 15px 14px;
+  border-radius: 16px;
+  padding: 16px 15px 14px;
   margin-bottom: 10px;
   position: relative; overflow: hidden;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.14), inset 0 1px 0 var(--card-hi);
+  animation: cardIn 0.35s ease both;
+  transition: transform 0.12s;
 }
+.pick-card:active { transform: scale(0.985); }
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+/* Top accent gradient bar */
 .pick-card::before {
   content: '';
-  position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-  border-radius: 3px 0 0 3px;
-  background: var(--green);
+  position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  background: linear-gradient(90deg, var(--green) 0%, transparent 60%);
 }
-.pick-card.crypto::before { background: var(--amber); }
-.pick-card.etf::before    { background: var(--purple); }
+.pick-card.crypto::before { background: linear-gradient(90deg, var(--amber)  0%, transparent 60%); }
+.pick-card.etf::before    { background: linear-gradient(90deg, var(--purple) 0%, transparent 60%); }
+/* Subtle inner top glow */
+.pick-card::after {
+  content: '';
+  position: absolute; left: 0; right: 0; top: 0; height: 54px;
+  background: linear-gradient(180deg, rgba(48,209,88,0.055) 0%, transparent 100%);
+  pointer-events: none; border-radius: 16px 16px 0 0;
+}
+.pick-card.crypto::after { content:''; position:absolute; left:0; right:0; top:0; height:54px; background:linear-gradient(180deg,rgba(255,214,10,0.055) 0%,transparent 100%); pointer-events:none; border-radius:16px 16px 0 0; }
+.pick-card.etf::after    { content:''; position:absolute; left:0; right:0; top:0; height:54px; background:linear-gradient(180deg,rgba(191,90,242,0.055) 0%,transparent 100%); pointer-events:none; border-radius:16px 16px 0 0; }
 
 .pick-top {
   display: flex; align-items: flex-start;
@@ -164,9 +214,13 @@ body {
 .conv-tag {
   font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px;
 }
-.conv-high   { background: rgba(48,209,88,.12);  color: var(--green); }
+.conv-high   { background: rgba(48,209,88,.14);  color: var(--green); box-shadow: 0 0 8px rgba(48,209,88,.28); animation: convGlow 2.5s ease-in-out infinite; }
 .conv-medium { background: rgba(255,214,10,.12); color: var(--amber); }
-.conv-low    { background: rgba(138,144,158,.12);color: var(--hint); }
+.conv-low    { background: rgba(138,144,158,.12); color: var(--hint); }
+@keyframes convGlow {
+  0%, 100% { box-shadow: 0 0 5px rgba(48,209,88,.2); }
+  50%       { box-shadow: 0 0 13px rgba(48,209,88,.48); }
+}
 
 .price-grid {
   display: grid; grid-template-columns: 1fr 1fr 1fr;
@@ -175,9 +229,9 @@ body {
 .price-cell   { text-align: center; }
 .price-lbl    { font-size: 10px; color: var(--hint); margin-bottom: 3px; }
 .price-num    { font-size: 14px; font-weight: 700; }
-.num-entry    { color: var(--text); }
-.num-target   { color: var(--green); }
-.num-stop     { color: var(--red); }
+.num-entry  { color: var(--text); }
+.num-target { color: var(--green); font-size: 17px; text-shadow: 0 0 12px rgba(48,209,88,0.3); }
+.num-stop   { color: var(--red); }
 
 .upside-bar {
   height: 4px; background: var(--border); border-radius: 4px;
@@ -186,6 +240,7 @@ body {
 .upside-fill {
   height: 100%; background: linear-gradient(90deg, var(--link), var(--green));
   border-radius: 4px; transition: width 0.5s ease;
+  box-shadow: 0 0 7px rgba(79,142,247,0.38);
 }
 
 .pick-thesis {
@@ -225,7 +280,8 @@ body {
 .summary-box {
   flex: 1; background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 14px; text-align: center;
+  border-radius: 14px; padding: 14px; text-align: center;
+  box-shadow: 0 2px 14px rgba(0,0,0,0.10), inset 0 1px 0 var(--card-hi);
 }
 .summary-lbl { font-size: 11px; color: var(--hint); margin-bottom: 5px; }
 .summary-val { font-size: 22px; font-weight: 800; }
@@ -235,15 +291,21 @@ body {
 
 /* Position card — expanded with action buttons */
 .pos-card {
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column; gap: 0;
   background: var(--card); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 13px 15px;
-  margin-bottom: 8px;
+  border-radius: 16px; padding: 0;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 12px rgba(0,0,0,0.10), inset 0 1px 0 var(--card-hi);
+  overflow: hidden;
+}
+.pos-card-main-wrap {
+  padding: 13px 15px 12px;
 }
 .pos-main { display: flex; align-items: center; gap: 12px; width: 100%; }
 .pos-avatar {
   width: 42px; height: 42px; border-radius: 12px;
-  background: rgba(255,255,255,0.07);
+  background: var(--avatar-bg);
+  border: 1px solid var(--border);
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 800; flex-shrink: 0;
   color: var(--text);
@@ -265,8 +327,8 @@ body {
 
 /* Action buttons on each position */
 .pos-actions {
-  display: flex; gap: 8px; width: 100%;
-  padding-top: 8px;
+  display: flex; gap: 8px;
+  padding: 9px 13px 11px;
   border-top: 1px solid var(--border);
 }
 .pos-btn {
@@ -282,6 +344,10 @@ body {
 .pos-btn-sell {
   background: rgba(255,69,58,.1);
   border: 1px solid rgba(255,69,58,.25); color: var(--red);
+}
+.pos-btn-more {
+  flex: 0; padding: 8px 13px;
+  background: transparent; border: 1px solid var(--border); color: var(--hint);
 }
 
 /* Add Position button */
@@ -319,6 +385,7 @@ body {
 .stat-box {
   background: var(--card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 14px 12px; text-align: center;
+  box-shadow: 0 2px 14px rgba(0,0,0,0.10), inset 0 1px 0 var(--card-hi);
 }
 .stat-lbl { font-size: 10px; color: var(--hint); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
 .stat-val { font-size: 26px; font-weight: 800; }
@@ -348,6 +415,7 @@ body {
 .settings-card {
   background: var(--card); border: 1px solid var(--border);
   border-radius: var(--radius); margin-bottom: 10px; overflow: hidden;
+  box-shadow: 0 1px 10px rgba(0,0,0,0.08), inset 0 1px 0 var(--card-hi);
 }
 .setting-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -358,7 +426,7 @@ body {
 .setting-value { font-size: 14px; color: var(--link); font-weight: 600; }
 .toggle {
   width: 46px; height: 27px; border-radius: 14px;
-  background: rgba(255,255,255,.14); position: relative;
+  background: var(--border); position: relative;
   cursor: pointer; transition: background 0.2s; flex-shrink: 0;
 }
 .toggle.on { background: var(--green); }
@@ -381,7 +449,7 @@ body {
   transition: background 0.15s;
 }
 .action-row:last-child { border-bottom: none; }
-.action-row:active { background: rgba(255,255,255,0.06); }
+.action-row:active { background: var(--card-hi); }
 .action-row-left  { display: flex; align-items: center; gap: 10px; }
 .action-icon { font-size: 18px; width: 22px; text-align: center; }
 .action-label { font-size: 15px; }
@@ -441,14 +509,15 @@ body {
 .bottom-sheet { will-change: transform; }
 
 /* ── Bought pick card ────────────────────────────────────────────────────── */
-.pick-card.bought { opacity: 0.55; }
-.pick-card.bought::before { background: var(--hint) !important; }
+.pick-card.bought { opacity: 0.52; }
+.pick-card.bought::before { background: linear-gradient(90deg, var(--hint) 0%, transparent 60%) !important; }
 .pick-card.bought::after {
   content: '✓ Bought';
   position: absolute; top: 11px; right: 12px;
+  height: auto; width: auto;
   font-size: 10px; font-weight: 800; color: var(--green);
-  background: rgba(48,209,88,.1); border: 1px solid rgba(48,209,88,.2);
-  padding: 2px 7px; border-radius: 20px;
+  background: rgba(48,209,88,.1) !important; border: 1px solid rgba(48,209,88,.2);
+  padding: 2px 7px; border-radius: 20px; pointer-events: none;
 }
 
 /* ── Overlay backdrop ────────────────────────────────────────────────────── */
@@ -574,14 +643,14 @@ body {
 
 /* ── Alerts tab ─────────────────────────────────────────────────────────── */
 .alert-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 0; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 0; border-bottom: 1px solid var(--border);
 }
 .alert-row:last-child { border-bottom: none; }
-.alert-ticker { font-size: 15px; font-weight: 700; min-width: 52px; }
+.alert-ticker { font-size: 14px; font-weight: 700; min-width: 48px; }
 .alert-info   { flex: 1; min-width: 0; }
-.alert-price  { font-size: 14px; font-weight: 600; color: var(--text); }
-.alert-away   { font-size: 11px; color: var(--hint); margin-top: 2px; }
+.alert-price  { font-size: 15px; font-weight: 700; color: var(--text); }
+.alert-away   { font-size: 11px; color: var(--hint); margin-top: 1px; }
 .dir-badge {
   font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; flex-shrink: 0;
 }
@@ -605,6 +674,12 @@ body {
   padding: 6px 14px; border-radius: 20px; cursor: pointer; font-family: inherit;
 }
 .btn-add-alert:active { opacity: 0.75; }
+.btn-clear-alerts {
+  background: none; border: none; color: var(--hint);
+  font-size: 12px; cursor: pointer; padding: 4px 2px; font-family: inherit;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.btn-clear-alerts:active { opacity: 0.6; }
 
 /* Alert sheet direction buttons */
 .dir-btn {
@@ -655,11 +730,14 @@ body {
 /* Regime pill */
 .regime-pill {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 11px; border-radius: 20px;
-  font-size: 12px; font-weight: 600;
+  padding: 5px 12px; border-radius: 20px;
+  font-size: 12px; font-weight: 700;
   background: var(--card); border: 1px solid var(--border);
-  margin-bottom: 12px;
+  margin-bottom: 12px; transition: background 0.3s, border-color 0.3s, color 0.3s;
 }
+.regime-pill.regime-bull    { background: rgba(48,209,88,.1);  border-color: rgba(48,209,88,.32);  color: var(--green); }
+.regime-pill.regime-bear    { background: rgba(255,69,58,.1);  border-color: rgba(255,69,58,.32);  color: var(--red);   }
+.regime-pill.regime-caution { background: rgba(255,214,10,.1); border-color: rgba(255,214,10,.32); color: var(--amber); }
 
 /* Picks/Prices toggle */
 .view-toggle {
@@ -729,6 +807,7 @@ body {
 .status-card {
   background: var(--card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px;
+  box-shadow: 0 1px 10px rgba(0,0,0,0.08), inset 0 1px 0 var(--card-hi);
 }
 .status-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -844,16 +923,17 @@ body {
 }
 .skeleton-card {
   background: var(--card); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 15px; margin-bottom: 10px;
+  border-radius: 16px; padding: 15px; margin-bottom: 10px;
+  box-shadow: 0 2px 14px rgba(0,0,0,0.10);
 }
 .skeleton-line {
   border-radius: 6px;
   background: linear-gradient(90deg,
-    rgba(255,255,255,0.04) 25%,
-    rgba(255,255,255,0.09) 50%,
-    rgba(255,255,255,0.04) 75%);
+    var(--skel-lo) 25%,
+    var(--skel-hi) 50%,
+    var(--skel-lo) 75%);
   background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
+  animation: shimmer 1.4s ease-in-out infinite;
 }
 
 /* ── Sticky section headers (picks tab only) ─────────────────────────────── */
@@ -871,7 +951,7 @@ body {
 <!-- ── Header ──────────────────────────────────────────────────────────────── -->
 <div class="header">
   <div class="header-left">
-    <span class="header-logo" onclick="window.scrollTo({top:0,behavior:'smooth'});tg.HapticFeedback?.impactOccurred('light')" style="cursor:pointer">📈 StockPulz</span>
+    <span class="header-logo" onclick="window.scrollTo({top:0,behavior:'smooth'});tg.HapticFeedback?.impactOccurred('light')" style="cursor:pointer">📈 <span class="header-logo-text">StockPulz</span></span>
     <div class="live-dot"></div>
   </div>
   <div class="header-date" id="hdr-date"></div>
@@ -1172,7 +1252,8 @@ body {
     <div class="sheet-body">
       <input type="text" id="alert-ticker-input" class="ticker-input" placeholder="e.g. AAPL"
              autocomplete="off" autocorrect="off" spellcheck="false"
-             oninput="this.value=this.value.toUpperCase()">
+             oninput="this.value=this.value.toUpperCase();onAlertTickerInput(this.value)">
+      <div id="alert-price-hint" style="font-size:13px;color:var(--hint);margin:-8px 0 12px;min-height:18px"></div>
       <input type="number" id="alert-price-input" class="ticker-input" placeholder="Target price e.g. 200"
              step="0.01" style="font-size:18px;letter-spacing:0">
       <div id="alert-dir-row" style="display:flex;gap:8px;margin-bottom:14px">
@@ -1197,6 +1278,23 @@ tg.ready();
 tg.expand();
 tg.setHeaderColor?.('bg_color');
 tg.setBackgroundColor?.('bg_color');
+
+// Sync Telegram's actual viewport height into a CSS variable.
+// 100vh in Telegram WebViews can differ from the real available height —
+// viewportStableHeight is the reliable source of truth.
+function _applyViewportHeight() {
+  const h = tg.viewportStableHeight || tg.viewportHeight || window.innerHeight;
+  document.documentElement.style.setProperty('--tg-h', h + 'px');
+}
+_applyViewportHeight();
+tg.onEvent('viewportChanged', _applyViewportHeight);
+
+// Apply light-mode class so CSS variables adapt to Telegram's theme
+function _applyTheme() {
+  document.body.classList.toggle('tg-light', tg.colorScheme === 'light');
+}
+_applyTheme();
+tg.onEvent('themeChanged', _applyTheme);
 
 document.getElementById('hdr-date').textContent =
   new Date().toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
@@ -1271,7 +1369,11 @@ async function api(path, method = 'GET', body = null) {
     opts.body    = JSON.stringify({ chat_id: userId, init_data: initData, ...body });
   }
   const r = await fetch(url, opts);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try { const j = await r.json(); msg = j.error || j.message || msg; } catch (_) {}
+    throw new Error(msg);
+  }
   return r.json();
 }
 
@@ -1520,8 +1622,9 @@ async function confirmSell() {
     loadedTabs['portfolio'] = false;
     if (curTab === 'portfolio') { loadPortfolio(); }
 
-    // Also invalidate stats so they refresh next visit
-    loadedTabs['stats'] = false;
+    // Also invalidate stats + performance so they refresh next visit
+    loadedTabs['stats']       = false;
+    loadedTabs['performance'] = false;
   } catch (e) {
     btn.disabled    = false;
     btn.textContent = `💸 Close ${sellTicker} Position`;
@@ -1587,12 +1690,12 @@ function renderRegimePill(regime) {
   if (!regime) return '';
   const label = regime.label || regime.regime || regime;
   const vix   = regime.vix ? ` · VIX ${parseFloat(regime.vix).toFixed(1)}` : '';
-  let dot = '⚪';
   const lc = String(label).toLowerCase();
-  if (lc.includes('bull'))     dot = '🟢';
-  else if (lc.includes('bear')) dot = '🔴';
-  else if (lc.includes('vol'))  dot = '🟡';
-  return `<span class="regime-pill">${dot} ${label}${vix}</span>`;
+  let dot = '⚪', cls = '';
+  if (lc.includes('bull'))                                                        { dot = '🟢'; cls = 'regime-bull'; }
+  else if (lc.includes('bear') || lc.includes('fear') || lc.includes('high'))   { dot = '🔴'; cls = 'regime-bear'; }
+  else if (lc.includes('vol') || lc.includes('caution') || lc.includes('elev')) { dot = '🟡'; cls = 'regime-caution'; }
+  return `<span class="regime-pill ${cls}">${dot} ${label}${vix}</span>`;
 }
 
 async function loadPicks() {
@@ -1610,11 +1713,17 @@ async function loadPicks() {
     picksLoadedAt = Date.now();
     renderPicksView();
   } catch (e) {
+    const is403 = e.message && e.message.includes('403');
+    const icon  = is403 ? '🔒' : '😕';
+    const title = is403 ? 'Not authorised' : 'Couldn\'t load picks';
+    const sub   = is403
+      ? 'Open this app from your StockPulz bot chat.'
+      : 'Check your connection and try again.';
     document.getElementById('picks-spinner').innerHTML =
-      '<div class="empty"><div class="empty-icon">😕</div>' +
-      '<div class="empty-title">Couldn\'t load picks</div>' +
-      '<div class="empty-sub">Check your connection and try again.</div>' +
-      '<button class="btn-retry" onclick="retryLoadPicks()">↻ Try Again</button></div>';
+      `<div class="empty"><div class="empty-icon">${icon}</div>` +
+      `<div class="empty-title">${title}</div>` +
+      `<div class="empty-sub">${sub}</div>` +
+      `<button class="btn-retry" onclick="retryLoadPicks()">↻ Try Again</button></div>`;
   }
 }
 
@@ -1723,7 +1832,7 @@ function switchPicksView(view) {
   renderPicksView();
 }
 
-function renderPickCard(p) {
+function renderPickCard(p, idx = 0) {
   const sym      = p._sym;
   const isBought = boughtSet.has(sym);
   const conv     = (p.conviction || '').toLowerCase();
@@ -1753,7 +1862,7 @@ function renderPickCard(p) {
     }
   }
 
-  return `<div class="pick-card${cardCls}">
+  return `<div class="pick-card${cardCls}" style="animation-delay:${idx * 55}ms">
     <div class="pick-top">
       <div class="pick-ticker-wrap">
         <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}
@@ -1859,6 +1968,21 @@ function renderPicks(filter) {
     html += `<div style="font-size:11px;color:var(--hint);text-align:center;padding:0 0 6px">Updated ${ago}</div>`;
   }
 
+  // Stale picks banner — shown when picks_date is >1 trading day behind today
+  const _meta = picksCache._meta || {};
+  if (_meta.picks_date && _meta.today && _meta.picks_date < _meta.today) {
+    const _pd   = new Date(_meta.picks_date + 'T12:00:00Z');
+    const _now  = new Date(_meta.today      + 'T12:00:00Z');
+    const _days = Math.round((_now - _pd) / 86400000);
+    const _lbl  = _pd.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    if (_days >= 1) {
+      html += `<div style="background:rgba(255,214,10,0.10);border:1px solid rgba(255,214,10,0.25);border-radius:10px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--hint)">
+        <span style="font-size:14px">⚠️</span>
+        <span>Picks from <b>${_lbl}</b>${_days >= 2 ? ` — ${_days} days ago` : ''} · pull down to refresh</span>
+      </div>`;
+    }
+  }
+
   html += '<div class="filter-row">';
   pillDefs.forEach(([f, lbl]) => {
     html += `<button class="pill${filter === f ? ' on' : ''}" onclick="renderPicks('${f}')">${lbl}</button>`;
@@ -1888,10 +2012,16 @@ function renderPicks(filter) {
   const sections = allSections.filter(s => s.picks.length > 0);
 
   if (!sections.length) {
+    const _meta = picksCache._meta || {};
+    const emptyIcon  = _meta.weekend ? '📅' : '📭';
+    const emptyTitle = _meta.weekend ? `Markets closed — ${_meta.day || 'Weekend'}` : 'No picks yet today';
+    const emptySub   = _meta.weekend
+      ? 'StockPulz runs on trading days. Fresh picks arrive Monday around 9 AM ET.'
+      : 'Analysis runs every market day. Check back after 9 AM ET.';
     html += `<div class="empty">
-      <div class="empty-icon">📭</div>
-      <div class="empty-title">No picks yet today</div>
-      <div class="empty-sub">Analysis runs every market day. Check back after 9 AM ET.</div>
+      <div class="empty-icon">${emptyIcon}</div>
+      <div class="empty-title">${emptyTitle}</div>
+      <div class="empty-sub">${emptySub}</div>
     </div>`;
   } else {
     const _collapsed = new Set(JSON.parse(sessionStorage.getItem('sp_collapsed') || '[]'));
@@ -1903,7 +2033,7 @@ function renderPicks(filter) {
           <span class="expand-arrow${isOpen ? ' open' : ''}" id="${id}-arrow">▶</span>
         </div>
         <div id="${id}"${isOpen ? '' : ' style="display:none"'}>`;
-      picks.forEach(p => { html += renderPickCard(p); });
+      picks.forEach((p, i) => { html += renderPickCard(p, i); });
       html += `</div>`;
     });
   }
@@ -2024,6 +2154,7 @@ async function loadPortfolio() {
       const stopLoss    = p.stop_loss     != null ? p.stop_loss     : '';
       const targetPrice = p.target_price != null ? p.target_price : '';
       html += `<div class="pos-card">
+        <div class="pos-card-main-wrap">
         <div class="pos-main">
           <div class="pos-avatar">${init}</div>
           <div class="pos-body">
@@ -2036,10 +2167,11 @@ async function loadPortfolio() {
             ${p.days_held != null ? `<div class="pos-days">${p.days_held}d held</div>` : ''}
           </div>
         </div>
+        </div>
         <div class="pos-actions">
           <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}')">📊 Chart</button>
           <button class="pos-btn pos-btn-sell"  onclick="openSellSheet('${sym}')">💸 Sell</button>
-          <button class="pos-btn" style="flex:0;padding:8px 12px;background:transparent;border:1px solid var(--border);color:var(--hint)" onclick="openPositionDetail('${sym}',${JSON.stringify(p.entry_price)},${JSON.stringify(p.current_price)},${JSON.stringify(stopLoss)},${JSON.stringify(targetPrice)})">⋯</button>
+          <button class="pos-btn pos-btn-more" onclick="openPositionDetail('${sym}',${JSON.stringify(p.entry_price)},${JSON.stringify(p.current_price)},${JSON.stringify(stopLoss)},${JSON.stringify(targetPrice)})">⋯</button>
         </div>
       </div>`;
     });
@@ -2341,12 +2473,23 @@ async function loadAlerts() {
     if (spinner) spinner.style.display = 'none';
     if (body) body.style.display = 'block';
 
+    // Client-side dedup — same ticker+target+direction shown once
+    const seen   = new Set();
+    const unique = alerts.filter(a => {
+      const k = `${a.ticker}|${a.target}|${a.direction}`;
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+
+    const clearBtn = unique.length >= 2
+      ? `<button class="btn-clear-alerts" onclick="clearAllAlerts()">Clear all</button>`
+      : '';
     let html = `<div class="alert-section-hdr">
       <span>Price Alerts</span>
-      <button class="btn-add-alert" onclick="openAddAlert()">+ Add Alert</button>
+      <div style="display:flex;gap:10px;align-items:center">${clearBtn}<button class="btn-add-alert" onclick="openAddAlert()">+ Add Alert</button></div>
     </div>`;
 
-    if (!alerts.length) {
+    if (!unique.length) {
       html += `<div class="empty">
         <div class="empty-icon">🔔</div>
         <div class="empty-title">No alerts set</div>
@@ -2354,13 +2497,26 @@ async function loadAlerts() {
       </div>`;
     } else {
       html += '<div class="settings-card" style="padding:0 16px">';
-      alerts.forEach((a, idx) => {
+      unique.forEach(a => {
         const dirCls  = a.direction === 'above' ? 'above' : a.direction === 'below' ? 'below' : 'auto';
-        const dirTxt  = a.direction === 'above' ? 'Above' : a.direction === 'below' ? 'Below' : 'Auto';
-        let awayHtml  = '';
-        if (a.price_at_set && a.target) {
-          const pct = ((a.target - a.price_at_set) / a.price_at_set * 100).toFixed(1);
-          awayHtml = `<div class="alert-away">${pct >= 0 ? '+' : ''}${pct}% from set price $${fmtPrice(a.price_at_set)}</div>`;
+        const dirTxt  = a.direction === 'above' ? '↑ Above' : a.direction === 'below' ? '↓ Below' : 'Auto';
+        // Age label from set_at timestamp
+        let ageLbl  = '';
+        let ageHtml = '';
+        if (a.set_at) {
+          const diffMs   = Date.now() - new Date(a.set_at.includes('Z') ? a.set_at : a.set_at + 'Z').getTime();
+          const diffDays = Math.floor(diffMs / 86400000);
+          const diffHrs  = Math.floor(diffMs / 3600000);
+          ageLbl  = diffDays >= 1 ? `${diffDays}d ago` : diffHrs >= 1 ? `${diffHrs}h ago` : 'just now';
+          ageHtml = ` · <span style="color:var(--hint)">${ageLbl}</span>`;
+        }
+        let awayHtml = '';
+        if (a.price_at_set) {
+          const pct   = ((a.target - a.price_at_set) / a.price_at_set * 100).toFixed(1);
+          const arrow = pct >= 0 ? '+' : '';
+          awayHtml = `<div class="alert-away">Was $${fmtPrice(a.price_at_set)} when set · ${arrow}${pct}%${ageHtml}</div>`;
+        } else if (ageLbl) {
+          awayHtml = `<div class="alert-away">${ageLbl}</div>`;
         }
         html += `<div class="alert-row">
           <div class="alert-ticker">${a.ticker}</div>
@@ -2369,7 +2525,7 @@ async function loadAlerts() {
             ${awayHtml}
           </div>
           <span class="dir-badge ${dirCls}">${dirTxt}</span>
-          <button class="alert-del" onclick="deleteAlert('${a.ticker}',${a.target})" title="Delete">🗑</button>
+          <button class="alert-del" onclick="deleteAlert('${a.ticker}',${a.target})" title="Delete">✕</button>
         </div>`;
       });
       html += '</div>';
@@ -2383,11 +2539,35 @@ async function loadAlerts() {
   }
 }
 
+let _alertQuoteTimer = null;
+
+function onAlertTickerInput(val) {
+  const ticker = val.trim().toUpperCase();
+  const hint   = document.getElementById('alert-price-hint');
+  if (!hint) return;
+  clearTimeout(_alertQuoteTimer);
+  if (ticker.length < 1) { hint.textContent = ''; return; }
+  hint.textContent = '…';
+  hint.style.color = 'var(--hint)';
+  _alertQuoteTimer = setTimeout(async () => {
+    try {
+      const data = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(ticker)}`);
+      hint.textContent = `Current price: $${fmtPrice(data.price)}`;
+      hint.style.color = 'var(--hint)';
+    } catch (e) {
+      hint.textContent = '⚠️ Ticker not found';
+      hint.style.color = 'var(--red)';
+    }
+  }, 700);
+}
+
 function openAddAlert() {
-  const ti = document.getElementById('alert-ticker-input');
-  const pi = document.getElementById('alert-price-input');
-  if (ti) ti.value = '';
-  if (pi) pi.value = '';
+  const ti   = document.getElementById('alert-ticker-input');
+  const pi   = document.getElementById('alert-price-input');
+  const hint = document.getElementById('alert-price-hint');
+  if (ti)   ti.value      = '';
+  if (pi)   pi.value      = '';
+  if (hint) hint.textContent = '';
   setAlertDir('auto');
   const btn = document.getElementById('alert-submit-btn');
   if (btn) { btn.disabled = false; btn.textContent = 'Set Alert'; }
@@ -2401,6 +2581,7 @@ async function submitAlert() {
   const target = parseFloat(document.getElementById('alert-price-input')?.value);
   if (!ticker || isNaN(target)) {
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Enter a ticker and target price');
     return;
   }
   const btn = document.getElementById('alert-submit-btn');
@@ -2411,10 +2592,12 @@ async function submitAlert() {
     tg.HapticFeedback?.notificationOccurred('success');
     closeOverlay('alert-overlay');
     loadAlerts();
+    showToast(`🔔 Alert set for ${ticker}`);
   } catch (e) {
     btn.disabled    = false;
     btn.textContent = 'Set Alert';
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast(e.message || 'Could not set alert');
   }
 }
 
@@ -2426,6 +2609,28 @@ async function deleteAlert(ticker, target) {
     loadAlerts();
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
+  }
+}
+
+async function clearAllAlerts() {
+  tg.HapticFeedback?.impactOccurred('heavy');
+  // Confirm before bulk delete
+  const confirmed = await new Promise(resolve => {
+    if (tg.showConfirm) {
+      tg.showConfirm('Clear all price alerts?', resolve);
+    } else {
+      resolve(true);   // fallback: skip dialog outside Telegram
+    }
+  });
+  if (!confirmed) return;
+  try {
+    await api('/api/miniapp/clear_alerts', 'POST');
+    tg.HapticFeedback?.notificationOccurred('success');
+    showToast('🗑 All alerts cleared');
+    loadAlerts();
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Could not clear alerts', 'error');
   }
 }
 
@@ -2947,26 +3152,36 @@ async function cycleRisk() {
   const cur = _settCfg.risk_profile || 'moderate';
   const idx = RISK_CYCLE.indexOf(cur);
   const next = RISK_CYCLE[(idx + 1) % RISK_CYCLE.length];
-  _settCfg.risk_profile = next;
+  _settCfg.risk_profile = next;   // optimistic
   tg.HapticFeedback?.selectionChanged();
   renderPrefsSheet();
   renderSettings();
   try {
     await api('/api/miniapp/update_settings', 'POST', { risk_profile: next });
-  } catch (e) {}
+  } catch (e) {
+    _settCfg.risk_profile = cur;  // revert on failure
+    renderPrefsSheet();
+    renderSettings();
+    showToast('Could not save — try again');
+  }
 }
 
 async function cycleAssets() {
   const cur = _settCfg.assets || 'both';
   const idx = ASSETS_CYCLE.indexOf(cur);
   const next = ASSETS_CYCLE[(idx + 1) % ASSETS_CYCLE.length];
-  _settCfg.assets = next;
+  _settCfg.assets = next;         // optimistic
   tg.HapticFeedback?.selectionChanged();
   renderPrefsSheet();
   renderSettings();
   try {
     await api('/api/miniapp/update_settings', 'POST', { assets: next });
-  } catch (e) {}
+  } catch (e) {
+    _settCfg.assets = cur;        // revert on failure
+    renderPrefsSheet();
+    renderSettings();
+    showToast('Could not save — try again');
+  }
 }
 
 async function saveBudget(type) {
@@ -2975,11 +3190,18 @@ async function saveBudget(type) {
   const val = parseFloat(input.value);
   if (isNaN(val) || val <= 0) return;
   const key = type === 'stock' ? 'stock_budget' : 'crypto_budget';
+  const prev = _settCfg[key];
   _settCfg[key] = val;
   try {
     await api('/api/miniapp/update_settings', 'POST', { [key]: val });
     tg.HapticFeedback?.notificationOccurred('success');
-  } catch (e) {}
+    showToast('Saved');
+  } catch (e) {
+    _settCfg[key] = prev;         // revert
+    input.value = prev ?? '';
+    tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Could not save — try again');
+  }
 }
 
 async function saveThreshold(key) {
@@ -2988,11 +3210,18 @@ async function saveThreshold(key) {
   if (!input) return;
   const val = parseFloat(input.value);
   if (isNaN(val) || val <= 0) return;
+  const prev = _settCfg[key];
   _settCfg[key] = val;
   try {
     await api('/api/miniapp/update_settings', 'POST', { [key]: val });
     tg.HapticFeedback?.notificationOccurred('success');
-  } catch (e) {}
+    showToast('Saved');
+  } catch (e) {
+    _settCfg[key] = prev;         // revert
+    input.value = prev ?? '';
+    tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Could not save — try again');
+  }
 }
 
 async function togglePaused(currentlyPaused) {
@@ -3002,7 +3231,11 @@ async function togglePaused(currentlyPaused) {
     await api('/api/miniapp/toggle_paused', 'POST', { paused: !currentlyPaused });
     el.classList.toggle('on');
     tg.HapticFeedback?.selectionChanged();
-  } catch (e) {}
+    showToast(currentlyPaused ? 'Daily picks enabled' : 'Daily picks paused');
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Could not save — try again');
+  }
 }
 
 function openHelp() {
@@ -3082,6 +3315,7 @@ async function addWatchTicker() {
     _renderWatchlistChips();
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast(e.message || 'Could not add ticker');
   }
 }
 
@@ -3093,6 +3327,7 @@ async function removeWatchTicker(ticker) {
     _renderWatchlistChips();
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Could not remove ticker');
   }
 }
 
@@ -3122,6 +3357,7 @@ async function addExclusion(sector) {
     _renderExclusionChips();
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Could not exclude sector');
   }
 }
 
@@ -3133,6 +3369,7 @@ async function removeExclusion(sector) {
     _renderExclusionChips();
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Could not remove exclusion');
   }
 }
 
@@ -3317,6 +3554,33 @@ renderPricesView = async function() {
     }
     sheetEl = null; overlayEl = null;
   }, { passive: true });
+})();
+
+// ── Portfolio live-price auto-refresh (90 s, only while portfolio tab active) ─
+(function() {
+  let _portRefreshTimer = null;
+  const _PORT_INTERVAL  = 90_000;
+
+  function _schedulePortRefresh() {
+    clearInterval(_portRefreshTimer);
+    _portRefreshTimer = setInterval(() => {
+      if (curTab !== 'portfolio') return;
+      // Silently re-fetch positions (will update live P&L numbers)
+      loadedTabs['portfolio'] = false;
+      loadPortfolio();
+    }, _PORT_INTERVAL);
+  }
+
+  // Start once portfolio is first visited; restart on each tab switch to it
+  const _origGotoTab = gotoTab;
+  // Patch gotoTab to start/stop the timer
+  window.addEventListener('load', () => { /* timer starts on first portfolio load */ });
+  // Hook into loadPortfolio completion to arm the timer
+  const _origLoadPortfolio = loadPortfolio;
+  loadPortfolio = async function() {
+    await _origLoadPortfolio.apply(this, arguments);
+    if (curTab === 'portfolio') _schedulePortRefresh();
+  };
 })();
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

@@ -385,6 +385,19 @@ def run_morning(config: dict, now_et: datetime):
             if cache:
                 print("[agent] Using midnight screener cache — skipping live screener.")
                 stock_candidates = cache["stocks"]
+                # Re-apply LT quality floor — guards against cached results from
+                # before the quality gate was added (task #102) or stale midnight
+                # runs where some candidates have been scored well below threshold.
+                _LT_FLOOR = 25   # same spirit as the liquidity gate in run_screener()
+                _before = len(stock_candidates.get("long_term", []))
+                stock_candidates["long_term"] = [
+                    c for c in stock_candidates.get("long_term", [])
+                    if c.get("lt_score", 0) >= _LT_FLOOR
+                ]
+                _after = len(stock_candidates["long_term"])
+                if _before != _after:
+                    print(f"[agent] LT quality floor: dropped {_before - _after} "
+                          f"cached candidates with lt_score < {_LT_FLOOR}.")
             else:
                 print("[agent] No fresh screener cache — running live stock screener...")
                 try:
@@ -406,13 +419,14 @@ def run_morning(config: dict, now_et: datetime):
                 print("[agent] Running crypto screener (with retry)...")
                 crypto_candidates = _run_crypto_with_retry()
 
-    # ── ETF screener ──────────────────────────────────────────────────────────
+    # ── ETF screener (weekdays only — ETFs trade NYSE hours) ─────────────────
     etf_candidates = {"short_term": [], "long_term": []}
-    try:
-        print("[agent] Running ETF screener...")
-        etf_candidates = run_etf_screener()
-    except Exception as exc:
-        print(f"[agent] ETF screener failed (non-critical): {exc}")
+    if not is_weekend and not is_holiday:
+        try:
+            print("[agent] Running ETF screener...")
+            etf_candidates = run_etf_screener()
+        except Exception as exc:
+            print(f"[agent] ETF screener failed (non-critical): {exc}")
 
     has_stocks = bool(stock_candidates["short_term"] or stock_candidates["long_term"])
     has_crypto = bool(crypto_candidates["short_term"] or crypto_candidates["long_term"])
@@ -656,7 +670,7 @@ def run_confirmation():
 
     # ── Price alerts ──────────────────────────────────────────────────────────
     try:
-        fired = check_all_alerts(send_fn=_alert)
+        fired = check_all_alerts(send_fn=_alert, send_keyboard_fn=send_inline_keyboard)
         if fired:
             print(f"[agent] {fired} price alert(s) triggered.")
     except Exception as exc:
@@ -884,7 +898,7 @@ def run_close_check():
 
     # ── Price alerts ──────────────────────────────────────────────────────────
     try:
-        fired = check_all_alerts(send_fn=_alert)
+        fired = check_all_alerts(send_fn=_alert, send_keyboard_fn=send_inline_keyboard)
         if fired:
             print(f"[agent] {fired} price alert(s) triggered.")
     except Exception as exc:
@@ -1268,7 +1282,7 @@ def run_price_alerts():
 
     # Check user-set price alerts (above/below thresholds)
     try:
-        fired = check_all_alerts(send_fn=_alert)
+        fired = check_all_alerts(send_fn=_alert, send_keyboard_fn=send_inline_keyboard)
         if fired:
             print(f"[agent] {fired} price alert(s) triggered.")
         else:

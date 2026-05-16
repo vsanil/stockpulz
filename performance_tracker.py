@@ -144,9 +144,9 @@ def build_weekly_recap() -> dict | None:
             "worst":      min(returns, key=lambda x: x[1]),
         }
 
-    # ── Individual pick outcomes (sorted by return, max 10) ──────────────────
+    # ── Individual pick outcomes (sorted by return, all picks) ───────────────
     pick_outcomes = []
-    for ticker, pct in sorted(stock_returns + crypto_returns, key=lambda x: x[1], reverse=True)[:10]:
+    for ticker, pct in sorted(stock_returns + crypto_returns, key=lambda x: x[1], reverse=True):
         asset_type = "crypto" if ticker in crypto_entries else "stock"
         entries_list = (
             stock_entries.get(ticker) or

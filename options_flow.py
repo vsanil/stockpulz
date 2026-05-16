@@ -60,6 +60,7 @@ def _get_polygon_options(ticker: str) -> dict | None:
     total_call_oi  = 0
     total_put_oi   = 0
     max_single_vol = 0
+    expiry_dates: set[str] = set()   # track distinct expiry dates for expiries_loaded
 
     url    = f"{_POLYGON_BASE}/v3/snapshot/options/{ticker.upper()}"
     params = {
@@ -89,6 +90,9 @@ def _get_polygon_options(ticker: str) -> dict | None:
             vol     = int(day.get("volume") or 0)
             oi      = int(contract.get("open_interest") or 0)
             ctype   = (details.get("contract_type") or "").lower()
+            exp_date = details.get("expiration_date")
+            if exp_date:
+                expiry_dates.add(exp_date)
 
             if ctype == "call":
                 total_call_vol += vol
@@ -113,12 +117,13 @@ def _get_polygon_options(ticker: str) -> dict | None:
         return None
 
     return {
-        "call_volume":    total_call_vol,
-        "put_volume":     total_put_vol,
-        "call_oi":        total_call_oi,
-        "put_oi":         total_put_oi,
-        "max_single_vol": max_single_vol,
-        "source":         "polygon",
+        "call_volume":     total_call_vol,
+        "put_volume":      total_put_vol,
+        "call_oi":         total_call_oi,
+        "put_oi":          total_put_oi,
+        "max_single_vol":  max_single_vol,
+        "expiries_loaded": len(expiry_dates),   # accurate count, not default 1
+        "source":          "polygon",
     }
 
 

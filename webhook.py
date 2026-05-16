@@ -642,19 +642,53 @@ def miniapp_picks():
     if not chat_id:
         return jsonify({"error": "unauthorised"}), 403
 
-    from config_manager import load_picks, get_user_config
-    picks = load_picks() or {}
-    ucfg  = get_user_config(chat_id)
+    try:
+        import pytz
+        from datetime import datetime as _dt
+        from config_manager import load_picks, get_user_config
 
-    # Filter assets based on user preference
-    assets = ucfg.get("assets", "both")
-    if assets == "stocks":
-        picks.pop("crypto", None)
-    elif assets == "crypto":
-        picks.pop("stocks", None)
-        picks.pop("etfs", None)
+        picks = load_picks() or {}
+        ucfg  = get_user_config(chat_id)
 
-    return jsonify(picks)
+        # Filter assets based on user preference
+        assets = ucfg.get("assets", "both")
+        if assets == "stocks":
+            picks.pop("crypto", None)
+        elif assets == "crypto":
+            picks.pop("stocks", None)
+            picks.pop("etfs", None)
+
+        # Attach meta so the frontend can distinguish weekends/no-picks from errors
+        now_et     = _dt.now(pytz.timezone("US/Eastern"))
+        is_weekend = now_et.weekday() >= 5
+        has_picks  = any(picks.get(k) for k in ("stocks", "crypto", "etfs"))
+
+        # Determine picks date from nested entry timestamps (used for stale banner)
+        picks_date = None
+        try:
+            for section_key in ("stocks", "crypto", "etfs"):
+                section = picks.get(section_key, {})
+                for tf in ("short_term", "long_term"):
+                    for p in (section.get(tf) or []):
+                        ts = p.get("generated_at") or p.get("date") or p.get("created_at")
+                        if ts and (picks_date is None or ts > picks_date):
+                            picks_date = ts[:10]  # keep YYYY-MM-DD only
+        except Exception:
+            pass
+
+        picks["_meta"] = {
+            "weekend":    is_weekend,
+            "has_picks":  has_picks,
+            "day":        now_et.strftime("%A"),
+            "picks_date": picks_date,       # ISO date string or None
+            "today":      now_et.strftime("%Y-%m-%d"),
+        }
+
+        return jsonify(picks)
+
+    except Exception as exc:
+        print(f"[miniapp_picks] ERROR: {exc}")
+        return jsonify({"error": "server_error", "_meta": {"weekend": False, "has_picks": False}}), 500
 
 
 @app.route("/api/miniapp/positions")
@@ -935,6 +969,23 @@ def miniapp_alerts():
     return jsonify({"ok": True, "alerts": alerts})
 
 
+@app.route("/api/miniapp/quote")
+def miniapp_quote():
+    """Return current price for a single ticker — used by the New Alert form."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    ticker = request.args.get("ticker", "").strip().upper()
+    if not ticker: return jsonify({"error": "ticker required"}), 400
+    try:
+        from price_alert_manager import _current_price
+        price = _current_price(ticker)
+        if price is None:
+            return jsonify({"error": f"No price found for {ticker}"}), 404
+        return jsonify({"ticker": ticker, "price": round(price, 6)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/miniapp/add_alert", methods=["POST"])
 def miniapp_add_alert():
     chat_id = _miniapp_auth()
@@ -949,6 +1000,9 @@ def miniapp_add_alert():
     try:
         msg = add_alert(chat_id, ticker, float(target), direction)
         return jsonify({"ok": True, "message": msg})
+    except ValueError as e:
+        # add_alert raises ValueError for invalid ticker or duplicate — return 400
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -967,6 +1021,15 @@ def miniapp_remove_alert():
         return jsonify({"ok": True, "message": msg})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/miniapp/clear_alerts", methods=["POST"])
+def miniapp_clear_alerts():
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from price_alert_manager import clear_alerts
+    count = clear_alerts(chat_id)
+    return jsonify({"ok": True, "removed": count})
 
 
 @app.route("/api/miniapp/paper")
@@ -1078,16 +1141,24 @@ def miniapp_live_prices():
         return jsonify({"ok": True, "prices": []})
 
     tickers = [p["ticker"] for p in all_picks]
-    crypto_syms = {"BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC","LINK","UNI","ATOM","LTC"}
-    yf_tickers = [f"{t}-USD" if t in crypto_syms else t for t in tickers]
+    from price_alert_manager import _CRYPTO_SYMBOLS as _CRYPTO_SYMS
+    yf_tickers = [f"{t}-USD" if t in _CRYPTO_SYMS else t for t in tickers]
 
     prices = {}
     try:
-        data = yf.download(yf_tickers, period="1d", progress=False, auto_adjust=True)
+        # yf.download with a single ticker returns a flat DataFrame (columns = OHLCV,
+        # no ticker in column names). Force multi-ticker mode by appending an anchor
+        # that we discard afterward.
+        _anchor = "SPY"
+        _padded = len(yf_tickers) == 1
+        fetch_list = yf_tickers + [_anchor] if _padded else yf_tickers
+
+        data  = yf.download(fetch_list, period="1d", progress=False, auto_adjust=True)
         close = data["Close"] if "Close" in data else data
+
         for orig, yft in zip(tickers, yf_tickers):
             try:
-                col = close[yft] if yft in close.columns else close
+                col = close[yft] if yft in close.columns else close[yft]
                 prices[orig] = float(col.dropna().iloc[-1])
             except Exception:
                 pass
