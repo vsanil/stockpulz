@@ -504,12 +504,15 @@ def _build_user_prompt(
             f"{fg_line}{rt_line}{sr_line}"
             f"  Note: {r.get('note', '')}\n"
             f"  Adjust pick aggressiveness accordingly:\n"
-            f"    bull → normal operation\n"
-            f"    neutral → normal, add brief caution note\n"
-            f"    volatile → prefer lower-beta picks, mention risk in thesis\n"
-            f"    bear → defensive sectors only (Utilities, Consumer Staples, Health Care), "
-            f"skip high-momentum plays\n"
-            f"  Use sector rotation to favour picks in leading sectors and avoid lagging ones."
+            f"    bull     → normal operation, full pick counts\n"
+            f"    neutral  → normal, add brief caution note in thesis\n"
+            f"    elevated → SPY uptrend intact but VIX elevated; reduce size, prefer quality, "
+            f"mention elevated risk in every thesis — conviction ★★★★ minimum\n"
+            f"    volatile → lower-beta picks only, mention risk prominently, "
+            f"conviction ★★★★ minimum\n"
+            f"    bear     → defensive sectors only (Utilities, Consumer Staples, Health Care), "
+            f"skip all high-momentum plays, conviction ★★★★★ or skip\n"
+            f"  Use sector rotation leaders/laggards to favour/avoid sectors in thesis."
         )
     else:
         regime_block = ""
@@ -541,19 +544,37 @@ def _build_user_prompt(
 
     return f"""Analyze these stock AND crypto candidates for a personal investor.
 {f"{mode_note}" + chr(10) if mode_note else ""}{(perf_context + chr(10) + chr(10)) if perf_context else ""}
+CONVICTION RUBRIC — ASSIGN 1-5 STARS USING THESE CRITERIA:
+  ★★★★★ (5) — EXCEPTIONAL: 4+ confirming signals below. Reserved for rare high-conviction setups.
+  ★★★★  (4) — STRONG: 3 confirming signals. Clear setup with multi-factor confirmation.
+  ★★★   (3) — MODERATE: 2 confirming signals. Acceptable for aggressive risk profiles only.
+  ★★    (2) — WEAK: 1 confirming signal or conflicting signals. Watchlist items only; cap near earnings.
+  ★     (1) — DO NOT INCLUDE. Return [] instead.
+
+  WHAT COUNTS AS ONE "CONFIRMING SIGNAL":
+    • RSI 35-55 AND MACD crossover present (both together = 1 signal)
+    • volume_ratio > 1.5 AND obv_positive = True (together = 1 signal)
+    • breakout_today = True OR patterns include "bull_flag" or "bullish_engulfing"
+    • options_flow: unusual = True OR bullish_flow = True OR put_call_ratio < 0.7
+    • insider_activity present AND is_cluster = True
+    • analyst_consensus = "buy" AND analyst_upside_pct > 10%
+    • eps_beats >= 3 AND last_eps_surprise_pct > 3%
+    • rs_vs_spy > +5% (meaningful outperformance over 20 days)
+    • congress_score >= 6 (cluster buy by multiple members)
+  Do NOT count the same data point twice under different signal names.
+
+CONVICTION GATE (ABSOLUTE RULE — READ BEFORE ANYTHING ELSE):
+  - Minimum conviction is set by the risk profile (conservative ★★★★+, moderate ★★★★+, aggressive ★★★+).
+  - Do NOT pad to hit pick count targets. Fewer genuine picks beats more filler picks EVERY time.
+  - A pick that barely squeaks past the threshold should be DROPPED, not included.
+  - If only 1 stock qualifies, return 1. If none qualify, return [].
+  - Empty arrays [] are acceptable and often the most honest answer.
+
 STOCKS:
 {stocks_block}
 
 ALLOCATION RULE:
   - Set 'allocation' to null for every pick — it is calculated automatically after selection.
-
-CONVICTION GATE (HARD RULE — MOST IMPORTANT RULE):
-  - The minimum conviction for any pick to be included is determined by the risk profile above.
-  - Do NOT pad with weak setups to hit pick count targets. Fewer genuine picks is ALWAYS better
-    than more filler picks. If only 1 stock qualifies, return 1 stock. If none qualify, return [].
-  - A pick that barely passes the threshold should be dropped, not included.
-  - Quality over quantity — every pick broadcast to users must be something you would stake
-    your reputation on. Empty arrays are acceptable and often correct.
 
 SECTOR DIVERSITY RULE (STRICTLY ENFORCE):
   - No two picks in the same category (short-term or long-term) may share the same sector.
