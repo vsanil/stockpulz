@@ -240,14 +240,22 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
             if ema_val <= current_price <= week_high:
                 score += 15
 
-        # Near Bollinger lower band (potential bounce) — volume guard prevents
-        # scoring dead-cat-bounce on declining volume (false support)
+        # Near Bollinger lower band (potential bounce).
+        # Two guards prevent false signals:
+        #   1. Volume > 1.2× avg — eliminates dead-cat bounces on thin volume.
+        #   2. Green candle (close >= open) — confirms buying pressure at support,
+        #      not heavy selling that happens to be near the lower band.
         bb         = ta.volatility.BollingerBands(close, window=20, window_dev=2)
         lower_band = float(bb.bollinger_lband().iloc[-1])
         metrics["bb_lower"] = round(lower_band, 2)
+        try:
+            last_open = float(hist["Open"].squeeze().iloc[-1])
+        except Exception:
+            last_open = None
         if (not pd.isna(lower_band)
                 and current_price <= lower_band * 1.05
-                and vol_ratio and vol_ratio > 1.2):
+                and vol_ratio and vol_ratio > 1.2
+                and (last_open is None or current_price >= last_open)):
             score += 15
 
         # OBV slope — positive = smart money accumulating (+10 pts)

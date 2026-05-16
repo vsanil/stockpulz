@@ -28,9 +28,13 @@ def _send_chart(ticker: str, asset_type: str, chat_id: str) -> None:
         picks = load_picks()
         if picks:
             all_p = (
-                picks.get("stocks", {}).get("short_term", []) +
-                picks.get("stocks", {}).get("long_term",  []) +
-                picks.get("crypto", {}).get("short_term", [])
+                picks.get("stocks",      {}).get("short_term", []) +
+                picks.get("stocks",      {}).get("long_term",  []) +
+                picks.get("crypto",      {}).get("short_term", []) +
+                picks.get("etfs",        {}).get("short_term", []) +
+                picks.get("etfs",        {}).get("long_term",  []) +
+                picks.get("commodities", {}).get("short_term", []) +
+                picks.get("commodities", {}).get("long_term",  [])
             )
             for p in all_p:
                 sym = (p.get("ticker") or p.get("symbol", "")).upper()

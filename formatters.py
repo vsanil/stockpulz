@@ -145,24 +145,28 @@ def _macro_narrative_line(m: dict) -> str:
     if tnx is not None:
         parts.append(f"10Y {tnx}%")
     if vix is not None:
+        # Match market_regime.py thresholds: LOW=15, CAUTION=20, ELEVATED_RISK=22, HIGH=28
         if vix < 15:   vix_desc = "calm"
         elif vix < 20: vix_desc = "steady"
-        elif vix < 25: vix_desc = "elevated"
+        elif vix < 22: vix_desc = "caution"
+        elif vix < 28: vix_desc = "elevated"
         else:          vix_desc = "fearful"
         parts.append(f"VIX {vix} ({vix_desc})")
 
     if not parts:
         return ""
 
-    # Overall sentiment suffix
+    # Overall sentiment suffix — aligned with market_regime.py thresholds
     sentiment = ""
     if spy_pct is not None and vix is not None:
-        if spy_pct >= 0.5 and vix < 20:
+        if vix >= 28:
+            sentiment = "→ 🔴 High fear — tighten stops"
+        elif vix >= 22 and spy_pct >= 0:
+            sentiment = "→ ⚠️ VIX elevated — reduce size"
+        elif spy_pct >= 0.5 and vix < 20:
             sentiment = "→ ✅ Bullish backdrop"
         elif spy_pct <= -0.5 and vix >= 20:
             sentiment = "→ ⚠️ Risk-off — stay cautious"
-        elif vix >= 25:
-            sentiment = "→ 🔴 High fear — tighten stops"
         elif spy_pct >= 0:
             sentiment = "→ 🟡 Mild tailwind"
         else:
@@ -331,6 +335,8 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}{window_line}",
             f"<i>{_esc(s.get('thesis'))}</i>",
         ]
+        if s.get('catalyst'):
+            lines.append(f"  🎯 <i>Catalyst: {_esc(s['catalyst'])}</i>")
         if sizing_line:
             lines.append(sizing_line)
         if iv_line:
@@ -363,6 +369,8 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_upside(entry, target)}</i>  ·  {_esc(s.get('horizon'))}{alloc_str}{window_line}",
             f"<i>{_esc(s.get('thesis'))}</i>",
         ]
+        if s.get('catalyst'):
+            lines.append(f"  🎯 <i>Catalyst: {_esc(s['catalyst'])}</i>")
         if s.get('invalidation'):
             lines.append(f"  ⚠️ <i>Breaks if: {_esc(s['invalidation'])}</i>")
         if personal_line:
@@ -391,6 +399,8 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}{window_line}",
             f"<i>{_esc(c.get('thesis'))}</i>",
         ]
+        if c.get('catalyst'):
+            lines.append(f"  🎯 <i>Catalyst: {_esc(c['catalyst'])}</i>")
         if sizing_line:
             lines.append(sizing_line)
         if iv_line:
@@ -420,6 +430,8 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}",
             f"<i>{_esc(e.get('thesis'))}</i>",
         ]
+        if e.get('catalyst'):
+            lines.append(f"  🎯 <i>Catalyst: {_esc(e['catalyst'])}</i>")
         if e.get('invalidation'):
             lines.append(f"  ⚠️ <i>Breaks if: {_esc(e['invalidation'])}</i>")
         return "\n".join(lines)
@@ -440,6 +452,8 @@ def format_daily_message(picks: dict, config: dict,
             f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}",
             f"<i>{_esc(c.get('thesis'))}</i>",
         ]
+        if c.get('catalyst'):
+            lines.append(f"  🎯 <i>Catalyst: {_esc(c['catalyst'])}</i>")
         if c.get('invalidation'):
             lines.append(f"  ⚠️ <i>Breaks if: {_esc(c['invalidation'])}</i>")
         return "\n".join(lines)
@@ -680,6 +694,16 @@ def format_confirmation_message(picks: dict, current_prices: dict,
         for c in cst:
             lines.append(price_line(c.get("symbol", ""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")))
 
+    etfs_d   = picks.get("etfs", {})
+    etf_st   = etfs_d.get("short_term", [])
+    etf_lt   = etfs_d.get("long_term",  [])
+    if etf_st or etf_lt:
+        lines += ["", "<b>📦 ETFs</b>"]
+        for e in etf_st:
+            lines.append(price_line(e.get("ticker", ""), e.get("entry_price"), e.get("target_price"), e.get("stop_loss")))
+        for e in etf_lt:
+            lines.append(price_line(e.get("ticker", ""), e.get("entry_price"), e.get("target_price"), None))
+
     comm     = picks.get("commodities", {})
     comm_st  = comm.get("short_term", [])
     comm_lt  = comm.get("long_term",  [])
@@ -718,10 +742,11 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
         worst_sign = "+" if worst_r >= 0 else ""
         bench = ""
         if spy is not None:
-            vs       = round(avg - spy, 1)
-            vs_sign  = "+" if vs  >= 0 else ""
-            spy_sign = "+" if spy >= 0 else ""
-            bench = f" vs S&P {spy_sign}{spy}% ({vs_sign}{vs}%)"
+            vs          = round(avg - spy, 1)
+            vs_sign     = "+" if vs  >= 0 else ""
+            spy_display = 0.0 if spy == 0 else spy   # collapse -0.0 → 0.0
+            spy_sign    = "+" if spy_display >= 0 else ""
+            bench = f" vs S&P {spy_sign}{spy_display}% ({vs_sign}{vs}%)"
         return [
             f"<b>{label}</b> — {stats['count']} picks, {win_pct}% wins",
             f"Best: <b>{best_sym}</b> {best_sign}{best_r}%  Worst: <b>{worst_sym}</b> {worst_sign}{worst_r}%",
@@ -758,7 +783,7 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
         for po in pick_outcomes:
             ticker = po.get("ticker", "")
             pct    = po.get("pct", 0)
-            icon   = "🟢" if pct > 0 else "🔴"
+            icon   = "🟢" if pct > 0 else ("🟡" if pct == 0 else "🔴")
             sign   = "+" if pct >= 0 else ""
             row_items.append(f"{icon} {ticker} {sign}{pct}%")
         # Output 3 per line
@@ -1094,6 +1119,10 @@ def format_week_ahead(earnings_this_week: dict, regime: dict | None = None) -> s
         if regime_note:
             lines += ["", regime_note]
         if vix:
-            lines.append(f"<i>VIX: {vix} — {'elevated fear' if vix > 20 else 'calm'}</i>")
+            if vix >= 28:    _vix_label = "high fear"
+            elif vix >= 22:  _vix_label = "elevated risk"
+            elif vix >= 20:  _vix_label = "caution"
+            else:            _vix_label = "calm"
+            lines.append(f"<i>VIX: {vix} — {_vix_label}</i>")
 
     return "\n".join(lines)

@@ -445,6 +445,43 @@ def handle_callback_query(callback_query: dict) -> None:
             print(f"[bot] confirm_sell failed for {ticker}: {exc}")
             send_message(f"⚠️ Couldn't remove <b>{ticker}</b> — try <code>/sold {ticker}</code> instead.", chat_id=chat_id)
 
+    # ── /history remove buttons ───────────────────────────────────────────────
+    elif action == "cancel_auto":
+        # Show confirmation before deleting any trade record from history.
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        log       = load_user_trade_log(chat_id)
+        in_open   = any(t["ticker"] == ticker for t in log.get("open",   []))
+        in_closed = any(t["ticker"] == ticker for t in log.get("closed", []))
+        if not in_open and not in_closed:
+            send_message(f"⚠️ <b>{ticker}</b> not found in your history.", chat_id=chat_id)
+            return
+        label = "open position" if in_open else "closed trade record"
+        send_inline_keyboard(
+            f"🗑 <b>Remove {ticker} from history?</b>\n"
+            f"<i>This deletes the {label} from your records permanently.</i>",
+            [[{"text": f"✅ Yes, remove {ticker}", "callback_data": f"cancel_auto_do|{ticker}"},
+              {"text": "❌ Cancel",                "callback_data": "cancel_abort"}]],
+            chat_id=chat_id,
+        )
+
+    elif action == "cancel_auto_do":
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        log             = load_user_trade_log(chat_id)
+        open_before     = len(log.get("open",   []))
+        closed_before   = len(log.get("closed", []))
+        log["open"]     = [t for t in log.get("open",   []) if t["ticker"] != ticker]
+        log["closed"]   = [t for t in log.get("closed", []) if t["ticker"] != ticker]
+        removed = (len(log["open"]) < open_before) or (len(log["closed"]) < closed_before)
+        if removed:
+            save_user_trade_log(chat_id, log)
+            send_message(f"✅ <b>{ticker}</b> removed from your trade history.", chat_id=chat_id)
+        else:
+            send_message(f"⚠️ <b>{ticker}</b> not found in your history.", chat_id=chat_id)
+
     elif action == "sold_bulk":
         payload = "|".join(parts[1:])
         entries = payload.split(",")
@@ -498,8 +535,46 @@ def handle_callback_query(callback_query: dict) -> None:
         shares_raw = parts[3] if len(parts) > 3 else None
         clear_pending_state(chat_id)
         try:
+            # Grab open trade BEFORE removing (debrief needs it)
+            _pre_log   = load_user_trade_log(chat_id)
+            _open_trade = next(
+                (t for t in _pre_log.get("open", []) if t["ticker"] == ticker.upper()), {}
+            )
             result = _execute_sold(ticker, chat_id, price=price_raw or None, shares_sold=shares_raw or None)
             send_message(result, chat_id=chat_id)
+
+            # Fire Haiku debrief in background (non-blocking, best-effort)
+            if result.startswith("✅") and price_raw and _open_trade:
+                try:
+                    _exit   = float(price_raw)
+                    _entry  = float(_open_trade.get("entry_price") or 0)
+                    if _entry > 0:
+                        _ret  = (_exit - _entry) / _entry * 100
+                        _alloc = float(_open_trade.get("allocation") or 0)
+                        _gain  = round(_alloc * _ret / 100, 2)
+                        _tgt   = float(_open_trade.get("target_price") or 0)
+                        _stp   = float(_open_trade.get("stop_loss")   or 0)
+                        if _tgt > 0 and _exit >= _tgt * 0.95:
+                            _outcome = "target"
+                        elif _stp > 0 and _exit <= _stp * 1.05:
+                            _outcome = "stop"
+                        else:
+                            _outcome = "expired"
+                        _debrief_trade = {
+                            **_open_trade,
+                            "closed_price": round(_exit, 2),
+                            "return_pct":   round(_ret, 2),
+                            "gain_usd":     _gain,
+                            "outcome":      _outcome,
+                        }
+                        def _send_debrief(trade=_debrief_trade, cid=chat_id):
+                            from ai_analyzer import generate_trade_debrief
+                            msg = generate_trade_debrief(trade)
+                            if msg:
+                                send_message(f"💡 <i>{_esc(msg)}</i>", chat_id=cid)
+                        threading.Thread(target=_send_debrief, daemon=True).start()
+                except Exception as _de:
+                    print(f"[bot] debrief setup failed (non-critical): {_de}")
         except Exception as exc:
             print(f"[bot] sold_confirm failed for {ticker}: {exc}")
             send_message(f"⚠️ Couldn't close <b>{ticker}</b> — try <code>/sold {ticker}</code> instead.", chat_id=chat_id)
@@ -747,6 +822,24 @@ def handle_callback_query(callback_query: dict) -> None:
         from release_tracker import mark_note_skipped
         mark_note_skipped(note_id)
         send_message("⏭ Release note skipped.", chat_id=chat_id)
+
+    elif action == "rearm_alert":
+        # Re-set a fired alert at the same price + direction
+        # callback_data: rearm_alert|TICKER|TARGET|DIRECTION
+        ticker    = parts[1].upper() if len(parts) > 1 else ""
+        target    = float(parts[2])  if len(parts) > 2 else None
+        direction = parts[3]         if len(parts) > 3 else "auto"
+        if not ticker or target is None:
+            send_message("⚠️ Could not re-arm alert — missing parameters.", chat_id=chat_id)
+        else:
+            try:
+                from price_alert_manager import add_alert as _aa
+                confirmation = _aa(chat_id, ticker, target, direction)
+                send_message(confirmation, chat_id=chat_id)
+            except ValueError as e:
+                send_message(f"⚠️ {e}", chat_id=chat_id)
+            except Exception as e:
+                send_message(f"⚠️ Could not re-arm alert: {e}", chat_id=chat_id)
 
     elif action == "cancel_abort":
         send_message("👍 No changes made.", chat_id=chat_id)

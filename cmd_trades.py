@@ -8,7 +8,7 @@ Handles: BOUGHT, SOLD, PAPER CANCEL, PAPER HISTORY, HISTORY, SUMMARY,
 import json
 import threading
 
-from telegram_api import send_message, send_inline_keyboard
+from telegram_api import send_message, send_inline_keyboard, typing_until_done, send_typing_action
 from formatters import _p, _esc
 from config_manager import (
     load_user_trade_log,
@@ -463,7 +463,8 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
 
         log         = load_user_trade_log(chat_id)
         open_trades = log.get("open", [])
-        stats       = get_performance_stats(chat_id)
+        with typing_until_done(chat_id):
+            stats   = get_performance_stats(chat_id)
 
         lines = ["📊 <b>Portfolio Health</b>", ""]
 
@@ -687,6 +688,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
         crypto_trades = [t for t in unique_trades if t.get("asset_type") != "stock"]
         stock_tickers = [t["ticker"] for t in stock_trades]
 
+        send_typing_action(chat_id)   # fires while yfinance .info calls run
         for t in stock_trades:
             ticker = t["ticker"]
             try:
@@ -864,17 +866,21 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
         lines.append("<i>Tap a button to remove a holding, or /bought to add one</i>")
         send_message("\n".join(lines), chat_id=chat_id)
 
-        # ── Quick-remove buttons — one per holding ────────────────────────────
+        # ── Quick-close buttons — route through sold_pick so exit price is
+        # captured and P&L is recorded in /stats.  confirm_sell (no price) is
+        # intentionally NOT used here because it calls remove_holding() which
+        # drops the trade from log["open"] without ever writing to log["closed"],
+        # meaning the trade never counts toward win-rate or expectancy.
         buttons = []
         for t in unique_trades:
             ticker = t["ticker"]
             buttons.append([{
-                "text":          f"🗑 Remove {ticker}",
-                "callback_data": f"confirm_sell|{ticker}",
+                "text":          f"💸 Close {ticker}",
+                "callback_data": f"sold_pick|{ticker}",
             }])
         if buttons:
             send_inline_keyboard(
-                "Remove a holding from your portfolio:",
+                "💸 <b>Close a position</b> — I'll ask for your exit price and record P&amp;L:",
                 buttons,
                 chat_id=chat_id,
             )

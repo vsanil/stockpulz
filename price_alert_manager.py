@@ -92,7 +92,7 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
     ticker  = ticker.upper()
     current = _current_price(ticker)
     if current is None:
-        return f"❌ Could not fetch current price for <b>{ticker}</b>. Is the ticker correct?"
+        raise ValueError(f"Could not fetch price for {ticker}. Check the ticker symbol.")
 
     if direction == "auto":
         direction = "above" if target_price > current else "below"
@@ -100,10 +100,10 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
     alerts      = _load_alerts()
     chat_alerts = alerts.setdefault(str(chat_id), [])
 
-    # Prevent duplicate
+    # Prevent duplicate — raise so the API returns 400 instead of silent success
     for a in chat_alerts:
         if a["ticker"] == ticker and a["target"] == target_price and a["direction"] == direction:
-            return f"⚠️ Alert already exists: <b>{ticker}</b> {direction} <b>${target_price:,.2f}</b>"
+            raise ValueError(f"Alert already exists: {ticker} {direction} ${target_price:,.2f}")
 
     chat_alerts.append({
         "ticker":       ticker,
@@ -163,12 +163,13 @@ def list_alerts(chat_id: str) -> str:
     return "\n".join(lines)
 
 
-def check_alerts(chat_id: str, send_fn=None) -> list[str]:
+def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]:
     """
     Evaluate all alerts for a chat against current prices.
     Triggered alerts are removed and returned as formatted Telegram strings.
 
-    Optionally pass send_fn(msg) to fire notifications immediately.
+    send_fn(msg, chat_id)                   — plain notification
+    send_keyboard_fn(msg, keyboard, chat_id) — notification with re-arm button
     """
     alerts      = _load_alerts()
     chat_alerts = alerts.get(str(chat_id), [])
@@ -208,8 +209,14 @@ def check_alerts(chat_id: str, send_fn=None) -> list[str]:
                 f"<i>Change since alert set: {change:+.1f}%</i>"
             )
             triggered.append(msg)
-            if send_fn:
-                send_fn(msg)
+            if send_keyboard_fn:
+                keyboard = [[{
+                    "text": f"🔔 Re-arm at ${a['target']:,.2f}",
+                    "callback_data": f"rearm_alert|{t}|{a['target']}|{a['direction']}",
+                }]]
+                send_keyboard_fn(msg, keyboard, chat_id=str(chat_id))
+            elif send_fn:
+                send_fn(msg)  # _alert() broadcasts to all; no chat_id needed
         else:
             remaining.append(a)
 
@@ -220,7 +227,7 @@ def check_alerts(chat_id: str, send_fn=None) -> list[str]:
     return triggered
 
 
-def check_all_alerts(send_fn=None) -> int:
+def check_all_alerts(send_fn=None, send_keyboard_fn=None) -> int:
     """
     Check alerts for ALL chat IDs (called from cron runs).
     Returns total number of alerts triggered.
@@ -228,6 +235,17 @@ def check_all_alerts(send_fn=None) -> int:
     alerts  = _load_alerts()
     total   = 0
     for chat_id in list(alerts.keys()):
-        fired = check_alerts(chat_id, send_fn=send_fn)
+        fired = check_alerts(chat_id, send_fn=send_fn, send_keyboard_fn=send_keyboard_fn)
         total += len(fired)
     return total
+
+
+def clear_alerts(chat_id: str) -> int:
+    """Remove all alerts for a chat. Returns count removed."""
+    alerts      = _load_alerts()
+    chat_alerts = alerts.get(str(chat_id), [])
+    count       = len(chat_alerts)
+    if count:
+        alerts[str(chat_id)] = []
+        _save_alerts(alerts)
+    return count

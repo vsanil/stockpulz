@@ -654,6 +654,19 @@ Stock Candidates:
 Crypto Candidates:
 {json.dumps(crypto_candidates, indent=2)}
 
+ETF CONVICTION RUBRIC (applies to ETF picks only — stock rubric does not apply):
+  ETF signals available: ret_1m (1-month momentum %), rsi (14-day), vol_ratio (10d avg / 30d avg volume)
+  ★★★★★ (5) — ALL THREE: ret_1m > +5%, RSI 40-65 (healthy, not overbought), vol_ratio > 1.1
+  ★★★★  (4) — TWO of the above confirming signals
+  ★★★   (3) — ONE clear signal: either ret_1m > +3%, RSI recovering from <40, or vol_ratio > 1.15
+  ★★    (2) — Marginal or conflicting (e.g. strong momentum but RSI > 72, or weak vol trend)
+  ★     (1) — DO NOT INCLUDE. Return [] instead.
+  REGIME ALIGNMENT (hard filter — apply before conviction):
+    bear / volatile regime: ONLY include broad defensive ETFs (SPY, IVV, VTI, GLD, TLT). Drop sector/thematic ETFs.
+    bull / elevated regime: sector and thematic ETFs acceptable if signals confirm.
+    neutral regime: broad market ETFs only; require conviction ★★★★+ for sector picks.
+  ETF picks are optional — return [] for both if nothing clears ★★★ after regime filter.
+
 ETF Candidates:
 {json.dumps(etf_candidates or [], indent=2)}
 
@@ -669,7 +682,10 @@ COMMODITIES (OPTIONAL — 0–2 picks):
 
 OPTIONS PLAYS (OPTIONAL — 0–2 plays):
   For ST stock picks that have conviction 4 or 5, you may suggest a simple directional play.
-  Format: ticker, CALL or PUT, a slightly OTM strike, expiry ~2-3 weeks out, note under 12 words.
+  STRIKE RULE: use nearest_otm_call from the pick's options_flow data as the strike, and
+    nearest_call_expiry as the expiry. If nearest_otm_call is absent, describe the play
+    directionally only (e.g. "bullish call spread") — do NOT invent or estimate a strike price.
+  Format: ticker, CALL or PUT, strike (from nearest_otm_call), expiry (from nearest_call_expiry), note under 12 words.
   Return [] if no ST stock picks have conviction 4+.
   These are illustrative / educational only — not buy recommendations.
 

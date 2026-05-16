@@ -4,7 +4,7 @@ cmd_market.py — Market data + portfolio commands extracted from bot_commands.p
 
 import threading
 
-from telegram_api import send_message
+from telegram_api import send_message, typing_until_done, send_typing_action
 from config_manager import get_config, get_user_config, load_picks, load_user_trade_log, get_allowed_users
 from formatters import format_daily_message, format_confirmation_message
 from cmd_helpers import _fetch_live_price, _resolve_ticker_candidates
@@ -27,7 +27,8 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             log            = load_user_trade_log(chat_id)
             open_positions = log.get("open", [])
             risk_profile   = config.get("risk_profile", "moderate")
-            personal_notes = personalize_picks(picks, open_positions, risk_profile)
+            with typing_until_done(chat_id):
+                personal_notes = personalize_picks(picks, open_positions, risk_profile)
         except Exception as pn_exc:
             print(f"[telegram] /today personal notes failed (non-critical): {pn_exc}")
         buy_counts: dict = {}
@@ -82,6 +83,7 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             return "📭 No picks found for today yet. Check back after 8 AM ET."
         try:
             from price_checker import get_current_prices
+            send_typing_action(chat_id)   # fires while live prices load (8-12 yfinance calls)
             current_prices = get_current_prices(picks)
             buy_counts: dict = {}
             if get_config().get("show_buy_counts"):
@@ -98,7 +100,8 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         try:
             from trade_logger import get_performance_stats
             from performance_tracker import get_recent_stats
-            stats = get_performance_stats(chat_id)
+            with typing_until_done(chat_id):
+                stats = get_performance_stats(chat_id)
             if not stats or stats["count"] == 0:
                 # Check if they have any open trades at all
                 log        = load_user_trade_log(chat_id)
@@ -186,7 +189,8 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                     logs.append(load_user_trade_log(uid))
                 except Exception:
                     pass
-            stats = build_community_stats(logs)
+            with typing_until_done(chat_id):
+                stats = build_community_stats(logs)
             if not stats or stats["total_trades"] == 0:
                 return (
                     "📭 <b>StockPulz Community</b>\n\n"
@@ -290,7 +294,8 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
     if text == "REGIME":
         try:
             from market_regime import get_market_regime, regime_emoji
-            r = get_market_regime()
+            with typing_until_done(chat_id):
+                r = get_market_regime()
             emoji = regime_emoji(r["regime"])
             return (
                 f"{emoji} <b>MARKET REGIME: {r['regime'].upper()}</b>\n\n"
