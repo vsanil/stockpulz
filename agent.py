@@ -201,18 +201,72 @@ MOCK_CRYPTO_CANDIDATES = {
         {"id": "bitcoin", "symbol": "BTC", "name": "Bitcoin",
          "current_price": 65000, "score": 80, "rsi": 55.0,
          "volume_ratio": 1.7, "price_change_24h_pct": 3.2, "price_change_7d_pct": 8.1},
-        {"id": "solana", "symbol": "SOL", "name": "Solana",
-         "current_price": 145.00, "score": 72, "rsi": 58.0,
-         "volume_ratio": 2.1, "price_change_24h_pct": 4.5, "price_change_7d_pct": 12.3},
     ],
-    "long_term": [
-        {"id": "ethereum", "symbol": "ETH", "name": "Ethereum",
-         "current_price": 3200, "score": 85, "market_cap": 385_000_000_000,
-         "price_change_30d_pct": 12.5, "pct_below_ath": 34.0, "ma30": 2950.0},
-        {"id": "chainlink", "symbol": "LINK", "name": "Chainlink",
-         "current_price": 14.50, "score": 70, "market_cap": 8_500_000_000,
-         "price_change_30d_pct": 18.2, "pct_below_ath": 55.0, "ma30": 13.20},
-    ],
+    "long_term": [],
+}
+
+# Pre-built picks in analyze_with_claude() output format — skips the Claude API call entirely.
+# Covers every keyboard/message section: 2 ST stocks, 1 LT stock, 1 crypto, 1 commodity.
+MOCK_PICKS = {
+    "stocks": {
+        "short_term": [
+            {
+                "ticker": "AAPL", "company": "Apple Inc", "sector": "Technology",
+                "entry_price": 182.50, "target_price": 196.00, "stop_loss": 174.00,
+                "conviction": 5, "hold_days": "3–5",
+                "thesis": "Bullish MACD crossover on high volume. Services revenue re-accelerating into earnings.",
+                "catalyst": "WWDC keynote + Vision Pro unit sales update",
+                "invalidation": "Daily close below $174",
+            },
+            {
+                "ticker": "NVDA", "company": "NVIDIA Corp", "sector": "Technology",
+                "entry_price": 875.00, "target_price": 950.00, "stop_loss": 840.00,
+                "conviction": 4, "hold_days": "2–4",
+                "thesis": "AI capex cycle intact. RSI reset from overbought; volume confirming accumulation.",
+                "catalyst": "GTC conference data-center order commentary",
+                "invalidation": "Close below 50-day MA ($840)",
+            },
+        ],
+        "long_term": [
+            {
+                "ticker": "MSFT", "company": "Microsoft Corp", "sector": "Technology",
+                "entry_price": 415.00, "target_price": 480.00, "stop_loss": 390.00,
+                "conviction": 5, "hold_days": "30–60",
+                "thesis": "Azure + Copilot monetisation driving margin expansion. Best-in-class balance sheet.",
+                "catalyst": "Q3 cloud revenue beat expected",
+                "invalidation": "Revenue growth decelerates below 12% YoY",
+            },
+        ],
+    },
+    "crypto": {
+        "short_term": [
+            {
+                "symbol": "BTC", "name": "Bitcoin",
+                "entry_price": 65000, "target_price": 72000, "stop_loss": 61000,
+                "conviction": 4, "hold_days": "5–10",
+                "thesis": "Spot ETF inflows accelerating. Weekly RSI in bullish range, hash-rate ATH.",
+                "catalyst": "Halving supply squeeze + ETF AUM milestone",
+                "invalidation": "Weekly close below $61k",
+            },
+        ],
+        "long_term": [],
+    },
+    "etfs": {"short_term": [], "long_term": []},
+    "commodities": {
+        "short_term": [
+            {
+                "ticker": "GLD", "company": "SPDR Gold Shares", "sector": "Commodities",
+                "entry_price": 218.00, "target_price": 232.00, "stop_loss": 210.00,
+                "conviction": 4, "hold_days": "7–14",
+                "thesis": "Gold breaking multi-year resistance. Safe-haven demand + weakening DXY.",
+                "catalyst": "Fed pause + geopolitical risk premium",
+                "invalidation": "DXY reclaims 105",
+            },
+        ],
+        "long_term": [],
+    },
+    "options_plays": [],
+    "macro_context": "SPY +0.4% · VIX 18.2 · 10Y 4.32% — Risk-on tone, momentum favours longs. <i>[MOCK DATA]</i>",
 }
 
 
@@ -457,22 +511,27 @@ def run_morning(config: dict, now_et: datetime):
     except Exception as exc:
         print(f"[agent] Recent losers fetch failed (non-critical): {exc}")
 
-    print("[agent] Running Claude analysis...")
-    try:
-        picks = analyze_with_claude(
-            stock_candidates, config,
-            crypto_results=crypto_candidates if has_crypto else None,
-            recent_losers=recent_losers,
-            etf_results=etf_candidates if has_etfs else None,
-        )
-    except Exception as exc:
-        print(f"[agent] Claude analysis failed: {exc}")
-        _alert(f"❌ <b>Morning run FAILED</b> — Claude analysis error:\n<code>{exc}</code>", admin_only=True)
-        return
+    if MOCK_DATA:
+        print("[agent] MOCK_DATA=true — skipping Claude analysis, using MOCK_PICKS.")
+        picks = MOCK_PICKS
+        macro_context = {}
+    else:
+        print("[agent] Running Claude analysis...")
+        try:
+            picks = analyze_with_claude(
+                stock_candidates, config,
+                crypto_results=crypto_candidates if has_crypto else None,
+                recent_losers=recent_losers,
+                etf_results=etf_candidates if has_etfs else None,
+            )
+        except Exception as exc:
+            print(f"[agent] Claude analysis failed: {exc}")
+            _alert(f"❌ <b>Morning run FAILED</b> — Claude analysis error:\n<code>{exc}</code>", admin_only=True)
+            return
 
-    # Attach macro context so the formatter can display it
-    if macro_context:
-        picks["macro_context"] = macro_context
+        # Attach macro context so the formatter can display it
+        if macro_context:
+            picks["macro_context"] = macro_context
 
     # ── Position sizing ───────────────────────────────────────────────────────
     # Only run if the user has configured a portfolio_size.
