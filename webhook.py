@@ -971,7 +971,10 @@ def miniapp_alerts():
 
 @app.route("/api/miniapp/quote")
 def miniapp_quote():
-    """Return current price for a single ticker — used by the New Alert form."""
+    """Return current price for a single ticker — used by the New Alert form.
+    If the raw input isn't a valid ticker (e.g. 'COSTCO'), resolves via Haiku
+    and returns the resolved ticker so the frontend can update the input field.
+    """
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     ticker = request.args.get("ticker", "").strip().upper()
@@ -979,9 +982,21 @@ def miniapp_quote():
     try:
         from price_alert_manager import _current_price
         price = _current_price(ticker)
-        if price is None:
-            return jsonify({"error": f"No price found for {ticker}"}), 404
-        return jsonify({"ticker": ticker, "price": round(price, 6)})
+        if price is not None:
+            return jsonify({"ticker": ticker, "price": round(price, 6)})
+        # No price — try resolving as a company name via Haiku
+        try:
+            from cmd_helpers import _resolve_ticker_candidates
+            candidates = _resolve_ticker_candidates(ticker)
+            if candidates:
+                resolved = candidates[0]["ticker"].upper()
+                if resolved != ticker:
+                    price = _current_price(resolved)
+                    if price is not None:
+                        return jsonify({"ticker": resolved, "price": round(price, 6)})
+        except Exception:
+            pass
+        return jsonify({"error": f"No price found for {ticker}"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
