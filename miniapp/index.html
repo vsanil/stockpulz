@@ -1973,9 +1973,11 @@ function gotoTab(name) {
 // ── API helpers ───────────────────────────────────────────────────────────────
 let _coldBannerTimer = null;
 let _coldBannerCount = 0; // track concurrent slow requests
+let _coldStartOccurred = false; // set true the first time the banner fires this session
 
 function _showColdBanner() {
   _coldBannerCount++;
+  _coldStartOccurred = true;
   document.getElementById('cold-banner')?.classList.add('show');
 }
 function _hideColdBanner() {
@@ -2333,7 +2335,7 @@ function renderRegimePill(regime) {
   return `<span class="regime-pill ${cls}">${dot} ${label}${vix}</span>`;
 }
 
-async function loadPicks() {
+async function loadPicks(isRetry = false) {
   // Kick off regime fetch in parallel; once done, patch in the pill
   loadRegime().then(r => {
     if (r && picksCache) {
@@ -2342,13 +2344,28 @@ async function loadPicks() {
       existing.forEach(el => { el.outerHTML = renderRegimePill(r); });
     }
   });
+  const wasCold = _coldStartOccurred;
   try {
     const data = await api('/api/miniapp/picks');
+    _coldStartOccurred = false; // server is alive now
     picksCache    = data;
     picksLoadedAt = Date.now();
     renderPicksView();
   } catch (e) {
     const is403 = e.status === 403 || (e.message && e.message.includes('403'));
+    // Auto-retry once if server was cold-starting and this isn't already the retry
+    if (!is403 && !isRetry && wasCold) {
+      const spinner = document.getElementById('picks-spinner');
+      if (spinner) {
+        spinner.innerHTML =
+          `<div class="empty"><div class="empty-icon" style="font-size:32px">⏳</div>` +
+          `<div class="empty-title">Server just woke up</div>` +
+          `<div class="empty-sub">Retrying in 4 seconds…</div></div>`;
+        spinner.style.display = 'block';
+      }
+      setTimeout(() => loadPicks(true), 4000);
+      return;
+    }
     const icon  = is403 ? '🔒' : '😕';
     const title = is403 ? 'Not authorised' : 'Couldn\'t load picks';
     const sub   = is403
