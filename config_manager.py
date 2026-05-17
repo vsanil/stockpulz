@@ -191,6 +191,13 @@ def update_user_config_multi(chat_id: str, updates: dict) -> dict:
     return get_user_config(uid)
 
 
+def save_user_config(chat_id: str, ucfg: dict) -> None:
+    """Persist the full user config dict (replaces existing entry)."""
+    all_configs = _load_gist_file(USER_CONFIGS_FILE) or {}
+    all_configs[str(chat_id)] = ucfg
+    _write_gist_file(USER_CONFIGS_FILE, all_configs)
+
+
 def reset_user_config(chat_id: str) -> dict:
     """Reset a user's config to DEFAULT_USER_CONFIG."""
     all_configs = _load_gist_file(USER_CONFIGS_FILE) or {}

@@ -1381,22 +1381,28 @@ body.tg-light .chip-input { background: rgba(0,0,0,0.03); }
   animation: shake-x 0.36s ease;
 }
 
-/* Cold-start banner */
+/* Cold-start banner — slim floating pill above nav */
 #cold-banner {
-  position: fixed; top: 56px; left: 0; right: 0; z-index: 50;
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  padding: 10px 16px;
-  background: linear-gradient(90deg, rgba(255,184,0,0.15), rgba(255,90,90,0.10));
-  border-bottom: 1px solid rgba(255,184,0,0.22);
-  font-size: 13px; font-weight: 600; color: var(--amber);
-  transform: translateY(-100%);
-  transition: transform 0.28s cubic-bezier(0.34,1.56,0.64,1);
+  position: fixed;
+  bottom: calc(var(--nav-h) + 14px);
+  left: 50%; transform: translateX(-50%) translateY(16px);
+  z-index: 50;
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 16px;
+  background: rgba(26,29,38,0.92);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,184,0,0.25);
+  border-radius: 100px;
+  font-size: 12.5px; font-weight: 600; color: var(--amber);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.22s ease, transform 0.26s cubic-bezier(0.34,1.56,0.64,1);
   pointer-events: none;
-  letter-spacing: 0.01em;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35);
 }
-#cold-banner.show { transform: translateY(0); }
+#cold-banner.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 #cold-banner .cb-spinner {
-  width: 14px; height: 14px; border-radius: 50%;
+  width: 12px; height: 12px; border-radius: 50%;
   border: 2px solid rgba(255,184,0,0.3);
   border-top-color: var(--amber);
   animation: spin 0.8s linear infinite;
@@ -1404,19 +1410,28 @@ body.tg-light .chip-input { background: rgba(0,0,0,0.03); }
 }
 
 /* Sector select */
-.sector-select {
-  width: 100%; padding: 11px 12px; border-radius: 10px;
-  background: rgba(0,0,0,0.22);
-  border: 1px solid var(--border);
-  color: var(--text); font-size: 14px; font-family: inherit;
-  outline: none; margin-top: 6px; cursor: pointer;
-  font-weight: 600;
-  transition: border-color .15s, box-shadow .15s;
+/* Sector pill grid (replaces native select) */
+.sector-grid {
+  display: flex; flex-wrap: wrap; gap: 7px; padding: 10px 0 4px;
 }
-body.tg-light .sector-select { background: rgba(0,0,0,0.03); }
-.sector-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79,142,247,0.18);
+.sector-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 13px; border-radius: 20px;
+  border: 1.5px dashed rgba(255,90,90,0.30);
+  background: rgba(255,90,90,0.06);
+  color: var(--hint); font-size: 12px; font-weight: 700;
+  cursor: pointer; font-family: inherit; letter-spacing: 0.01em;
+  transition: background .13s, border-color .13s, color .13s, transform .1s;
+}
+.sector-pill:active { transform: scale(.94); }
+.sector-pill:hover  {
+  background: rgba(255,90,90,0.14);
+  border-color: var(--red);
+  color: var(--red);
+}
+.sector-grid-label {
+  font-size: 11px; font-weight: 600; color: var(--hint);
+  letter-spacing: 0.05em; text-transform: uppercase; padding: 8px 0 2px;
 }
 
 /* ── Toast notification ──────────────────────────────────────────────────── */
@@ -2094,6 +2109,27 @@ function handleOverlayTap(e, id) {
   if (e.target === document.getElementById(id)) closeOverlay(id);
 }
 
+// ── Avatar color — deterministic per ticker ────────────────────────────────
+const _AVATAR_PALETTES = [
+  ['79,142,247',  '106,163,255'],  // blue
+  ['0,212,170',   '0,255,198'],    // teal
+  ['167,139,250', '196,181,253'],  // purple
+  ['245,158,11',  '251,191,36'],   // amber
+  ['99,102,241',  '129,140,248'],  // indigo
+  ['6,182,212',   '34,211,238'],   // cyan
+  ['16,185,129',  '52,211,153'],   // emerald
+  ['236,72,153',  '244,114,182'],  // pink
+];
+function _avatarBg(sym, assetType) {
+  if (assetType === 'crypto') {
+    return 'linear-gradient(135deg,rgba(245,158,11,0.38) 0%,rgba(251,191,36,0.22) 100%)';
+  }
+  let h = 0;
+  for (let i = 0; i < sym.length; i++) h = (h * 31 + sym.charCodeAt(i)) & 0xffff;
+  const [c1, c2] = _AVATAR_PALETTES[h % _AVATAR_PALETTES.length];
+  return `linear-gradient(135deg,rgba(${c1},0.36) 0%,rgba(${c2},0.20) 100%)`;
+}
+
 // ── Price formatting ──────────────────────────────────────────────────────────
 function fmtPrice(v) {
   if (v == null || v === '') return '—';
@@ -2335,25 +2371,56 @@ function renderRegimePill(regime) {
   return `<span class="regime-pill ${cls}">${dot} ${label}${vix}</span>`;
 }
 
+// ── Picks local cache (stale-while-revalidate) ───────────────────────────────
+const _PICKS_LS_KEY  = 'sp_picks_v2';
+const _PICKS_MAX_AGE = 6 * 60 * 60 * 1000; // 6 hours — picks change once per day
+
+function _savePicks(data) {
+  try { localStorage.setItem(_PICKS_LS_KEY, JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
+}
+function _loadCachedPicks() {
+  try {
+    const raw = localStorage.getItem(_PICKS_LS_KEY);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > _PICKS_MAX_AGE) return null;
+    return data;
+  } catch (_) { return null; }
+}
+
 async function loadPicks(isRetry = false) {
-  // Kick off regime fetch in parallel; once done, patch in the pill
+  // ── 1. Show cached picks instantly (stale-while-revalidate) ────────────────
+  const cached = _loadCachedPicks();
+  const hadCache = !!cached;
+  if (cached && !picksCache) {
+    picksCache    = cached;
+    picksLoadedAt = Date.now();
+    renderPicksView();          // instant render from cache
+    // Kick off background prefetch of other tabs now that picks are on screen
+    _prefetchOtherTabs();
+  }
+
+  // ── 2. Regime fetch in parallel ────────────────────────────────────────────
   loadRegime().then(r => {
     if (r && picksCache) {
-      // Update regime pill in DOM without full re-render
       const existing = document.querySelectorAll('.regime-pill');
       existing.forEach(el => { el.outerHTML = renderRegimePill(r); });
     }
   });
+
+  // ── 3. Fresh fetch — silently update if cache was shown ────────────────────
   const wasCold = _coldStartOccurred;
   try {
     const data = await api('/api/miniapp/picks');
-    _coldStartOccurred = false; // server is alive now
+    _coldStartOccurred = false;
+    _savePicks(data);             // update cache
     picksCache    = data;
     picksLoadedAt = Date.now();
-    renderPicksView();
+    renderPicksView();            // re-render with fresh data (usually instant)
+    if (!hadCache) _prefetchOtherTabs(); // first load: prefetch after picks appear
   } catch (e) {
+    if (hadCache) return;         // already showing stale data — don't show error
     const is403 = e.status === 403 || (e.message && e.message.includes('403'));
-    // Auto-retry once if server was cold-starting and this isn't already the retry
     if (!is403 && !isRetry && wasCold) {
       const spinner = document.getElementById('picks-spinner');
       if (spinner) {
@@ -2377,6 +2444,24 @@ async function loadPicks(isRetry = false) {
       `<div class="empty-sub">${sub}</div>` +
       `<button class="btn-retry" onclick="retryLoadPicks()">↻ Try Again</button></div>`;
   }
+}
+
+// ── Background prefetch: silently load portfolio + stats so they're ready ────
+let _prefetchDone = false;
+function _prefetchOtherTabs() {
+  if (_prefetchDone) return;
+  _prefetchDone = true;
+  // Small delay so picks render completes first, then fetch in parallel
+  setTimeout(() => {
+    if (!loadedTabs['portfolio']) {
+      loadedTabs['portfolio'] = true;
+      loadPortfolio().catch(() => { loadedTabs['portfolio'] = false; });
+    }
+    if (!loadedTabs['stats']) {
+      loadedTabs['stats'] = true;
+      loadStats().catch(() => { loadedTabs['stats'] = false; });
+    }
+  }, 800);
 }
 
 function retryLoadPicks() {
@@ -2777,7 +2862,7 @@ async function loadPortfolio() {
       <div class="summary-val ${avgPnl >= 0 ? 'val-pos' : 'val-neg'}">${fmtPct(avgPnl)}</div>
     </div>`;
     html += `<div class="summary-box">
-      <div class="summary-lbl">Winning</div>
+      <div class="summary-lbl">In Profit</div>
       <div class="summary-val val-pos">${winners}</div>
     </div>`;
     html += '</div>';
@@ -2808,7 +2893,7 @@ async function loadPortfolio() {
       html += `<div class="pos-card">
         <div class="pos-card-main-wrap">
         <div class="pos-main">
-          <div class="pos-avatar">${init}</div>
+          <div class="pos-avatar" style="background:${_avatarBg(sym,aType)}">${init}</div>
           <div class="pos-body">
             <div class="pos-sym">${sym}</div>
             <div class="pos-sub">${entry}${cur ? ` → ${cur}` : ''}</div>
@@ -3043,7 +3128,7 @@ async function loadPaperPortfolio() {
         const aType = p.asset_type  || 'stock';
         html += `<div class="pos-card">
           <div class="pos-main">
-            <div class="pos-avatar">${init}</div>
+            <div class="pos-avatar" style="background:${_avatarBg(sym,aType)}">${init}</div>
             <div class="pos-body">
               <div class="pos-sym">${sym}</div>
               <div class="pos-sub">${entry}${cur ? ` → ${cur}` : ''}</div>
@@ -3134,11 +3219,18 @@ async function loadAlerts() {
     });
 
     const clearBtn = unique.length >= 2
-      ? `<button class="btn-clear-alerts" onclick="clearAllAlerts()">Clear all</button>`
+      ? `<button class="btn-clear-alerts" id="clear-alerts-btn" onclick="confirmClearAlerts()">Clear all</button>`
+      : '';
+    const clearConfirm = unique.length >= 2
+      ? `<span id="clear-alerts-confirm" style="display:none;align-items:center;gap:7px">
+           <span style="font-size:13px;color:var(--hint)">Clear all?</span>
+           <button class="btn-clear-alerts" style="color:var(--red);border-color:rgba(255,90,90,0.35)" onclick="clearAllAlerts()">Yes</button>
+           <button class="btn-clear-alerts" onclick="cancelClearAlerts()">No</button>
+         </span>`
       : '';
     let html = `<div class="alert-section-hdr">
       <span>Price Alerts</span>
-      <div style="display:flex;gap:10px;align-items:center">${clearBtn}<button class="btn-add-alert" onclick="openAddAlert()">+ Add Alert</button></div>
+      <div style="display:flex;gap:10px;align-items:center">${clearConfirm}${clearBtn}<button class="btn-add-alert" onclick="openAddAlert()">+ Add Alert</button></div>
     </div>`;
 
     if (!unique.length) {
@@ -3312,17 +3404,25 @@ async function deleteAlert(ticker, target) {
   }
 }
 
+function confirmClearAlerts() {
+  // Show inline Yes/No instead of native dialog (window.confirm blocked in Telegram WebView)
+  tg.HapticFeedback?.impactOccurred('medium');
+  const btn     = document.getElementById('clear-alerts-btn');
+  const confirm = document.getElementById('clear-alerts-confirm');
+  if (btn)     btn.style.display     = 'none';
+  if (confirm) confirm.style.display = 'flex';
+}
+
+function cancelClearAlerts() {
+  tg.HapticFeedback?.selectionChanged();
+  const btn     = document.getElementById('clear-alerts-btn');
+  const confirm = document.getElementById('clear-alerts-confirm');
+  if (btn)     btn.style.display     = '';
+  if (confirm) confirm.style.display = 'none';
+}
+
 async function clearAllAlerts() {
   tg.HapticFeedback?.impactOccurred('heavy');
-  // tg.showConfirm requires Bot API ≥ 6.2 and doesn't work on all clients;
-  // fall back to window.confirm so it never silently hangs.
-  let confirmed = false;
-  if (tg.showConfirm && tg.isVersionAtLeast && tg.isVersionAtLeast('6.2')) {
-    confirmed = await new Promise(resolve => tg.showConfirm('Clear all price alerts?', resolve));
-  } else {
-    confirmed = window.confirm('Clear all price alerts?');
-  }
-  if (!confirmed) return;
   try {
     await api('/api/miniapp/clear_alerts', 'POST');
     tg.HapticFeedback?.notificationOccurred('success');
@@ -3331,6 +3431,7 @@ async function clearAllAlerts() {
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
     showToast('Could not clear alerts');
+    cancelClearAlerts(); // restore button on error
   }
 }
 
@@ -3831,17 +3932,20 @@ function renderPrefsSheet() {
   // ── Excluded Sectors card ──────────────────────────────────────────────────
   const excluded = cfg.excluded_sectors || [];
   const exclChips = excluded.map(s =>
-    `<span class="chip">${s}<button class="chip-remove" onclick="removeExclusion('${s.replace(/'/g, "\\'")}')">✕</button></span>`
+    `<span class="chip" style="border-color:rgba(255,90,90,0.30);background:rgba(255,90,90,0.08)">${s}<button class="chip-remove" onclick="removeExclusion('${s.replace(/'/g, "\\'")}')">✕</button></span>`
   ).join('');
   const availSectors = ALL_SECTORS.filter(s => !excluded.includes(s));
-  const sectorOptions = availSectors.map(s => `<option value="${s}">${s}</option>`).join('');
+  const pillsHtml = availSectors.map(s =>
+    `<button class="sector-pill" onclick="addExclusion('${s.replace(/'/g, "\\'")}')">🚫 ${s}</button>`
+  ).join('');
   html += `<div class="settings-card" style="padding:14px 16px">
     <div class="card-title">🚫 Excluded Sectors</div>
-    <div class="chips-container" id="exclusions-chips">${exclChips || '<span style="font-size:13px;color:var(--hint)">None excluded</span>'}</div>
-    ${availSectors.length ? `<select class="sector-select" onchange="addExclusion(this.value); this.value=''">
-      <option value="">+ Add sector to exclude…</option>
-      ${sectorOptions}
-    </select>` : '<div style="font-size:13px;color:var(--hint);padding-top:4px">All sectors excluded</div>'}
+    <div style="font-size:12px;color:var(--hint);margin:-2px 0 8px">Picks from excluded sectors won't appear in your feed.</div>
+    <div class="chips-container" id="exclusions-chips">${exclChips || '<span style="font-size:13px;color:var(--hint)">None excluded — tap a sector below to hide it</span>'}</div>
+    ${availSectors.length ? `
+      <div class="sector-grid-label">Tap to exclude</div>
+      <div class="sector-grid" id="sector-avail-grid">${pillsHtml}</div>
+    ` : '<div style="font-size:13px;color:var(--hint);padding-top:4px">All sectors excluded</div>'}
   </div>`;
 
   body.innerHTML = html;
@@ -4010,25 +4114,21 @@ async function addWatchTicker() {
   if (!input) return;
   const raw = (input.value || '').trim();
   if (!raw) { input.focus(); return; }
+
+  // Sanitise: strip non-alphanumeric (keep dots/hyphens for ETFs like BRK.B)
+  const ticker = raw.toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+  if (!ticker) { showToast('Enter a ticker or company name'); input.focus(); return; }
+
   tg.HapticFeedback?.selectionChanged();
-
-  // Resolve company names ("nvidia" → "NVDA") via the quote endpoint
-  let ticker = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
   try {
-    showToast('Looking up ticker…');
-    const q = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(raw)}`);
-    if (q.ticker) ticker = q.ticker;
-  } catch (_) { /* not found — proceed with uppercased input */ }
-
-  if (!ticker) { showToast('Ticker not found'); input.focus(); return; }
-
-  try {
+    // Backend resolves company names (COSTCO→COST, nvidia→NVDA) without a Haiku round-trip
     const res = await api('/api/miniapp/update_watchlist', 'POST', { action: 'add', ticker });
     _settCfg.watchlist = res.watchlist || [];
     input.value = '';
     _renderWatchlistChips();
     tg.HapticFeedback?.notificationOccurred('success');
-    showToast(`✓ ${ticker} added to watchlist`);
+    const added = res.added_as || ticker;
+    showToast(`✓ ${added} added to watchlist`);
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
     showToast(e.message || 'Could not add ticker');
@@ -4120,23 +4220,26 @@ function _renderExclusionChips() {
   const container = document.getElementById('exclusions-chips');
   if (!container) return;
   const excluded = _settCfg.excluded_sectors || [];
+
+  // Update excluded chips
   if (!excluded.length) {
-    container.innerHTML = '<span style="font-size:13px;color:var(--hint)">None excluded</span>';
+    container.innerHTML = '<span style="font-size:13px;color:var(--hint)">None excluded — tap a sector below to hide it</span>';
   } else {
     container.innerHTML = excluded.map(s =>
-      `<span class="chip">${s}<button class="chip-remove" onclick="removeExclusion('${s.replace(/'/g, "\\'")}')">✕</button></span>`
+      `<span class="chip" style="border-color:rgba(255,90,90,0.30);background:rgba(255,90,90,0.08)">${s}<button class="chip-remove" onclick="removeExclusion('${s.replace(/'/g, "\\'")}')">✕</button></span>`
     ).join('');
   }
-  // Also refresh the select dropdown
-  const sel = container.parentElement?.querySelector('.sector-select');
-  if (sel) {
+
+  // Refresh the pill grid of available sectors
+  const grid = document.getElementById('sector-avail-grid');
+  if (grid) {
     const availSectors = ALL_SECTORS.filter(s => !excluded.includes(s));
     if (!availSectors.length) {
-      sel.style.display = 'none';
+      grid.parentElement?.remove();
     } else {
-      sel.style.display = '';
-      sel.innerHTML = '<option value="">+ Add sector to exclude…</option>' +
-        availSectors.map(s => `<option value="${s}">${s}</option>`).join('');
+      grid.innerHTML = availSectors.map(s =>
+        `<button class="sector-pill" onclick="addExclusion('${s.replace(/'/g, "\\'")}')">🚫 ${s}</button>`
+      ).join('');
     }
   }
 }

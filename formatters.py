@@ -550,6 +550,8 @@ def format_daily_message(picks: dict, config: dict,
 
     lines += [
         "",
+        "👆 <b>Open the Dashboard below</b> — charts, portfolio tracker, price alerts & more.",
+        "",
         "⚠️ <i>Not financial advice.</i>  📋 /help  ·  📲 /share  ·  💬 /feedback",
         "<i>💬 Have a question about any pick? Just type it.</i>",
     ]
@@ -584,12 +586,21 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
             {"text": "📊 Chart",            "callback_data": f"chart|{ticker}|{asset_type}"},
         ]
 
-    def _add_section(picks_list: list, get_sym, asset_type: str, header: str):
+    def _add_section(picks_list: list, get_sym, asset_type: str, header: str, icon: str = ""):
         """
         Append a section header + picks paired 2-per-row.
-        Odd pick at end: place its Bought + Chart on one row (fills the space cleanly).
+        Single pick: skip the header row, fold the icon into the button text.
+        Odd pick at end: place its Bought + Chart on one row (no empty columns).
         """
         if not picks_list:
+            return
+        if len(picks_list) == 1:
+            # Only 1 pick — no header row, embed icon in button to save vertical space
+            ticker = get_sym(picks_list[0])
+            pair = _pair(ticker, asset_type)
+            if icon:
+                pair[0] = {**pair[0], "text": f"{icon} Bought {ticker}"}
+            buttons.append(pair)
             return
         buttons.append(_header(header))
         it = iter(picks_list)
@@ -604,6 +615,14 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
 
     buttons = []
 
+    # ── Mini App launch button — top, full-width, prominent ───────────────────
+    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    if render_url:
+        buttons.append([{
+            "text":    "🚀 Open Dashboard  ↗",
+            "web_app": {"url": f"{render_url}/miniapp"},
+        }])
+
     st_picks  = [s for s in stocks.get("short_term", []) if s.get("ticker")]
     lt_picks  = [s for s in stocks.get("long_term",  []) if s.get("ticker")]
     cst_picks = [c for c in crypto.get("short_term", []) if c.get("symbol")] if show_crypto else []
@@ -617,19 +636,11 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         [c for c in commodities.get("long_term",  []) if c.get("ticker")]
     )
 
-    _add_section(st_picks,  lambda s: s["ticker"], "stock",  "── 📈 Short Term ──")
-    _add_section(lt_picks,  lambda s: s["ticker"], "stock",  "── 🏛 Long Term ──")
-    _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──")
-    _add_section(etf_picks, lambda e: e["ticker"], "stock",  "── 📦 ETFs ──")
-    _add_section(comm_picks, lambda c: c["ticker"], "stock", "── 🛢 Commodities ──")
-
-    # ── Mini App launch button ────────────────────────────────────────────────
-    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
-    if render_url:
-        buttons.append([{
-            "text":    "📊 Open Dashboard",
-            "web_app": {"url": f"{render_url}/miniapp"},
-        }])
+    _add_section(st_picks,  lambda s: s["ticker"], "stock",  "── 📈 Short Term ──",  "📈")
+    _add_section(lt_picks,  lambda s: s["ticker"], "stock",  "── 🏛 Long Term ──",   "🏛")
+    _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──",      "🪙")
+    _add_section(etf_picks, lambda e: e["ticker"], "stock",  "── 📦 ETFs ──",        "📦")
+    _add_section(comm_picks, lambda c: c["ticker"], "stock", "── 🛢 Commodities ──", "🛢")
 
     return buttons
 
