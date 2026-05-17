@@ -120,8 +120,17 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
 
     # Fast path: input is already an uppercase ticker symbol (AAPL, MSFT, BTC, etc.)
     # Only applies when fully uppercase so "apple" / "Tesla" go through Haiku for proper resolution.
+    # Validate via yfinance — if the ticker has no price data it's not a real symbol and we fall
+    # through to Haiku (catches cases like "AVERY" which looks like a ticker but is actually AVY).
     if _re.match(r"^[A-Z.\-]{1,5}$", raw):
-        return [{"ticker": raw.upper(), "name": raw.upper()}]
+        try:
+            import yfinance as _yf
+            _info = _yf.Ticker(raw).fast_info
+            if getattr(_info, "last_price", None):
+                return [{"ticker": raw.upper(), "name": raw.upper()}]
+        except Exception:
+            pass
+        # No valid price — fall through to Haiku resolution below
 
     # Ask Haiku for up to 4 candidates with full names
     prompt = (

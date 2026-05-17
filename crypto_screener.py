@@ -248,11 +248,16 @@ def run_crypto_screener() -> dict:
         print(f"[crypto_screener] ERROR fetching coin list: {exc}")
         return {"short_term": [], "long_term": []}
 
-    # Filter stablecoins, wrapped tokens, micro-caps
+    # Filter stablecoins, wrapped tokens, micro-caps, and malformed symbols.
+    # Real crypto symbols are short alphanumeric strings (BTC, ETH, DOGE, etc.).
+    # Anything containing underscores, hyphens, or exceeding 10 chars is garbage
+    # data from CoinGecko (e.g. "FIGR_HELOC") and should never reach Claude.
     coins = [
         c for c in coins
         if c.get("id") not in EXCLUDE_IDS
         and (c.get("market_cap") or 0) >= MIN_MARKET_CAP
+        and c.get("symbol", "").isalnum()
+        and len(c.get("symbol", "")) <= 10
     ]
 
     print(f"[crypto_screener] {len(coins)} coins after exclusions.")

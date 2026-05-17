@@ -508,12 +508,16 @@ def run_morning(config: dict, now_et: datetime):
             "protects your capital.\n\n"
             "<i>Alerts and watchlist monitoring remain active.</i>"
         )
-        for uid in _all_recipients():
+        recipients = _all_recipients()
+        outbox = []
+        for uid in recipients:
             try:
                 if not get_user_config(uid).get("paused"):
-                    send_message(no_picks_msg, chat_id=uid)
-            except Exception:
-                pass
+                    outbox.append({"chat_id": uid, "text": no_picks_msg})
+            except Exception as exc:
+                print(f"[agent] no-picks send skipped for {uid}: {exc}")
+        if outbox:
+            broadcast_all(outbox)
         _alert(
             f"📭 <b>Morning run: no picks broadcast</b> — all filtered below ★{min_conviction}.",
             admin_only=True,
