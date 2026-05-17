@@ -1160,23 +1160,27 @@ def miniapp_live_prices():
     yf_tickers = [f"{t}-USD" if t in _CRYPTO_SYMS else t for t in tickers]
 
     prices = {}
+    # Fetch prices in parallel using fast_info (much faster than yf.download for live quotes)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch_one(orig, yft):
+        try:
+            fi = yf.Ticker(yft).fast_info
+            price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
+            if price:
+                return orig, float(price)
+        except Exception:
+            pass
+        return orig, None
+
     try:
-        # yf.download with a single ticker returns a flat DataFrame (columns = OHLCV,
-        # no ticker in column names). Force multi-ticker mode by appending an anchor
-        # that we discard afterward.
-        _anchor = "SPY"
-        _padded = len(yf_tickers) == 1
-        fetch_list = yf_tickers + [_anchor] if _padded else yf_tickers
-
-        data  = yf.download(fetch_list, period="1d", progress=False, auto_adjust=True)
-        close = data["Close"] if "Close" in data else data
-
-        for orig, yft in zip(tickers, yf_tickers):
-            try:
-                col = close[yft] if yft in close.columns else close[yft]
-                prices[orig] = float(col.dropna().iloc[-1])
-            except Exception:
-                pass
+        with ThreadPoolExecutor(max_workers=min(len(tickers), 10)) as executor:
+            futures = {executor.submit(_fetch_one, orig, yft): orig
+                       for orig, yft in zip(tickers, yf_tickers)}
+            for fut in as_completed(futures, timeout=8):
+                orig, price = fut.result()
+                if price is not None:
+                    prices[orig] = price
     except Exception:
         pass
 
