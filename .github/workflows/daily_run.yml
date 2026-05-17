@@ -35,7 +35,7 @@ on:
         required: false
         default: "false"
       mock_data:
-        description: "true = skip live screeners, fast test"
+        description: "true = use mock picks, skip screeners + Claude API (instant ~10s test)"
         required: false
         default: "false"
 
