@@ -635,6 +635,9 @@ def _miniapp_auth() -> str | None:
     return chat_id
 
 
+_picks_mem_cache = {"data": None, "ts": 0}
+_PICKS_CACHE_TTL = 300  # 5 minutes — picks only change once per day
+
 @app.route("/api/miniapp/picks")
 def miniapp_picks():
     """Return today's picks for the Mini App."""
@@ -643,11 +646,20 @@ def miniapp_picks():
         return jsonify({"error": "unauthorised"}), 403
 
     try:
+        import time as _time
         import pytz
         from datetime import datetime as _dt
         from config_manager import load_picks, get_user_config
 
-        picks = load_picks() or {}
+        # Serve from in-process memory cache if fresh (avoids Gist/Supabase round-trip)
+        now_mono = _time.monotonic()
+        if _picks_mem_cache["data"] is not None and (now_mono - _picks_mem_cache["ts"]) < _PICKS_CACHE_TTL:
+            picks = {k: v for k, v in _picks_mem_cache["data"].items() if k != "_meta"}
+        else:
+            picks = load_picks() or {}
+            _picks_mem_cache["data"] = picks
+            _picks_mem_cache["ts"]   = now_mono
+
         ucfg  = get_user_config(chat_id)
 
         # Filter assets based on user preference
@@ -1378,6 +1390,65 @@ def miniapp_status():
     })
 
 
+# Fast company-name → ticker map (no Haiku needed)
+_NAME_TO_TICKER = {
+    "NVIDIA": "NVDA", "NVIDEA": "NVDA", "NVDIA": "NVDA",
+    "APPLE": "AAPL",
+    "MICROSOFT": "MSFT",
+    "AMAZON": "AMZN",
+    "GOOGLE": "GOOGL", "ALPHABET": "GOOGL",
+    "META": "META", "FACEBOOK": "META",
+    "TESLA": "TSLA",
+    "COSTCO": "COST",
+    "WALMART": "WMT",
+    "NETFLIX": "NFLX",
+    "BERKSHIRE": "BRK-B",
+    "JPMORGAN": "JPM", "JP MORGAN": "JPM",
+    "VISA": "V",
+    "MASTERCARD": "MA",
+    "JOHNSON": "JNJ",
+    "UNITEDHEALTH": "UNH",
+    "EXXON": "XOM", "EXXONMOBIL": "XOM",
+    "CHEVRON": "CVX",
+    "PROCTER": "PG", "PROCTERGAMBLE": "PG",
+    "HOME DEPOT": "HD", "HOMEDEPOT": "HD",
+    "ABBVIE": "ABBV",
+    "BROADCOM": "AVGO",
+    "SALESFORCE": "CRM",
+    "ORACLE": "ORCL",
+    "AMD": "AMD", "ADVANCED MICRO": "AMD",
+    "INTEL": "INTC",
+    "QUALCOMM": "QCOM",
+    "ADOBE": "ADBE",
+    "PAYPAL": "PYPL",
+    "COINBASE": "COIN",
+    "PALANTIR": "PLTR",
+    "SNOWFLAKE": "SNOW",
+    "UBER": "UBER",
+    "AIRBNB": "ABNB",
+    "SHOPIFY": "SHOP",
+    "SPOTIFY": "SPOT",
+    "PINTEREST": "PINS",
+    "SNAP": "SNAP",
+    "TWITTER": "X",
+    "ROBINHOOD": "HOOD",
+    "RIVIAN": "RIVN",
+    "LUCID": "LCID",
+    "NIO": "NIO",
+    "BAIDU": "BIDU",
+    "ALIBABA": "BABA",
+}
+
+def _resolve_watchlist_ticker(raw: str) -> str:
+    """Resolve company names to tickers without Haiku. Returns uppercased ticker."""
+    upper = raw.strip().upper().replace(" ", "").replace(".", "").replace("-", "")
+    # Direct name lookup
+    if upper in _NAME_TO_TICKER:
+        return _NAME_TO_TICKER[upper]
+    # Already looks like a ticker (≤6 chars, all alphanum) — trust it
+    return raw.strip().upper()
+
+
 @app.route("/api/miniapp/update_watchlist", methods=["POST"])
 def miniapp_update_watchlist():
     chat_id = _miniapp_auth()
@@ -1390,18 +1461,22 @@ def miniapp_update_watchlist():
     ticker  = (body.get("ticker") or "").strip().upper()
     tickers = body.get("tickers")   # for "set" action
 
+    added_as = ticker
     current = ucfg.get("watchlist", [])
     if action == "add" and ticker:
-        if ticker not in current:
-            current = current + [ticker]
+        # Resolve company name → ticker (e.g. COSTCO → COST, NVIDEA → NVDA)
+        resolved = _resolve_watchlist_ticker(ticker)
+        added_as = resolved
+        if resolved not in current:
+            current = current + [resolved]
     elif action == "remove" and ticker:
         current = [t for t in current if t != ticker]
     elif action == "set" and isinstance(tickers, list):
-        current = [t.strip().upper() for t in tickers if t.strip()]
+        current = [_resolve_watchlist_ticker(t) for t in tickers if t.strip()]
 
     ucfg["watchlist"] = current
     save_user_config(chat_id, ucfg)
-    return jsonify({"ok": True, "watchlist": current})
+    return jsonify({"ok": True, "watchlist": current, "added_as": added_as})
 
 
 @app.route("/api/miniapp/update_exclusions", methods=["POST"])
