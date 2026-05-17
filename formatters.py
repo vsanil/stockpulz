@@ -192,371 +192,172 @@ def format_daily_message(picks: dict, config: dict,
                          buy_counts: dict | None = None,
                          recent_stats: dict | None = None) -> str:
     """
-    Build the formatted daily Telegram message from Claude picks (stocks + crypto).
-
-    personal_notes (optional): dict mapping ticker/symbol → one-line personalised note.
-      e.g. {"AAPL": "Balances your tech-heavy portfolio with value", "BTC": "Complements your ETH long"}
-      When provided, each pick gets a 💡 line showing why this pick suits the user's portfolio.
-
-    pick_streaks (optional): dict mapping ticker/symbol → consecutive-day count (≥ 2).
-      e.g. {"AAPL": 3, "BTC": 2}
-      When provided, picks that recur on consecutive days show a ⚡ N-day badge.
+    Concise daily Telegram message — scannable in under 10 seconds.
+    Each pick is 2 lines: prices + thesis. Full detail lives in the mini app.
     """
-    today         = date.today().strftime("%a %b %d, %Y")
-    stock_budget  = config.get("stock_budget")
-    crypto_budget = config.get("crypto_budget")
-    pick_mode     = config.get("pick_mode", "both")
-
-    # Compute equal per-pick amounts
-    max_stock_picks  = config.get("max_short_picks", 2) + config.get("max_long_picks", 3)
-    max_crypto_picks = config.get("max_crypto_short_picks", 2) + config.get("max_crypto_long_picks", 2)
-    per_stock  = round(float(stock_budget)  / max(max_stock_picks,  1), 2) if stock_budget  else None
-    per_crypto = round(float(crypto_budget) / max(max_crypto_picks, 1), 2) if crypto_budget else None
-
+    today       = date.today().strftime("%a %b %d")
+    pick_mode   = config.get("pick_mode", "both")
     show_st     = pick_mode in ("st", "both")
     show_lt     = pick_mode in ("lt", "both")
-    show_crypto = config.get("show_crypto", True)   # per-user crypto on/off
+    show_crypto = config.get("show_crypto", True)
 
-    stocks    = picks.get("stocks", picks)
-    crypto    = picks.get("crypto", {})
-    st_picks  = stocks.get("short_term", []) if show_st else []
-    lt_picks  = stocks.get("long_term", [])  if show_lt else []
+    stocks      = picks.get("stocks", picks)
+    crypto      = picks.get("crypto", {})
+    etfs        = picks.get("etfs", {})
+    commodities = picks.get("commodities", {})
 
-    # ETF picks
-    etfs       = picks.get("etfs", {})
-    etf_st     = etfs.get("short_term", []) if show_st else []
-    etf_lt     = [{**e, "_lt": True} for e in etfs.get("long_term", [])] if show_lt else []
-    etf_picks  = etf_st + etf_lt
-
-    # Crypto — short-term only (LT crypto removed)
-    cst_picks = crypto.get("short_term", []) if show_crypto else []
-
-    # Commodity picks
-    commodities  = picks.get("commodities", {})
-    comm_st      = commodities.get("short_term", []) if show_st else []
-    comm_lt      = [{**c, "_lt": True} for c in commodities.get("long_term", [])] if show_lt else []
-    comm_picks   = comm_st + comm_lt
-
-    # Options plays (top-level array)
+    st_picks    = stocks.get("short_term",   []) if show_st else []
+    lt_picks    = stocks.get("long_term",    []) if show_lt else []
+    cst_picks   = crypto.get("short_term",   []) if show_crypto else []
+    etf_st      = etfs.get("short_term",     []) if show_st else []
+    etf_lt      = [{**e, "_lt": True} for e in etfs.get("long_term", [])] if show_lt else []
+    etf_picks   = etf_st + etf_lt
+    comm_st     = commodities.get("short_term", []) if show_st else []
+    comm_lt     = [{**c, "_lt": True} for c in commodities.get("long_term", [])] if show_lt else []
+    comm_picks  = comm_st + comm_lt
     options_plays = picks.get("options_plays", [])
 
-    # Macro context line — conversational narrative
-    m = picks.get("macro_context", {})
-    macro_line = _macro_narrative_line(m)
+    # ── Header ────────────────────────────────────────────────────────────────
+    mood = _esc(picks.get("daily_summary", ""))
+    mood_emoji = "📈"
+    if mood:
+        lo = mood.lower()
+        if any(w in lo for w in ("bear", "sell", "weak", "crash", "plunge")):
+            mood_emoji = "📉"
+        elif any(w in lo for w in ("cautious", "volatile", "uncertain", "fear", "risk-off", "elevated")):
+            mood_emoji = "⚠️"
 
-    lines = [
-        f"<u><b>📊 Daily Picks — {today}  <i>· NYSE 9:30 AM ET</i></b></u>",
-        "",
-        f"<i>{_esc(picks.get('daily_summary', ''))}</i>",
-    ]
+    lines = [f"{mood_emoji} <b>{today}</b>"]
+    if mood:
+        lines.append(f"<i>{mood}</i>")
+
+    macro_line = _macro_narrative_line(picks.get("macro_context", {}))
     if macro_line:
         lines.append(macro_line)
 
-    # ── Performance bar — shown when at least 3 closed trades exist ──────────
+    # Performance bar — only when there's real data
     if recent_stats and recent_stats.get("total"):
-        t   = recent_stats["total"]
+        t  = recent_stats["total"]
         spy = recent_stats.get("spy_return")
-        _s  = lambda x: "+" if x >= 0 else ""
-        parts = [
-            f"{t['wins']}W/{t['losses']}L ({t['win_rate']}%)",
-            f"avg {_s(t['avg_return'])}{t['avg_return']}%",
-            f"exp {_s(t['expectancy'])}{t['expectancy']}%/trade",
-        ]
+        _s = lambda x: "+" if x >= 0 else ""
+        perf = f"📊 <i>{t['wins']}W/{t['losses']}L · {t['win_rate']}% · avg {_s(t['avg_return'])}{t['avg_return']}%"
         if spy is not None:
-            parts.append(f"vs SPY {_s(spy)}{spy}%")
-        lines.append(f"<i>📊 Last {recent_stats['days']}d: {' · '.join(parts)}</i>")
+            perf += f" · vs SPY {_s(spy)}{spy}%"
+        perf += f"  ({recent_stats['days']}d)</i>"
+        lines.append(perf)
 
-    def _buy_badge(ticker: str) -> str:
-        """Return '👥 N members bought' badge when count ≥ 2, else empty string."""
-        n = bc.get(ticker, 0)
-        return f"  <i>👥 {n} bought</i>" if n >= 2 else ""
+    # ── Pick row helpers ──────────────────────────────────────────────────────
+    def _conv_tag(conviction):
+        c = max(1, min(5, int(conviction or 3)))
+        if c == 5: return "  <i>· ⭐ highest conviction</i>"
+        if c <= 2: return "  <i>· low conviction</i>"
+        return ""
 
-    def _sizing_line(pick: dict) -> str:
-        """Return a compact sizing line if sizing data is present, else empty string."""
-        sz = pick.get("sizing")
-        if not sz or not sz.get("dollar_amount"):
-            return ""
-        shares    = sz.get("shares")
-        dollar    = sz.get("dollar_amount")
-        risk_d    = sz.get("risk_dollars")
-        risk_pct  = sz.get("risk_pct")
-        stop_p    = sz.get("stop_price")
-        capped    = sz.get("capped_by")
-        cap_tag   = f" <i>·  capped</i>" if capped else ""
-        if shares:
-            return (
-                f"  📐 <i>{shares} shares · ${dollar:,.0f} · "
-                f"risk ${risk_d:,.0f} ({risk_pct}%) · stop ${stop_p:.2f}</i>{cap_tag}"
-            )
-        else:
-            return (
-                f"  📐 <i>${dollar:,.0f} · "
-                f"risk ${risk_d:,.0f} ({risk_pct}%) · stop ${stop_p:.4g}</i>{cap_tag}"
-            )
+    def _iv_warn(pick):
+        of = (pick.get("options_flow") or {})
+        return "\n  🔴 <i>IV extreme — high crush risk on options</i>" \
+               if of.get("iv_label") == "EXTREME" else ""
 
-    def _iv_line(pick: dict) -> str:
-        """
-        Return a compact IV rank line only for ELEVATED / EXTREME reads — silence on
-        LOW/NORMAL to avoid noise on every pick.
-        Example: "  🌡 IV: ELEVATED (rank 74)  ·  ATM IV ~38%  ·  RV 28%"
-        """
-        of = pick.get("options_flow") or {}
-        iv_label = of.get("iv_label")
-        iv_rank  = of.get("iv_rank")
-        iv_pct   = of.get("iv_pct")
-        if not iv_label or iv_label in ("NORMAL", "LOW") or iv_rank is None:
-            return ""
-        emoji = "🔴" if iv_label == "EXTREME" else "🟡"
-        iv_str  = f"  ·  ATM IV ~{iv_pct}%" if iv_pct else ""
-        rv_pct  = of.get("rv_pct")
-        rv_str  = f"  ·  RV {rv_pct}%" if rv_pct else ""
-        crush   = "  ⚠️ (IV crush risk — avoid naked buys)" if iv_label == "EXTREME" else ""
-        return f"  {emoji} <i>IV: {iv_label} (rank {iv_rank}){iv_str}{rv_str}{crush}</i>"
+    def _tline(thesis, catalyst):
+        parts = [_esc(thesis)] if thesis else []
+        if catalyst:
+            parts.append(f"🎯 {_esc(catalyst)}")
+        return "  <i>" + "  ·  ".join(parts) + "</i>" if parts else ""
 
-    def _pick_row_st(i, s, personal_note: str = "", streak: int = 0):
-        entry, target, stop = s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
-        ticker        = s.get("ticker", "")
-        earnings_tag  = f"  🗓 {_esc(s['earnings_date'])}" if s.get("earnings_date") else ""
-        alloc         = s.get("allocation")
-        alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
-        badge         = _conviction_badge(s.get("conviction", 3))
-        streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
-        social_badge  = _buy_badge(ticker)
-        personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
-        sizing_line   = _sizing_line(s)
-        iv_line       = _iv_line(s)
-        window        = _entry_window(entry, stop=stop, budget=per_stock,
-                                       is_long_term=False, is_crypto=False)
-        window_line   = f"\n{window}" if window else ""
-        lines = [
-            f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
-            f"<i>{_esc(_short_company(s.get('company', '')))}</i>{earnings_tag}",
-            f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>  ·  stop <code>${_p(stop)}</code>{alloc_str}{window_line}",
-            f"<i>{_esc(s.get('thesis'))}</i>",
-        ]
-        if s.get('catalyst'):
-            lines.append(f"  🎯 <i>Catalyst: {_esc(s['catalyst'])}</i>")
-        if sizing_line:
-            lines.append(sizing_line)
-        if iv_line:
-            lines.append(iv_line)
-        entry_low  = s.get('entry_low')
-        entry_high = s.get('entry_high')
-        if entry_low and entry_high:
-            lines.append(f"  📍 <i>Entry zone: ${entry_low:.2f}–${entry_high:.2f}  (don't chase above ${entry_high:.2f})</i>")
-        if s.get('invalidation'):
-            lines.append(f"  ⚠️ <i>Breaks if: {_esc(s['invalidation'])}</i>")
-        if personal_line:
-            lines.append(personal_line.lstrip("\n"))
-        return "\n".join(lines)
+    def _row_st(s):
+        t, e, tgt, stop = s.get("ticker",""), s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
+        stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop else ""
+        row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}  "
+               f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
+               f"<i>{_upside(e,tgt)}</i>{stop_str}")
+        tl = _tline(s.get("thesis"), s.get("catalyst"))
+        if tl: row += f"\n{tl}"
+        row += _iv_warn(s)
+        return row
 
-    def _pick_row_lt(i, s, personal_note: str = ""):
-        entry, target = s.get("entry_price"), s.get("target_price")
-        ticker        = s.get("ticker", "")
-        alloc         = s.get("allocation")
-        alloc_str     = f"  <code>${_p(alloc)}/mo</code>" if alloc is not None else ""
-        badge         = _conviction_badge(s.get("conviction", 3))
-        social_badge  = _buy_badge(ticker)
-        personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
-        window        = _entry_window(entry, budget=per_stock,
-                                       is_long_term=True, is_crypto=False)
-        window_line   = f"\n{window}" if window else ""
-        lines = [
-            f"<b>{_esc(ticker)}</b>  {_stars(s.get('conviction', 3))}{badge}{social_badge}  "
-            f"<i>{_esc(_short_company(s.get('company', '')))}</i>",
-            f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>  ·  {_esc(s.get('horizon'))}{alloc_str}{window_line}",
-            f"<i>{_esc(s.get('thesis'))}</i>",
-        ]
-        if s.get('catalyst'):
-            lines.append(f"  🎯 <i>Catalyst: {_esc(s['catalyst'])}</i>")
-        if s.get('invalidation'):
-            lines.append(f"  ⚠️ <i>Breaks if: {_esc(s['invalidation'])}</i>")
-        if personal_line:
-            lines.append(personal_line.lstrip("\n"))
-        return "\n".join(lines)
+    def _row_lt(s):
+        t, e, tgt = s.get("ticker",""), s.get("entry_price"), s.get("target_price")
+        hz = f"  ·  <i>{_esc(s.get('horizon',''))}</i>" if s.get("horizon") else ""
+        row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}  "
+               f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
+               f"<i>{_upside(e,tgt)}</i>{hz}")
+        tl = _tline(s.get("thesis"), s.get("catalyst"))
+        if tl: row += f"\n{tl}"
+        return row
 
-    def _pick_row_cst(i, c, personal_note: str = "", streak: int = 0):
-        entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
-        sym           = c.get("symbol", "")
-        alloc         = c.get("allocation")
-        alloc_str     = f"  <code>${_p(alloc)}</code>" if alloc is not None else ""
-        badge         = _conviction_badge(c.get("conviction", 3))
-        streak_badge  = f"  ⚡ <i>{_ordinal(streak)} day</i>" if streak >= 2 else ""
-        social_badge  = _buy_badge(sym)
-        personal_line = f"\n💡 <i>{_esc(personal_note)}</i>" if personal_note else ""
-        stop_str      = f"  ·  stop <code>${_p(stop)}</code>" if stop else ""
-        window        = _entry_window(entry, stop=stop, budget=per_crypto,
-                                       is_long_term=False, is_crypto=True)
-        window_line   = f"\n{window}" if window else ""
-        sizing_line   = _sizing_line(c)
-        iv_line       = _iv_line(c)
-        lines = [
-            f"<b>{_esc(sym)}</b>  {_stars(c.get('conviction', 3))}{badge}{streak_badge}{social_badge}  "
-            f"<i>{_esc(_short_company(c.get('name', '')))}</i>",
-            f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>{stop_str}{alloc_str}{window_line}",
-            f"<i>{_esc(c.get('thesis'))}</i>",
-        ]
-        if c.get('catalyst'):
-            lines.append(f"  🎯 <i>Catalyst: {_esc(c['catalyst'])}</i>")
-        if sizing_line:
-            lines.append(sizing_line)
-        if iv_line:
-            lines.append(iv_line)
-        entry_low  = c.get('entry_low')
-        entry_high = c.get('entry_high')
-        if entry_low and entry_high:
-            lines.append(f"  📍 <i>Entry zone: ${entry_low:.2f}–${entry_high:.2f}  (don't chase above ${entry_high:.2f})</i>")
-        if c.get('invalidation'):
-            lines.append(f"  ⚠️ <i>Breaks if: {_esc(c['invalidation'])}</i>")
-        if personal_line:
-            lines.append(personal_line.lstrip("\n"))
-        return "\n".join(lines)
+    def _row_crypto(c):
+        sym, e, tgt, stop = c.get("symbol",""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
+        stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop else ""
+        row = (f"<b>{_esc(sym)}</b>{_conv_tag(c.get('conviction',3))}  "
+               f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
+               f"<i>{_upside(e,tgt)}</i>{stop_str}")
+        tl = _tline(c.get("thesis"), c.get("catalyst"))
+        if tl: row += f"\n{tl}"
+        row += _iv_warn(c)
+        return row
 
-    def _pick_row_etf(i, e):
-        entry, target, stop = e.get("entry_price"), e.get("target_price"), e.get("stop_loss")
-        ticker   = e.get("ticker", "")
-        is_lt    = e.get("_lt", False)
-        badge    = _conviction_badge(e.get("conviction", 3))
-        lt_label = "  <i>· long-term</i>" if is_lt else ""
+    def _row_etf(e):
+        t, ep, tgt, stop = e.get("ticker",""), e.get("entry_price"), e.get("target_price"), e.get("stop_loss")
+        is_lt = e.get("_lt", False)
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop and not is_lt else ""
-        horizon  = f"  ·  {_esc(e.get('horizon', ''))}" if is_lt and e.get("horizon") else ""
-        lines = [
-            f"<b>{_esc(ticker)}</b>  {_stars(e.get('conviction', 3))}{badge}  "
-            f"<i>{_esc(_short_company(e.get('name', '')))}</i>{lt_label}",
-            f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}",
-            f"<i>{_esc(e.get('thesis'))}</i>",
-        ]
-        if e.get('catalyst'):
-            lines.append(f"  🎯 <i>Catalyst: {_esc(e['catalyst'])}</i>")
-        if e.get('invalidation'):
-            lines.append(f"  ⚠️ <i>Breaks if: {_esc(e['invalidation'])}</i>")
-        return "\n".join(lines)
+        hz = f"  ·  <i>{_esc(e.get('horizon',''))}</i>" if is_lt and e.get("horizon") else ""
+        row = (f"<b>{_esc(t)}</b>  "
+               f"<code>${_p(ep)}</code> → <code>${_p(tgt)}</code>  "
+               f"<i>{_upside(ep,tgt)}</i>{stop_str}{hz}")
+        tl = _tline(e.get("thesis"), e.get("catalyst"))
+        if tl: row += f"\n{tl}"
+        return row
 
-    def _pick_row_commodity(i, c):
-        """Commodity ETF pick — same layout as ETF row."""
-        entry, target, stop = c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
-        ticker   = c.get("ticker", "")
-        is_lt    = c.get("_lt", False)
-        badge    = _conviction_badge(c.get("conviction", 3))
-        lt_label = "  <i>· long-term</i>" if is_lt else ""
+    def _row_commodity(c):
+        t, ep, tgt, stop = c.get("ticker",""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
+        is_lt = c.get("_lt", False)
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop and not is_lt else ""
-        horizon  = f"  ·  {_esc(c.get('horizon', ''))}" if is_lt and c.get("horizon") else ""
-        lines = [
-            f"<b>{_esc(ticker)}</b>  {_stars(c.get('conviction', 3))}{badge}  "
-            f"<i>{_esc(_short_company(c.get('name', '')))}</i>{lt_label}",
-            f"<code>${_p(entry)}</code> → <code>${_p(target)}</code>  "
-            f"<i>{_upside(entry, target)}</i>{stop_str}{horizon}",
-            f"<i>{_esc(c.get('thesis'))}</i>",
-        ]
-        if c.get('catalyst'):
-            lines.append(f"  🎯 <i>Catalyst: {_esc(c['catalyst'])}</i>")
-        if c.get('invalidation'):
-            lines.append(f"  ⚠️ <i>Breaks if: {_esc(c['invalidation'])}</i>")
-        return "\n".join(lines)
+        row = (f"<b>{_esc(t)}</b>  "
+               f"<code>${_p(ep)}</code> → <code>${_p(tgt)}</code>  "
+               f"<i>{_upside(ep,tgt)}</i>{stop_str}")
+        tl = _tline(c.get("thesis"), c.get("catalyst"))
+        if tl: row += f"\n{tl}"
+        return row
 
-    def _pick_row_options_play(i, o):
-        """Simple directional options play tied to a high-conviction ST pick."""
-        ticker = o.get("ticker", "")
-        action = o.get("action", "CALL").upper()
-        strike = o.get("strike")
-        expiry = o.get("expiry", "")
-        note   = o.get("note", "")
-        icon   = "📈" if action == "CALL" else "📉"
-        return (
-            f"{icon} <b>{_esc(ticker)}</b>  {_esc(action)}  "
-            f"strike <code>${_p(strike)}</code>  exp <i>{_esc(expiry)}</i>\n"
-            f"<i>{_esc(note)}</i>"
-        )
+    def _row_options(o):
+        t, action = o.get("ticker",""), o.get("action","CALL").upper()
+        icon = "📈" if action == "CALL" else "📉"
+        row = (f"{icon} <b>{_esc(t)}</b>  {_esc(action)}  "
+               f"strike <code>${_p(o.get('strike'))}</code>  "
+               f"exp <i>{_esc(o.get('expiry',''))}</i>")
+        if o.get("note"): row += f"\n  <i>{_esc(o['note'])}</i>"
+        return row
 
-    pn = personal_notes or {}   # ticker/symbol → personal note string
-    ps = pick_streaks   or {}   # ticker/symbol → consecutive-day count
-    bc = buy_counts     or {}   # ticker/symbol → number of members who bought today
-
+    # ── Sections ──────────────────────────────────────────────────────────────
     if st_picks:
-        budget_tag = f"  <code>${per_stock}/pick</code>" if per_stock else ""
-        body = "\n\n".join(
-            _pick_row_st(i, s, pn.get(s.get("ticker", ""), ""), ps.get(s.get("ticker", ""), 0))
-            for i, s in enumerate(st_picks, 1)
-        )
-        lines += ["", f"<blockquote expandable>📈 <b>STOCK — SHORT TERM</b>{budget_tag}\n\n{body}</blockquote>"]
+        body = "\n\n".join(_row_st(s) for s in st_picks)
+        lines += ["", f"<blockquote expandable>📈 <b>STOCKS — SHORT TERM</b>\n\n{body}</blockquote>"]
 
     if lt_picks:
-        budget_tag = f"  <code>${per_stock}/pick</code>" if per_stock else ""
-        body = "\n\n".join(
-            _pick_row_lt(i, s, pn.get(s.get("ticker", ""), ""))
-            for i, s in enumerate(lt_picks, 1)
-        )
-        lines += ["", f"<blockquote expandable>🏦 <b>STOCK — LONG TERM</b>{budget_tag}\n\n{body}</blockquote>"]
+        body = "\n\n".join(_row_lt(s) for s in lt_picks)
+        lines += ["", f"<blockquote expandable>🏦 <b>STOCKS — LONG TERM</b>\n\n{body}</blockquote>"]
 
     if cst_picks:
-        budget_tag = f"  <code>${per_crypto}/pick</code>" if per_crypto else ""
-        body = "\n\n".join(
-            _pick_row_cst(i, c, pn.get(c.get("symbol", ""), ""), ps.get(c.get("symbol", ""), 0))
-            for i, c in enumerate(cst_picks, 1)
-        )
-        lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO</b>{budget_tag}  ⚡ HIGH RISK\n\n{body}</blockquote>"]
+        body = "\n\n".join(_row_crypto(c) for c in cst_picks)
+        lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO</b>  <i>· high risk</i>\n\n{body}</blockquote>"]
 
     if etf_picks:
-        body = "\n\n".join(
-            _pick_row_etf(i, e)
-            for i, e in enumerate(etf_picks, 1)
-        )
-        lines += ["", f"<blockquote expandable>📦 <b>ETF PICKS</b>\n\n{body}</blockquote>"]
+        body = "\n\n".join(_row_etf(e) for e in etf_picks)
+        lines += ["", f"<blockquote expandable>📦 <b>ETFs</b>\n\n{body}</blockquote>"]
 
     if comm_picks:
-        body = "\n\n".join(
-            _pick_row_commodity(i, c)
-            for i, c in enumerate(comm_picks, 1)
-        )
+        body = "\n\n".join(_row_commodity(c) for c in comm_picks)
         lines += ["", f"<blockquote expandable>🛢 <b>COMMODITIES</b>\n\n{body}</blockquote>"]
 
     if options_plays:
-        body = "\n\n".join(
-            _pick_row_options_play(i, o)
-            for i, o in enumerate(options_plays, 1)
-        )
-        lines += ["", f"<blockquote expandable>🎯 <b>OPTIONS PLAYS</b>  <i>· illustrative only</i>\n\n{body}</blockquote>"]
+        body = "\n\n".join(_row_options(o) for o in options_plays)
+        lines += ["", f"<blockquote expandable>🎯 <b>OPTIONS</b>  <i>· illustrative only</i>\n\n{body}</blockquote>"]
 
-    # Footer — sector concentration warning (only shown when picks are concentrated)
-    sector_counts: dict = {}
-    total_picks = len(st_picks) + len(lt_picks)
-    for p in st_picks + lt_picks:
-        s = p.get("sector", "")
-        if s and s != "Unknown":
-            sector_counts[s] = sector_counts.get(s, 0) + 1
-
-    concentration_line = ""
-    if sector_counts and total_picks >= 2:
-        top_sector, top_count = max(sector_counts.items(), key=lambda x: x[1])
-        pct = top_count / total_picks
-        if pct >= 0.6:   # 60%+ in one sector → warn
-            concentration_line = (
-                f"⚠️ <i>{top_count} of {total_picks} picks are {_esc(top_sector)} "
-                f"— consider sizing down to manage sector risk.</i>"
-            )
-
-    # Portfolio sizing summary (only shown when position_sizer has run)
-    portfolio_summary_line = picks.get("portfolio_summary", "")
-    if portfolio_summary_line:
-        lines += ["", portfolio_summary_line]
-
-    # Sizing warnings from position_sizer (sector concentration, total risk, etc.)
-    for warn in (picks.get("sizing_warnings") or []):
-        lines += ["", warn]
-
+    # ── Footer ────────────────────────────────────────────────────────────────
     lines += [
         "",
-        "👆 <b>Open the Dashboard below</b> — charts, portfolio tracker, price alerts & more.",
-        "",
-        "⚠️ <i>Not financial advice.</i>  📋 /help  ·  📲 /share  ·  💬 /feedback",
-        "<i>💬 Have a question about any pick? Just type it.</i>",
+        "⚠️ <i>Not financial advice. Open the dashboard for full analysis & charts.</i>",
     ]
-    if concentration_line:
-        lines.append(concentration_line)
 
     return "\n".join(lines)
 

@@ -904,6 +904,46 @@ body.tg-light .sheet-handle { background: rgba(0,0,0,.18); }
 .sheet-body { padding: 4px 18px 18px; }
 .sheet-hint { font-size: 13px; color: var(--hint); margin-bottom: 16px; line-height: 1.5; }
 
+/* ── History calendar ────────────────────────────────────────────────────── */
+.cal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 0 12px;
+}
+.cal-month-label { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; }
+.cal-nav {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--secondary); border: 1px solid var(--border);
+  color: var(--text); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-family: inherit;
+  transition: background .15s, transform .12s;
+}
+.cal-nav:active { transform: scale(.92); background: var(--border); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.cal-day-label {
+  text-align: center; font-size: 10px; opacity: .45;
+  font-weight: 600; padding: 0 0 6px; letter-spacing: .3px;
+}
+.cal-cell {
+  aspect-ratio: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border-radius: 8px; position: relative;
+  transition: background .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.cal-cell.has-trades { cursor: pointer; }
+.cal-cell.has-trades:active { background: var(--secondary); }
+.cal-cell.today { background: rgba(79,142,247,0.13); }
+.cal-cell.weekend .cal-day-num { opacity: .38; }
+.cal-day-num { font-size: 12px; font-weight: 500; line-height: 1; }
+.cal-dot {
+  width: 5px; height: 5px; border-radius: 50%; margin-top: 3px;
+  flex-shrink: 0;
+}
+.cal-dot.green  { background: var(--green); }
+.cal-dot.red    { background: var(--red); }
+.cal-dot.mixed  { background: #f59e0b; }
+
 /* ── Chart overlay ───────────────────────────────────────────────────────── */
 #chart-overlay .bottom-sheet { padding-bottom: env(safe-area-inset-bottom, 8px); }
 .lw-container {
@@ -1715,6 +1755,18 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
       </div>
       <div class="chart-meta-chg" id="chart-meta-chg"></div>
     </div>
+  </div>
+</div>
+
+<!-- ── Calendar day-detail sheet ─────────────────────────────────────────── -->
+<div id="day-overlay" class="overlay" onclick="if(event.target===this)_closeDaySheet()">
+  <div class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title" id="day-sheet-title">Trades</div>
+      <button class="sheet-close" onclick="_closeDaySheet()">✕</button>
+    </div>
+    <div id="day-sheet-body" style="padding:0 18px 24px"></div>
   </div>
 </div>
 
@@ -3681,6 +3733,128 @@ function buildPeriodTable(periodStats) {
     </table>`;
 }
 
+// ── History calendar ──────────────────────────────────────────────────────
+let _calYear   = new Date().getFullYear();
+let _calMonth  = new Date().getMonth(); // 0-indexed
+let _calTrades = [];
+
+function _renderCalendar() {
+  const wrap = document.getElementById('cal-grid-wrap');
+  if (!wrap) return;
+
+  const today    = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const year     = _calYear;
+  const month    = _calMonth;
+
+  // Group trades by closed_date
+  const byDate = {};
+  for (const t of _calTrades) {
+    const d = t.closed_date || t.sold_date;
+    if (!d) continue;
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(t);
+  }
+
+  document.getElementById('cal-month-label').textContent =
+    new Date(year, month, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+  const firstDow    = new Date(year, month, 1).getDay();   // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const DAY_LABELS  = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+  let html = DAY_LABELS.map(d =>
+    `<div class="cal-day-label">${d}</div>`
+  ).join('');
+
+  for (let i = 0; i < firstDow; i++) html += `<div class="cal-cell"></div>`;
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const ds  = `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const dow = new Date(year, month, day).getDay();
+    const trades = byDate[ds] || [];
+
+    let dotHtml = '';
+    let hasTrades = trades.length > 0;
+    if (hasTrades) {
+      const wins   = trades.filter(t => parseFloat(t.return_pct || 0) > 0).length;
+      const losses = trades.length - wins;
+      const cls    = wins > 0 && losses === 0 ? 'green'
+                   : losses > 0 && wins === 0 ? 'red'
+                   : 'mixed';
+      dotHtml = `<div class="cal-dot ${cls}"></div>`;
+    }
+
+    const cls = [
+      'cal-cell',
+      ds === todayStr            ? 'today'      : '',
+      dow === 0 || dow === 6     ? 'weekend'    : '',
+      hasTrades                  ? 'has-trades' : '',
+    ].filter(Boolean).join(' ');
+
+    html += `<div class="${cls}" ${hasTrades ? `onclick="_openDaySheet('${ds}')"` : ''}>
+      <div class="cal-day-num">${day}</div>
+      ${dotHtml}
+    </div>`;
+  }
+
+  wrap.innerHTML = html;
+}
+
+function _calPrevMonth() {
+  _calMonth--;
+  if (_calMonth < 0) { _calMonth = 11; _calYear--; }
+  _renderCalendar();
+}
+function _calNextMonth() {
+  _calMonth++;
+  if (_calMonth > 11) { _calMonth = 0; _calYear++; }
+  _renderCalendar();
+}
+
+function _openDaySheet(dateStr) {
+  const trades = _calTrades.filter(t => (t.closed_date || t.sold_date) === dateStr);
+  if (!trades.length) return;
+
+  const date  = new Date(dateStr + 'T12:00:00');
+  const label = date.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' });
+  document.getElementById('day-sheet-title').textContent = label;
+
+  const sign = n => parseFloat(n) >= 0 ? '+' : '';
+  const outcomeLabel = o =>
+    o === 'hit_target' ? '✅ Hit target' :
+    o === 'hit_stop'   ? '🛑 Stop hit'   :
+    o === 'manual'     ? '📝 Manual'     : '📊 Closed';
+
+  const rows = trades.map(t => {
+    const ret   = parseFloat(t.return_pct || 0);
+    const color = ret >= 0 ? 'var(--green)' : 'var(--red)';
+    const usd   = t.gain_usd != null
+      ? `<div style="font-size:12px;opacity:.5;margin-top:1px">${sign(t.gain_usd)}$${Math.abs(t.gain_usd).toFixed(0)}</div>`
+      : '';
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+                  padding:12px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-weight:700;font-size:15px">${t.ticker}</div>
+          <div style="font-size:12px;opacity:.5;margin-top:2px">${outcomeLabel(t.outcome)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;font-size:15px;color:${color}">${sign(ret)}${ret.toFixed(1)}%</div>
+          ${usd}
+        </div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('day-sheet-body').innerHTML = rows;
+  document.getElementById('day-overlay').classList.add('open');
+  tg.HapticFeedback?.selectionChanged();
+}
+
+function _closeDaySheet() {
+  document.getElementById('day-overlay').classList.remove('open');
+}
+
 async function loadPerformance() {
   const spinner = document.getElementById('perf-spinner');
   const body    = document.getElementById('perf-body');
@@ -3690,13 +3864,38 @@ async function loadPerformance() {
     spinner.style.display = 'none';
     body.style.display    = 'block';
 
+    // Fetch trade history for calendar (parallel, non-blocking)
+    let histTrades = [];
+    try {
+      const hist = await api('/api/miniapp/history');
+      histTrades = hist.trades || [];
+    } catch (_) {}
+    _calTrades = histTrades;
+
+    // Always render the calendar block, even with no trades
+    const calHtml = `
+      <div style="background:var(--secondary);border-radius:14px;padding:14px 14px 10px;margin:0 0 14px">
+        <div class="cal-header">
+          <button class="cal-nav" onclick="_calPrevMonth()">‹</button>
+          <div class="cal-month-label" id="cal-month-label"></div>
+          <button class="cal-nav" onclick="_calNextMonth()">›</button>
+        </div>
+        <div class="cal-grid" id="cal-grid-wrap"></div>
+        <div style="display:flex;gap:12px;justify-content:center;padding:10px 0 2px;font-size:11px;opacity:.55">
+          <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:3px"></span>Profit</span>
+          <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-right:3px"></span>Loss</span>
+          <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-right:3px"></span>Mixed</span>
+        </div>
+      </div>`;
+
     if (!stats.total_trades || stats.total_trades < 3) {
-      body.innerHTML = `
-        <div style="text-align:center;padding:40px 20px;opacity:.6">
+      body.innerHTML = calHtml + `
+        <div style="text-align:center;padding:30px 20px;opacity:.6">
           <div style="font-size:48px;margin-bottom:12px">📭</div>
           <div style="font-weight:600;margin-bottom:8px">No track record yet</div>
           <div style="font-size:13px">Log your first trade with /bought, then /sold to start tracking performance here.</div>
         </div>`;
+      _renderCalendar();
       return;
     }
 
@@ -3719,7 +3918,7 @@ async function loadPerformance() {
     const bestRow  = best    ? `<div class="stat-row"><span>🏆 Best pick</span><span style="color:var(--green)"><b>${best[0]}</b> ${sign(best[1])}${best[1].toFixed(1)}%</span></div>` : '';
     const worstRow = worst   ? `<div class="stat-row"><span>💔 Worst pick</span><span style="color:var(--red)"><b>${worst[0]}</b> ${sign(worst[1])}${worst[1].toFixed(1)}%</span></div>` : '';
 
-    body.innerHTML = `
+    body.innerHTML = calHtml + `
       <div style="padding:6px 0 16px">
         <div style="text-align:center;padding:20px 0 10px">
           <div style="font-size:13px;opacity:.6;margin-bottom:4px">Win Rate</div>
@@ -3744,6 +3943,7 @@ async function loadPerformance() {
           Based on trades logged by StockPulz users.<br>Past performance does not guarantee future results.
         </div>
       </div>`;
+    _renderCalendar();
   } catch(e) {
     spinner.style.display = 'none';
     body.style.display    = 'block';
