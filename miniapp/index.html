@@ -1683,11 +1683,6 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
     <div id="port-body" style="display:none"></div>
   </div>
 
-  <div class="tab-pane" id="pane-stats">
-    <div class="loading" id="stats-spinner"><div class="spinner"></div>Loading stats…</div>
-    <div id="stats-body" style="display:none"></div>
-  </div>
-
   <div class="tab-pane" id="pane-performance">
     <div class="loading" id="perf-spinner"><div class="spinner"></div>Loading track record…</div>
     <div id="perf-body" style="display:none"></div>
@@ -1723,11 +1718,8 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
   <div class="nav-item" id="nav-portfolio" onclick="gotoTab('portfolio')">
     <div class="nav-icon">💼</div><div class="nav-label">Portfolio</div>
   </div>
-  <div class="nav-item" id="nav-stats" onclick="gotoTab('stats')">
-    <div class="nav-icon">📊</div><div class="nav-label">Stats</div>
-  </div>
   <div class="nav-item" id="nav-performance" onclick="gotoTab('performance')">
-    <div class="nav-icon">🏆</div><div class="nav-label">Record</div>
+    <div class="nav-icon">📊</div><div class="nav-label">Performance</div>
   </div>
   <div class="nav-item" id="nav-settings" onclick="gotoTab('settings')">
     <div class="nav-icon">⚙️</div><div class="nav-label">Settings</div>
@@ -1999,7 +1991,7 @@ let _detailTicker     = null;
 
 // ── Tab routing ───────────────────────────────────────────────────────────────
 const _scrollPos  = {};
-const _TAB_ORDER  = ['picks', 'portfolio', 'stats', 'performance', 'settings'];
+const _TAB_ORDER  = ['picks', 'portfolio', 'performance', 'settings'];
 
 function _moveNavIndicator(name) {
   const indicator = document.getElementById('nav-indicator');
@@ -2031,7 +2023,6 @@ function gotoTab(name) {
   if (!loadedTabs[name]) {
     loadedTabs[name] = true;
     if (name === 'portfolio')   loadPortfolio();
-    if (name === 'stats')       loadStats();
     if (name === 'performance') loadPerformance();
     if (name === 'settings')    loadSettings();
   }
@@ -2347,8 +2338,7 @@ async function confirmSell() {
     loadedTabs['portfolio'] = false;
     if (curTab === 'portfolio') { loadPortfolio(); }
 
-    // Also invalidate stats + performance so they refresh next visit
-    loadedTabs['stats']       = false;
+    // Also invalidate performance so it refreshes next visit
     loadedTabs['performance'] = false;
   } catch (e) {
     btn.disabled    = false;
@@ -2508,10 +2498,6 @@ function _prefetchOtherTabs() {
     if (!loadedTabs['portfolio']) {
       loadedTabs['portfolio'] = true;
       loadPortfolio().catch(() => { loadedTabs['portfolio'] = false; });
-    }
-    if (!loadedTabs['stats']) {
-      loadedTabs['stats'] = true;
-      loadStats().catch(() => { loadedTabs['stats'] = false; });
     }
   }, 800);
 }
@@ -3487,11 +3473,9 @@ async function clearAllAlerts() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// STATS TAB
-// ═══════════════════════════════════════════════════════════════════════════════
+// (Stats tab removed — merged into Performance tab)
 
-async function loadStats() {
+async function loadStats_REMOVED() {
   try {
     const data   = await api('/api/miniapp/stats');
     const stats  = data.stats  || {};
@@ -3942,8 +3926,39 @@ async function loadPerformance() {
         <div style="text-align:center;font-size:12px;opacity:.45;padding-bottom:4px">
           Based on trades logged by StockPulz users.<br>Past performance does not guarantee future results.
         </div>
+
+        <div class="community-card" id="community-section">
+          <div class="community-title">🌍 Community</div>
+          <div id="community-content" style="color:var(--hint);font-size:13px">Loading community stats…</div>
+        </div>
       </div>`;
     _renderCalendar();
+
+    // Load community lazily after DOM is painted
+    communityLoaded = false;
+    setTimeout(async () => {
+      if (communityLoaded) return;
+      communityLoaded = true;
+      const commEl = document.getElementById('community-content');
+      if (!commEl) return;
+      try {
+        const cdata = await api('/api/miniapp/community');
+        if (!cdata.ok || !cdata.stats) { commEl.textContent = 'No community data yet.'; return; }
+        const s = cdata.stats;
+        commEl.innerHTML = [
+          s.total_users    != null ? `<div class="community-stat-row"><span>Total users</span><span>${s.total_users}</span></div>` : '',
+          s.win_rate       != null ? `<div class="community-stat-row"><span>Win rate</span><span style="color:var(--green)">${parseFloat(s.win_rate).toFixed(1)}%</span></div>` : '',
+          s.avg_return     != null ? `<div class="community-stat-row"><span>Avg return</span><span style="color:${s.avg_return>=0?'var(--green)':'var(--red)'}">${s.avg_return>=0?'+':''}${parseFloat(s.avg_return).toFixed(1)}%</span></div>` : '',
+          s.vs_spy         != null ? `<div class="community-stat-row"><span>vs SPY</span><span style="color:${s.vs_spy>=0?'var(--green)':'var(--red)'}">${s.vs_spy>=0?'+':''}${parseFloat(s.vs_spy).toFixed(1)}%</span></div>` : '',
+          s.best_pick      ? `<div class="community-stat-row"><span>Best pick</span><span style="color:var(--green)">${s.best_pick}</span></div>` : '',
+          s.worst_pick     ? `<div class="community-stat-row"><span>Worst pick</span><span style="color:var(--red)">${s.worst_pick}</span></div>` : '',
+        ].filter(Boolean).join('') || 'Not enough data yet.';
+      } catch (e) {
+        const el = document.getElementById('community-content');
+        if (el) el.textContent = 'Could not load community stats.';
+      }
+    }, 100);
+
   } catch(e) {
     spinner.style.display = 'none';
     body.style.display    = 'block';
@@ -4514,7 +4529,6 @@ async function confirmAddCash() {
                           document.getElementById('picks-body').style.display    = 'none';
                           return loadPicks();
       case 'portfolio':   return loadPortfolio();
-      case 'stats':       return loadStats();
       case 'performance': return loadPerformance();
       case 'settings':    return loadSettings();
       default:            return Promise.resolve();
