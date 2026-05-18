@@ -2128,12 +2128,27 @@ async function api(path, method = 'GET', body = null) {
     opts.headers = { 'Content-Type': 'application/json' };
     opts.body    = JSON.stringify({ chat_id: userId, init_data: initData, ...body });
   }
+
+  // Abort after 25s so fetch never hangs indefinitely (Render cold-start can take ~30s)
+  const controller = new AbortController();
+  opts.signal = controller.signal;
+  const abortTimer = setTimeout(() => controller.abort(), 25000);
+
   // Show cold-start banner if request takes > 4s (Render free-tier wake)
   const coldTimer = setTimeout(_showColdBanner, 4000);
   let r;
   try {
     r = await fetch(url, opts);
+  } catch (fetchErr) {
+    // AbortError means our 25s timeout fired — surface as a retriable timeout
+    if (fetchErr.name === 'AbortError') {
+      const te = new Error('Request timed out — server may be waking up');
+      te.isTimeout = true;
+      throw te;
+    }
+    throw fetchErr;
   } finally {
+    clearTimeout(abortTimer);
     clearTimeout(coldTimer);
     _hideColdBanner();
   }
@@ -2577,17 +2592,18 @@ async function loadPicks(isRetry = false) {
     if (!hadCache) _prefetchOtherTabs(); // first load: prefetch after picks appear
   } catch (e) {
     if (hadCache) return;         // already showing stale data — don't show error
-    const is403 = e.status === 403 || (e.message && e.message.includes('403'));
-    if (!is403 && !isRetry && wasCold) {
+    const is403    = e.status === 403 || (e.message && e.message.includes('403'));
+    const isWakeup = e.isTimeout || _coldStartOccurred; // check live value, not pre-fetch snapshot
+    if (!is403 && !isRetry && isWakeup) {
       const spinner = document.getElementById('picks-spinner');
       if (spinner) {
         spinner.innerHTML =
           `<div class="empty"><div class="empty-icon" style="font-size:32px">⏳</div>` +
           `<div class="empty-title">Server just woke up</div>` +
-          `<div class="empty-sub">Retrying in 4 seconds…</div></div>`;
+          `<div class="empty-sub">Retrying in 5 seconds…</div></div>`;
         spinner.style.display = 'block';
       }
-      setTimeout(() => loadPicks(true), 4000);
+      setTimeout(() => loadPicks(true), 5000);
       return;
     }
     const icon  = is403 ? '🔒' : '😕';
@@ -3053,7 +3069,9 @@ async function loadPortfolio() {
         <div style="font-size:12px;font-weight:600;opacity:.5;text-transform:uppercase;letter-spacing:.5px">Cumulative P&amp;L</div>
         <div id="pnl-total" style="font-size:15px;font-weight:700"></div>
       </div>
-      <canvas id="pnl-chart-canvas" height="100" style="width:100%;display:block;padding:8px 0"></canvas>
+      <div style="position:relative;height:100px">
+        <canvas id="pnl-chart-canvas" style="width:100%;height:100%;display:block"></canvas>
+      </div>
       <div style="padding:0 14px 12px;display:flex;gap:16px">
         <div><div style="font-size:10px;opacity:.4;text-transform:uppercase">Trades</div><div id="pnl-trades" style="font-size:13px;font-weight:600"></div></div>
         <div><div style="font-size:10px;opacity:.4;text-transform:uppercase">Win Rate</div><div id="pnl-winrate" style="font-size:13px;font-weight:600;color:var(--green)"></div></div>

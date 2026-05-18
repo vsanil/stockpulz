@@ -54,7 +54,7 @@ def _start_onboarding_wizard(chat_id: str) -> None:
     send_inline_keyboard(
         "",
         [[
-            {"text": label, "callback_data": f"onboard_budget_{key}"}
+            {"text": label, "callback_data": f"onboard_budget|{key}"}
             for key, (label, _, __) in _BUDGET_BUCKETS.items()
         ]],
         chat_id=chat_id,
@@ -412,6 +412,53 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
         return (f"✅ Watchlist set: <b>{', '.join(tickers)}</b>\n"
                 f"These tickers will always be evaluated in tomorrow's screener.\n"
                 f"<i>To clear: /watch none</i>")
+
+    # ── /track and /untrack — add/remove a single ticker from watchlist ─────
+    if text == "TRACK":
+        return (
+            "📌 <b>Usage:</b> <code>/track TICKER</code>\n"
+            "Adds a ticker to your watchlist so its live price shows in your dashboard.\n"
+            "<i>Example: /track NVDA</i>"
+        )
+
+    if text.startswith("TRACK "):
+        from config_manager import load_user_trade_log, save_user_trade_log
+        ticker = text[len("TRACK "):].strip().upper()
+        if not ticker:
+            return "⚠️ Please provide a ticker, e.g. <code>/track NVDA</code>"
+        log = load_user_trade_log(chat_id)
+        watchlist = log.get("watchlist", [])
+        if ticker in watchlist:
+            return f"👁 <b>{ticker}</b> is already on your watchlist."
+        watchlist.append(ticker)
+        log["watchlist"] = watchlist
+        save_user_trade_log(chat_id, log)
+        return (
+            f"✅ <b>{ticker}</b> added to your price watchlist.\n"
+            f"You now have {len(watchlist)} ticker(s) tracked.\n"
+            f"<i>View live prices in the dashboard or with /prices</i>"
+        )
+
+    if text == "UNTRACK":
+        return (
+            "📌 <b>Usage:</b> <code>/untrack TICKER</code>\n"
+            "Removes a ticker from your watchlist.\n"
+            "<i>Example: /untrack NVDA</i>"
+        )
+
+    if text.startswith("UNTRACK "):
+        from config_manager import load_user_trade_log, save_user_trade_log
+        ticker = text[len("UNTRACK "):].strip().upper()
+        if not ticker:
+            return "⚠️ Please provide a ticker, e.g. <code>/untrack NVDA</code>"
+        log = load_user_trade_log(chat_id)
+        watchlist = log.get("watchlist", [])
+        if ticker not in watchlist:
+            return f"⚠️ <b>{ticker}</b> is not on your watchlist."
+        watchlist = [t for t in watchlist if t != ticker]
+        log["watchlist"] = watchlist
+        save_user_trade_log(chat_id, log)
+        return f"🗑 <b>{ticker}</b> removed from your watchlist."
 
     # ── /share ───────────────────────────────────────────────────────────────
     if text == "SHARE":
