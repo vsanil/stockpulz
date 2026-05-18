@@ -1031,7 +1031,17 @@ def run_weekly_recap(config: dict, now_et: datetime):
                     if DRY_RUN:
                         print(f"\n{'='*60}\nDRY RUN — Weekly Recap for {uid}:\n{'='*60}\n{message}")
                     else:
-                        send_message(message, chat_id=uid)
+                        send_inline_keyboard(
+                            message,
+                            [[
+                                {"text": "📈 My Stats",       "callback_data": "cmd|STATS"},
+                                {"text": "📊 My Positions",   "callback_data": "cmd|POSITIONS"},
+                            ], [
+                                {"text": "🏆 Community",      "callback_data": "cmd|COMMUNITY"},
+                                {"text": "📋 Full History",   "callback_data": "cmd|HISTORY"},
+                            ]],
+                            chat_id=uid,
+                        )
                 except Exception as exc:
                     print(f"[agent] Weekly recap failed for {uid}: {exc}")
         else:
@@ -1373,15 +1383,64 @@ def run_price_alerts():
 
             newly_closed = check_and_close_trades(current_prices, uid)
             for trade in newly_closed:
-                emoji = "✅" if trade["outcome"] == "target" else ("🔴" if trade["outcome"] == "stop" else "⏱")
-                sign  = "+" if trade["return_pct"] >= 0 else ""
-                send_message(
-                    f"{emoji} <b>{trade['ticker']}</b> {trade['outcome'].upper()} HIT "
-                    f"@ <code>${trade['closed_price']}</code>  "
-                    f"<b>{sign}{trade['return_pct']:.1f}%</b>  "
-                    f"(${trade['gain_usd']:+.2f})",
-                    chat_id=uid,
-                )
+                ticker = trade["ticker"]
+                sign   = "+" if trade["return_pct"] >= 0 else ""
+                pct    = f"{sign}{trade['return_pct']:.1f}%"
+                usd    = f"${trade['gain_usd']:+.2f}"
+                price  = f"${trade['closed_price']}"
+
+                if trade["outcome"] == "target":
+                    msg = (
+                        f"🎯 <b>{ticker} TARGET HIT!</b>\n"
+                        f"Closed @ <code>{price}</code>  ·  <b>{pct}</b>  ({usd})\n"
+                        f"<i>Position auto-closed and logged to your history.</i>"
+                    )
+                    kb = [[
+                        {"text": "📊 View Portfolio",  "callback_data": "cmd|POSITIONS"},
+                        {"text": "📈 My Stats",         "callback_data": "cmd|STATS"},
+                    ]]
+                elif trade["outcome"] == "stop":
+                    msg = (
+                        f"🔴 <b>{ticker} STOP HIT</b>\n"
+                        f"Closed @ <code>{price}</code>  ·  <b>{pct}</b>  ({usd})\n"
+                        f"<i>Position auto-closed. Risk managed ✓</i>"
+                    )
+                    kb = [[
+                        {"text": "📊 View Portfolio",  "callback_data": "cmd|POSITIONS"},
+                        {"text": "📈 Today's Picks",   "callback_data": "cmd|TODAY"},
+                    ]]
+                else:  # expired
+                    msg = (
+                        f"⏱ <b>{ticker} position expired</b> (28 days)\n"
+                        f"Closed @ <code>{price}</code>  ·  <b>{pct}</b>  ({usd})"
+                    )
+                    kb = [[{"text": "📊 View Portfolio", "callback_data": "cmd|POSITIONS"}]]
+
+                send_inline_keyboard(msg, kb, chat_id=uid)
+
+                # Target-approach alert: warn when within 5% of target (not yet hit)
+            for trade in log.get("open", []):
+                ticker  = trade["ticker"]
+                current = current_prices.get(ticker)
+                target  = trade.get("target_price")
+                entry   = trade.get("entry_price")
+                if not (current and target and entry and float(target) > float(entry)):
+                    continue
+                gap_pct = (float(target) - float(current)) / float(current) * 100
+                if 0 < gap_pct <= 5:
+                    alert_key = f"target_approach_{uid}_{ticker}_{date.today().isoformat()}"
+                    from cache_layer import get_cache, set_cache
+                    if not get_cache(alert_key):
+                        set_cache(alert_key, "1", ttl=86400)
+                        send_inline_keyboard(
+                            f"⚡ <b>{ticker}</b> is <b>{gap_pct:.1f}%</b> from your target <code>${float(target):.2f}</code>\n"
+                            f"Current: <code>${float(current):.2f}</code>  ·  Consider taking partial profit.",
+                            [[
+                                {"text": f"✅ Close {ticker}", "callback_data": f"sold_pick|{ticker}"},
+                                {"text": "Hold 💎",           "callback_data": "noop"},
+                            ]],
+                            chat_id=uid,
+                        )
         except Exception as exc:
             print(f"[agent] Intraday trade check failed for {uid} (non-critical): {exc}")
 

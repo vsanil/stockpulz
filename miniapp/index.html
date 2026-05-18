@@ -834,6 +834,34 @@ body.tg-light .fb-textarea { background: rgba(0,0,0,0.03); }
 /* Smooth drag-to-close transition on bottom sheets */
 .bottom-sheet { will-change: transform; }
 
+/* ── Pick card swipe wrapper ─────────────────────────────────────────────── */
+.pick-swipe-outer {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  margin-bottom: 14px;
+}
+.pick-swipe-action {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 72px;
+  background: var(--accent);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 20px; gap: 2px;
+  border-radius: 0 16px 16px 0;
+  pointer-events: none;
+}
+.pick-swipe-action span { font-size: 10px; color: #fff; font-weight: 600; }
+.pick-swipe-outer .pick-card {
+  margin-bottom: 0;
+  border-radius: 16px;
+  position: relative;
+  z-index: 1;
+  transition: transform 0.2s ease;
+  will-change: transform;
+}
+.pick-swipe-outer .pick-card:active { transform: none; }
+
 /* ── Bought pick card ────────────────────────────────────────────────────── */
 .pick-card.bought { opacity: 0.55; }
 .pick-card.bought::before {
@@ -1618,6 +1646,31 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
 <!-- ── Tab panes ───────────────────────────────────────────────────────────── -->
 <div class="content">
   <div class="tab-pane active" id="pane-picks">
+
+    <!-- ── Ticker Search ───────────────────────────────────────────────── -->
+    <div id="ticker-search-bar" style="padding:12px 0 4px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="position:relative;flex:1">
+          <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;pointer-events:none;opacity:.5">🔍</span>
+          <input id="ticker-search-input" type="text" placeholder="Search any ticker… AAPL, BTC"
+            autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
+            style="width:100%;box-sizing:border-box;padding:10px 12px 10px 34px;
+                   border-radius:12px;border:1.5px solid var(--border);
+                   background:var(--card);color:var(--text);font-size:14px;outline:none;"
+            oninput="this.value=this.value.toUpperCase()"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();searchTicker();}"
+          />
+        </div>
+        <button onclick="searchTicker()"
+          style="padding:10px 16px;border-radius:12px;border:none;background:var(--accent);
+                 color:#fff;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">
+          Go
+        </button>
+      </div>
+      <div id="ticker-search-result" style="display:none;margin-top:8px;padding:12px 14px;
+           background:var(--card);border-radius:12px;border:1px solid var(--border)"></div>
+    </div>
+
     <div id="picks-spinner">
       <div style="height:14px"></div>
       <!-- Skeleton card 1 -->
@@ -1688,6 +1741,11 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
     <div id="perf-body" style="display:none"></div>
   </div>
 
+  <div class="tab-pane" id="pane-watchlist">
+    <div class="loading" id="watch-spinner"><div class="spinner"></div>Loading watchlist…</div>
+    <div id="watch-body" style="display:none"></div>
+  </div>
+
   <div class="tab-pane" id="pane-settings">
     <div class="loading" id="sett-spinner"><div class="spinner"></div>Loading settings…</div>
     <div id="sett-body" style="display:none"></div>
@@ -1720,6 +1778,9 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
   </div>
   <div class="nav-item" id="nav-performance" onclick="gotoTab('performance')">
     <div class="nav-icon">📊</div><div class="nav-label">Performance</div>
+  </div>
+  <div class="nav-item" id="nav-watchlist" onclick="gotoTab('watchlist')">
+    <div class="nav-icon">👁</div><div class="nav-label">Watch</div>
   </div>
   <div class="nav-item" id="nav-settings" onclick="gotoTab('settings')">
     <div class="nav-icon">⚙️</div><div class="nav-label">Settings</div>
@@ -1991,7 +2052,7 @@ let _detailTicker     = null;
 
 // ── Tab routing ───────────────────────────────────────────────────────────────
 const _scrollPos  = {};
-const _TAB_ORDER  = ['picks', 'portfolio', 'performance', 'settings'];
+const _TAB_ORDER  = ['picks', 'portfolio', 'performance', 'watchlist', 'settings'];
 
 function _moveNavIndicator(name) {
   const indicator = document.getElementById('nav-indicator');
@@ -2024,6 +2085,7 @@ function gotoTab(name) {
     loadedTabs[name] = true;
     if (name === 'portfolio')   loadPortfolio();
     if (name === 'performance') loadPerformance();
+    if (name === 'watchlist')   loadWatchlist();
     if (name === 'settings')    loadSettings();
   }
 }
@@ -2678,36 +2740,39 @@ function renderPickCard(p, idx = 0) {
     }
   }
 
-  return `<div class="pick-card${cardCls}" style="animation-delay:${idx * 55}ms">
-    <div class="pick-top">
-      <div class="pick-ticker-wrap">
-        <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}
-        ${conv ? `<span class="conv-tag ${convCls}">${convIcon} ${p.conviction}</span>` : ''}
+  return `<div class="pick-swipe-outer" id="swipe-outer-${sym}" data-sym="${sym}" data-type="${p._type}">
+    <div class="pick-swipe-action"><span>👁</span><span>Watch</span></div>
+    <div class="pick-card${cardCls}" style="animation-delay:${idx * 55}ms">
+      <div class="pick-top">
+        <div class="pick-ticker-wrap">
+          <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}
+          ${conv ? `<span class="conv-tag ${convCls}">${convIcon} ${p.conviction}</span>` : ''}
+        </div>
+        <span class="type-tag ${tagCls}">${tagTxt}</span>
       </div>
-      <span class="type-tag ${tagCls}">${tagTxt}</span>
-    </div>
-    <div class="price-grid">
-      <div class="price-cell">
-        <div class="price-lbl">Entry</div>
-        <div class="price-num num-entry">$${fmtPrice(p.entry_price)}</div>
+      <div class="price-grid">
+        <div class="price-cell">
+          <div class="price-lbl">Entry</div>
+          <div class="price-num num-entry">$${fmtPrice(p.entry_price)}</div>
+        </div>
+        <div class="price-cell">
+          <div class="price-lbl">Target</div>
+          <div class="price-num num-target">$${fmtPrice(p.target_price)}</div>
+        </div>
+        <div class="price-cell">
+          <div class="price-lbl">Stop</div>
+          <div class="price-num num-stop">$${fmtPrice(p.stop_loss)}</div>
+        </div>
       </div>
-      <div class="price-cell">
-        <div class="price-lbl">Target</div>
-        <div class="price-num num-target">$${fmtPrice(p.target_price)}</div>
+      <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
+      ${p.thesis || p.reason ? `<div class="pick-thesis">${p.thesis || p.reason}</div>` : ''}
+      <div class="pick-actions">
+        <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
+        <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
+                onclick="markBought('${sym}','${p._type}','${p._tf}')">
+          ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
+        </button>
       </div>
-      <div class="price-cell">
-        <div class="price-lbl">Stop</div>
-        <div class="price-num num-stop">$${fmtPrice(p.stop_loss)}</div>
-      </div>
-    </div>
-    <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
-    ${p.thesis || p.reason ? `<div class="pick-thesis">${p.thesis || p.reason}</div>` : ''}
-    <div class="pick-actions">
-      <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
-      <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
-              onclick="markBought('${sym}','${p._type}','${p._tf}')">
-        ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
-      </button>
     </div>
   </div>`;
 }
@@ -2858,6 +2923,62 @@ function renderPicks(filter) {
   const body = document.getElementById('picks-body');
   body.style.display = 'block';
   body.innerHTML = html;
+
+  // Wire swipe-left-to-watch on each pick card
+  _attachPickSwipeHandlers();
+}
+
+function _attachPickSwipeHandlers() {
+  document.querySelectorAll('.pick-swipe-outer').forEach(outer => {
+    const card = outer.querySelector('.pick-card');
+    if (!card || outer._swipeWired) return;
+    outer._swipeWired = true;
+    const sym  = outer.dataset.sym;
+    let sx = 0, sy = 0, dragging = false;
+    card.addEventListener('touchstart', e => {
+      sx = e.touches[0].clientX;
+      sy = e.touches[0].clientY;
+      dragging = false;
+      card.style.transition = 'none';
+    }, { passive: true });
+    card.addEventListener('touchmove', e => {
+      const dx = e.touches[0].clientX - sx;
+      const dy = Math.abs(e.touches[0].clientY - sy);
+      if (!dragging && dy > 12) return; // vertical scroll wins
+      if (dx < -6) { dragging = true; }
+      if (dragging) {
+        const clamped = Math.max(-80, Math.min(0, dx));
+        card.style.transform = `translateX(${clamped}px)`;
+      }
+    }, { passive: true });
+    card.addEventListener('touchend', e => {
+      card.style.transition = 'transform 0.2s ease';
+      const dx = e.changedTouches[0].clientX - sx;
+      if (dx < -60) {
+        // Trigger watch action
+        card.style.transform = 'translateX(-80px)';
+        setTimeout(() => { card.style.transform = ''; }, 600);
+        tg.HapticFeedback?.impactOccurred('medium');
+        addToWatchlistFromPick(sym);
+      } else {
+        card.style.transform = '';
+      }
+    }, { passive: true });
+  });
+}
+
+async function addToWatchlistFromPick(ticker) {
+  try {
+    const d = await api('/api/miniapp/watchlist/add', 'POST', { ticker });
+    if (d.ok) {
+      showToast('👁 ' + ticker + ' added to watchlist');
+      loadedTabs['watchlist'] = false; // stale watchlist
+    } else {
+      showToast('👁 ' + ticker + ' already on watchlist');
+    }
+  } catch(e) {
+    showToast('⚠️ Couldn\'t add to watchlist');
+  }
 }
 
 async function markBought(sym, assetType, tf) {
@@ -2914,6 +3035,20 @@ async function loadPortfolio() {
       <button class="rp-btn"        id="rp-paper" onclick="switchPortfolioMode('paper')">Paper</button>
     </div>`;
 
+    // ── P&L history chart card ───────────────────────────────────────────────
+    html += `<div id="pnl-chart-card" style="background:var(--card);border-radius:var(--radius);margin-bottom:12px;overflow:hidden">
+      <div style="padding:14px 14px 0;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:12px;font-weight:600;opacity:.5;text-transform:uppercase;letter-spacing:.5px">Cumulative P&amp;L</div>
+        <div id="pnl-total" style="font-size:15px;font-weight:700"></div>
+      </div>
+      <canvas id="pnl-chart-canvas" height="100" style="width:100%;display:block;padding:8px 0"></canvas>
+      <div style="padding:0 14px 12px;display:flex;gap:16px">
+        <div><div style="font-size:10px;opacity:.4;text-transform:uppercase">Trades</div><div id="pnl-trades" style="font-size:13px;font-weight:600"></div></div>
+        <div><div style="font-size:10px;opacity:.4;text-transform:uppercase">Win Rate</div><div id="pnl-winrate" style="font-size:13px;font-weight:600;color:var(--green)"></div></div>
+        <div><div style="font-size:10px;opacity:.4;text-transform:uppercase">Streak</div><div id="pnl-streak" style="font-size:13px;font-weight:600"></div></div>
+      </div>
+    </div>`;
+
     if (!positionsCache.length) {
       html += `<div class="empty">
         <div class="empty-icon">💼</div>
@@ -2922,6 +3057,7 @@ async function loadPortfolio() {
       </div>
       <button class="btn-add-position" onclick="openAddPosition()">➕ Add Position</button>`;
       body.innerHTML = html;
+      _renderPnlChart();
       return;
     }
 
@@ -3006,9 +3142,82 @@ async function loadPortfolio() {
     </div>`;
 
     body.innerHTML = html;
+    _renderPnlChart();
   } catch (e) {
     document.getElementById('port-spinner').innerHTML =
       '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load positions</div></div>';
+  }
+}
+
+let _pnlChartInstance = null;
+async function _renderPnlChart() {
+  const canvas = document.getElementById('pnl-chart-canvas');
+  if (!canvas) return;
+  try {
+    const d = await api('/api/miniapp/pnl_history');
+    const pts = d.points || [];
+
+    // Update stats
+    const total = d.total_pnl || 0;
+    const totalEl = document.getElementById('pnl-total');
+    if (totalEl) {
+      totalEl.textContent = (total >= 0 ? '+$' : '-$') + Math.abs(total).toFixed(2);
+      totalEl.style.color = total >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+    const tradesEl = document.getElementById('pnl-trades');
+    if (tradesEl) tradesEl.textContent = d.total_trades || 0;
+    const winEl = document.getElementById('pnl-winrate');
+    if (winEl) winEl.textContent = (d.win_rate || 0) + '%';
+    const streakEl = document.getElementById('pnl-streak');
+    if (streakEl) {
+      const s = d.current_streak || 0;
+      streakEl.textContent = s > 0 ? '🔥' + s + 'W' : s < 0 ? '❄️' + Math.abs(s) + 'L' : '—';
+      streakEl.style.color = s > 0 ? 'var(--green)' : s < 0 ? 'var(--red)' : 'var(--text)';
+    }
+
+    if (!pts.length) {
+      canvas.style.display = 'none';
+      return;
+    }
+
+    // Destroy old chart
+    if (_pnlChartInstance) { _pnlChartInstance.destroy(); _pnlChartInstance = null; }
+
+    const labels = pts.map(p => p.date.slice(5));  // MM-DD
+    const values = pts.map(p => p.cumulative);
+    const isPositive = (values[values.length - 1] || 0) >= 0;
+    const lineColor  = isPositive ? '#00d4aa' : '#ff5a5a';
+
+    _pnlChartInstance = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          borderColor: lineColor,
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: true,
+          backgroundColor: isPositive ? 'rgba(0,212,170,0.08)' : 'rgba(255,90,90,0.08)',
+          tension: 0.4,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => (ctx.raw >= 0 ? '+$' : '-$') + Math.abs(ctx.raw).toFixed(2) }
+        }},
+        scales: {
+          x: { display: false },
+          y: { display: false, grid: { display: false } }
+        }
+      }
+    });
+  } catch (e) {
+    const card = document.getElementById('pnl-chart-card');
+    if (card) card.style.display = 'none';
   }
 }
 
@@ -4025,6 +4234,122 @@ async function loadPerformance() {
 
 let _statusData = null;
 
+// ─── WATCHLIST ────────────────────────────────────────────────────────────────
+async function loadWatchlist() {
+  const spinner = document.getElementById('watch-spinner');
+  const body    = document.getElementById('watch-body');
+  try {
+    const d = await api('/api/miniapp/watchlist');
+    const tickers = d.tickers || [];
+    spinner.style.display = 'none';
+    body.style.display    = 'block';
+    await renderWatchlist(tickers);
+  } catch(e) {
+    spinner.innerHTML = '<div style="opacity:.5;font-size:13px">Failed to load watchlist.</div>';
+  }
+}
+
+async function renderWatchlist(tickers) {
+  const body = document.getElementById('watch-body');
+  let html = `
+    <div style="padding:12px 0 4px">
+      <div style="font-size:18px;font-weight:700;margin-bottom:2px">Watchlist</div>
+      <div style="font-size:12px;opacity:.5">Track prices for any ticker</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="watch-add-input" type="text" placeholder="Add ticker…"
+        autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
+        style="flex:1;padding:10px 12px;border-radius:12px;border:1.5px solid var(--border);
+               background:var(--card);color:var(--text);font-size:14px;outline:none;"
+        oninput="this.value=this.value.toUpperCase()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();addToWatchlist();}"
+      />
+      <button onclick="addToWatchlist()" style="padding:10px 16px;border-radius:12px;border:none;
+               background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer">
+        Add
+      </button>
+    </div>
+    <div id="watch-list">`;
+
+  if (!tickers.length) {
+    html += `<div style="text-align:center;padding:40px 0;opacity:.5">
+      <div style="font-size:32px;margin-bottom:8px">👁</div>
+      <div style="font-size:14px">No tickers yet</div>
+      <div style="font-size:12px;margin-top:4px">Add any stock or crypto to watch</div>
+    </div>`;
+  } else {
+    html += `<div id="watch-rows">`;
+    for (const t of tickers) {
+      html += `<div id="wrow-${t}" style="display:flex;justify-content:space-between;align-items:center;
+               padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div onclick="openChart('${t}','${/BTC|ETH|SOL|DOGE|ADA|XRP|AVAX|BNB/.test(t)?'crypto':'stock'}')"
+               style="font-size:16px;font-weight:700;cursor:pointer;color:var(--accent)">${t}</div>
+          <div id="wprice-${t}" style="font-size:13px;opacity:.6">…</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="openChart('${t}','${/BTC|ETH|SOL|DOGE|ADA|XRP|AVAX|BNB/.test(t)?'crypto':'stock'}')"
+                  style="padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);
+                         background:transparent;color:var(--text);font-size:12px;cursor:pointer">📊</button>
+          <button onclick="removeFromWatchlist('${t}')"
+                  style="padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);
+                         background:transparent;color:var(--red);font-size:12px;cursor:pointer">✕</button>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  html += `</div>`;
+  body.innerHTML = html;
+
+  // Fetch live prices for each ticker concurrently
+  if (tickers.length) {
+    await Promise.allSettled(tickers.map(async t => {
+      try {
+        const q = await api('/api/miniapp/quote?ticker=' + encodeURIComponent(t));
+        const el = document.getElementById('wprice-' + t);
+        if (el && q.price != null) {
+          el.textContent = '$' + Number(q.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:6});
+          el.style.opacity = '1';
+        }
+      } catch(_) {}
+    }));
+  }
+}
+
+async function addToWatchlist() {
+  const input  = document.getElementById('watch-add-input');
+  const ticker = (input?.value || '').trim().toUpperCase();
+  if (!ticker) { input?.focus(); return; }
+  tg.HapticFeedback?.impactOccurred('light');
+  try {
+    const d = await api('/api/miniapp/watchlist/add', 'POST', { ticker });
+    if (d.ok) {
+      input.value = '';
+      showToast('✅ ' + ticker + ' added to watchlist');
+      // Reload watchlist pane
+      loadedTabs['watchlist'] = false;
+      loadWatchlist();
+    } else {
+      showToast('⚠️ ' + (d.error || 'Could not add ticker'));
+    }
+  } catch(e) {
+    showToast('⚠️ Already watching or ticker not found');
+  }
+}
+
+async function removeFromWatchlist(ticker) {
+  tg.HapticFeedback?.impactOccurred('light');
+  try {
+    await api('/api/miniapp/watchlist/remove', 'POST', { ticker });
+    const row = document.getElementById('wrow-' + ticker);
+    if (row) row.remove();
+    showToast('🗑 ' + ticker + ' removed');
+  } catch(e) {
+    showToast('⚠️ Could not remove ticker');
+  }
+}
+
 async function loadSettings() {
   try {
     const [settData, statusData] = await Promise.all([
@@ -4178,6 +4503,36 @@ function setDefine(term) {
   const input = document.getElementById('define-input');
   if (input) { input.value = term; }
   runDefine();
+}
+
+// ─── TICKER SEARCH ────────────────────────────────────────────────────────────
+async function searchTicker() {
+  const input  = document.getElementById('ticker-search-input');
+  const result = document.getElementById('ticker-search-result');
+  const ticker = (input?.value || '').trim().toUpperCase();
+  if (!ticker) { input?.focus(); return; }
+  tg.HapticFeedback?.impactOccurred('light');
+  result.style.display = 'block';
+  result.innerHTML = '<span style="opacity:.5">Looking up <em>' + ticker + '</em>…</span>';
+  try {
+    const d = await api('/api/miniapp/quote?ticker=' + encodeURIComponent(ticker));
+    const sym   = (d.ticker || ticker).toUpperCase();
+    const price = d.price != null ? '$' + Number(d.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:6}) : '—';
+    const isCrypto = /BTC|ETH|SOL|DOGE|ADA|XRP|AVAX|BNB|DOT|LINK|MATIC|UNI/.test(sym);
+    const assetType = isCrypto ? 'crypto' : 'stock';
+    if (sym !== ticker) { input.value = sym; }
+    result.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+        '<span style="font-size:18px;font-weight:700;color:var(--text)">' + sym + '</span>' +
+        '<span style="font-size:17px;font-weight:600;color:var(--accent)">' + price + '</span>' +
+      '</div>' +
+      '<div style="margin-top:10px;display:flex;gap:8px">' +
+        '<button onclick="openChart(\'' + sym + '\',\'' + assetType + '\')" style="flex:1;padding:9px 0;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer">📊 View Chart</button>' +
+        '<button onclick="document.getElementById(\'alert-ticker-input\').value=\'' + sym + '\';openOverlay(\'alert-overlay\')" style="flex:1;padding:9px 0;border-radius:10px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:600;cursor:pointer">🔔 Set Alert</button>' +
+      '</div>';
+  } catch(e) {
+    result.innerHTML = '<span style="color:var(--red)">Ticker not found — try a different symbol.</span>';
+  }
 }
 
 function openPrefsSheet() {
@@ -4768,6 +5123,24 @@ loadedTabs['picks'] = true;
 // Position nav indicator on the initial tab after layout settles
 requestAnimationFrame(() => _moveNavIndicator('picks'));
 loadPicks();
+
+// ── Deep-link: ?chart=TICKER&asset_type=crypto ────────────────────────────────
+(function() {
+  const params    = new URLSearchParams(window.location.search);
+  const chartTick = (params.get('chart') || '').toUpperCase();
+  const chartType = params.get('asset_type') || 'stock';
+  if (chartTick) {
+    // Wait for picks to load then open chart automatically
+    const _waitAndOpen = () => {
+      if (typeof openChart === 'function') {
+        openChart(chartTick, chartType);
+      } else {
+        setTimeout(_waitAndOpen, 200);
+      }
+    };
+    setTimeout(_waitAndOpen, 600);
+  }
+})();
 </script>
 </body>
 </html>

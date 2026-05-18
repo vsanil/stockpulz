@@ -20,6 +20,7 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
             "\n/define — Plain-English explanation of any financial term (e.g. /define RSI)"
             "\n/chart — Candlestick chart for any ticker\n"
             "\n<b>💼 My Portfolio</b>"
+            "\n/size — Position sizing: how many shares to buy (e.g. /size NVDA)"
             "\n/bought — Log a position you entered"
             "\n/sold — Close a position &amp; record P&amp;L"
             "\n/positions — Open positions with live P&amp;L &amp; exposure"
