@@ -171,6 +171,8 @@ def handle_callback_query(callback_query: dict) -> None:
         "reset_confirm":      "⏳ Resetting settings…",
         "psell":              "⏳ Loading…",
         "psell_confirm":      "⏳ Closing paper position…",
+        "sell":               "⏳ Closing position…",
+        "alert":              "🔔 Setting alert…",
         "noop":               "",
     }
     toast = _TOASTS.get(action, "⏳ Working…") if action not in ("noop", "cancel_pending", "cancel_abort") else ""
@@ -524,7 +526,7 @@ def handle_callback_query(callback_query: dict) -> None:
         send_inline_keyboard(
             "<b>What's your risk appetite?</b>",
             [[
-                {"text": label, "callback_data": f"onboard_risk_{key2}"}
+                {"text": label, "callback_data": f"onboard_risk|{key2}"}
                 for key2, (label, _) in _RISK_OPTIONS.items()
             ]],
             chat_id=chat_id,
@@ -576,6 +578,41 @@ def handle_callback_query(callback_query: dict) -> None:
             return
         reply = _execute_bought(ticker, chat_id)
         send_message(reply, chat_id=chat_id)
+
+    elif action == "sell":
+        # Ticker disambiguation for /sold — user picked from a multi-match list.
+        # callback_data: sell|TICKER|PRICE|SHARES
+        ticker     = parts[1].upper() if len(parts) > 1 else ""
+        price_raw  = parts[2]         if len(parts) > 2 else None
+        shares_raw = parts[3]         if len(parts) > 3 else None
+        if not ticker:
+            return
+        try:
+            reply = _execute_sold(ticker, chat_id, price=price_raw or None, shares_sold=shares_raw or None)
+            send_message(reply, chat_id=chat_id)
+        except Exception as exc:
+            print(f"[bot] sell callback failed for {ticker}: {exc}")
+            send_message(f"⚠️ Couldn't close <b>{ticker}</b> — try <code>/sold {ticker}</code> instead.", chat_id=chat_id)
+
+    elif action == "alert":
+        # Quick alert shortcut from pick/exit alert messages.
+        # callback_data: alert|TICKER
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        try:
+            live = _fetch_live_price(ticker)
+            price_hint = f"  (live: <code>${_p(live)}</code>)" if live else ""
+            save_pending_state(chat_id, "alert", step=2, data={"ticker": ticker})
+            send_inline_keyboard(
+                f"🔔 <b>Set alert for {ticker}</b>{price_hint}\n"
+                f"Type the target price (e.g. <code>500</code>), or type <code>{ticker} above 500</code>.",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+        except Exception as exc:
+            print(f"[bot] alert callback failed for {ticker}: {exc}")
+            send_message(f"⚠️ Use <code>/alert {ticker} above PRICE</code> to set an alert.", chat_id=chat_id)
 
     elif action == "confirm_sell":
         ticker = parts[1] if len(parts) > 1 else ""
@@ -773,6 +810,7 @@ def handle_callback_query(callback_query: dict) -> None:
                 + f"Stop: {stop_str}  |  Target: {target_str}\n"
                 + "Track it anytime with /positions"
             )
+            send_message(success_msg, chat_id=chat_id, parse_mode="HTML")
             try:
                 from config_manager import increment_buy_count
                 cfg2 = get_config()
@@ -782,7 +820,7 @@ def handle_callback_query(callback_query: dict) -> None:
                 print(f"[bot] buy count increment failed (non-critical): {exc3}")
         except Exception as exc:
             print(f"[bot] confirm_buy failed for {ticker}: {exc}")
-            send_message(f"⚠️ Couldn't log <b>{ticker}</b> — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
+            send_message(f"⚠️ Couldn't log <b>{ticker}</b> — try <code>/bought {ticker}</code> instead.", chat_id=chat_id, parse_mode="HTML")
         return
 
     elif action == "skip_buy":
