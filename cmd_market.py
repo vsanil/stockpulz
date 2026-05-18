@@ -215,7 +215,8 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             streak_str = ""
             if stats.get("hot_streak_users", 0) > 0:
                 streak_str = f"\n🔥 {stats['hot_streak_users']} user(s) on a 3+ win streak!"
-            return (
+            from telegram_api import send_inline_keyboard
+            community_msg = (
                 f"🌍 <b>StockPulz Community</b>\n\n"
                 f"<b>Users tracked:</b>  {stats['total_users']}\n"
                 f"<b>Closed trades:</b>  {stats['total_trades']}\n"
@@ -224,8 +225,16 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                 f"<b>Avg return/trade:</b>  {'+' if stats['avg_return'] >= 0 else ''}{stats['avg_return']}%"
                 f"{spy_str}{alpha_str}"
                 f"{best_str}{worst_str}{streak_str}\n\n"
-                f"<i>Based on actual closed trades by StockPulz users.</i>"
+                f"<i>Based on actual closed trades by StockPulz users.</i>\n\n"
+                f"📊 Curious how <b>you</b> compare? Tap below:"
             )
+            send_inline_keyboard(
+                community_msg,
+                [[{"text": "📊 My Accuracy", "callback_data": "cmd|ACCURACY"},
+                  {"text": "📋 My History",  "callback_data": "cmd|HISTORY"}]],
+                chat_id=chat_id,
+            )
+            return None
         except Exception as exc:
             return f"⚠️ Could not load community stats: {exc}"
 
@@ -306,6 +315,253 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             )
         except Exception as exc:
             return f"⚠️ Could not fetch market regime: {exc}"
+
+    # ── /swap [TICKER] ────────────────────────────────────────────────────────
+    # Give user an alternative pick — replacing a specific ticker or next best.
+    if text == "SWAP" or text.startswith("SWAP "):
+        parts = text.split(maxsplit=1)
+        skip_ticker = parts[1].upper() if len(parts) > 1 else None
+
+        picks = load_picks()
+        if not picks:
+            return "📭 No picks for today yet. Check back after the morning run."
+
+        # Build set of already-picked tickers
+        picked = set()
+        for cat in ("short_term", "long_term"):
+            for p in picks.get("stocks", {}).get(cat, []):
+                picked.add(p.get("ticker", "").upper())
+            for p in picks.get("etfs", {}).get(cat, []):
+                picked.add(p.get("ticker", "").upper())
+            for p in picks.get("commodities", {}).get(cat, []):
+                picked.add(p.get("ticker", "").upper())
+
+        # Determine category of the ticker being swapped (default: short_term)
+        category = "short_term"
+        if skip_ticker:
+            if any(p.get("ticker", "").upper() == skip_ticker
+                   for p in picks.get("stocks", {}).get("long_term", [])):
+                category = "long_term"
+            if skip_ticker not in picked:
+                return f"⚠️ <b>{skip_ticker}</b> isn't in today's picks — nothing to swap."
+            picked.add(skip_ticker)
+
+        # Load screener cache to find alternatives
+        try:
+            from config_manager import load_screener_cache
+            cache = load_screener_cache()
+        except Exception:
+            cache = None
+
+        if not cache:
+            return (
+                "⚠️ No screener data available for today.\n\n"
+                "The midnight screener cache may have expired. Try again after the next morning run."
+            )
+
+        pool = cache.get("stocks", {}).get(category, [])
+        alternatives = [c for c in pool if c.get("ticker", "").upper() not in picked]
+        alternatives.sort(key=lambda c: c.get("score", 0), reverse=True)
+
+        if not alternatives:
+            other_cat = "long_term" if category == "short_term" else "short_term"
+            alternatives = [c for c in cache.get("stocks", {}).get(other_cat, [])
+                            if c.get("ticker", "").upper() not in picked]
+            alternatives.sort(key=lambda c: c.get("score", 0), reverse=True)
+            if alternatives:
+                category = other_cat
+
+        if not alternatives:
+            return (
+                "😕 No strong alternatives found in today's screener pool.\n\n"
+                "All remaining candidates were below the conviction threshold."
+            )
+
+        send_typing_action(chat_id)
+        send_message(
+            f"🔄 Analysing <b>{alternatives[0].get('ticker','?').upper()}</b> as your alternative pick…",
+            chat_id=chat_id,
+        )
+
+        try:
+            from ai_analyzer import get_swap_pick
+            ucfg = get_user_config(chat_id) or {}
+            cfg  = {**get_config(), **ucfg}
+            pick = get_swap_pick(alternatives[0], category=category, config=cfg)
+        except Exception as exc:
+            return f"⚠️ Couldn't generate alternative pick: {exc}"
+
+        if not pick and len(alternatives) > 1:
+            next_t = alternatives[1].get("ticker", "?").upper()
+            send_message(f"🔄 First alternative didn't clear the bar — trying <b>{next_t}</b>…", chat_id=chat_id)
+            try:
+                pick = get_swap_pick(alternatives[1], category=category, config=cfg)
+            except Exception:
+                pick = None
+
+        if not pick:
+            return (
+                "😕 Couldn't find a high-conviction alternative today.\n\n"
+                "The remaining candidates didn't clear the conviction threshold. "
+                "Consider revisiting /today's picks or waiting until tomorrow."
+            )
+
+        # Format the swap pick
+        cat_label = "📈 Short-Term" if pick.get("_category", category) == "short_term" else "🏦 Long-Term"
+        t   = pick.get("ticker", "?")
+        co  = pick.get("company", "")
+        ent = pick.get("entry_price", 0)
+        tgt = pick.get("target_price", 0)
+        stp = pick.get("stop_loss")
+        con = pick.get("conviction", 3)
+        stars = "★" * con + "☆" * (5 - con)
+        upside   = f" (+{((tgt - ent) / ent * 100):.1f}%)" if ent and tgt and ent > 0 else ""
+        stop_ln  = f"\n🛑 Stop: <code>${stp:.2f}</code>" if stp else ""
+        thesis   = pick.get("thesis", "")
+        catalyst = pick.get("catalyst", "")
+        inv      = pick.get("invalidation", "")
+        swap_note = f" instead of {skip_ticker}" if skip_ticker else ""
+
+        msg = (
+            f"🔄 <b>SWAP PICK</b> · {cat_label}\n\n"
+            f"<b>{t}</b>  <i>{co}</i>\n"
+            f"Entry <code>${ent:.2f}</code> → Target <code>${tgt:.2f}</code>{upside}{stop_ln}\n"
+            f"Conviction: {stars}\n\n"
+        )
+        if thesis:    msg += f"📝 {thesis}\n"
+        if catalyst:  msg += f"⚡ <i>{catalyst}</i>\n"
+        if inv:       msg += f"❌ <i>Invalidated if: {inv}</i>\n"
+        msg += f"\n<i>⚠️ Not financial advice. Next-best pick{swap_note} from today's screener pool.</i>"
+        return msg
+
+    # ── /accuracy — personal win rate breakdown ───────────────────────────────
+    if text == "ACCURACY":
+        try:
+            from datetime import datetime, timedelta
+            log     = load_user_trade_log(chat_id)
+            closed  = log.get("closed", [])
+            if not closed:
+                return (
+                    "📊 <b>Your Accuracy</b>\n\n"
+                    "You haven't closed any trades yet.\n\n"
+                    "📌 How to track:\n"
+                    "  1️⃣ /bought AAPL 182 — log a buy\n"
+                    "  2️⃣ /sold AAPL 197 — log the sale\n"
+                    "StockPulz will calculate your win rate automatically.\n\n"
+                    "<i>Tip: /history shows all your open &amp; closed trades.</i>"
+                )
+
+            now = datetime.utcnow()
+            def _period_stats(trades, days=None):
+                subset = trades
+                if days:
+                    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+                    subset = [t for t in trades if (t.get("closed_date") or "") >= cutoff]
+                if not subset:
+                    return None
+                returns  = [float(t.get("return_pct", 0)) for t in subset]
+                wins     = [r for r in returns if r > 0]
+                losses   = [r for r in returns if r <= 0]
+                win_rate = round(len(wins) / len(returns) * 100) if returns else 0
+                avg_gain = round(sum(wins) / len(wins), 1) if wins else 0
+                avg_loss = round(sum(losses) / len(losses), 1) if losses else 0
+                best     = max(subset, key=lambda t: float(t.get("return_pct", 0)))
+                worst    = min(subset, key=lambda t: float(t.get("return_pct", 0)))
+                return {
+                    "n": len(returns), "wins": len(wins), "losses": len(losses),
+                    "win_rate": win_rate, "avg_gain": avg_gain, "avg_loss": avg_loss,
+                    "best": best, "worst": worst,
+                }
+
+            s7  = _period_stats(closed, 7)
+            s30 = _period_stats(closed, 30)
+            sAll= _period_stats(closed)
+
+            def _row(label, s):
+                if not s:
+                    return f"<b>{label}:</b>  No closed trades yet\n"
+                wr_emoji = "✅" if s["win_rate"] >= 60 else "⚠️" if s["win_rate"] >= 50 else "❌"
+                return (
+                    f"<b>{label}:</b>  {s['wins']}W / {s['losses']}L  →  "
+                    f"<b>{s['win_rate']}%</b> {wr_emoji}\n"
+                )
+
+            msg  = "📊 <b>Your Accuracy</b>\n\n"
+            msg += _row("Last 7 days",  s7)
+            msg += _row("Last 30 days", s30)
+            msg += _row("All time",     sAll)
+
+            if sAll:
+                sign = lambda n: "+" if n >= 0 else ""
+                msg += (
+                    f"\n<b>Avg gain on wins:</b>   {sign(sAll['avg_gain'])}{sAll['avg_gain']}%\n"
+                    f"<b>Avg loss on stops:</b>  {sign(sAll['avg_loss'])}{sAll['avg_loss']}%\n"
+                )
+                best_t  = sAll["best"]
+                worst_t = sAll["worst"]
+                b_ret   = float(best_t.get("return_pct", 0))
+                w_ret   = float(worst_t.get("return_pct", 0))
+                msg += (
+                    f"\n🏆 Best pick:   <b>{best_t.get('ticker','?')}</b>  "
+                    f"{sign(b_ret)}{round(b_ret,1)}%\n"
+                    f"💔 Worst pick:  <b>{worst_t.get('ticker','?')}</b>  "
+                    f"{round(w_ret,1)}%\n"
+                )
+
+            msg += "\n<i>Based on trades you logged with /bought &amp; /sold.</i>"
+            msg += "\n📈 See full history: /history"
+            return msg
+        except Exception as exc:
+            return f"⚠️ Could not load accuracy: {exc}"
+
+    # ── /define — plain-English glossary via Haiku ────────────────────────────
+    if text == "DEFINE":
+        return (
+            "📖 <b>What term would you like explained?</b>\n\n"
+            "Examples:\n"
+            "  <code>/define RSI</code>\n"
+            "  <code>/define MACD</code>\n"
+            "  <code>/define stop loss</code>\n"
+            "  <code>/define options</code>\n"
+            "  <code>/define market cap</code>\n\n"
+            "<i>I'll explain it in plain English — no jargon.</i>"
+        )
+
+    if text.startswith("DEFINE "):
+        raw   = original.lstrip("/")
+        term  = raw.split(" ", 1)[1].strip() if " " in raw else raw
+        if not term:
+            return "⚠️ Please provide a term, e.g. /define RSI"
+        send_message(f"📖 <i>Looking up <b>{term}</b>…</i>", chat_id=chat_id)
+        def _define_async():
+            try:
+                import anthropic as _ant
+                import os as _os
+                client = _ant.Anthropic(api_key=_os.environ["ANTHROPIC_API_KEY"])
+                resp   = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=300,
+                    system=(
+                        "You are a friendly financial educator helping everyday investors. "
+                        "Explain the term in 2-3 short sentences of plain English — "
+                        "zero jargon, zero disclaimers. "
+                        "Format: first sentence = one-line definition. "
+                        "Second sentence = why it matters for trading. "
+                        "Third sentence (optional) = a simple real-world example with numbers. "
+                        "End with: 'StockPulz uses this to: ...' (one short line)."
+                    ),
+                    messages=[{"role": "user", "content": f"Explain this financial term: {term}"}],
+                )
+                explanation = resp.content[0].text.strip()
+                send_message(
+                    f"📖 <b>{term.upper()}</b>\n\n{explanation}\n\n"
+                    f"<i>💡 Try another: /define options · /define RSI · /define MACD</i>",
+                    chat_id=chat_id,
+                )
+            except Exception as exc:
+                send_message(f"⚠️ Couldn't look that up right now: {exc}", chat_id=chat_id)
+        threading.Thread(target=_define_async, daemon=True).start()
+        return None
 
     # ── /dividends ────────────────────────────────────────────────────────────
     if text == "DIVIDENDS":
