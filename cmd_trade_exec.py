@@ -5,6 +5,7 @@ cmd_trade_exec.py — Trade execution helpers extracted from bot_commands.py.
 import os
 import threading
 
+from datetime import date
 from telegram_api import send_message, send_photo
 from config_manager import load_picks, load_user_trade_log, save_user_trade_log
 from formatters import _p, _esc
@@ -151,6 +152,7 @@ def _execute_sold(ticker: str, chat_id: str,
 
     # Calculate P&L if exit price provided
     pnl_line = ""
+    _ret_pct  = None  # tracked for post-close debrief
     if price is not None:
         try:
             exit_price = float(str(price).replace(",", ""))
@@ -161,6 +163,7 @@ def _execute_sold(ticker: str, chat_id: str,
                     if entry:
                         entry    = float(entry)
                         ret_pct  = (exit_price - entry) / entry * 100
+                        _ret_pct = ret_pct
                         sign     = "+" if ret_pct >= 0 else ""
                         emoji    = "📈" if ret_pct >= 0 else "📉"
                         qty      = float(t.get("shares") or shares_sold or 0)
@@ -171,10 +174,68 @@ def _execute_sold(ticker: str, chat_id: str,
         except Exception:
             pass
 
+    # ── Tax-awareness note ───────────────────────────────────────────────────
+    tax_note = ""
+    if price is not None:
+        try:
+            exit_price_tax = float(str(price).replace(",", ""))
+            log_tax = load_user_trade_log(chat_id)
+            for t_tax in log_tax.get("open", []):
+                if t_tax["ticker"] == ticker:
+                    opened_str = t_tax.get("opened_date") or t_tax.get("opened_at", "")
+                    if opened_str:
+                        try:
+                            opened_d = date.fromisoformat(str(opened_str)[:10])
+                            days_held = (date.today() - opened_d).days
+                            # Determine pnl direction
+                            entry_tax = t_tax.get("entry_price")
+                            pnl_positive = entry_tax and exit_price_tax > float(entry_tax)
+                            pnl_negative = entry_tax and exit_price_tax < float(entry_tax)
+                            if pnl_positive:
+                                if days_held < 330:
+                                    tax_note = (
+                                        f"\n\n⚠️ <b>Tax Note:</b> This is a <b>short-term gain</b> "
+                                        f"(held {days_held} days). Short-term gains are taxed at your "
+                                        f"income rate — typically higher than the 15-20% long-term rate."
+                                    )
+                                elif days_held < 365:
+                                    days_left = 365 - days_held
+                                    tax_note = (
+                                        f"\n\n💡 <b>Tax Tip:</b> You've held this {days_held} days — "
+                                        f"just {days_left} more days would qualify for the <b>lower "
+                                        f"long-term capital gains rate</b> (15-20% vs your income rate). "
+                                        f"Worth considering if you're not in a rush to sell."
+                                    )
+                                else:
+                                    tax_note = (
+                                        f"\n\n✅ <b>Long-term gain</b> — held {days_held} days. "
+                                        f"You qualify for the preferential long-term capital gains rate "
+                                        f"(0%, 15%, or 20% depending on your income). Nice work holding the course."
+                                    )
+                            elif pnl_negative:
+                                tax_note = (
+                                    "\n\n📋 <b>Tax Note:</b> This loss may be deductible against "
+                                    "your capital gains. Keep records for your tax filing."
+                                )
+                        except Exception:
+                            pass
+                    break
+        except Exception:
+            pass
+
     removed = remove_holding(ticker, chat_id)
     if not removed:
         return f"⚠️ <b>{ticker}</b> is not in your portfolio."
-    return f"✅ <b>{ticker}</b> removed from your portfolio.{pnl_line}"
+    # Build debrief note based on P&L direction
+    debrief_note = ""
+    if _ret_pct is not None:
+        if _ret_pct > 0.5:
+            debrief_note = "\n\n💬 <i>Good discipline taking profits. Letting winners run AND knowing when to exit is what separates good traders from great ones.</i>"
+        elif _ret_pct < -0.5:
+            debrief_note = "\n\n💬 <i>Cutting a losing position before the stop is sometimes the right call — especially if your thesis has changed. Protecting capital is always the priority.</i>"
+        else:
+            debrief_note = "\n\n💬 <i>Exiting at breakeven is perfectly valid risk management — you protected your capital and kept your options open.</i>"
+    return f"✅ <b>{ticker}</b> removed from your portfolio.{pnl_line}{tax_note}{debrief_note}"
 
 
 def _execute_update_level(ticker: str, field: str, new_price: float, chat_id: str) -> str:

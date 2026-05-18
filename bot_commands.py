@@ -149,6 +149,9 @@ def handle_callback_query(callback_query: dict) -> None:
     _TOASTS = {
         "onboard_budget":     "✅ Got it!",
         "onboard_risk":       "✅ Got it!",
+        "onboard_goal":       "✅ Got it!",
+        "onboard_horizon":    "✅ Got it!",
+        "onboard_portfolio":  "✅ Got it!",
         "onboard_assets":     "✅ Setting up your account…",
         "quickbuy":           "📝 Confirm below…",
         "quickbuy_confirm":   "⏳ Logging position…",
@@ -158,6 +161,9 @@ def handle_callback_query(callback_query: dict) -> None:
         "sold_review":        "⏳ Loading…",
         "sold_confirm":       "⏳ Closing position…",
         "bought_confirm":     "⏳ Logging position…",
+        "buy_pick":           "🛒 Loading pick details…",
+        "confirm_buy":        "⏳ Logging position…",
+        "skip_buy":           "👍 Skipped.",
         "updatelevel_pick":   "⏳ Loading…",
         "unalert_confirm":    "⏳ Removing alert…",
         "paper_reset_confirm":"⏳ Resetting…",
@@ -356,14 +362,27 @@ def handle_callback_query(callback_query: dict) -> None:
             return
         _, stock_b, crypto_b = _BUDGET_BUCKETS[key]
         update_user_config_multi(chat_id, {"stock_budget": stock_b, "crypto_budget": crypto_b})
+        # Proceed to total portfolio size step
         send_inline_keyboard(
-            "💰 Budget saved.\n\n"
-            "<b>Question 2 of 3 — What's your risk appetite?</b>\n"
-            "<i>Conservative = tighter stops, fewer trades. Aggressive = wider targets, higher volatility picks.</i>",
-            [[
-                {"text": label, "callback_data": f"onboard_risk_{key2}"}
-                for key2, (label, _) in _RISK_OPTIONS.items()
-            ]],
+            (
+                "💼 <b>Optional: Total Portfolio Size</b>\n\n"
+                "How much total money do you have invested across all accounts? "
+                "This helps me warn you if you're over-concentrated.\n\n"
+                "<i>This is private and only used for guidance. Skip if you prefer.</i>"
+            ),
+            [
+                [
+                    {"text": "Under $5k",   "callback_data": "onboard_portfolio|5000"},
+                    {"text": "Under $25k",  "callback_data": "onboard_portfolio|25000"},
+                ],
+                [
+                    {"text": "Under $100k", "callback_data": "onboard_portfolio|100000"},
+                    {"text": "Over $100k",  "callback_data": "onboard_portfolio|500000"},
+                ],
+                [
+                    {"text": "Skip",        "callback_data": "onboard_portfolio|skip"},
+                ],
+            ],
             chat_id=chat_id,
         )
         return
@@ -374,9 +393,70 @@ def handle_callback_query(callback_query: dict) -> None:
             return
         _, profile = _RISK_OPTIONS[key]
         update_user_config(chat_id, "risk_profile", profile)
-        send_inline_keyboard(
+        send_message(
             "⚖️ Risk profile saved.\n\n"
-            "<b>Question 3 of 3 — Which asset classes do you want picks for?</b>\n"
+            "🛡 <b>Stop-Loss &amp; Target</b>\n\n"
+            "A <b>stop-loss</b> is your safety net — if a stock drops this % from your entry, sell automatically to prevent bigger losses. (Default: 7%)\n\n"
+            "A <b>target</b> is your profit goal — if a stock rises this %, consider taking your gains. (Default: 15%)\n\n"
+            "<i>These defaults work well for most people. You can always adjust with /set_thresholds</i>",
+            chat_id=chat_id,
+        )
+        # Proceed to investment goal step (new wizard step)
+        send_inline_keyboard(
+            "🎯 <b>What are you investing for?</b>\n\n"
+            "This helps me tailor picks to your situation. There's no wrong answer.",
+            [
+                [
+                    {"text": "🏠 House / Big Purchase", "callback_data": "onboard_goal|house"},
+                    {"text": "🏖 Retirement",           "callback_data": "onboard_goal|retirement"},
+                ],
+                [
+                    {"text": "📈 General Wealth",       "callback_data": "onboard_goal|wealth"},
+                    {"text": "🧪 Learning / Practice",  "callback_data": "onboard_goal|learning"},
+                ],
+            ],
+            chat_id=chat_id,
+        )
+        return
+
+    if action == "onboard_goal":
+        goal_value = parts[1] if len(parts) > 1 else ""
+        if not goal_value:
+            return
+        log_g = load_user_trade_log(chat_id)
+        log_g.setdefault("settings", {})["investment_goal"] = goal_value
+        save_user_trade_log(chat_id, log_g)
+        # Proceed to time horizon step
+        send_inline_keyboard(
+            (
+                "\u23f3 <b>What's your time horizon?</b>\n\n"
+                "How long are you planning to keep money in the market?\n\n"
+                "<i>This affects how aggressively I pick \u2014 longer horizons can handle more volatility.</i>"
+            ),
+            [
+                [
+                    {"text": "\u26a1 Under 1 year",  "callback_data": "onboard_horizon|short"},
+                    {"text": "\U0001f4c5 1\u20133 years",     "callback_data": "onboard_horizon|medium"},
+                ],
+                [
+                    {"text": "\U0001f331 3\u201310 years",    "callback_data": "onboard_horizon|long"},
+                    {"text": "\U0001f3d4 10+ years",     "callback_data": "onboard_horizon|verylong"},
+                ],
+            ],
+            chat_id=chat_id,
+        )
+        return
+
+    if action == "onboard_horizon":
+        horizon_value = parts[1] if len(parts) > 1 else ""
+        if not horizon_value:
+            return
+        log_h = load_user_trade_log(chat_id)
+        log_h.setdefault("settings", {})["time_horizon"] = horizon_value
+        save_user_trade_log(chat_id, log_h)
+        # Proceed to asset class step (final question)
+        send_inline_keyboard(
+            "<b>Last question \u2014 Which asset classes do you want picks for?</b>\n"
             "<i>You can change this anytime in /settings.</i>",
             [[
                 {"text": label, "callback_data": f"onboard_assets_{key2}"}
@@ -386,17 +466,69 @@ def handle_callback_query(callback_query: dict) -> None:
         )
         return
 
-    if action == "onboard_assets":
-        key = parts[1] if len(parts) > 1 else ""
-        if key not in _ASSET_OPTIONS:
-            return
-        _, show_crypto, show_etfs = _ASSET_OPTIONS[key]
-        update_user_config_multi(chat_id, {
-            "show_crypto": show_crypto,
-            "show_etfs":   show_etfs,
-            "onboarded":   True,
-        })
+    if action in ("onboard_assets_stocks", "onboard_assets_stockscrypto", "onboard_assets_all") or action.startswith("onboard_assets_"):
+        key = action[len("onboard_assets_"):]
+        opt = _ASSET_OPTIONS.get(key)
+        if opt:
+            _, show_crypto, show_etfs = opt
+            update_user_config_multi(chat_id, {"show_crypto": show_crypto, "show_etfs": show_etfs, "onboarded": True})
+        else:
+            update_user_config(chat_id, "onboarded", True)
         _send_onboarding_complete(chat_id)
+        orientation = (
+            "\U0001f4c5 <b>Here's what to expect every day:</b>\n\n"
+            "\U0001f305 <b>Morning (market days)</b>\n"
+            "Your daily picks arrive with entry price, position size, stop-loss and target already calculated. "
+            "Just tap <b>[\u2705 Buy]</b> on anything you like.\n\n"
+            "\u2600\ufe0f <b>During the day</b>\n"
+            "I'll message you if:\n"
+            "\u2022 News breaks on one of your positions\n"
+            "\u2022 Markets get unusually volatile\n"
+            "\u2022 A position is drifting toward its stop\n"
+            "\u2022 A major economic event is happening tomorrow\n\n"
+            "\U0001f514 <b>When a target or stop hits</b>\n"
+            "You'll get an alert with a one-tap <b>[\u2705 Log as Sold]</b> button. "
+            "No need to watch charts.\n\n"
+            "\U0001f4ca <b>Friday evening</b>\n"
+            "Your weekly wrap arrives automatically \u2014 P&amp;L, wins, losses, how you did vs the S&amp;P 500.\n\n"
+            "\U0001f5d3 <b>Sunday morning</b>\n"
+            "A personalised week-ahead briefing with upcoming earnings on your positions and key market events.\n\n"
+            "<b>That's genuinely all you need to do.</b> The research, monitoring and alerts run automatically.\n\n"
+            "Start with /today to see today's picks, or /help for all commands. Good luck! \U0001f3af"
+        )
+        send_message(orientation, chat_id=chat_id)
+        return
+
+    if action == "onboard_portfolio":
+        portfolio_value = parts[1] if len(parts) > 1 else ""
+        if not portfolio_value:
+            return
+        log_p = load_user_trade_log(chat_id)
+        log_p.setdefault("settings", {})
+        if portfolio_value != "skip":
+            try:
+                log_p["settings"]["total_portfolio_size"] = int(portfolio_value)
+            except ValueError:
+                pass
+        save_user_trade_log(chat_id, log_p)
+        # Proceed to risk profile step
+        send_message(
+            "⚖️ <b>Risk Profile</b>\n\n"
+            "This tells me how cautious to be with your picks.\n\n"
+            "\u2022 <b>Conservative</b> \u2014 Safer, slower-moving stocks. Smaller gains but fewer surprises. Good if you're new or don't like stress.\n"
+            "\u2022 <b>Moderate</b> \u2014 A balance of growth and safety. Most people start here.\n"
+            "\u2022 <b>Aggressive</b> \u2014 Higher-reward picks that can also drop fast. Better for experienced traders who can handle volatility.\n\n"
+            "<i>You can change this anytime with /set_risk</i>",
+            chat_id=chat_id,
+        )
+        send_inline_keyboard(
+            "<b>What's your risk appetite?</b>",
+            [[
+                {"text": label, "callback_data": f"onboard_risk_{key2}"}
+                for key2, (label, _) in _RISK_OPTIONS.items()
+            ]],
+            chat_id=chat_id,
+        )
         return
 
     if action == "set_budget":
@@ -539,6 +671,127 @@ def handle_callback_query(callback_query: dict) -> None:
         except Exception as exc:
             print(f"[bot] bought_confirm failed for {ticker}: {exc}")
             send_message(f"⚠️ Couldn't log <b>{ticker}</b> — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
+
+    elif action == "buy_pick":
+        # User tapped [✅ Buy TICKER] on the morning picks message.
+        # callback_data: buy_pick|TICKER|ENTRY|SHARES|ASSET_TYPE|STOP_PCT|TARGET_PCT
+        ticker     = parts[1].upper() if len(parts) > 1 else ""
+        entry_raw  = parts[2]         if len(parts) > 2 else ""
+        shares_raw = parts[3]         if len(parts) > 3 else "1"
+        asset_type = parts[4]         if len(parts) > 4 else "stock"
+        stop_pct   = parts[5]         if len(parts) > 5 else "7"
+        target_pct = parts[6]         if len(parts) > 6 else "15"
+        if not ticker or not entry_raw:
+            return
+        try:
+            entry      = float(entry_raw)
+            shares     = int(shares_raw) if shares_raw.isdigit() else 1
+            sp         = float(stop_pct)
+            tp         = float(target_pct)
+            stop_price  = round(entry * (1 - sp / 100), 2)
+            target_price = round(entry * (1 + tp / 100), 2)
+            # Look up company name from today's picks (best-effort)
+            try:
+                _picks = load_picks() or {}
+                _all_picks = (
+                    _picks.get("stocks", {}).get("short_term", []) +
+                    _picks.get("stocks", {}).get("long_term",  []) +
+                    _picks.get("crypto", {}).get("short_term", []) +
+                    _picks.get("etfs",   {}).get("short_term", []) +
+                    _picks.get("etfs",   {}).get("long_term",  []) +
+                    _picks.get("commodities", {}).get("short_term", []) +
+                    _picks.get("commodities", {}).get("long_term",  [])
+                )
+                company = next(
+                    (
+                        p.get("company") or p.get("name") or ""
+                        for p in _all_picks
+                        if (p.get("ticker") or p.get("symbol") or "").upper() == ticker
+                    ),
+                    "",
+                )
+            except Exception:
+                company = ""
+            company_suffix = (" — " + _esc(company)) if company else ""
+            confirm_msg = (
+                "🛒 <b>Ready to log your buy?</b>\n"
+                + f"📌 <b>{ticker}</b>{company_suffix}\n"
+                + f"💰 Entry: <code>${_p(entry)}</code>\n"
+                + f"📦 Shares: {shares} (based on your budget)\n"
+                + f"🛡 Stop-loss: <code>${_p(stop_price)}</code> ({sp}% below entry)\n"
+                + f"🎯 Target: <code>${_p(target_price)}</code> ({tp}% above entry)\n\n"
+                + "Tap Confirm to log this position."
+            )
+            confirm_cb = f"confirm_buy|{ticker}|{entry_raw}|{shares}|{asset_type}|{stop_price}|{target_price}"
+            skip_cb    = f"skip_buy|{ticker}"
+            send_inline_keyboard(
+                confirm_msg,
+                [[
+                    {"text": "✅ Confirm Buy", "callback_data": confirm_cb},
+                    {"text": "❌ Skip",        "callback_data": skip_cb},
+                ]],
+                chat_id=chat_id,
+            )
+        except Exception as exc:
+            print(f"[bot] buy_pick failed for {ticker}: {exc}")
+            send_message(f"⚠️ Something went wrong — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
+        return
+
+    elif action == "confirm_buy":
+        # User confirmed the buy from the pick confirmation message.
+        # callback_data: confirm_buy|TICKER|ENTRY|SHARES|ASSET_TYPE|STOP_PRICE|TARGET_PRICE
+        ticker       = parts[1].upper() if len(parts) > 1 else ""
+        entry_raw    = parts[2]         if len(parts) > 2 else ""
+        shares_raw   = parts[3]         if len(parts) > 3 else None
+        stop_raw     = parts[5]         if len(parts) > 5 else None
+        target_raw   = parts[6]         if len(parts) > 6 else None
+        if not ticker:
+            return
+        try:
+            result = _execute_bought(ticker, chat_id, price=entry_raw or None, shares=shares_raw or None)
+            # Override stop/target in trade log if we have them
+            if stop_raw or target_raw:
+                try:
+                    log = load_user_trade_log(chat_id)
+                    for t in log.get("open", []):
+                        if t["ticker"] == ticker:
+                            if stop_raw:
+                                t["stop_loss"] = float(stop_raw)
+                            if target_raw:
+                                t["target_price"] = float(target_raw)
+                            break
+                    save_user_trade_log(chat_id, log)
+                except Exception as exc2:
+                    print(f"[bot] confirm_buy stop/target override failed (non-critical): {exc2}")
+            entry_str  = f"<code>${_p(float(entry_raw))}</code>" if entry_raw else ""
+            shares_str = f" — {shares_raw} shares" if shares_raw else ""
+            stop_str   = f"<code>${_p(float(stop_raw))}</code>"   if stop_raw   else "—"
+            target_str = f"<code>${_p(float(target_raw))}</code>" if target_raw else "—"
+            success_msg = (
+                "✅ <b>Position logged!</b>\n"
+                + f"<b>{ticker}</b>{shares_str} at {entry_str}\n"
+                + f"Stop: {stop_str}  |  Target: {target_str}\n"
+                + "Track it anytime with /positions"
+            )
+            try:
+                from config_manager import increment_buy_count
+                cfg2 = get_config()
+                if cfg2.get("show_buy_counts"):
+                    increment_buy_count(ticker)
+            except Exception as exc3:
+                print(f"[bot] buy count increment failed (non-critical): {exc3}")
+        except Exception as exc:
+            print(f"[bot] confirm_buy failed for {ticker}: {exc}")
+            send_message(f"⚠️ Couldn't log <b>{ticker}</b> — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
+        return
+
+    elif action == "skip_buy":
+        # User tapped Skip on the buy confirmation.
+        # callback_data: skip_buy|TICKER
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        msg    = f"No problem — you can log it later with <code>/bought {ticker}</code>" if ticker else "No problem."
+        send_message(msg, chat_id=chat_id)
+        return
 
     elif action == "sold_confirm":
         ticker     = parts[1] if len(parts) > 1 else ""
