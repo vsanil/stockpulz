@@ -227,14 +227,16 @@ def handle_callback_query(callback_query: dict) -> None:
         asset_type = parts[2] if len(parts) > 2 else "stock"
         if not ticker:
             return
-        try:
-            send_message("📊 <i>Generating chart…</i>", chat_id=chat_id)
-            threading.Thread(
-                target=_send_chart, args=(ticker, asset_type, chat_id), daemon=True
-            ).start()
-        except Exception as exc:
-            print(f"[bot] chart failed for {ticker}: {exc}")
-            send_message(f"⚠️ Chart unavailable for <b>{ticker}</b> right now.", chat_id=chat_id)
+        render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+        if render_url:
+            mini_url = f"{render_url}/miniapp?chart={ticker}&asset_type={asset_type}"
+            send_inline_keyboard(
+                f"📊 <b>{ticker}</b> chart — tap to open in the dashboard:",
+                [[{"text": f"📊 View {ticker} Chart  ↗", "web_app": {"url": mini_url}}]],
+                chat_id=chat_id,
+            )
+        else:
+            send_message(f"📊 Open the dashboard to view the {ticker} chart.", chat_id=chat_id)
         return
 
     if action == "noop":
@@ -1539,6 +1541,11 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     if command == "dividends":
         return _parse_and_execute("DIVIDENDS", original="/dividends", chat_id=chat_id)
+
+    if command == "size":
+        arg = text.strip().upper() if text.strip() else ""
+        cmd_text = f"SIZE {arg}" if arg else "SIZE"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
 
     if command == "performance":
         return _parse_and_execute("PERFORMANCE", original="/performance", chat_id=chat_id)

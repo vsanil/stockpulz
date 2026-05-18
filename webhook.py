@@ -1082,6 +1082,62 @@ def miniapp_history():
     return jsonify({"ok": True, "trades": closed, "has_simulated": False})
 
 
+@app.route("/api/miniapp/pnl_history")
+def miniapp_pnl_history():
+    """Return daily cumulative P&L from closed trades for portfolio chart."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_user_trade_log, load_backtest_trades
+    log    = load_user_trade_log(chat_id)
+    closed = log.get("closed", [])
+
+    # Merge backtest if few real trades
+    if len(closed) < 5:
+        bt = load_backtest_trades(chat_id)
+        if bt:
+            closed = sorted(closed + bt, key=lambda t: t.get("closed_date", ""))
+
+    # Build daily cumulative P&L (sum gain_usd by close date)
+    from collections import defaultdict
+    daily = defaultdict(float)
+    for t in closed:
+        d = t.get("closed_date", "")
+        g = float(t.get("gain_usd") or t.get("return_pct") or 0)
+        if d:
+            daily[d] += g
+
+    # Build sorted cumulative series
+    points = []
+    cum = 0.0
+    for d in sorted(daily.keys()):
+        cum += round(daily[d], 2)
+        points.append({"date": d, "cumulative": round(cum, 2), "daily": round(daily[d], 2)})
+
+    total_pnl  = round(cum, 2)
+    total_trades = len(closed)
+    wins = len([t for t in closed if float(t.get("return_pct") or 0) > 0])
+    win_rate = round(wins / total_trades * 100) if total_trades else 0
+
+    # Compute current win/loss streak from most recent trades
+    current_streak = 0
+    if closed:
+        sorted_closed = sorted(closed, key=lambda t: t.get("closed_date", ""))
+        last_outcome = None
+        for t in reversed(sorted_closed):
+            is_win = float(t.get("return_pct") or 0) > 0
+            if last_outcome is None:
+                last_outcome = is_win
+                current_streak = 1 if is_win else -1
+            elif is_win == last_outcome:
+                current_streak = current_streak + 1 if is_win else current_streak - 1
+            else:
+                break
+
+    return jsonify({"ok": True, "points": points, "total_pnl": total_pnl,
+                    "total_trades": total_trades, "win_rate": win_rate,
+                    "current_streak": current_streak})
+
+
 @app.route("/api/miniapp/alerts")
 def miniapp_alerts():
     chat_id = _miniapp_auth()
@@ -1456,6 +1512,52 @@ def miniapp_share_link():
         "price alerts, and weekly performance recaps.\n\nJoin here 👇\n" + bot_link
     )
     return jsonify({"ok": True, "url": bot_link, "text": share_text})
+
+
+@app.route("/api/miniapp/watchlist")
+def miniapp_watchlist():
+    """Return user's watchlist tickers."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_user_trade_log
+    log = load_user_trade_log(chat_id)
+    tickers = log.get("watchlist", [])
+    return jsonify({"ok": True, "tickers": tickers})
+
+
+@app.route("/api/miniapp/watchlist/add", methods=["POST"])
+def miniapp_watchlist_add():
+    """Add a ticker to the user's watchlist."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_user_trade_log, save_user_trade_log
+    body   = request.get_json(silent=True) or {}
+    ticker = (body.get("ticker") or "").strip().upper()
+    if not ticker: return jsonify({"error": "ticker required"}), 400
+    log = load_user_trade_log(chat_id)
+    watchlist = log.get("watchlist", [])
+    if ticker in watchlist:
+        return jsonify({"ok": False, "error": f"{ticker} already on watchlist"}), 200
+    watchlist.append(ticker)
+    log["watchlist"] = watchlist
+    save_user_trade_log(chat_id, log)
+    return jsonify({"ok": True, "ticker": ticker, "count": len(watchlist)})
+
+
+@app.route("/api/miniapp/watchlist/remove", methods=["POST"])
+def miniapp_watchlist_remove():
+    """Remove a ticker from the user's watchlist."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    from config_manager import load_user_trade_log, save_user_trade_log
+    body   = request.get_json(silent=True) or {}
+    ticker = (body.get("ticker") or "").strip().upper()
+    if not ticker: return jsonify({"error": "ticker required"}), 400
+    log = load_user_trade_log(chat_id)
+    watchlist = [t for t in log.get("watchlist", []) if t != ticker]
+    log["watchlist"] = watchlist
+    save_user_trade_log(chat_id, log)
+    return jsonify({"ok": True, "ticker": ticker, "count": len(watchlist)})
 
 
 @app.route("/api/miniapp/status")

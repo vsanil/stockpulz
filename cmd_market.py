@@ -578,4 +578,65 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         except Exception as exc:
             return f"⚠️ Could not fetch dividend data: {exc}"
 
+    # ── /size ─────────────────────────────────────────────────────────────────
+    if text == "SIZE":
+        return (
+            "💰 <b>Position Sizing</b>\n\n"
+            "Usage: <code>/size TICKER</code>  — e.g. <code>/size NVDA</code>\n\n"
+            "I'll calculate how many shares to buy based on your budget and risk profile."
+        )
+
+    if text.startswith("SIZE "):
+        ticker = text[5:].strip().upper()
+        if not ticker:
+            return "Usage: <code>/size TICKER</code>"
+
+        cfg         = {**get_config(), **get_user_config(chat_id)}
+        stock_budget = float(cfg.get("stock_budget") or cfg.get("budget_per_trade") or 500)
+        crypto_budget= float(cfg.get("crypto_budget") or 100)
+        stop_pct     = float(cfg.get("stop_loss_pct") or 7)
+        risk_profile = cfg.get("risk_profile", "moderate")
+
+        # Detect if crypto
+        is_crypto = len(ticker) <= 5 and ticker.isalpha() and ticker in (
+            "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","LINK",
+            "UNI","ATOM","LTC","BCH","ALGO","XLM","ICP","FIL","HYPE","SUI","ARB","OP"
+        )
+        budget = crypto_budget if is_crypto else stock_budget
+
+        send_typing_action(chat_id)
+        price = _fetch_live_price(ticker)
+        if not price or price <= 0:
+            return f"⚠️ Couldn't fetch a live price for <b>{ticker}</b>. Try again shortly."
+
+        # Risk-based position size: risk $ = budget * stop%
+        # Shares = risk_amount / (price * stop_pct/100)
+        risk_multiplier = {"conservative": 0.5, "moderate": 1.0, "aggressive": 1.5}.get(risk_profile, 1.0)
+        max_risk_amt    = budget * (stop_pct / 100) * risk_multiplier
+        shares          = max_risk_amt / (price * stop_pct / 100)
+        shares          = max(1, round(shares))
+        total_cost      = round(shares * price, 2)
+        stop_price      = round(price * (1 - stop_pct / 100), 2)
+        target_price    = round(price * (1 + (stop_pct * 2) / 100), 2)   # 2:1 reward/risk
+
+        # Cap to budget
+        if total_cost > budget:
+            shares     = max(1, int(budget / price))
+            total_cost = round(shares * price, 2)
+
+        risk_amt   = round(shares * price * stop_pct / 100, 2)
+        reward_amt = round(shares * (target_price - price), 2)
+
+        return (
+            f"💰 <b>Position Size — {ticker}</b>\n\n"
+            f"Live price:    <code>${price:,.2f}</code>\n"
+            f"Suggested:     <b>{shares} share{'s' if shares != 1 else ''}</b>  (${total_cost:,.2f})\n\n"
+            f"🛑 Stop loss:  <code>${stop_price:,.2f}</code>  (−{stop_pct}%)\n"
+            f"🎯 Target:     <code>${target_price:,.2f}</code>  (+{stop_pct*2}%)\n\n"
+            f"Max risk:      <b>${risk_amt:,.2f}</b>  ·  Reward: <b>${reward_amt:,.2f}</b>\n"
+            f"Risk/Reward:   1 : 2  ({risk_profile} profile)\n\n"
+            f"<i>Based on your ${budget:,.0f} budget &amp; {stop_pct}% stop. "
+            f"Adjust with /set_budget &amp; /set_thresholds.</i>"
+        )
+
     return None
