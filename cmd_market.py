@@ -174,6 +174,52 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             except Exception:
                 pass
 
+            # ── SPY benchmark comparison ──────────────────────────────────────
+            try:
+                import yfinance as yf
+                from datetime import date as _date
+                log_spy = load_user_trade_log(chat_id)
+                all_trades_spy = log_spy.get("closed", []) + log_spy.get("open", [])
+                if all_trades_spy:
+                    date_strs = []
+                    for _t in all_trades_spy:
+                        _ds = _t.get("opened_date") or _t.get("opened_at", "")
+                        if _ds:
+                            date_strs.append(str(_ds)[:10])
+                    if date_strs:
+                        first_trade_date = min(date_strs)
+                        spy_data = yf.download("SPY", start=first_trade_date, progress=False)["Close"]
+                        if not spy_data.empty and len(spy_data) >= 2:
+                            spy_return = float((spy_data.iloc[-1] / spy_data.iloc[0] - 1) * 100)
+                            # User total return: sum pnl_usd / sum invested
+                            closed_spy = log_spy.get("closed", [])
+                            total_pnl_usd = sum(float(t.get("gain_usd") or 0) for t in closed_spy)
+                            total_invested = 0.0
+                            for t in closed_spy:
+                                ep = t.get("entry_price")
+                                sh = t.get("shares") or t.get("quantity")
+                                alloc = t.get("allocation") or t.get("budget")
+                                if ep and sh:
+                                    total_invested += float(ep) * float(sh)
+                                elif alloc:
+                                    total_invested += float(alloc)
+                            user_return = (total_pnl_usd / total_invested * 100) if total_invested > 0 else 0.0
+                            if user_return > spy_return + 2:
+                                verdict = "🏆 You're beating the market — the picks are working."
+                            elif user_return > spy_return - 2:
+                                verdict = "⚖️ Roughly in line with the market."
+                            else:
+                                verdict = "📉 The market has outperformed your picks so far. Stay patient or review your strategy with /backtest."
+                            msg += (
+                                f"\n\n<b>📊 vs S&amp;P 500</b>\n"
+                                f"Since your first trade ({first_trade_date}):\n"
+                                f"Your picks: {user_return:+.1f}%\n"
+                                f"SPY (S&amp;P 500): {spy_return:+.1f}%\n"
+                                f"{verdict}"
+                            )
+            except Exception:
+                pass
+
             msg += "\n\n<i>⚠️ Past performance doesn't guarantee future results.</i>  📋 /help"
             return msg
         except Exception as exc:

@@ -275,7 +275,7 @@ MOCK_PICKS = {
 def detect_run_mode(now_et: datetime) -> str:
     """Auto-detect run mode by ET hour/weekday. Override with RUN_MODE env var."""
     forced = os.environ.get("RUN_MODE", "").lower()
-    if forced in ("morning", "confirmation", "weekly", "close_check", "eod_summary", "prescreener", "price_alerts", "week_ahead", "premarket"):
+    if forced in ("morning", "confirmation", "weekly", "close_check", "eod_summary", "prescreener", "price_alerts", "week_ahead", "premarket", "friday_wrap", "macro_alert", "midday_check", "vix_check", "news_check", "pre_earnings", "monthly_commentary"):
         return forced
     if now_et.weekday() == 6 and now_et.hour < 14:   # Sunday morning → week ahead briefing
         return "week_ahead"
@@ -687,18 +687,21 @@ def _broadcast_trade_closes(current_prices: dict) -> None:
                         f"🎯 Your profit target was hit on {ticker} — great trade! "
                         f"Time to lock in your gains.\n"
                         f"Closed @ {price_str}  {pct_str}  {usd_str}"
+                        "\n\n💬 <i>The target was set when the pick was made. Hitting it means the thesis played out exactly as planned — that's the system working.</i>"
                     )
                 elif outcome == "stop":
                     close_msg = (
                         f"🛡 Your stop-loss triggered on {ticker} — this protection saved you "
                         f"from bigger losses. Sell now to close the position.\n"
                         f"Closed @ {price_str}  {pct_str}  {usd_str}"
+                        "\n\n💬 <i>Stop-losses exist for this exact moment. By exiting here, you avoided any further downside. A small controlled loss is far better than a large uncontrolled one.</i>"
                     )
                 else:
                     close_msg = (
                         f"⏱ {ticker} position expired after 28 days. "
                         f"Review and decide: hold or close?\n"
                         f"Closed @ {price_str}  {pct_str}  {usd_str}"
+                        "\n\n💬 <i>Not every trade hits its target within the window — that's normal. Review the position and decide if the thesis still holds before re-entering.</i>"
                     )
 
                 # Post-trade debrief via Haiku (non-critical)
@@ -1039,6 +1042,984 @@ def run_eod_summary():
             _check_hold_or_fold(uid, current_prices)
         except Exception as exc:
             print(f"[agent] Hold/fold nudge failed for {uid} (non-critical): {exc}")
+
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            log = load_user_trade_log(uid)
+            open_positions = log.get("open", [])
+            _check_cash_position(uid, cfg, open_positions, current_prices)
+        except Exception as exc:
+            print(f"[agent] Cash position check failed for {uid} (non-critical): {exc}")
+
+    if date.today().weekday() == 0:   # Monday only
+        for uid in _all_recipients():
+            try:
+                log = load_user_trade_log(uid)
+                open_positions = log.get("open", [])
+                _check_portfolio_correlation(uid, open_positions)
+            except Exception as exc:
+                print(f"[agent] Portfolio correlation check failed for {uid} (non-critical): {exc}")
+
+
+# ── Friday Evening Wrap-Up ────────────────────────────────────────────────────
+
+def run_friday_wrap():
+    """
+    Friday ~6 PM ET — send each user a personalised weekly summary.
+    Covers: closed trades this week (winners/losers/P&L) + open positions
+    with unrealised P&L if live prices are available.
+    """
+    _log_cron_run("friday_wrap")
+    print("[agent] Running Friday evening wrap-up...")
+
+    now_et = datetime.now(ET)
+    # Week window: Monday 00:00 ET through today
+    today = now_et.date()
+    week_start = today - timedelta(days=today.weekday())  # Monday
+
+    import yfinance as yf
+
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            if cfg.get("paused"):
+                continue
+
+            log = load_user_trade_log(uid)
+            closed_trades = log.get("closed", [])
+            open_trades   = log.get("open", [])
+
+            # Filter trades closed THIS week
+            week_closed = []
+            for trade in closed_trades:
+                closed_date_str = trade.get("closed_date") or trade.get("closed_at", "")
+                if not closed_date_str:
+                    continue
+                try:
+                    closed_d = date.fromisoformat(str(closed_date_str)[:10])
+                    if week_start <= closed_d <= today:
+                        week_closed.append(trade)
+                except Exception:
+                    continue
+
+            if not week_closed:
+                send_message(
+                    "📭 No closed trades this week — your positions are still working. "
+                    "Check /positions for live P&amp;L.",
+                    chat_id=uid,
+                )
+                continue
+
+            # Stats on closed trades
+            winners = [t for t in week_closed if float(t.get("gain_usd") or t.get("return_pct") or 0) > 0]
+            losers  = [t for t in week_closed if t not in winners]
+            total_pnl = sum(float(t.get("gain_usd") or 0) for t in week_closed)
+            accuracy  = round(len(winners) / len(week_closed) * 100) if week_closed else 0
+
+            pnl_sign  = "+" if total_pnl >= 0 else ""
+            pnl_str   = f"{pnl_sign}${total_pnl:,.2f}"
+
+            # Unrealised P&L for open positions
+            unrealised_pnl = 0.0
+            n_open = len(open_trades)
+            if open_trades:
+                try:
+                    open_tickers = list({t["ticker"] for t in open_trades if t.get("ticker")})
+                    raw = yf.download(
+                        " ".join(open_tickers), period="1d", interval="1d",
+                        progress=False, auto_adjust=True,
+                    )
+                    if not raw.empty:
+                        if hasattr(raw["Close"], "columns"):
+                            prices = {t: float(raw["Close"][t].dropna().iloc[-1])
+                                      for t in open_tickers if t in raw["Close"].columns}
+                        else:
+                            prices = {open_tickers[0]: float(raw["Close"].dropna().iloc[-1])} if open_tickers else {}
+                        for trade in open_trades:
+                            ticker = trade.get("ticker")
+                            entry  = trade.get("entry_price")
+                            curr   = prices.get(ticker) if ticker else None
+                            if not (ticker and entry and curr):
+                                continue
+                            alloc  = trade.get("allocation") or trade.get("budget") or 0
+                            shares = trade.get("shares") or trade.get("quantity")
+                            if shares:
+                                unrealised_pnl += (float(curr) - float(entry)) * float(shares)
+                            elif alloc:
+                                est_shares = float(alloc) / float(entry)
+                                unrealised_pnl += (float(curr) - float(entry)) * est_shares
+                except Exception as exc:
+                    print(f"[agent] Friday wrap — unrealised P&L fetch failed for {uid}: {exc}")
+
+            unr_sign = "+" if unrealised_pnl >= 0 else ""
+            unr_str  = f"{unr_sign}${unrealised_pnl:,.2f}"
+
+            # Motivational closing line
+            if accuracy >= 60:
+                closer = "Keep letting the stops and targets do their job — that's how the edge compounds. 🎯"
+            elif len(week_closed) == 1:
+                closer = "One trade is still a data point. Stay consistent and let the process work. 🎯"
+            else:
+                closer = "Every loss is tuition. The system is working — keep trusting it. 💪"
+
+            open_section = ""
+            if n_open:
+                open_section = (
+                    f"\n<b>Still open:</b> {n_open} position{'s' if n_open != 1 else ''}\n"
+                    f"📈 Unrealised P&amp;L: {unr_str}\n"
+                )
+
+            # SPY weekly return
+            spy_week_str = ""
+            try:
+                spy_data = yf.download("SPY", period="5d", progress=False)["Close"]
+                if not spy_data.empty and len(spy_data) >= 2:
+                    spy_week = float((spy_data.iloc[-1] / spy_data.iloc[0] - 1) * 100)
+                    spy_week_str = f"\n<b>vs Market:</b> SPY this week: {spy_week:+.1f}%"
+            except Exception as _spy_exc:
+                print(f"[agent] Friday wrap — SPY fetch failed for {uid}: {_spy_exc}")
+
+            msg = (
+                f"📊 <b>Your Week in Review — StockPulz</b>\n\n"
+                f"<b>Closed this week:</b> {len(week_closed)} trade{'s' if len(week_closed) != 1 else ''}\n"
+                f"✅ Winners: {len(winners)}  |  ❌ Stopped out: {len(losers)}\n"
+                f"💰 Realised P&amp;L: {pnl_str}\n"
+                f"{open_section}\n"
+                f"<b>Bot accuracy this week:</b> {accuracy}% ({len(winners)} of {len(week_closed)})\n\n"
+                f"{closer}"
+                f"{spy_week_str}"
+            )
+            send_message(msg, chat_id=uid, parse_mode="HTML")
+
+        except Exception as exc:
+            print(f"[agent] Friday wrap failed for {uid} (non-critical): {exc}")
+
+    print("[agent] Friday evening wrap-up complete.")
+
+
+
+def run_tax_loss_harvest_check():
+    """
+    Run on the 1st and 15th of November and December.
+    Alert users with open positions sitting at an unrealised loss ≥ $50,
+    nudging them to consider year-end tax-loss harvesting.
+    """
+    _log_cron_run("tax_harvest")
+    today = date.today()
+    if today.month not in (11, 12):
+        print("[agent] Tax harvest check — not November or December, skipping.")
+        return
+
+    print("[agent] Running tax-loss harvest check...")
+    import yfinance as yf
+
+    dedup_month = today.strftime("%Y-%m")
+
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            if cfg.get("paused"):
+                continue
+
+            dedup_key = f"taxharvest_{uid}_{dedup_month}"
+            if _is_alerted(dedup_key):
+                continue
+
+            log = load_user_trade_log(uid)
+            open_trades = log.get("open", [])
+            if not open_trades:
+                continue
+
+            open_tickers = list({t["ticker"] for t in open_trades if t.get("ticker")})
+            try:
+                raw = yf.download(
+                    " ".join(open_tickers), period="1d", interval="1d",
+                    progress=False, auto_adjust=True,
+                )
+                if raw.empty:
+                    continue
+                if hasattr(raw["Close"], "columns"):
+                    prices = {t: float(raw["Close"][t].dropna().iloc[-1])
+                              for t in open_tickers if t in raw["Close"].columns}
+                else:
+                    prices = {open_tickers[0]: float(raw["Close"].dropna().iloc[-1])} if open_tickers else {}
+            except Exception as exc:
+                print(f"[agent] Tax harvest — price fetch failed for {uid}: {exc}")
+                continue
+
+            loss_positions = []
+            for trade in open_trades:
+                ticker = trade.get("ticker")
+                entry  = trade.get("entry_price")
+                curr   = prices.get(ticker) if ticker else None
+                if not (ticker and entry and curr):
+                    continue
+                shares = trade.get("shares") or trade.get("quantity")
+                alloc  = trade.get("allocation") or trade.get("budget")
+                if shares:
+                    unrealised = (float(curr) - float(entry)) * float(shares)
+                elif alloc:
+                    est_shares = float(alloc) / float(entry)
+                    unrealised = (float(curr) - float(entry)) * est_shares
+                else:
+                    continue
+                if unrealised < -50:
+                    loss_pct = (float(curr) - float(entry)) / float(entry) * 100
+                    loss_positions.append({
+                        "ticker": ticker,
+                        "abs_loss": abs(unrealised),
+                        "loss_pct": loss_pct,
+                    })
+
+            if not loss_positions:
+                continue
+
+            positions_lines = "\n".join(
+                f"• {p['ticker']} — down ${p['abs_loss']:.0f} "
+                f"(unrealised loss of {p['loss_pct']:.1f}%)"
+                for p in loss_positions
+            )
+
+            msg = (
+                f"🍂 <b>Year-End Tax Tip</b>\n\n"
+                f"You have positions sitting at a loss that could be useful before December 31:\n\n"
+                f"{positions_lines}\n\n"
+                f"Selling these before year-end lets you <b>offset capital gains</b> you've "
+                f"realised this year, potentially reducing your tax bill.\n\n"
+                f"⚠️ <b>Watch the wash-sale rule:</b> If you sell at a loss, don't buy the same "
+                f"stock back within 30 days or the deduction is disallowed.\n\n"
+                f"<i>This is general information, not tax advice. Consult your tax advisor for "
+                f"your specific situation.</i>\n\n"
+                f"Use /sold TICKER to close a position."
+            )
+            send_message(msg, chat_id=uid)
+            _mark_alerted(dedup_key)
+
+        except Exception as exc:
+            print(f"[agent] Tax harvest check failed for {uid} (non-critical): {exc}")
+
+    print("[agent] Tax-loss harvest check complete.")
+
+
+# ── Tomorrow's macro events (ForexFactory JSON, high-impact only) ─────────────
+
+def _get_tomorrows_macro_events() -> list[dict]:
+    """
+    Fetch tomorrow's high-impact economic events from ForexFactory public JSON.
+    Returns list of dicts like [{"name": "CPI Release", "impact": "high"}, ...].
+    Falls back to empty list on any error (graceful degradation).
+    """
+    import urllib.request
+    import json
+
+    tomorrow = (date.today() + timedelta(days=1)).strftime("%m-%d-%Y")
+    try:
+        url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+        req = urllib.request.Request(url, headers={"User-Agent": "StockPulz/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        events = []
+        for item in data:
+            if item.get("date", "").startswith(tomorrow) and item.get("impact", "").lower() == "high":
+                events.append({"name": item.get("title", item.get("event", "")), "impact": "high"})
+        return events
+    except Exception as exc:
+        print(f"[agent] _get_tomorrows_macro_events: fetch failed (non-critical): {exc}")
+        return []
+
+
+# ── Mid-week macro event alerts ───────────────────────────────────────────────
+
+def run_macro_alert_check():
+    """
+    Mon–Thu ~5 PM ET — check if high-impact macro events are scheduled tomorrow.
+    If yes, alert all users with a personalised view of potentially affected positions.
+    Deduplicated: only one alert per calendar day.
+    """
+    _log_cron_run("macro_alert")
+    print("[agent] Running macro alert check...")
+
+    # Only fire Mon–Thu
+    now_et = datetime.now(ET)
+    if now_et.weekday() >= 4:  # 4 = Friday, 5 = Sat, 6 = Sun
+        print("[agent] macro_alert: skipping — not Mon–Thu.")
+        return
+
+    dedup_key = f"macroalert_{date.today().isoformat()}"
+    if _is_alerted(dedup_key):
+        print("[agent] macro_alert: already sent today — skipping.")
+        return
+
+    events = _get_tomorrows_macro_events()
+    if not events:
+        print("[agent] macro_alert: no high-impact events tomorrow.")
+        return
+
+    _mark_alerted(dedup_key)
+    event_names = ", ".join(e["name"] for e in events[:5])
+
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            if cfg.get("paused"):
+                continue
+
+            log           = load_user_trade_log(uid)
+            open_tickers  = [t["ticker"] for t in log.get("open", []) if t.get("ticker")]
+            watch_tickers = cfg.get("watchlist", [])
+
+            personal_section = ""
+            if open_tickers or watch_tickers:
+                lines = []
+                if open_tickers:
+                    lines.append(f"💼 {', '.join(open_tickers[:6])} (open positions)")
+                if watch_tickers:
+                    lines.append(f"👁 {', '.join(watch_tickers[:6])} (watchlist)")
+                personal_section = (
+                    "\n\nYour positions that may be affected:\n"
+                    + "\n".join(lines)
+                    + "\n\nNo action needed — your stops are in place. Just be aware."
+                )
+
+            msg = (
+                f"⚠️ <b>Market Alert — Big Event Tomorrow</b>\n\n"
+                f"<b>Tomorrow:</b> {event_names}\n\n"
+                f"These events can cause sharp moves in equities, crypto, and rate-sensitive assets."
+                f"{personal_section}"
+            )
+            send_message(msg, chat_id=uid, parse_mode="HTML")
+
+        except Exception as exc:
+            print(f"[agent] macro_alert send failed for {uid} (non-critical): {exc}")
+
+    print(f"[agent] macro_alert: sent to {len(_all_recipients())} users for events: {event_names}")
+
+
+# ── Intraday Mid-Day Check ────────────────────────────────────────────────────
+
+def run_midday_check():
+    """12:30 PM ET intraday check — catch big moves during market hours."""
+    _log_cron_run("midday_check")
+    print("[agent] run_midday_check: starting")
+    try:
+        import yfinance as yf
+
+        users = _all_recipients()
+
+        # Collect all tracked tickers across all users
+        all_tickers: set = set()
+        for uid in users:
+            try:
+                log = load_user_trade_log(uid)
+                for trade in log.get("open", []):
+                    if trade.get("ticker"):
+                        all_tickers.add(trade["ticker"])
+            except Exception:
+                pass
+
+        if not all_tickers:
+            print("[agent] run_midday_check: no open positions — nothing to check.")
+            return
+
+        # Fetch current prices via yfinance (same approach as run_price_alerts)
+        ticker_list = list(all_tickers)
+        raw = yf.download(
+            " ".join(ticker_list), period="1d", interval="1m",
+            progress=False, auto_adjust=True,
+        )
+        if raw.empty:
+            print("[agent] run_midday_check: price fetch returned empty.")
+            return
+
+        if hasattr(raw["Close"], "columns"):
+            current_prices = {
+                t: float(raw["Close"][t].dropna().iloc[-1])
+                for t in ticker_list if t in raw["Close"].columns
+            }
+        else:
+            current_prices = (
+                {ticker_list[0]: float(raw["Close"].dropna().iloc[-1])} if ticker_list else {}
+            )
+
+        for uid in users:
+            _check_hold_or_fold(uid, current_prices)
+            _check_portfolio_health(uid, current_prices)
+
+    except Exception as e:
+        print(f"[agent] run_midday_check error: {e}")
+
+    print("[agent] run_midday_check: complete.")
+
+
+# ── VIX Volatility Spike Alerts ──────────────────────────────────────────────
+
+def run_vix_check():
+    """
+    10:00 AM ET weekdays — alert all users when VIX spikes above 20.
+    Three tiers: mild (20-25), high (25-35), extreme (35+).
+    Deduplicated once per tier per day.
+    """
+    _log_cron_run("vix_check")
+    print("[agent] Running VIX check...")
+    try:
+        import yfinance as yf
+        vix_data = yf.download("^VIX", period="1d", progress=False)["Close"]
+        if vix_data.empty:
+            print("[agent] vix_check: no VIX data returned.")
+            return
+        vix = float(vix_data.iloc[-1])
+        print(f"[agent] vix_check: VIX = {vix:.1f}")
+    except Exception as exc:
+        print(f"[agent] vix_check: VIX fetch failed: {exc}")
+        return
+
+    if vix < 20:
+        print("[agent] vix_check: VIX below 20 — no alert needed.")
+        return
+
+    # Determine tier and dedup key
+    if vix >= 35:
+        dedup_key = f"vix_high_{date.today()}"
+        msg = (
+            f"🚨 <b>Extreme Volatility — VIX {vix:.1f}</b>\n\n"
+            f"Markets are in fear mode. Conditions like this are rare and usually short-lived.\n\n"
+            f"✅ Your stops are protecting you. Trust the system.\n"
+            f"⚠️ Avoid adding new positions until volatility settles (VIX back below 25).\n"
+            f"📊 Check /regime for current market conditions."
+        )
+    elif vix >= 25:
+        dedup_key = f"vix_high_{date.today()}"
+        msg = (
+            f"⚠️ <b>High Volatility Alert — VIX {vix:.1f}</b>\n\n"
+            f"Markets are getting nervous. The VIX fear index is above 25 — expect sharp intraday moves.\n\n"
+            f"✅ Your stop-losses are your protection. Don't panic-sell manually above your stops.\n"
+            f"💡 This is often when the best buying opportunities appear — stay disciplined.\n\n"
+            f"Check /positions to see your current exposure."
+        )
+    else:
+        # 20 <= vix < 25
+        dedup_key = f"vix_mild_{date.today()}"
+        msg = (
+            f"📊 <b>Market Volatility Update</b>\n\n"
+            f"The VIX fear index is at {vix:.1f} — slightly elevated. Markets may be choppier than usual.\n\n"
+            f"Your stops are in place. No action needed — just be aware that daily swings could be larger."
+        )
+
+    if _is_alerted(dedup_key):
+        print(f"[agent] vix_check: already alerted today ({dedup_key}) — skipping.")
+        return
+    _mark_alerted(dedup_key)
+
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            if cfg.get("paused"):
+                continue
+            send_message(msg, chat_id=uid, parse_mode="HTML")
+        except Exception as exc:
+            print(f"[agent] vix_check: send failed for {uid} (non-critical): {exc}")
+
+    print(f"[agent] vix_check: sent VIX={vix:.1f} alert to {len(_all_recipients())} users.")
+
+
+# ── Position News Alerts ──────────────────────────────────────────────────────
+
+def _news_context_note(title: str) -> str:
+    """Return a 1-sentence contextual note based on keywords in the headline."""
+    t = title.lower()
+    if any(w in t for w in ("partnership", "deal", "contract")):
+        return "Major partnerships often signal institutional confidence."
+    if any(w in t for w in ("earnings", "beat", "revenue")):
+        return "Earnings beats typically cause a gap up at open."
+    if any(w in t for w in ("miss", "below expectations", "cut")):
+        return "Earnings misses can cause sharp drops — check your stop."
+    if any(w in t for w in ("fda", "approval", "cleared")):
+        return "Regulatory approvals are strong catalysts for the sector."
+    if any(w in t for w in ("lawsuit", "sec", "investigation", "fine")):
+        return "Regulatory/legal issues can weigh on the stock short-term."
+    if any(w in t for w in ("layoffs", "restructur")):
+        return "Restructuring news is mixed — often positive long-term, volatile short-term."
+    if any(w in t for w in ("upgrade", "buy rating", "price target raised")):
+        return "Analyst upgrades often bring institutional buying."
+    if any(w in t for w in ("downgrade", "sell rating", "price target cut")):
+        return "Analyst downgrades can trigger selling pressure."
+    return "Monitor price action at open and check if your thesis still holds."
+
+
+def run_news_check():
+    """
+    8:30 AM and 1:00 PM ET weekdays — scan news for tickers users hold or watch.
+    Sends batched per-user messages for significant stories in the last 24 hours.
+    """
+    _log_cron_run("news_check")
+    print("[agent] Running position news check...")
+    import yfinance as yf
+    import time as _time
+
+    # Gather tickers per user (open positions + watchlist)
+    user_tickers: dict[str, set] = {}
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            if cfg.get("paused"):
+                continue
+            log = load_user_trade_log(uid)
+            tickers: set = set()
+            for t in log.get("open", []):
+                if t.get("ticker"):
+                    tickers.add(t["ticker"].upper())
+            for t in cfg.get("watchlist", []):
+                if t:
+                    tickers.add(t.upper())
+            if tickers:
+                user_tickers[uid] = tickers
+        except Exception as exc:
+            print(f"[agent] news_check: user ticker gather failed for {uid}: {exc}")
+
+    # Unique tickers across all users
+    all_tickers: set = set()
+    for tickers in user_tickers.values():
+        all_tickers.update(tickers)
+
+    if not all_tickers:
+        print("[agent] news_check: no tickers to check.")
+        return
+
+    cutoff = _time.time() - 86400
+    # {sym: [(title, publisher, link, published_ts), ...]}
+    ticker_news: dict[str, list] = {}
+
+    for sym in all_tickers:
+        try:
+            ticker_obj = yf.Ticker(sym)
+            news = ticker_obj.news or []
+            relevant = []
+            for item in news:
+                published = item.get("providerPublishTime", 0)
+                title = item.get("title", "")
+                if published < cutoff:
+                    continue
+                if sym.lower() not in title.lower():
+                    continue
+                relevant.append((
+                    title,
+                    item.get("publisher", ""),
+                    item.get("link", ""),
+                    published,
+                ))
+            if relevant:
+                ticker_news[sym] = relevant
+        except Exception as exc:
+            print(f"[agent] news_check: news fetch failed for {sym}: {exc}")
+
+    if not ticker_news:
+        print("[agent] news_check: no relevant news found.")
+        return
+
+    # Send per-user batched messages
+    for uid, tickers in user_tickers.items():
+        try:
+            for sym in sorted(tickers):
+                stories = ticker_news.get(sym)
+                if not stories:
+                    continue
+                for title, publisher, link, published_ts in stories:
+                    dedup_key = f"news_{sym}_{hash(title) % 100000}_{date.today()}"
+                    if _is_alerted(dedup_key):
+                        continue
+                    _mark_alerted(dedup_key)
+
+                    # Human-readable time ago
+                    age_secs = _time.time() - published_ts
+                    if age_secs < 3600:
+                        age_str = f"{int(age_secs / 60)} minutes ago"
+                    elif age_secs < 7200:
+                        age_str = "1 hour ago"
+                    else:
+                        age_str = f"{int(age_secs / 3600)} hours ago"
+
+                    context_note = _news_context_note(title)
+                    link_part = f'\n\n<a href="{link}">Read full story →</a>' if link else ""
+
+                    msg = (
+                        f"📰 <b>News on your position: {sym}</b>\n\n"
+                        f"<b>{title}</b>\n"
+                        f"<i>Source: {publisher} · {age_str}</i>\n\n"
+                        f"<i>💡 What this could mean: {context_note}</i>"
+                        f"{link_part}"
+                    )
+                    send_message(msg, chat_id=uid, parse_mode="HTML")
+        except Exception as exc:
+            print(f"[agent] news_check: send failed for {uid} (non-critical): {exc}")
+
+    print("[agent] news_check: complete.")
+
+
+# ── Pre-Earnings Guidance ─────────────────────────────────────────────────────
+
+def run_pre_earnings_guidance():
+    """
+    4:00 PM ET weekdays — alert users when a position or watchlist ticker
+    has earnings tomorrow (within 24-48 hours).
+    """
+    _log_cron_run("pre_earnings")
+    print("[agent] Running pre-earnings guidance check...")
+    import yfinance as yf
+
+    now_ts = datetime.now(ET).timestamp()
+    window_start = now_ts + 86400   # 24 hours from now
+    window_end   = now_ts + 172800  # 48 hours from now
+
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            if cfg.get("paused"):
+                continue
+
+            log = load_user_trade_log(uid)
+            open_tickers  = [t["ticker"] for t in log.get("open", []) if t.get("ticker")]
+            watch_tickers = cfg.get("watchlist", [])
+            all_tickers   = list(dict.fromkeys(open_tickers + watch_tickers))
+
+            for sym in all_tickers:
+                dedup_key = f"preearnings_{sym}_{date.today()}"
+                if _is_alerted(dedup_key):
+                    continue
+                try:
+                    info = yf.Ticker(sym).info
+                    earnings_ts = info.get("earningsTimestamp") or info.get("earningsTimestampStart")
+                    if not earnings_ts:
+                        continue
+                    earnings_ts = float(earnings_ts)
+                    if not (window_start <= earnings_ts <= window_end):
+                        continue
+
+                    # Data for message
+                    target_price     = info.get("targetMeanPrice")
+                    current_price    = info.get("regularMarketPrice") or info.get("currentPrice")
+                    rec_key          = info.get("recommendationKey", "hold")
+                    n_analysts       = info.get("numberOfAnalystOpinions") or 0
+
+                    # Analyst consensus text
+                    if rec_key in ("strong_buy", "buy"):
+                        rec_text = f"Analysts lean bullish ({n_analysts} analysts, avg target ${target_price:.0f})" if target_price else f"Analysts lean bullish ({n_analysts} analysts)"
+                    elif rec_key in ("sell", "strong_sell"):
+                        rec_text = f"Analysts lean cautious ({n_analysts} analysts, avg target ${target_price:.0f})" if target_price else f"Analysts lean cautious ({n_analysts} analysts)"
+                    else:
+                        rec_text = f"Analysts are mixed ({n_analysts} analysts, avg target ${target_price:.0f})" if target_price else f"Analysts are mixed ({n_analysts} analysts)"
+
+                    # Upside
+                    upside_str = ""
+                    if target_price and current_price and float(current_price) > 0:
+                        upside = (float(target_price) - float(current_price)) / float(current_price) * 100
+                        sign   = "+" if upside >= 0 else ""
+                        upside_str = f"\n📈 Upside to target: {sign}{upside:.1f}% from current price"
+
+                    # Stop info for open positions
+                    stop_str = ""
+                    for trade in log.get("open", []):
+                        if trade.get("ticker") == sym and trade.get("stop_loss"):
+                            stop_str = f" Your stop at ${_p(float(trade['stop_loss']))} is your safety net either way."
+                            break
+
+                    _mark_alerted(dedup_key)
+                    msg = (
+                        f"📅 <b>Earnings Tomorrow — {sym}</b>\n\n"
+                        f"{sym} reports earnings <b>tomorrow</b>.\n\n"
+                        f"📊 Analyst consensus: {rec_text}"
+                        f"{upside_str}\n\n"
+                        f"<b>What should you do?</b>\n"
+                        f"Earnings are unpredictable — even good companies can drop on good results "
+                        f"if expectations were too high.\n\n"
+                        f"<b>Two common approaches:</b>\n"
+                        f"• <b>Hold through</b> — if you believe in the long-term thesis and your stop is in place\n"
+                        f"• <b>Trim before</b> — sell half now to lock in some gains, let the rest ride\n\n"
+                        f"There's no universally right answer.{stop_str}\n\n"
+                        f"Use /sold {sym} to reduce your position, or /updatestop {sym} to tighten your stop before the report."
+                    )
+                    send_message(msg, chat_id=uid, parse_mode="HTML")
+                except Exception as exc:
+                    print(f"[agent] pre_earnings: data fetch failed for {sym}: {exc}")
+        except Exception as exc:
+            print(f"[agent] pre_earnings: failed for {uid} (non-critical): {exc}")
+
+    print("[agent] pre_earnings guidance complete.")
+
+
+# ── Monthly Market Commentary ─────────────────────────────────────────────────
+
+def run_monthly_commentary():
+    """
+    1st of each month — send a market commentary with last month's returns
+    and a forward-looking view for the new month.
+    """
+    _log_cron_run("monthly_commentary")
+    now_et = datetime.now(ET)
+    year   = now_et.year
+    month  = now_et.strftime("%B")
+
+    dedup_key = f"monthly_commentary_{year}_{month}"
+    if _is_alerted(dedup_key):
+        print(f"[agent] monthly_commentary: already sent for {month} {year} — skipping.")
+        return
+
+    print(f"[agent] Running monthly commentary for {month} {year}...")
+    import yfinance as yf
+
+    try:
+        # Fetch 1-month returns for broad market + sectors
+        symbols = {
+            "SPY":  "S&P 500",
+            "QQQ":  "Nasdaq 100",
+            "XLK":  "Technology",
+            "XLF":  "Financials",
+            "XLE":  "Energy",
+            "XLV":  "Healthcare",
+            "XLI":  "Industrials",
+            "^VIX": "VIX",
+        }
+        raw = yf.download(list(symbols.keys()), period="1mo", progress=False)["Close"]
+        returns: dict[str, float] = {}
+        current_vix = None
+        for sym in symbols:
+            try:
+                col = raw[sym] if sym in raw.columns else None
+                if col is None or col.dropna().empty:
+                    continue
+                vals = col.dropna()
+                if sym == "^VIX":
+                    current_vix = float(vals.iloc[-1])
+                else:
+                    ret = (float(vals.iloc[-1]) - float(vals.iloc[0])) / float(vals.iloc[0]) * 100
+                    returns[sym] = round(ret, 2)
+            except Exception:
+                pass
+
+        spy_ret  = returns.get("SPY",  0.0)
+        qqq_ret  = returns.get("QQQ",  0.0)
+        sector_returns = {k: returns[k] for k in ("XLK", "XLF", "XLE", "XLV", "XLI") if k in returns}
+        sorted_sectors = sorted(sector_returns.items(), key=lambda x: x[1], reverse=True)
+        sector_names   = {"XLK": "Technology", "XLF": "Financials", "XLE": "Energy", "XLV": "Healthcare", "XLI": "Industrials"}
+
+        best_sector  = sector_names.get(sorted_sectors[0][0], sorted_sectors[0][0]) if sorted_sectors else "N/A"
+        worst_sector = sector_names.get(sorted_sectors[-1][0], sorted_sectors[-1][0]) if sorted_sectors else "N/A"
+
+    except Exception as exc:
+        print(f"[agent] monthly_commentary: market data fetch failed: {exc}")
+        spy_ret = qqq_ret = 0.0
+        sorted_sectors = []
+        best_sector = worst_sector = "N/A"
+        current_vix = None
+
+    # Try Claude for commentary; fall back to template
+    commentary = None
+    try:
+        from llm_client import _get_client
+        sector_lines = "\n".join(
+            f"  {sector_names.get(sym, sym)}: {ret:+.1f}%"
+            for sym, ret in sorted_sectors
+        )
+        vix_line = f"VIX: {current_vix:.1f}" if current_vix else ""
+        prompt = (
+            f"Write a 3-paragraph monthly market commentary for {month} {year} based on this data:\n"
+            f"SPY: {spy_ret:+.1f}%\nQQQ: {qqq_ret:+.1f}%\n{sector_lines}\n{vix_line}\n\n"
+            f"Paragraph 1: What happened last month (SPY/QQQ returns, dominant theme). "
+            f"Paragraph 2: Sector leadership/laggards and why. "
+            f"Paragraph 3: What to watch this month (forward-looking). "
+            f"Use plain concise language suitable for retail investors. No bullet points, just prose. "
+            f"Each paragraph 2-3 sentences max."
+        )
+        client = _get_client()
+        resp   = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        commentary = resp.content[0].text.strip()
+    except Exception as exc:
+        print(f"[agent] monthly_commentary: Claude call failed, using template: {exc}")
+
+    if not commentary:
+        sign_spy = "+" if spy_ret >= 0 else ""
+        sign_qqq = "+" if qqq_ret >= 0 else ""
+        commentary = (
+            f"Last month, the S&P 500 returned {sign_spy}{spy_ret:.1f}% while the Nasdaq 100 returned "
+            f"{sign_qqq}{qqq_ret:.1f}%. Markets were driven by a mix of macro data and earnings results.\n\n"
+            f"{best_sector} was the standout sector, while {worst_sector} lagged. "
+            f"Sector rotation remained a key theme as investors repositioned around economic data.\n\n"
+            f"This month, watch for central bank policy signals and upcoming earnings releases "
+            f"which could set the tone for equities. Keep your stops in place and let the market tell its story."
+        )
+
+    _mark_alerted(dedup_key)
+
+    msg = (
+        f"📋 <b>Monthly Market Update — {month} {year}</b>\n\n"
+        f"{commentary}\n\n"
+        f"<b>Your portfolio:</b> Check /summary for your current positions and exposure."
+    )
+
+    for uid in _all_recipients():
+        try:
+            cfg = get_user_config(uid)
+            if cfg.get("paused"):
+                continue
+            send_message(msg, chat_id=uid, parse_mode="HTML")
+        except Exception as exc:
+            print(f"[agent] monthly_commentary: send failed for {uid} (non-critical): {exc}")
+
+    print(f"[agent] monthly_commentary: sent for {month} {year}.")
+
+
+# ── Cash Position Guidance ────────────────────────────────────────────────────
+
+def _check_cash_position(uid: str, user_settings: dict, open_positions: list, current_prices: dict) -> None:
+    """
+    Warn user if they are over 85% invested based on total_portfolio_size setting.
+    Fires at most once per week per user.
+    """
+    total_portfolio = user_settings.get("total_portfolio_size")
+    if not total_portfolio:
+        # Also check inside the nested settings structure
+        total_portfolio = user_settings.get("settings", {}).get("total_portfolio_size")
+    if not total_portfolio:
+        return
+
+    try:
+        total_portfolio = float(total_portfolio)
+    except (TypeError, ValueError):
+        return
+
+    if total_portfolio <= 0:
+        return
+
+    # Calculate total invested
+    total_invested = 0.0
+    for pos in open_positions:
+        ticker = pos.get("ticker")
+        current = current_prices.get(ticker) if ticker else None
+        if not current:
+            continue
+        shares = pos.get("shares") or pos.get("quantity")
+        alloc  = pos.get("allocation") or pos.get("budget") or 0
+        entry  = pos.get("entry_price")
+        if shares:
+            total_invested += float(shares) * float(current)
+        elif alloc and entry and float(entry) > 0:
+            est_shares = float(alloc) / float(entry)
+            total_invested += est_shares * float(current)
+
+    if total_invested <= 0:
+        return
+
+    invested_pct = total_invested / total_portfolio * 100
+    if invested_pct <= 85:
+        return
+
+    # Dedup: once per week
+    week_num  = date.today().isocalendar()[1]
+    dedup_key = f"cash_warning_{uid}_{week_num}"
+    if _is_alerted(dedup_key):
+        return
+    _mark_alerted(dedup_key)
+
+    msg = (
+        f"💰 <b>Portfolio Allocation Check</b>\n\n"
+        f"You're currently {invested_pct:.0f}% invested (${total_invested:,.0f} of ${total_portfolio:,.0f}).\n\n"
+        f"A good rule of thumb: keep 15-20% in cash. It lets you:\n"
+        f"• Buy dips without needing to sell something first\n"
+        f"• Reduce emotional pressure when markets are volatile\n"
+        f"• Act on new opportunities as they appear\n\n"
+        f"No action required — just something to keep in mind. Your stops are managing your downside."
+    )
+    try:
+        send_message(msg, chat_id=uid, parse_mode="HTML")
+    except Exception as exc:
+        print(f"[agent] _check_cash_position: send failed for {uid} (non-critical): {exc}")
+
+
+# ── Portfolio Correlation Warning ─────────────────────────────────────────────
+
+def _check_portfolio_correlation(uid: str, open_positions: list) -> None:
+    """
+    Warn user if any two open stock positions have moved together > 85% of the time
+    over the last 30 days. Runs on Mondays only (called from run_eod_summary).
+    Deduped once per week per user.
+    """
+    import yfinance as yf
+
+    # Filter to stock positions only
+    stock_positions = [p for p in open_positions if p.get("asset_type") == "stock" or
+                       (p.get("asset_type") is None and p.get("ticker") and
+                        not any(c.isdigit() for c in p.get("ticker", "")[-1:]))]
+    tickers = list(dict.fromkeys(p["ticker"] for p in stock_positions if p.get("ticker")))
+
+    if len(tickers) < 3:
+        return
+
+    week_num  = date.today().isocalendar()[1]
+    dedup_key = f"correlation_{uid}_{week_num}"
+    if _is_alerted(dedup_key):
+        return
+
+    try:
+        data = yf.download(tickers, period="30d", progress=False)["Close"]
+        if data.empty:
+            return
+        # Ensure DataFrame with columns
+        if not hasattr(data, "columns") or len(data.columns) < 2:
+            return
+        corr = data.pct_change().corr()
+    except Exception as exc:
+        print(f"[agent] _check_portfolio_correlation: data fetch failed for {uid}: {exc}")
+        return
+
+    # Find highly correlated pairs
+    high_corr_pairs: list[tuple[str, str, float]] = []
+    checked = set()
+    for t1 in tickers:
+        for t2 in tickers:
+            if t1 == t2 or (t1, t2) in checked or (t2, t1) in checked:
+                continue
+            checked.add((t1, t2))
+            try:
+                if t1 not in corr.columns or t2 not in corr.columns:
+                    continue
+                c = float(corr.loc[t1, t2])
+                if c > 0.85:
+                    high_corr_pairs.append((t1, t2, c))
+            except Exception:
+                pass
+
+    if not high_corr_pairs:
+        return
+
+    _mark_alerted(dedup_key)
+
+    # Build pairs text
+    pairs_lines = []
+    for t1, t2, c in high_corr_pairs:
+        pct = int(c * 100)
+        pairs_lines.append(f"Your positions <b>{t1}</b> and <b>{t2}</b> have moved together <b>{pct}%</b> of the time over the last 30 days.")
+
+    pairs_text = "\n".join(pairs_lines)
+
+    msg = (
+        f"🔗 <b>Portfolio Correlation Alert</b>\n\n"
+        f"{pairs_text}\n\n"
+        f"This means a single sector selloff could hit both positions simultaneously — "
+        f"effectively doubling your exposure to that move.\n\n"
+        f"<b>This isn't necessarily bad</b> — it just means your risk is more concentrated than it might appear.\n\n"
+        f"💡 Consider: if you're comfortable with the combined exposure, no action needed. "
+        f"If not, /sold one to reduce overlap.\n\n"
+        f"Check /positions for your full portfolio."
+    )
+    try:
+        send_message(msg, chat_id=uid, parse_mode="HTML")
+    except Exception as exc:
+        print(f"[agent] _check_portfolio_correlation: send failed for {uid} (non-critical): {exc}")
 
 
 # ── Weekly recap (Saturday morning) ──────────────────────────────────────────
@@ -1730,6 +2711,22 @@ def main():
         run_eod_summary()
     elif mode == "price_alerts":
         run_price_alerts()
+    elif mode == "friday_wrap":
+        run_friday_wrap()
+    elif mode == "tax_harvest":
+        run_tax_loss_harvest_check()
+    elif mode == "macro_alert":
+        run_macro_alert_check()
+    elif mode == "midday_check":
+        run_midday_check()
+    elif mode == "vix_check":
+        run_vix_check()
+    elif mode == "news_check":
+        run_news_check()
+    elif mode == "pre_earnings":
+        run_pre_earnings_guidance()
+    elif mode == "monthly_commentary":
+        run_monthly_commentary()
     else:
         run_confirmation()
 

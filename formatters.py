@@ -383,8 +383,8 @@ def format_daily_message(picks: dict, config: dict,
 def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[dict]]:
     """
     Build an inline keyboard for the morning picks message.
-    Returns one '✅ Bought TICKER' button per pick (ST stocks, LT stocks, crypto).
-    Tapping a button fires the quickbuy callback — no typing needed.
+    Returns one '✅ Buy TICKER' button per pick (ST stocks, LT stocks, crypto).
+    Tapping a button fires the buy_pick callback with encoded price/shares/pct data.
     """
     cfg         = config or {}
     show_crypto = cfg.get("show_crypto", True)
@@ -396,27 +396,51 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     def _header(label: str) -> list[dict]:
         return [{"text": label, "callback_data": "noop"}]
 
-    def _pair(ticker: str, asset_type: str) -> list[dict]:
-        """Return [Bought, 📊 Chart] for one pick — used to build 2-per-row layouts."""
+    def _buy_callback(pick: dict, asset_type: str) -> str:
+        """Build the buy_pick callback_data string for a pick."""
+        ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
+        entry  = pick.get("entry_price")
+        stop   = pick.get("stop_loss")
+        target = pick.get("target_price")
+
+        # Shares from budget
+        budget_key = "crypto_budget" if asset_type == "crypto" else "stock_budget"
+        budget = cfg.get(budget_key)
+        shares = max(1, int(float(budget) / float(entry))) if (budget and entry) else 1
+
+        # Percentages — rounded to 1 decimal
+        try:
+            stop_pct   = round((float(entry) - float(stop))   / float(entry) * 100, 1) if (entry and stop)   else 7
+            target_pct = round((float(target) - float(entry)) / float(entry) * 100, 1) if (entry and target) else 15
+        except Exception:
+            stop_pct, target_pct = 7, 15
+
+        entry_str = f"{float(entry):.2f}" if entry else "0"
+        return f"buy_pick|{ticker}|{entry_str}|{shares}|{asset_type}|{stop_pct}|{target_pct}"
+
+    def _pair(pick: dict, asset_type: str) -> list[dict]:
+        """Return [Buy, 📊 Chart] for one pick — used to build 2-per-row layouts."""
+        ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
         return [
-            {"text": f"✅ Bought {ticker}", "callback_data": f"quickbuy|{ticker}"},
-            {"text": "📊 Chart",            "callback_data": f"chart|{ticker}|{asset_type}"},
+            {"text": f"✅ Buy {ticker}", "callback_data": _buy_callback(pick, asset_type)},
+            {"text": "📊 Chart",         "callback_data": f"chart|{ticker}|{asset_type}"},
         ]
 
     def _add_section(picks_list: list, get_sym, asset_type: str, header: str, icon: str = ""):
         """
         Append a section header + picks paired 2-per-row.
         Single pick: skip the header row, fold the icon into the button text.
-        Odd pick at end: place its Bought + Chart on one row (no empty columns).
+        Odd pick at end: place its Buy + Chart on one row (no empty columns).
         """
         if not picks_list:
             return
         if len(picks_list) == 1:
             # Only 1 pick — no header row, embed icon in button to save vertical space
-            ticker = get_sym(picks_list[0])
-            pair = _pair(ticker, asset_type)
+            pick   = picks_list[0]
+            ticker = get_sym(pick)
+            pair   = _pair(pick, asset_type)
             if icon:
-                pair[0] = {**pair[0], "text": f"{icon} Bought {ticker}"}
+                pair[0] = {**pair[0], "text": f"{icon} Buy {ticker}"}
             buttons.append(pair)
             return
         buttons.append(_header(header))
@@ -425,10 +449,9 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
             right = next(it, None)
             if right is None:
                 # Last odd pick — buy + chart on one row, no empty columns
-                ticker = get_sym(p)
-                buttons.append(_pair(ticker, asset_type))
+                buttons.append(_pair(p, asset_type))
             else:
-                buttons.append(_pair(get_sym(p), asset_type) + _pair(get_sym(right), asset_type))
+                buttons.append(_pair(p, asset_type) + _pair(right, asset_type))
 
     buttons = []
 

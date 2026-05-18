@@ -39,8 +39,15 @@ def _start_onboarding_wizard(chat_id: str) -> None:
     """Send the first wizard step (budget question) to a newly approved user."""
     send_message(
         "👋 <b>Welcome to StockPulz!</b>\n\n"
-        "You're in. Let's set you up in 3 quick questions so your picks are tailored to you.\n\n"
-        "<b>Question 1 of 3 — What's your rough budget per trade?</b>\n"
+        "You're in. Let's set you up in a few quick questions so your picks are tailored to you.",
+        chat_id=chat_id,
+    )
+    send_message(
+        "💰 <b>Per-Trade Budget</b>\n\n"
+        "This is how much money you're comfortable putting into a single trade.\n\n"
+        "For example, if you set stocks to $200, I'll size your positions so each stock pick risks that amount.\n\n"
+        "<i>Start small — you can always increase it with /set_budget</i>\n\n"
+        "<b>Question 1 — What's your rough budget per trade?</b>\n"
         "<i>(This determines how many shares/coins you'd allocate per pick.)</i>",
         chat_id=chat_id,
     )

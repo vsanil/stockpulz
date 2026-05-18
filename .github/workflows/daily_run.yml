@@ -22,6 +22,15 @@ on:
     # ── Weekend runs ────────────────────────────────────────────────────────────
     - cron: "0 12 * * 6"        #  8:00 AM ET Saturday — crypto picks + weekly recap
     - cron: "0 12 * * 0"        #  8:00 AM ET Sunday   — Week Ahead briefing
+    - cron: "0 23 * * 5"        #  6:00 PM ET Friday   — Friday evening wrap-up
+    - cron: "0 21 * * 1-4"      #  5:00 PM ET Mon–Thu  — macro event alert check
+    - cron: "30 16 * * 1-5"     # 12:30 PM ET weekdays — midday intraday check
+    - cron: "0 14 * * 1-5"      # 10:00 AM ET weekdays — VIX volatility spike alerts
+    - cron: "30 12 * * 1-5"     #  8:30 AM ET weekdays — position news alerts (morning)
+    - cron: "0 17 * * 1-5"      #  1:00 PM ET weekdays — position news alerts (afternoon)
+    - cron: "0 20 * * 1-5"      #  4:00 PM ET weekdays — pre-earnings guidance
+    - cron: "0 13 1 * *"        #  9:00 AM ET 1st of month — monthly market commentary
+    - cron: "0 14 1,15 11,12 *" #  9:00 AM ET 1st + 15th of Nov/Dec — tax-loss harvest check
 
   # Manual trigger — useful for testing individual modes without waiting for schedule
   workflow_dispatch:
@@ -90,6 +99,24 @@ jobs:
             MODE="weekly"
           elif [[ "$SCHEDULE" == "0 12 * * 0" ]]; then
             MODE="week_ahead"
+          elif [[ "$SCHEDULE" == "0 23 * * 5" ]]; then
+            MODE="friday_wrap"
+          elif [[ "$SCHEDULE" == "0 21 * * 1-4" ]]; then
+            MODE="macro_alert"
+          elif [[ "$SCHEDULE" == "30 16 * * 1-5" ]]; then
+            MODE="midday_check"
+          elif [[ "$SCHEDULE" == "0 14 * * 1-5" ]]; then
+            MODE="vix_check"
+          elif [[ "$SCHEDULE" == "30 12 * * 1-5" ]]; then
+            MODE="news_check"
+          elif [[ "$SCHEDULE" == "0 17 * * 1-5" ]]; then
+            MODE="news_check"
+          elif [[ "$SCHEDULE" == "0 20 * * 1-5" ]]; then
+            MODE="pre_earnings"
+          elif [[ "$SCHEDULE" == "0 13 1 * *" ]]; then
+            MODE="monthly_commentary"
+          elif [[ "$SCHEDULE" == "0 14 1,15 11,12 *" ]]; then
+            MODE="tax_harvest"
           else
             echo "Unknown schedule '$SCHEDULE' — defaulting to morning"
             MODE="morning"
