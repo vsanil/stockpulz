@@ -895,6 +895,15 @@ def miniapp_settings():
 
     from config_manager import get_user_config
     ucfg = get_user_config(chat_id)
+    # Notification preference defaults (all on)
+    _notif_defaults = {
+        "notif_target_hit":       True,
+        "notif_target_approach":  True,
+        "notif_watchlist_move":   True,
+        "notif_weekly_recap":     True,
+        "notif_morning_picks":    True,
+    }
+    notif_prefs = {k: ucfg.get(k, v) for k, v in _notif_defaults.items()}
     return jsonify({"settings": {
         "risk_profile":    ucfg.get("risk_profile", "moderate"),
         "assets":          ucfg.get("assets", "both"),
@@ -905,7 +914,31 @@ def miniapp_settings():
         "target_gain_pct": ucfg.get("target_gain_pct"),
         "watchlist":       ucfg.get("watchlist", []),
         "excluded_sectors": ucfg.get("excluded_sectors", []),
+        **notif_prefs,
     }})
+
+
+@app.route("/api/miniapp/settings/update", methods=["POST"])
+def miniapp_settings_update():
+    """Update a single user config key from the Mini App settings panel."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    from config_manager import update_user_config
+    body  = request.get_json(silent=True) or {}
+    key   = (body.get("key") or "").strip()
+    value = body.get("value")
+    # Allowlist of keys the Mini App is allowed to set
+    _allowed = {
+        "notif_target_hit", "notif_target_approach", "notif_watchlist_move",
+        "notif_weekly_recap", "notif_morning_picks",
+        "risk_profile", "stock_budget", "crypto_budget",
+        "stop_loss_pct", "target_gain_pct",
+    }
+    if not key or key not in _allowed:
+        return jsonify({"error": f"key '{key}' not allowed"}), 400
+    update_user_config(chat_id, key, value)
+    return jsonify({"ok": True, "key": key, "value": value})
 
 
 _CHART_CRYPTO = {
@@ -1512,6 +1545,58 @@ def miniapp_share_link():
         "price alerts, and weekly performance recaps.\n\nJoin here 👇\n" + bot_link
     )
     return jsonify({"ok": True, "url": bot_link, "text": share_text})
+
+
+@app.route("/api/miniapp/earnings")
+def miniapp_earnings():
+    """Return upcoming earnings dates for given tickers (from watchlist)."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    raw = request.args.get("tickers", "")
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    if not tickers:
+        return jsonify({"ok": True, "earnings": []})
+    try:
+        import yfinance as yf
+        from datetime import date, timedelta
+        results = []
+        today = date.today()
+        for ticker in tickers[:20]:  # cap to 20 to avoid slow responses
+            try:
+                info = yf.Ticker(ticker).info
+                # yfinance stores earnings date as a timestamp or string
+                ed = info.get("earningsTimestamp") or info.get("earningsDate")
+                if ed:
+                    if isinstance(ed, (int, float)):
+                        from datetime import datetime as _dt
+                        ed_date = _dt.utcfromtimestamp(ed).date()
+                    else:
+                        from datetime import datetime as _dt
+                        ed_date = _dt.fromisoformat(str(ed)).date()
+                    days_until = (ed_date - today).days
+                    if -1 <= days_until <= 90:  # include yesterday through next 90 days
+                        timing = info.get("earningsCallTimestamp")
+                        timing_str = ""
+                        if timing:
+                            try:
+                                from datetime import datetime as _dt2
+                                t_obj = _dt2.utcfromtimestamp(timing)
+                                hour = t_obj.hour
+                                timing_str = "Before open" if hour < 12 else "After close"
+                            except Exception:
+                                pass
+                        results.append({
+                            "ticker":     ticker,
+                            "date":       ed_date.strftime("%b %d"),
+                            "days_until": max(0, days_until),
+                            "timing":     timing_str,
+                        })
+            except Exception:
+                pass
+        results.sort(key=lambda x: x["days_until"])
+        return jsonify({"ok": True, "earnings": results})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 @app.route("/api/miniapp/watchlist")

@@ -1,0 +1,55 @@
+Paste this into @BotFather → /setcommands
+────────────────────────────────────────
+
+today - Today's stock & crypto picks
+prices - Live prices vs entry for today's picks
+explain - Ask any market question or why a stock was picked
+define - Plain-English explanation of any financial term
+chart - Candlestick chart for any ticker
+regime - Current market conditions (Bull / Bear / Caution)
+accuracy - Your personal win rate: 7-day, 30-day & all-time
+performance - Bot track record: win rate, avg return, vs S&P
+community - All StockPulz users' performance vs S&P 500
+backtest - How the strategy performed historically
+earnings - Upcoming earnings dates for your positions & watchlist
+size - Position sizing: how many shares to buy
+bought - Log a position you entered
+sold - Close a position & record P&L
+positions - Open positions with live P&L & exposure
+summary - Portfolio health: win rate, open P&L, risk warnings
+stats - Your win rate, expectancy & P&L breakdown
+history - Full trade history (open & closed)
+updatestop - Move a stop-loss (e.g. to breakeven)
+updatetarget - Adjust a price target
+fixticker - Rename a wrongly stored ticker
+dividends - Dividend yield & next ex-date for your positions
+paper_buy - Simulate a buy (no real money)
+paper_sell - Simulate a sell
+paper_cancel - Remove a paper position without recording a sale
+paper_portfolio - Virtual portfolio, cash & unrealised P&L
+paper_perf - Paper trading performance vs SPY
+paper_history - All past paper trades
+paper_add_cash - Add cash to your paper account
+paper_reset - Wipe paper portfolio and start fresh
+alert - Set a price alert (e.g. NVDA above 1000)
+alerts - View all your active alerts
+unalert - Remove an alert
+track - Track a ticker's price in your watchlist
+untrack - Remove a ticker from your watchlist
+settings - All preferences in one interactive panel
+set_risk - Risk profile: conservative / moderate / aggressive
+set_budget - Per-trade budget (e.g. stocks 200 crypto 50)
+set_thresholds - Stop loss & target gain %
+watch - Always include specific tickers in your picks
+exclude - Exclude a sector (e.g. Energy, Utilities)
+pause - Pause daily briefings
+resume - Resume daily briefings
+status - Check if picks are active and when the next one runs
+next - When's the next scheduled pick
+reset - Reset all settings to defaults
+swap - Get an alternative pick for today
+share - Get your invite link
+feedback - Send feedback to the team
+guide - Quick reference: daily schedule, /bought, /stats explained
+setup - Re-run the setup wizard (budget, risk, assets)
+help - Show all available commands

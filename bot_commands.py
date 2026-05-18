@@ -1204,6 +1204,31 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "watch":
         return _parse_and_execute(f"WATCH {text}", original=f"/watch {text}", chat_id=chat_id)
 
+    if command in ("track", "untrack"):
+        ticker = text.strip().upper()
+        if not ticker:
+            return ("📌 <b>Usage:</b> <code>/track NVDA</code> — track a price in your watchlist\n"
+                    "<code>/untrack NVDA</code> — remove it")
+        from config_manager import load_user_trade_log, save_user_trade_log
+        log = load_user_trade_log(chat_id)
+        watchlist = log.get("watchlist", [])
+        if command == "track":
+            if ticker in watchlist:
+                return f"👁 <b>{ticker}</b> is already on your watchlist."
+            watchlist.append(ticker)
+            log["watchlist"] = watchlist
+            save_user_trade_log(chat_id, log)
+            return (f"✅ <b>{ticker}</b> added to your price watchlist.\n"
+                    f"You now have {len(watchlist)} ticker(s) tracked.\n"
+                    f"<i>Open the dashboard to view live prices.</i>")
+        else:  # untrack
+            if ticker not in watchlist:
+                return f"⚠️ <b>{ticker}</b> is not on your watchlist."
+            watchlist = [t for t in watchlist if t != ticker]
+            log["watchlist"] = watchlist
+            save_user_trade_log(chat_id, log)
+            return f"🗑 <b>{ticker}</b> removed from your watchlist."
+
     if command == "exclude":
         return _parse_and_execute(f"EXCLUDE {text}", original=f"/exclude {text}", chat_id=chat_id)
 
