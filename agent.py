@@ -670,18 +670,37 @@ def run_morning(config: dict, now_et: datetime):
 
 def _broadcast_trade_closes(current_prices: dict) -> None:
     """Check and close trades for all recipients, sending close alerts + debriefs."""
+    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
     for uid in _all_recipients():
         try:
             closed = check_and_close_trades(current_prices, uid)
             for trade in closed:
-                emoji = "✅" if trade["outcome"] == "target" else ("🔴" if trade["outcome"] == "stop" else "⏱")
-                sign  = "+" if trade["return_pct"] >= 0 else ""
-                close_msg = (
-                    f"{emoji} <b>{trade['ticker']}</b> {trade['outcome'].upper()} HIT "
-                    f"@ <code>${trade['closed_price']}</code>  "
-                    f"<b>{sign}{trade['return_pct']:.1f}%</b>  "
-                    f"(${trade['gain_usd']:+.2f})"
-                )
+                ticker  = trade["ticker"]
+                outcome = trade["outcome"]
+                sign    = "+" if trade["return_pct"] >= 0 else ""
+                pct_str = f"<b>{sign}{trade['return_pct']:.1f}%</b>"
+                price_str = f"<code>${trade['closed_price']}</code>"
+                usd_str   = f"(${trade['gain_usd']:+.2f})"
+
+                if outcome == "target":
+                    close_msg = (
+                        f"🎯 Your profit target was hit on {ticker} — great trade! "
+                        f"Time to lock in your gains.\n"
+                        f"Closed @ {price_str}  {pct_str}  {usd_str}"
+                    )
+                elif outcome == "stop":
+                    close_msg = (
+                        f"🛡 Your stop-loss triggered on {ticker} — this protection saved you "
+                        f"from bigger losses. Sell now to close the position.\n"
+                        f"Closed @ {price_str}  {pct_str}  {usd_str}"
+                    )
+                else:
+                    close_msg = (
+                        f"⏱ {ticker} position expired after 28 days. "
+                        f"Review and decide: hold or close?\n"
+                        f"Closed @ {price_str}  {pct_str}  {usd_str}"
+                    )
+
                 # Post-trade debrief via Haiku (non-critical)
                 try:
                     debrief = generate_trade_debrief(trade)
@@ -689,7 +708,12 @@ def _broadcast_trade_closes(current_prices: dict) -> None:
                         close_msg += f"\n\n📖 <i>{debrief}</i>"
                 except Exception as db_exc:
                     print(f"[agent] Trade debrief failed (non-critical): {db_exc}")
-                send_message(close_msg, chat_id=uid)
+
+                # Build keyboard — always include Log as Sold, Dashboard only if URL set
+                kb_row = [{"text": "✅ Log as Sold", "callback_data": f"sold_pick|{ticker}"}]
+                if render_url:
+                    kb_row.append({"text": "📊 Dashboard", "web_app": {"url": f"{render_url}/miniapp"}})
+                send_inline_keyboard(close_msg, [kb_row], chat_id=uid)
         except Exception as exc:
             print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
 
@@ -1004,6 +1028,18 @@ def run_eod_summary():
         except Exception as exc:
             print(f"[agent] EOD full summary failed for {uid} (non-critical): {exc}")
 
+    for uid in _all_recipients():
+        try:
+            _check_portfolio_health(uid, current_prices)
+        except Exception as exc:
+            print(f"[agent] Portfolio health check failed for {uid} (non-critical): {exc}")
+
+    for uid in _all_recipients():
+        try:
+            _check_hold_or_fold(uid, current_prices)
+        except Exception as exc:
+            print(f"[agent] Hold/fold nudge failed for {uid} (non-critical): {exc}")
+
 
 # ── Weekly recap (Saturday morning) ──────────────────────────────────────────
 
@@ -1048,6 +1084,89 @@ def run_weekly_recap(config: dict, now_et: datetime):
             print("[agent] No weekly picks data — skipping recap.")
     except Exception as exc:
         print(f"[agent] Weekly recap failed (non-critical): {exc}")
+
+
+# ── Portfolio health nudge helper ────────────────────────────────────────────
+
+def _check_portfolio_health(uid: str, current_prices: dict) -> None:
+    """
+    Proactive portfolio health check — fires once per ticker per day.
+    Checks for concentration risk, positions near stop, and big winners ready to trim.
+    """
+    log    = load_user_trade_log(uid)
+    trades = log.get("open", [])
+    if not trades:
+        return
+
+    today = date.today()
+
+    # Calculate total portfolio value based on current prices
+    total_value = 0.0
+    trade_values: list[tuple] = []
+    for trade in trades:
+        ticker = trade.get("ticker")
+        entry  = trade.get("entry_price")
+        shares = trade.get("shares") or trade.get("quantity")
+        current = current_prices.get(ticker) if ticker else None
+        if not (ticker and entry and current):
+            continue
+        # Estimate current position value: use shares if available, else allocation
+        alloc = trade.get("allocation") or trade.get("budget") or 0
+        if shares:
+            pos_value = float(shares) * float(current)
+        elif alloc:
+            # approximate shares from original allocation and entry price
+            est_shares = float(alloc) / float(entry)
+            pos_value  = est_shares * float(current)
+        else:
+            continue
+        trade_values.append((ticker, trade, float(current), float(entry), pos_value))
+        total_value += pos_value
+
+    if total_value <= 0:
+        return
+
+    for ticker, trade, curr_f, entry_f, pos_value in trade_values:
+        pct_of_portfolio = (pos_value / total_value) * 100
+        stop = trade.get("stop_loss")
+        gain_pct = (curr_f - entry_f) / entry_f * 100
+
+        # ── Concentration risk ────────────────────────────────────────────────
+        if pct_of_portfolio > 35:
+            key = f"health_{uid}_{ticker}_{today}"
+            if not _is_alerted(key):
+                _mark_alerted(key)
+                send_message(
+                    f"⚠️ <b>Concentration risk — {ticker}</b>\n"
+                    f"This position is <b>{pct_of_portfolio:.0f}%</b> of your tracked portfolio. "
+                    f"Consider trimming to reduce single-stock risk.",
+                    chat_id=uid,
+                )
+
+        # ── Near stop ─────────────────────────────────────────────────────────
+        if stop:
+            stop_f = float(stop)
+            pct_to_stop = (curr_f - stop_f) / curr_f * 100
+            if 0 < pct_to_stop <= 3:
+                key = f"health_stop_{uid}_{ticker}_{today}"
+                if not _is_alerted(key):
+                    _mark_alerted(key)
+                    send_message(
+                        f"⚠️ <b>{ticker}</b> is approaching your stop at "
+                        f"<code>${_p(stop_f)}</code> — consider reviewing",
+                        chat_id=uid,
+                    )
+
+        # ── Big winner ready to trim ──────────────────────────────────────────
+        if gain_pct > 12:
+            key = f"health_winner_{uid}_{ticker}_{today}"
+            if not _is_alerted(key):
+                _mark_alerted(key)
+                send_message(
+                    f"🎯 <b>{ticker}</b> is up <b>+{gain_pct:.1f}%</b> — "
+                    f"consider taking partial profits or moving stop to breakeven",
+                    chat_id=uid,
+                )
 
 
 # ── Trailing stop nudge helper ───────────────────────────────────────────────
@@ -1113,6 +1232,53 @@ def _check_trailing_stops(current_prices: dict, uid: str) -> None:
         save_user_trade_log(uid, log)
 
 
+# ── Hold/fold nudge helper ───────────────────────────────────────────────────
+
+def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
+    """
+    For positions between -3% and the stop-loss: send a plain-English
+    hold/fold nudge. Once per position per day via cache dedup.
+    """
+    log = load_user_trade_log(uid)
+    for trade in log.get("open", []):
+        ticker = trade.get("ticker")
+        entry  = trade.get("entry_price")
+        stop   = trade.get("stop_loss")
+        if not (ticker and entry and stop):
+            continue
+        current = current_prices.get(ticker)
+        if not current:
+            continue
+        entry_f, stop_f, curr_f = float(entry), float(stop), float(current)
+        pct_from_entry = (curr_f - entry_f) / entry_f * 100
+        pct_to_stop    = (curr_f - stop_f)  / curr_f  * 100
+        # Only nudge when down 2–8% AND within 5% of stop
+        if -8.0 <= pct_from_entry <= -2.0 and pct_to_stop <= 5.0:
+            key = f"holdfold_{uid}_{ticker}_{date.today()}"
+            if _is_alerted(key):
+                continue
+            _mark_alerted(key)
+            send_message(
+                f"🤔 <b>Hold or fold? — {ticker}</b>\n"
+                f"Down <b>{pct_from_entry:.1f}%</b> from your entry. "
+                f"Stop is at <code>${_p(stop_f)}</code> "
+                f"({pct_to_stop:.1f}% away).\n\n"
+                f"<i>If the thesis still holds, stay in. "
+                f"If something has changed, it's okay to cut early and protect capital.</i>\n\n"
+                f"<code>/sold {ticker}</code> to close  ·  <code>/updatestop {ticker}</code> to adjust",
+                chat_id=uid,
+            )
+
+
+# ── Macro events helper ──────────────────────────────────────────────────────
+
+def _get_macro_events_this_week() -> list[str]:
+    """Return a list of notable macro events this week (Mon–Fri)."""
+    # We can't reliably fetch a live economic calendar for free,
+    # so we return a short note prompting awareness.
+    return []  # Future: wire to an economic calendar API
+
+
 # ── Sunday Week Ahead briefing ───────────────────────────────────────────────
 
 def run_week_ahead(config: dict):
@@ -1171,6 +1337,8 @@ def run_week_ahead(config: dict):
         print("[agent] Week-ahead message was empty — skipping.")
         return
 
+    macro_events = _get_macro_events_this_week()
+
     recipients = _all_recipients()
     print(f"[agent] Sending Sunday Week Ahead to {len(recipients)} user(s)...")
     for uid in recipients:
@@ -1179,10 +1347,35 @@ def run_week_ahead(config: dict):
             if user_cfg.get("paused"):
                 print(f"[agent] Skipping week-ahead for {uid} — picks paused.")
                 continue
+
+            # Build personalised earnings prefix for this user's open positions + watchlist
+            user_log = load_user_trade_log(uid)
+            open_tickers     = [t["ticker"] for t in user_log.get("open", []) if t.get("asset_type") == "stock"]
+            watchlist_tickers = user_log.get("watchlist", [])
+            personal_tickers = list(dict.fromkeys(open_tickers + watchlist_tickers))
+
+            personal_earnings: dict = {}
+            if personal_tickers:
+                try:
+                    from earnings_checker import get_upcoming_earnings
+                    personal_earnings = get_upcoming_earnings(personal_tickers, days_ahead=7)
+                except Exception:
+                    pass
+
+            personal_prefix = ""
+            if personal_earnings:
+                lines = []
+                for t, d in list(personal_earnings.items())[:5]:
+                    badge = "💼" if t in open_tickers else "👁"
+                    lines.append(f"  {badge} <b>{t}</b> — {d}")
+                personal_prefix = "📅 <b>Your Earnings This Week</b>\n" + "\n".join(lines) + "\n\n"
+
+            final_msg = personal_prefix + week_msg
+
             if DRY_RUN:
-                print(f"\n{'=' * 60}\nDRY RUN — Week Ahead for {uid}:\n{'=' * 60}\n{week_msg}\n")
+                print(f"\n{'=' * 60}\nDRY RUN — Week Ahead for {uid}:\n{'=' * 60}\n{final_msg}\n")
             else:
-                send_message(week_msg, chat_id=uid)
+                send_message(final_msg, chat_id=uid)
         except Exception as exc:
             print(f"[agent] Week-ahead send failed for {uid}: {exc}")
 

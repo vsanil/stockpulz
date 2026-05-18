@@ -697,6 +697,7 @@ SIGNAL GUIDANCE (use in thesis and catalyst where relevant):
   - invalidation: one specific price level or event that would break the thesis (e.g. "closes below $145 support", "fails to hold 50-day MA", "earnings miss next week")
   - catalyst: the single most important upcoming trigger for this pick (e.g. "Q2 earnings May 28 — 4/4 beats history", "Fed rate decision June 12", "breakout above $840 52-week high", "product launch next week"). For LT picks use a fundamental catalyst.
   - entry_low / entry_high (ST stocks and crypto only): ideal buy zone. If entry is at a key level, set entry_low = entry_price * 0.99, entry_high = entry_price * 1.005. If chasing is a big risk (momentum stock, already up today), tighten: entry_high = entry_price * 1.002.
+  - "plain_english": one sentence (max 20 words) for a complete beginner — what this company does and why you're buying now. No jargon.
 
 Stock Candidates:
 {json.dumps(stock_candidates, indent=2)}
@@ -757,6 +758,7 @@ Return this exact JSON structure:
         "catalyst": "single most important upcoming trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words",
+        "plain_english": "one sentence for a beginner — what this company does and why buying now, max 20 words",
         "entry_low":  null,
         "entry_high": null,
         "earnings_date": "Thu May 1 or omit if no earnings this week"
@@ -774,6 +776,7 @@ Return this exact JSON structure:
         "thesis": "fundamental strength + growth driver + valuation context, max 25 words",
         "catalyst": "single most important upcoming fundamental trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
+        "plain_english": "one sentence for a beginner — what this company does and why buying now, max 20 words",
         "horizon": "2-3 years",
         "earnings_date": "Thu May 1 or omit if no earnings this week"
       }}
@@ -795,6 +798,7 @@ Return this exact JSON structure:
         "catalyst": "single most important upcoming trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words",
+        "plain_english": "one sentence for a beginner — what this asset is and why buying now, max 20 words",
         "entry_low":  null,
         "entry_high": null
       }}
@@ -813,7 +817,8 @@ Return this exact JSON structure:
         "thesis": "technical setup + sector driver, max 25 words",
         "catalyst": "single most important upcoming trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
-        "risk": "one sentence risk, max 10 words"
+        "risk": "one sentence risk, max 10 words",
+        "plain_english": "one sentence for a beginner — what this ETF holds and why buying now, max 20 words"
       }}
     ],
     "long_term": [
@@ -827,6 +832,7 @@ Return this exact JSON structure:
         "thesis": "macro + valuation basis for long-term allocation, max 25 words",
         "catalyst": "single most important upcoming fundamental trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
+        "plain_english": "one sentence for a beginner — what this ETF holds and why buying now, max 20 words",
         "horizon": "1-3 years"
       }}
     ]
@@ -844,7 +850,8 @@ Return this exact JSON structure:
         "thesis": "macro driver + technical setup for commodity, max 25 words",
         "catalyst": "single most important upcoming macro trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
-        "risk": "one sentence risk, max 10 words"
+        "risk": "one sentence risk, max 10 words",
+        "plain_english": "one sentence for a beginner — what this commodity is and why buying now, max 20 words"
       }}
     ],
     "long_term": [
@@ -858,6 +865,7 @@ Return this exact JSON structure:
         "thesis": "macro driver + long-term supply/demand context, max 25 words",
         "catalyst": "single most important upcoming macro trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
+        "plain_english": "one sentence for a beginner — what this commodity is and why buying now, max 20 words",
         "horizon": "6-12 months"
       }}
     ]
