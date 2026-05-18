@@ -272,7 +272,11 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(e,tgt)}</i>{stop_str}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
         if tl: row += f"\n{tl}"
+        pe = s.get("plain_english", "")
+        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         row += _iv_warn(s)
+        ew = _entry_window(e, stop, budget=config.get("stock_budget"), is_long_term=False, is_crypto=False)
+        if ew: row += f"\n{ew}"
         return row
 
     def _row_lt(s):
@@ -283,6 +287,10 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(e,tgt)}</i>{hz}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
         if tl: row += f"\n{tl}"
+        pe = s.get("plain_english", "")
+        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
+        ew = _entry_window(e, None, budget=config.get("stock_budget"), is_long_term=True, is_crypto=False)
+        if ew: row += f"\n{ew}"
         return row
 
     def _row_crypto(c):
@@ -293,7 +301,11 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(e,tgt)}</i>{stop_str}")
         tl = _tline(c.get("thesis"), c.get("catalyst"))
         if tl: row += f"\n{tl}"
+        pe = c.get("plain_english", "")
+        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         row += _iv_warn(c)
+        ew = _entry_window(e, stop, budget=config.get("crypto_budget"), is_long_term=False, is_crypto=True)
+        if ew: row += f"\n{ew}"
         return row
 
     def _row_etf(e):
@@ -306,6 +318,8 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(ep,tgt)}</i>{stop_str}{hz}")
         tl = _tline(e.get("thesis"), e.get("catalyst"))
         if tl: row += f"\n{tl}"
+        pe = e.get("plain_english", "")
+        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         return row
 
     def _row_commodity(c):
@@ -317,6 +331,8 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(ep,tgt)}</i>{stop_str}")
         tl = _tline(c.get("thesis"), c.get("catalyst"))
         if tl: row += f"\n{tl}"
+        pe = c.get("plain_english", "")
+        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         return row
 
     def _row_options(o):
