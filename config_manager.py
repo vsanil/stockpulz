@@ -100,6 +100,7 @@ USER_CONFIGS_FILE      = "user_configs.json"    # Per-user settings (risk, watch
 USER_TRADES_FILE       = "user_trades.json"     # Per-user trade logs (open + closed)
 USER_PAPER_FILE        = "user_paper.json"      # Per-user paper portfolios
 FEEDBACK_FILE          = "feedback.json"        # User feedback submissions
+BACKTEST_TRADES_FILE   = "backtest_trades.json" # Simulated trades seeded from backtester (per-user)
 
 
 def _gist_headers() -> dict:
@@ -538,6 +539,22 @@ def load_screener_cache() -> dict | None:
     except Exception as exc:
         print(f"[config_manager] Screener cache invalid ({exc}).")
         return None
+
+
+# ── Backtest trades (simulated track record seed) ───────────────────────────
+
+def save_backtest_trades(chat_id: str, trades: list) -> None:
+    """Persist simulated backtest trades for a user (used to seed Performance tab)."""
+    all_data = _load_gist_file(BACKTEST_TRADES_FILE) or {}
+    all_data[str(chat_id)] = trades
+    _write_gist_file(BACKTEST_TRADES_FILE, all_data)
+    print(f"[config_manager] Saved {len(trades)} backtest trades for {chat_id}.")
+
+
+def load_backtest_trades(chat_id: str) -> list:
+    """Load simulated backtest trades for a user. Returns [] if none seeded."""
+    all_data = _load_gist_file(BACKTEST_TRADES_FILE) or {}
+    return all_data.get(str(chat_id), [])
 
 
 # ── Buy counts (social feature, admin-gated) ─────────────────────────────────

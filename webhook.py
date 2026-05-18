@@ -771,7 +771,7 @@ def miniapp_stats():
         return jsonify({"error": "unauthorised"}), 403
 
     from trade_logger import get_performance_stats
-    from config_manager import load_user_trade_log
+    from config_manager import load_user_trade_log, load_backtest_trades
 
     stats  = get_performance_stats(chat_id) or {}
     log    = load_user_trade_log(chat_id)
@@ -780,6 +780,41 @@ def miniapp_stats():
         key=lambda t: t.get("closed_date", ""),
         reverse=True,
     )
+
+    has_simulated = False
+    real_count    = len(closed)
+
+    # When user has fewer than 5 real trades, supplement with backtest trades
+    # so the Stats section isn't empty. Compute stats manually from combined set.
+    if real_count < 5:
+        bt = load_backtest_trades(chat_id)
+        if bt:
+            has_simulated = True
+            combined = closed + bt
+            returns  = [t.get("return_pct", 0) for t in combined]
+            wins_l   = [r for r in returns if r > 0]
+            losses_l = [r for r in returns if r <= 0]
+            wr       = round(len(wins_l) / len(returns) * 100, 1) if returns else 0
+            ag       = round(sum(wins_l)   / len(wins_l)   if wins_l   else 0, 2)
+            al       = round(sum(losses_l) / len(losses_l) if losses_l else 0, 2)
+            cum      = round(sum(returns), 2)
+            best_t   = max(combined, key=lambda t: t.get("return_pct", 0))
+            worst_t  = min(combined, key=lambda t: t.get("return_pct", 0))
+            mapped   = {
+                "count":                 len(combined),
+                "wins":                  len(wins_l),
+                "losses":                len(losses_l),
+                "win_rate":              wr,
+                "avg_gain":              ag,
+                "avg_loss":              al,
+                "best":                  [best_t.get("ticker","—"),  best_t.get("return_pct", 0)],
+                "worst":                 [worst_t.get("ticker","—"), worst_t.get("return_pct", 0)],
+                "cumulative_return_pct": cum,
+                "streak":                0,
+                "has_simulated":         True,
+                "real_count":            real_count,
+            }
+            return jsonify({"stats": mapped, "closed": sorted(combined, key=lambda t: t.get("closed_date",""), reverse=True), "has_simulated": True})
 
     # Map field names for the Mini App
     mapped = {
@@ -795,7 +830,41 @@ def miniapp_stats():
         "streak":                stats.get("streak", 0),
     } if stats else {}
 
-    return jsonify({"stats": mapped, "closed": closed})
+    return jsonify({"stats": mapped, "closed": closed, "has_simulated": False})
+
+
+@app.route("/api/miniapp/seed_backtest", methods=["POST"])
+def miniapp_seed_backtest():
+    """
+    Admin endpoint: run the backtest and seed simulated trades for a user.
+    Runs in a background thread — returns immediately.
+    POST body: {"chat_id": "optional — defaults to caller", "days_back": 60}
+    """
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    # Only admin can seed for other users; regular users can only seed themselves
+    body      = request.get_json(silent=True) or {}
+    target_id = str(body.get("chat_id", chat_id))
+    days_back = int(body.get("days_back", 60))
+
+    def _run():
+        try:
+            from backtester import generate_dated_trades
+            from config_manager import save_backtest_trades
+            trades = generate_dated_trades(days_back=days_back, picks_per_period=3)
+            if trades:
+                save_backtest_trades(target_id, trades)
+                print(f"[webhook] Seeded {len(trades)} backtest trades for {target_id}.")
+            else:
+                print(f"[webhook] Backtest generated no trades for {target_id}.")
+        except Exception as exc:
+            print(f"[webhook] seed_backtest error: {exc}")
+
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": f"Backtest seeding started for {target_id} ({days_back}d). Check Performance tab in ~2 minutes."})
 
 
 @app.route("/api/miniapp/log_bought", methods=["POST"])
@@ -874,6 +943,38 @@ def miniapp_chart(ticker):
                 "volume": int(row["Volume"]),
             })
         return jsonify({"ticker": ticker, "data": data})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/miniapp/define")
+def miniapp_define():
+    """Plain-English definition of a financial term via Haiku."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    term = request.args.get("term", "").strip()
+    if not term or len(term) > 80:
+        return jsonify({"error": "invalid term"}), 400
+
+    try:
+        import anthropic as _ant
+        client = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        resp   = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system=(
+                "You are a friendly financial educator. Explain the term in 2-3 short "
+                "sentences of plain English — zero jargon, zero disclaimers. "
+                "First sentence = one-line definition. "
+                "Second sentence = why it matters for trading. "
+                "Third sentence (optional) = a simple real-world example with numbers. "
+                "End with one short line starting 'StockPulz uses this to:'"
+            ),
+            messages=[{"role": "user", "content": f"Explain this financial term: {term}"}],
+        )
+        return jsonify({"term": term, "explanation": resp.content[0].text.strip()})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
@@ -965,10 +1066,20 @@ def miniapp_feedback():
 def miniapp_history():
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
-    from config_manager import load_user_trade_log
-    log = load_user_trade_log(chat_id)
+    from config_manager import load_user_trade_log, load_backtest_trades
+    log    = load_user_trade_log(chat_id)
     closed = sorted(log.get("closed", []), key=lambda t: t.get("closed_date",""), reverse=True)
-    return jsonify({"ok": True, "trades": closed})
+
+    # Merge simulated backtest trades when user has fewer than 5 real trades
+    has_simulated = False
+    if len(closed) < 5:
+        bt = load_backtest_trades(chat_id)
+        if bt:
+            merged = sorted(closed + bt, key=lambda t: t.get("closed_date",""), reverse=True)
+            has_simulated = True
+            return jsonify({"ok": True, "trades": merged, "has_simulated": True})
+
+    return jsonify({"ok": True, "trades": closed, "has_simulated": False})
 
 
 @app.route("/api/miniapp/alerts")

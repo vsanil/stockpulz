@@ -203,6 +203,111 @@ def run_backtest(universe: list[str] | None = None) -> dict:
     }
 
 
+def generate_dated_trades(days_back: int = 60, picks_per_period: int = 3) -> list[dict]:
+    """
+    Generate simulated historical trades with real calendar dates.
+    Used to seed the Performance tab before real trades accumulate.
+
+    Uses a curated 100-ticker universe for speed (~2 min download).
+    Forward hold: 14 trading days (matching the app's short-term window).
+    Returns list of closed trade dicts compatible with trade_logger format,
+    with source="backtest" so the UI can label them as simulated.
+    """
+    from datetime import datetime
+
+    SEED_UNIVERSE = [
+        "AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA","AVGO","JPM","V",
+        "MA","UNH","XOM","LLY","JNJ","PG","HD","COST","ABBV","MRK",
+        "CVX","AMD","ORCL","CSCO","ACN","NOW","INTU","CAT","GS","MS",
+        "BAC","WFC","BLK","SPGI","CB","MMC","DE","HON","GE","RTX",
+        "LMT","NOC","BA","EMR","ETN","MCD","SBUX","CMG","NKE","LULU",
+        "TMO","DHR","ISRG","EW","MDT","SYK","BSX","NEE","SO","DUK",
+        "PLD","AMT","CCI","EQIX","SPG","PSA","PANW","CRWD","ZS","FTNT",
+        "AMAT","KLAC","LRCX","MCHP","TXN","QCOM","MU","LIN","APD","ECL",
+        "SHW","AMGN","GILD","REGN","VRTX","BIIB","WMT","TGT","DG","KR",
+        "F","GM","UBER","ABNB","DIS","NFLX","CMCSA","T","VZ","PYPL",
+    ]
+
+    forward_days = 14
+    total_days   = days_back + forward_days + 40
+
+    print(f"[backtester] Downloading {len(SEED_UNIVERSE)} tickers for dated backtest ({total_days}d)…")
+    try:
+        data = yf.download(
+            SEED_UNIVERSE + ["SPY"],
+            period=f"{total_days}d",
+            auto_adjust=True,
+            progress=False,
+            threads=False,
+        )
+        close_df  = data["Close"]  if "Close"  in data else data.xs("Close",  axis=1, level=0)
+        volume_df = data["Volume"] if "Volume" in data else data.xs("Volume", axis=1, level=0)
+    except Exception as exc:
+        print(f"[backtester] Dated backtest download failed: {exc}")
+        return []
+
+    dates      = close_df.index
+    total_bars = len(dates)
+    if total_bars < forward_days + 30:
+        print("[backtester] Not enough data for dated backtest.")
+        return []
+
+    # Roughly map calendar days to trading bars (≈5/7 ratio)
+    approx_trading = int(days_back * 5 / 7)
+    start_bar      = max(30, total_bars - forward_days - approx_trading)
+    n_periods      = max(1, approx_trading // 5)   # weekly steps
+    step           = max(1, (total_bars - forward_days - start_bar) // n_periods)
+    test_bars      = list(range(start_bar, total_bars - forward_days, step))[:n_periods]
+
+    trades: list[dict] = []
+
+    for bar_idx in test_bars:
+        period_scores: dict[str, int] = {}
+        for ticker in SEED_UNIVERSE:
+            if ticker not in close_df.columns:
+                continue
+            close  = close_df[ticker].iloc[:bar_idx].dropna()
+            volume = volume_df[ticker].iloc[:bar_idx].dropna() if ticker in volume_df else pd.Series(dtype=float)
+            if len(close) < 30:
+                continue
+            score = _st_score(close, volume)
+            if score >= 40:
+                period_scores[ticker] = score
+
+        top = sorted(period_scores, key=period_scores.get, reverse=True)[:picks_per_period]
+
+        for ticker in top:
+            exit_bar = bar_idx + forward_days
+            if exit_bar >= total_bars:
+                continue
+            entry_price = float(close_df[ticker].iloc[bar_idx])
+            exit_price  = float(close_df[ticker].iloc[exit_bar])
+            if pd.isna(entry_price) or pd.isna(exit_price) or entry_price == 0:
+                continue
+
+            return_pct  = round((exit_price - entry_price) / entry_price * 100, 2)
+            entry_date  = dates[bar_idx].strftime("%Y-%m-%d")
+            closed_date = dates[exit_bar].strftime("%Y-%m-%d")
+
+            trades.append({
+                "ticker":       ticker,
+                "asset_type":   "stock",
+                "entry_price":  round(entry_price, 2),
+                "closed_price": round(exit_price, 2),
+                "return_pct":   return_pct,
+                "outcome":      "target" if return_pct > 0 else "stop",
+                "opened_date":  entry_date,
+                "closed_date":  closed_date,
+                "source":       "backtest",
+                "conviction":   3,
+                "thesis":       "Simulated — screener signal backtest",
+                "gain_usd":     None,
+            })
+
+    print(f"[backtester] Generated {len(trades)} dated backtest trades.")
+    return trades
+
+
 def format_backtest_message(result: dict) -> str:
     """Format backtest result as Telegram HTML message."""
     if "note" in result and result.get("total_picks", 0) == 0:

@@ -176,6 +176,15 @@ def handle_callback_query(callback_query: dict) -> None:
         send_message("👍 Cancelled.", chat_id=chat_id)
         return
 
+    # Generic command shortcut — cmd|ACCURACY, cmd|HISTORY, etc.
+    if action == "cmd":
+        cmd_text = parts[1].upper() if len(parts) > 1 else ""
+        if cmd_text:
+            reply = _parse_and_execute(cmd_text, original=f"/{cmd_text.lower()}", chat_id=chat_id)
+            if reply:
+                send_message(reply, chat_id=chat_id)
+        return
+
     if action == "quickbuy":
         # Show confirmation before logging — prevents accidental taps
         ticker = parts[1].upper() if len(parts) > 1 else ""
@@ -1183,6 +1192,12 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             if not ticker or not _is_number(text.strip()):
                 return "⚠️ Please send just the new price, e.g. <code>118.50</code>"
             return _execute_update_level(ticker, field, float(text.strip().replace(",", "")), chat_id)
+
+    if command == "accuracy":
+        return _parse_and_execute("ACCURACY", original="/accuracy", chat_id=chat_id)
+
+    if command == "define":
+        return _parse_and_execute(f"DEFINE {text}".strip(), original=f"/define {text}".strip(), chat_id=chat_id)
 
     if command == "watch":
         return _parse_and_execute(f"WATCH {text}", original=f"/watch {text}", chat_id=chat_id)

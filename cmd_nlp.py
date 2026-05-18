@@ -107,7 +107,11 @@ def _explain_pick(query: str) -> str:
             max_tokens=350,
             messages=[{"role": "user", "content": f"{system}\n\n{user_msg}"}],
         )
-        return f"💬 {message.content[0].text.strip()}"
+        answer = message.content[0].text.strip()
+        return (
+            f"💬 {answer}\n\n"
+            f"<i>💡 Unfamiliar with a term? Try /define RSI · /define MACD · /define stop loss</i>"
+        )
     except Exception as exc:
         return f"⚠️ Could not generate explanation: {exc}"
 

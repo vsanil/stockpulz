@@ -502,6 +502,35 @@ def _build_user_prompt(
             laggards = ", ".join(sr.get("laggards", [])) or "none"
             sr_line  = f"  Sector rotation — Leading: {leaders} | Lagging: {laggards}\n"
 
+        # Build regime-specific signal priority guidance
+        regime_name = r['regime'].lower()
+        if regime_name == 'bull':
+            signal_priority = (
+                "  SIGNAL PRIORITY (bull regime): Weight MOST → rs_vs_spy > +5%, breakout_today, "
+                "bullish patterns, options bullish_flow/sweep. Weight LESS → defensive fundamentals alone. "
+                "Momentum backed by volume is your best friend here."
+            )
+        elif regime_name == 'elevated':
+            signal_priority = (
+                "  SIGNAL PRIORITY (elevated regime): Weight MOST → analyst_consensus buy + eps_beats "
+                "combination, insider_activity cluster, low debt_to_equity, high inst_own_pct. "
+                "Weight LESS → pure price momentum without fundamental backing. "
+                "Require at least 1 fundamental signal alongside any technical signal."
+            )
+        elif regime_name in ('volatile', 'bear'):
+            signal_priority = (
+                f"  SIGNAL PRIORITY ({regime_name} regime): Weight MOST → insider_activity (especially cluster), "
+                "analyst_consensus buy with high buy count, defensive sector membership, low atr_pct, "
+                "high inst_own_pct. Weight LEAST → social_sentiment, short_float squeeze thesis, "
+                "pure momentum. Reject any pick whose primary thesis is price momentum alone."
+            )
+        else:  # neutral
+            signal_priority = (
+                "  SIGNAL PRIORITY (neutral regime): Balanced weighting across all signals. "
+                "Prefer picks with 2+ signal types confirming (e.g. technical + fundamental, "
+                "or technical + insider). Single-signal picks require conviction ★★★★ minimum."
+            )
+
         regime_block = (
             f"MARKET REGIME: {r['regime'].upper()}\n"
             f"  VIX: {r.get('vix', 'N/A')} | SPY above 50MA: {r.get('spy_above_50ma')} "
@@ -517,7 +546,8 @@ def _build_user_prompt(
             f"conviction ★★★★ minimum\n"
             f"    bear     → defensive sectors only (Utilities, Consumer Staples, Health Care), "
             f"skip all high-momentum plays, conviction ★★★★★ or skip\n"
-            f"  Use sector rotation leaders/laggards to favour/avoid sectors in thesis."
+            f"  Use sector rotation leaders/laggards to favour/avoid sectors in thesis.\n"
+            f"{signal_priority}"
         )
     else:
         regime_block = ""
@@ -574,6 +604,26 @@ CONVICTION GATE (ABSOLUTE RULE — READ BEFORE ANYTHING ELSE):
   - A pick that barely squeaks past the threshold should be DROPPED, not included.
   - If only 1 stock qualifies, return 1. If none qualify, return [].
   - Empty arrays [] are acceptable and often the most honest answer.
+
+ANALYSIS FRAMEWORK — WORK THROUGH THESE STEPS MENTALLY BEFORE SELECTING ANY PICK:
+  Step 1 — REGIME LENS: Anchor your entire analysis to the current market regime.
+    bull     → full operation; momentum and breakout setups are valid
+    elevated → tighten standards; require quality signals alongside technicals; mention risk in every thesis
+    volatile → technicals alone are insufficient; require fundamental or insider backing too
+    bear     → defensive sectors only; reject all momentum/breakout plays regardless of score
+  Step 2 — SIGNAL COUNT: For each candidate, count confirming signals strictly using the rubric above.
+    If you are uncertain whether a signal qualifies, it does NOT qualify. Marginal = fail.
+  Step 3 — STRESS TEST (devil's advocate): For each candidate that passes Step 2, ask:
+    "What are the 2 most likely reasons this pick fails in the next 2–4 weeks?"
+    If those reasons outweigh the thesis → DROP the pick.
+    If they are meaningful but manageable → lower conviction by 1 star and note the risk.
+  Step 4 — NEWS CATALYST QUALITY: For each pick, assess the catalyst honestly:
+    Is it upcoming (adds fuel) or already priced in (no edge)? Is it company-specific or just macro noise?
+    An already-priced catalyst weakens the pick — lower conviction accordingly.
+  Step 5 — PORTFOLIO COHERENCE: Review all passing picks together.
+    No sector duplicates. No two picks driven by the identical catalyst type.
+    Prefer picks that complement each other across risk/return profile.
+    Then apply the conviction gate and output JSON.
 
 STOCKS:
 {stocks_block}
@@ -1310,6 +1360,126 @@ def generate_trade_debrief(trade: dict) -> str:
     except Exception as exc:
         print(f"[ai_analyzer] generate_trade_debrief failed (non-critical): {exc}")
         return ""
+
+
+# ── /swap: generate one alternative pick from a single screener candidate ─────
+
+def get_swap_pick(candidate: dict, category: str = "short_term", config: dict | None = None) -> dict | None:
+    """
+    Generate a single alternative pick from one screener candidate.
+    Called by the /swap command. Returns a pick dict (same shape as daily picks)
+    or None if the candidate is too weak to recommend.
+
+    Steps:
+      1. Enrich the candidate with news + signals (reuses _build_stock_candidates logic)
+      2. Call Claude with a focused single-pick prompt
+      3. Return the parsed pick or None
+    """
+    config = config or {}
+
+    # ── Enrich: reuse the same pipeline as the morning run ───────────────────
+    screener_input = {category: [candidate]}
+    enriched = _build_stock_candidates(screener_input)
+    if not enriched:
+        return None
+    cand = enriched[0]
+
+    # ── Regime context ────────────────────────────────────────────────────────
+    regime_info = None
+    try:
+        from market_regime import get_market_regime
+        regime_info = get_market_regime()
+    except Exception:
+        pass
+
+    regime_note = ""
+    if regime_info and regime_info.get("regime"):
+        regime_note = f"\nCurrent market regime: {regime_info['regime'].upper()}. Adjust conviction accordingly."
+
+    is_lt = category == "long_term"
+    horizon_note = (
+        "LONG-TERM pick (1-5 year hold). Set realistic target: 8-18% annualised return. No stop_loss needed."
+        if is_lt else
+        "SHORT-TERM pick (1-4 week trade). Include entry_price, target_price, stop_loss (ATR-based if available)."
+    )
+
+    risk_profile = config.get("risk_profile", "moderate")
+    min_stars = 4 if risk_profile in ("conservative", "moderate") else 3
+
+    prompt = f"""You are a financial analyst. Evaluate this single stock candidate and decide if it is worth recommending as a {category.replace('_', '-')} pick.
+
+Candidate data:
+{json.dumps(cand, indent=2)}
+{regime_note}
+
+TASK: {horizon_note}
+
+CONVICTION RUBRIC (count confirming signals):
+  ★★★★★ (5) — 4+ confirming signals
+  ★★★★  (4) — 3 confirming signals
+  ★★★   (3) — 2 confirming signals
+  ★★    (2) — 1 signal or conflicting — DO NOT INCLUDE
+  ★     (1) — DO NOT INCLUDE
+
+What counts as one confirming signal:
+  • RSI 35-55 AND MACD crossover (both = 1 signal)
+  • volume_ratio > 1.5 AND obv_positive = True (both = 1 signal)
+  • breakout_today = True OR bull_flag / bullish_engulfing pattern
+  • options_flow: unusual = True OR bullish_flow = True OR put_call_ratio < 0.7
+  • insider_activity present AND is_cluster = True
+  • analyst_consensus = "buy" AND analyst_upside_pct > 10%
+  • eps_beats >= 3 AND last_eps_surprise_pct > 3%
+  • rs_vs_spy > +5%
+  • congress_score >= 6
+
+MINIMUM CONVICTION for this user's risk profile ({risk_profile}): {min_stars} stars.
+If conviction < {min_stars}, return {{"pick": null, "reason": "below conviction threshold"}}.
+
+Return ONLY valid JSON — no preamble, no markdown:
+{{
+  "pick": {{
+    "ticker": "...",
+    "company": "...",
+    "action": "BUY",
+    "entry_price": 0.0,
+    "target_price": 0.0,
+    "stop_loss": 0.0,
+    "conviction": 4,
+    "thesis": "max 25 words",
+    "catalyst": "max 12 words",
+    "invalidation": "max 12 words"
+  }},
+  "reason": "brief explanation of conviction decision"
+}}
+"""
+
+    client = _get_client()
+    for attempt in range(2):
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=600,
+                system="You are a financial analysis assistant. Return ONLY valid JSON. No preamble, no markdown.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = resp.content[0].text.strip()
+            # Strip markdown code fences if present
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            result = json.loads(raw)
+            pick = result.get("pick")
+            if not pick:
+                print(f"[ai_analyzer] swap: candidate {cand.get('ticker')} below threshold — {result.get('reason', '')}")
+                return None
+            # Tag the category so callers know what type of pick this is
+            pick["_category"] = category
+            return pick
+        except Exception as exc:
+            print(f"[ai_analyzer] get_swap_pick attempt {attempt+1} failed: {exc}")
+            if attempt == 1:
+                return None
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────

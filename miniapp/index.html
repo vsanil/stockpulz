@@ -2195,7 +2195,7 @@ function fmtPct(v, showPlus = true) {
 // CHART OVERLAY
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function openChart(sym, assetType) {
+async function openChart(sym, assetType, entryPrice = 0, targetPrice = 0, stopPrice = 0) {
   document.getElementById('chart-sym-label').textContent = sym;
   document.getElementById('chart-meta').style.display = 'none';
   const container = document.getElementById('lw-container');
@@ -2256,16 +2256,57 @@ async function openChart(sym, assetType) {
 
     const seriesData = chartData.map(d => ({ time: d.time, value: d.close }));
     lwSeries.setData(seriesData);
+
+    // ── Price level lines ─────────────────────────────────────────────────────
+    const LineStyle = LightweightCharts.LineStyle;
+    if (entryPrice > 0) {
+      lwSeries.createPriceLine({
+        price: entryPrice, color: '#60a5fa',
+        lineWidth: 1, lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true, title: 'Entry',
+      });
+    }
+    if (targetPrice > 0) {
+      lwSeries.createPriceLine({
+        price: targetPrice, color: '#30d158',
+        lineWidth: 1, lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true, title: 'Target',
+      });
+    }
+    if (stopPrice > 0) {
+      lwSeries.createPriceLine({
+        price: stopPrice, color: '#ff453a',
+        lineWidth: 1, lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true, title: 'Stop',
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     lwChart.timeScale().fitContent();
 
     // Price meta bar
-    const chgPct = ((last - first) / first * 100);
+    const chgPct  = ((last - first) / first * 100);
     const chgSign = chgPct >= 0 ? '+' : '';
     const metaChg = document.getElementById('chart-meta-chg');
     metaChg.textContent = `${chgSign}${chgPct.toFixed(1)}% (3mo)`;
     metaChg.style.color = isUp ? 'var(--green)' : 'var(--red)';
     document.getElementById('chart-meta-price').textContent = '$' + fmtPrice(last);
     document.getElementById('chart-meta').style.display = 'flex';
+
+    // ── Legend pill for price levels ─────────────────────────────────────────
+    if (entryPrice > 0 || targetPrice > 0 || stopPrice > 0) {
+      const legendHtml = [
+        entryPrice  > 0 ? `<span style="color:#60a5fa">— Entry $${fmtPrice(entryPrice)}</span>`  : '',
+        targetPrice > 0 ? `<span style="color:#30d158">— Target $${fmtPrice(targetPrice)}</span>` : '',
+        stopPrice   > 0 ? `<span style="color:#ff453a">— Stop $${fmtPrice(stopPrice)}</span>`     : '',
+      ].filter(Boolean).join('<span style="opacity:.35"> · </span>');
+
+      const legend = document.createElement('div');
+      legend.style.cssText = 'font-size:11px;padding:6px 14px 0;display:flex;gap:8px;flex-wrap:wrap;opacity:.85';
+      legend.innerHTML = legendHtml;
+      container.appendChild(legend);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
   } catch (e) {
     container.innerHTML = `<div class="chart-loading" style="color:var(--hint)">
@@ -2662,7 +2703,7 @@ function renderPickCard(p, idx = 0) {
     <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
     ${p.thesis || p.reason ? `<div class="pick-thesis">${p.thesis || p.reason}</div>` : ''}
     <div class="pick-actions">
-      <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}')">📊 Chart</button>
+      <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
       <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
               onclick="markBought('${sym}','${p._type}','${p._tf}')">
         ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
@@ -2944,7 +2985,7 @@ async function loadPortfolio() {
         </div>
         </div>
         <div class="pos-actions">
-          <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}')">📊 Chart</button>
+          <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},${parseFloat(targetPrice)||0},${parseFloat(stopLoss)||0})">📊 Chart</button>
           <button class="pos-btn pos-btn-sell"  onclick="openSellSheet('${sym}')">💸 Sell</button>
           <button class="pos-btn pos-btn-more" onclick="openPositionDetail('${sym}',${JSON.stringify(p.entry_price)},${JSON.stringify(p.current_price)},${JSON.stringify(stopLoss)},${JSON.stringify(targetPrice)})">⋯</button>
         </div>
@@ -3176,7 +3217,7 @@ async function loadPaperPortfolio() {
             </div>
           </div>
           <div class="pos-actions">
-            <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}')">📊 Chart</button>
+            <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},0,0)">📊 Chart</button>
             <button class="pos-btn" style="color:var(--red)" onclick="cancelPaperPosition('${sym}')">🗑 Cancel</button>
           </div>
         </div>`;
@@ -3816,11 +3857,15 @@ function _openDaySheet(dateStr) {
     const usd   = t.gain_usd != null
       ? `<div style="font-size:12px;opacity:.5;margin-top:1px">${sign(t.gain_usd)}$${Math.abs(t.gain_usd).toFixed(0)}</div>`
       : '';
+    const simTag = t.source === 'backtest'
+      ? `<span style="font-size:10px;background:rgba(245,158,11,.15);color:#d97706;
+                      border-radius:4px;padding:1px 5px;margin-left:5px;vertical-align:middle">simulated</span>`
+      : '';
     return `
       <div style="display:flex;align-items:center;justify-content:space-between;
                   padding:12px 0;border-bottom:1px solid var(--border)">
         <div>
-          <div style="font-weight:700;font-size:15px">${t.ticker}</div>
+          <div style="font-weight:700;font-size:15px">${t.ticker}${simTag}</div>
           <div style="font-size:12px;opacity:.5;margin-top:2px">${outcomeLabel(t.outcome)}</div>
         </div>
         <div style="text-align:right">
@@ -3850,9 +3895,11 @@ async function loadPerformance() {
 
     // Fetch trade history for calendar (parallel, non-blocking)
     let histTrades = [];
+    let hasSimulated = false;
     try {
       const hist = await api('/api/miniapp/history');
-      histTrades = hist.trades || [];
+      histTrades    = hist.trades       || [];
+      hasSimulated  = hist.has_simulated || false;
     } catch (_) {}
     _calTrades = histTrades;
 
@@ -3897,12 +3944,21 @@ async function loadPerformance() {
     const retColor = avgRet >= 0 ? 'var(--green)' : 'var(--red)';
     const sign     = n => parseFloat(n) >= 0 ? '+' : '';
 
+    const simBanner = hasSimulated
+      ? `<div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);
+                     border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:12px;
+                     color:#d97706;display:flex;gap:8px;align-items:flex-start">
+           <span style="font-size:15px;line-height:1.3">📊</span>
+           <span>Includes simulated backtest data — your real trades will replace this as you trade.</span>
+         </div>`
+      : '';
+
     const spyRow   = spy30   != null ? `<div class="stat-row"><span>S&P 500 (30d)</span><span>${sign(spy30)}${spy30}%</span></div>` : '';
     const alphaRow = alpha   != null ? `<div class="stat-row"><span>Alpha vs S&P</span><span style="color:${parseFloat(alpha)>=0?'var(--green)':'var(--red)'}"><b>${sign(alpha)}${alpha}%</b></span></div>` : '';
     const bestRow  = best    ? `<div class="stat-row"><span>🏆 Best pick</span><span style="color:var(--green)"><b>${best[0]}</b> ${sign(best[1])}${best[1].toFixed(1)}%</span></div>` : '';
     const worstRow = worst   ? `<div class="stat-row"><span>💔 Worst pick</span><span style="color:var(--red)"><b>${worst[0]}</b> ${sign(worst[1])}${worst[1].toFixed(1)}%</span></div>` : '';
 
-    body.innerHTML = calHtml + `
+    body.innerHTML = calHtml + simBanner + `
       <div style="padding:6px 0 16px">
         <div style="text-align:center;padding:20px 0 10px">
           <div style="font-size:13px;opacity:.6;margin-bottom:4px">Win Rate</div>
@@ -4045,6 +4101,36 @@ function renderSettings() {
     </div>
   </div>`;
 
+  // ── Glossary / Learn card ─────────────────────────────────────────────────
+  html += `<div class="settings-card">
+    <div style="padding:14px 14px 6px">
+      <div style="font-size:12px;font-weight:600;opacity:.5;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">📖 Learn a Term</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="define-input" type="text" placeholder="e.g. RSI, MACD, stop loss…"
+          style="flex:1;background:var(--input-bg,rgba(255,255,255,0.07));border:1px solid var(--border);
+                 border-radius:10px;padding:9px 12px;font-size:13px;color:var(--text);outline:none"
+          onkeydown="if(event.key==='Enter')runDefine()"
+        />
+        <button onclick="runDefine()"
+          style="background:var(--accent);color:#fff;border:none;border-radius:10px;
+                 padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">
+          Explain
+        </button>
+      </div>
+      <div id="define-result" style="display:none;margin-top:12px;font-size:13px;
+           line-height:1.55;color:var(--text);background:rgba(255,255,255,0.04);
+           border-radius:10px;padding:12px 14px;border-left:3px solid var(--accent)"></div>
+      <div style="margin-top:8px;font-size:11px;opacity:.4;display:flex;gap:10px;flex-wrap:wrap">
+        <span onclick="setDefine('RSI')" style="cursor:pointer;text-decoration:underline">RSI</span>
+        <span onclick="setDefine('MACD')" style="cursor:pointer;text-decoration:underline">MACD</span>
+        <span onclick="setDefine('stop loss')" style="cursor:pointer;text-decoration:underline">Stop loss</span>
+        <span onclick="setDefine('market cap')" style="cursor:pointer;text-decoration:underline">Market cap</span>
+        <span onclick="setDefine('options')" style="cursor:pointer;text-decoration:underline">Options</span>
+        <span onclick="setDefine('short selling')" style="cursor:pointer;text-decoration:underline">Short selling</span>
+      </div>
+    </div>
+  </div>`;
+
   html += `<div class="settings-card">
     <div class="action-row" onclick="openHelp()">
       <div class="action-row-left">
@@ -4070,6 +4156,28 @@ function renderSettings() {
   </div>`;
 
   body.innerHTML = html;
+}
+
+async function runDefine() {
+  const input = document.getElementById('define-input');
+  const result = document.getElementById('define-result');
+  const term = (input?.value || '').trim();
+  if (!term) { input?.focus(); return; }
+  tg.HapticFeedback?.impactOccurred('light');
+  result.style.display = 'block';
+  result.innerHTML = '<span style="opacity:.5">Looking up <em>' + term + '</em>…</span>';
+  try {
+    const d = await api('/api/miniapp/define?term=' + encodeURIComponent(term));
+    result.innerHTML = '<strong style="color:var(--accent)">' + (d.term || term) + '</strong><br><span>' + (d.explanation || 'No explanation available.') + '</span>';
+  } catch (e) {
+    result.innerHTML = '<span style="color:var(--red)">Couldn\'t fetch explanation — try again.</span>';
+  }
+}
+
+function setDefine(term) {
+  const input = document.getElementById('define-input');
+  if (input) { input.value = term; }
+  runDefine();
 }
 
 function openPrefsSheet() {
