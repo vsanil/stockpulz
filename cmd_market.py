@@ -578,6 +578,93 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         except Exception as exc:
             return f"⚠️ Could not fetch dividend data: {exc}"
 
+    # ── /earnings — upcoming earnings for open positions + watchlist ─────────
+    if text == "EARNINGS":
+        log      = load_user_trade_log(chat_id)
+        open_t   = log.get("open", [])
+        watchlist = log.get("watchlist", [])
+
+        # Collect stock tickers from open positions + watchlist (deduplicated)
+        seen     = set()
+        tickers  = []
+        for t in open_t:
+            sym = t.get("ticker", "").upper()
+            if sym and t.get("asset_type", "stock") == "stock" and sym not in seen:
+                tickers.append(sym); seen.add(sym)
+        for sym in watchlist:
+            sym = sym.upper()
+            if sym and sym not in seen:
+                tickers.append(sym); seen.add(sym)
+
+        if not tickers:
+            return (
+                "📅 <b>Upcoming Earnings</b>\n\n"
+                "You have no open stock positions or watchlist tickers to check.\n\n"
+                "Log a position with <code>/bought</code> or track a ticker with <code>/track TICKER</code>."
+            )
+
+        send_message("📅 <i>Fetching earnings dates…</i>", chat_id=chat_id)
+
+        try:
+            import yfinance as yf
+            from datetime import datetime, timezone
+
+            rows = []
+            for sym in tickers:
+                try:
+                    info = yf.Ticker(sym).info
+                    ts   = info.get("earningsTimestamp") or info.get("earningsTimestampStart")
+                    if not ts:
+                        continue
+                    dt       = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    today    = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                    days_out = (dt.replace(hour=0, minute=0, second=0, microsecond=0) - today).days
+                    if days_out < -1:
+                        continue   # already reported, skip
+                    is_open  = any(t.get("ticker", "").upper() == sym for t in open_t)
+                    rows.append({
+                        "ticker":    sym,
+                        "date":      dt.strftime("%b %d"),
+                        "days_out":  days_out,
+                        "is_open":   is_open,
+                    })
+                except Exception:
+                    continue
+
+            if not rows:
+                return (
+                    "📅 <b>Upcoming Earnings</b>\n\n"
+                    "No upcoming earnings found for your positions/watchlist in the next 90 days.\n"
+                    "<i>Data sourced from Yahoo Finance — dates may shift.</i>"
+                )
+
+            rows.sort(key=lambda r: r["days_out"])
+
+            lines = []
+            for r in rows[:15]:
+                d  = r["days_out"]
+                if d == 0:
+                    when = "🔴 <b>Today</b>"
+                elif d == 1:
+                    when = "🟠 Tomorrow"
+                elif d < 0:
+                    when = "✅ Reported"
+                else:
+                    when = f"📆 in {d}d"
+                badge = " 💼" if r["is_open"] else " 👁"
+                lines.append(f"  <b>{r['ticker']}</b>{badge}  {r['date']}  —  {when}")
+
+            msg = (
+                "📅 <b>Upcoming Earnings</b>\n\n"
+                + "\n".join(lines)
+                + "\n\n<i>💼 = open position  ·  👁 = watchlist\n"
+                "Dates sourced from Yahoo Finance — subject to change.</i>"
+            )
+            return msg
+
+        except Exception as exc:
+            return f"⚠️ Could not fetch earnings dates: {exc}"
+
     # ── /size ─────────────────────────────────────────────────────────────────
     if text == "SIZE":
         return (

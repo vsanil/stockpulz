@@ -52,6 +52,17 @@
   --shadow-glow-r:  0 0 22px rgba(255,90,90,0.18);
 }
 
+.light-theme {
+  --bg:     #f2f2f7;
+  --card:   #ffffff;
+  --border: rgba(0,0,0,0.10);
+  --text:   #1c1c1e;
+  --hint:   #8e8e93;
+  --accent: #007aff;
+  --green:  #34c759;
+  --red:    #ff3b30;
+}
+
 /* ── Light-mode overrides ─────────────────────────────────────────────────── */
 body.tg-light {
   --bg:        #f6f7fb;
@@ -2002,6 +2013,7 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
 <script>
 // ── Telegram init ─────────────────────────────────────────────────────────────
 const tg       = window.Telegram.WebApp;
+try { if (localStorage.getItem('sp_theme') === 'light') document.documentElement.classList.add('light-theme'); } catch(_) {}
 const tgUser   = tg.initDataUnsafe?.user || {};
 const userId   = String(tgUser.id || '');
 const initData = tg.initData || '';
@@ -3141,11 +3153,47 @@ async function loadPortfolio() {
       </div>
     </div>`;
 
+    html += `<div style="margin-top:16px;text-align:center">
+  <button onclick="exportPortfolioCSV()" style="padding:10px 20px;border-radius:12px;border:1.5px solid var(--border);background:transparent;color:var(--hint);font-size:13px;cursor:pointer">⬇️ Export Trade History (CSV)</button>
+</div>`;
+
     body.innerHTML = html;
     _renderPnlChart();
   } catch (e) {
     document.getElementById('port-spinner').innerHTML =
       '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load positions</div></div>';
+  }
+}
+
+async function exportPortfolioCSV() {
+  tg.HapticFeedback?.impactOccurred('light');
+  try {
+    const d = await api('/api/miniapp/history');
+    const trades = d.trades || [];
+    if (!trades.length) { showToast('No trade history to export'); return; }
+    const headers = ['Ticker','Type','Entry Price','Close Price','Return %','Gain USD','Bought Date','Closed Date','Outcome'];
+    const rows = trades.map(t => [
+      t.ticker || '',
+      t.asset_type || 'stock',
+      t.entry_price || '',
+      t.closed_price || '',
+      t.return_pct != null ? t.return_pct.toFixed(2) : '',
+      t.gain_usd != null ? t.gain_usd.toFixed(2) : '',
+      t.bought_date || '',
+      t.closed_date || '',
+      t.outcome || 'closed',
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'stockpulz_trades.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('✅ CSV downloaded');
+  } catch(e) {
+    showToast('⚠️ Could not export — try again');
   }
 }
 
@@ -4196,8 +4244,16 @@ async function loadPerformance() {
           <div class="community-title">🌍 Community</div>
           <div id="community-content" style="color:var(--hint);font-size:13px">Loading community stats…</div>
         </div>
+
+        <div style="margin-top:20px">
+          <div style="font-size:13px;font-weight:700;text-transform:uppercase;opacity:.4;letter-spacing:.06em;margin-bottom:10px">Community</div>
+          <div id="community-card" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:16px">
+            <div style="opacity:.4;font-size:13px;text-align:center">Loading community stats…</div>
+          </div>
+        </div>
       </div>`;
     _renderCalendar();
+    _loadCommunityCard();
 
     // Load community lazily after DOM is painted
     communityLoaded = false;
@@ -4231,6 +4287,28 @@ async function loadPerformance() {
   }
 }
 
+async function _loadCommunityCard() {
+  const card = document.getElementById('community-card');
+  if (!card) return;
+  try {
+    const d = await api('/api/miniapp/community');
+    const s = d.stats;
+    if (!s) { card.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center">No community data yet</div>'; return; }
+    const spyLine = s.spy_return_30d != null ? `<div style="font-size:11px;opacity:.5;margin-top:4px">SPY 30d: ${s.spy_return_30d > 0?'+':''}${s.spy_return_30d}%</div>` : '';
+    const best = s.best_pick ? `${s.best_pick[0]} +${s.best_pick[1]}%` : '—';
+    card.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
+      <div style="text-align:center"><div style="font-size:22px;font-weight:700;color:var(--accent)">${s.total_users||0}</div><div style="font-size:11px;opacity:.5;margin-top:2px">Traders</div></div>
+      <div style="text-align:center"><div style="font-size:22px;font-weight:700;color:var(--green)">${s.win_rate||0}%</div><div style="font-size:11px;opacity:.5;margin-top:2px">Win Rate</div></div>
+      <div style="text-align:center"><div style="font-size:22px;font-weight:700;color:${(s.avg_return||0)>=0?'var(--green)':'var(--red)'}">${(s.avg_return||0)>=0?'+':''}${s.avg_return||0}%</div><div style="font-size:11px;opacity:.5;margin-top:2px">Avg Return</div></div>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between;align-items:center">
+      <div><div style="font-size:11px;opacity:.4;text-transform:uppercase;letter-spacing:.05em">Best Pick</div><div style="font-size:14px;font-weight:700;color:var(--green);margin-top:2px">${best}</div>${spyLine}</div>
+      <div style="text-align:right"><div style="font-size:11px;opacity:.4;text-transform:uppercase;letter-spacing:.05em">Hot Streaks</div><div style="font-size:14px;font-weight:700;color:var(--accent);margin-top:2px">🔥 ${s.hot_streak_users||0} users</div></div>
+    </div>`;
+  } catch(e) {
+    card.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center">Community stats unavailable</div>';
+  }
+}
 
 let _statusData = null;
 
@@ -4300,7 +4378,17 @@ async function renderWatchlist(tickers) {
     html += `</div>`;
   }
   html += `</div>`;
+  html += `<div style="margin-top:20px">
+  <div style="font-size:13px;font-weight:700;text-transform:uppercase;opacity:.4;letter-spacing:.06em;margin-bottom:10px">Upcoming Earnings</div>
+  <div id="earnings-list" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:12px">
+    <div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">${tickers.length ? 'Loading…' : 'Add tickers to see earnings'}</div>
+  </div>
+</div>`;
   body.innerHTML = html;
+
+  if (tickers.length) {
+    _loadEarnings(tickers);
+  }
 
   // Fetch live prices for each ticker concurrently
   if (tickers.length) {
@@ -4314,6 +4402,25 @@ async function renderWatchlist(tickers) {
         }
       } catch(_) {}
     }));
+  }
+}
+
+async function _loadEarnings(tickers) {
+  const el = document.getElementById('earnings-list');
+  if (!el || !tickers.length) return;
+  try {
+    const d = await api('/api/miniapp/earnings?tickers=' + tickers.map(t => encodeURIComponent(t)).join(','));
+    const items = d.earnings || [];
+    if (!items.length) {
+      el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">No upcoming earnings for your watchlist</div>';
+      return;
+    }
+    el.innerHTML = items.map((e, i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0${i < items.length-1 ? ';border-bottom:1px solid var(--border)' : ''}">
+      <div><span style="font-size:15px;font-weight:700">${e.ticker}</span><span style="font-size:12px;opacity:.5;margin-left:6px">${e.date}</span></div>
+      <div style="text-align:right;font-size:12px">${e.days_until===0?'<span style="color:var(--accent);font-weight:700">Today</span>':e.days_until===1?'<span style="color:var(--accent)">Tomorrow</span>':`<span style="opacity:.6">in ${e.days_until}d</span>`}<div style="font-size:11px;opacity:.4">${e.timing||''}</div></div>
+    </div>`).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center">Earnings unavailable</div>';
   }
 }
 
@@ -4384,6 +4491,10 @@ function renderSettings() {
 
   // ── Status card ────────────────────────────────────────────────────────────
   let html = '';
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--card);border-radius:14px;margin-bottom:12px;border:1px solid var(--border)">
+  <div><div style="font-size:14px;font-weight:600">Theme</div><div style="font-size:12px;opacity:.5" id="theme-label">Dark</div></div>
+  <button id="theme-toggle-btn" onclick="toggleTheme()" style="padding:8px 16px;border-radius:10px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:14px;cursor:pointer">🌙 Dark</button>
+</div>`;
   const sd = _statusData;
   if (sd && sd.ok) {
     const botDot  = sd.bot_active  ? '<span class="status-dot-active">●</span>' : '<span class="status-dot-paused">●</span>';
@@ -4480,7 +4591,53 @@ function renderSettings() {
     </div>
   </div>`;
 
+  html += '<div style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:16px;margin-top:12px">';
+  html += '<div style="font-size:14px;font-weight:700;margin-bottom:14px">🔔 Notification Preferences</div>';
+  var notifPrefs = [
+    ['notif_target_hit',      '🎯 Target/stop hit alerts',       true],
+    ['notif_target_approach', '⚡ Near-target warnings (5%)',    true],
+    ['notif_watchlist_move',  '🚀 Watchlist price moves (3%+)',  true],
+    ['notif_weekly_recap',    '📊 Weekly performance recap',     true],
+    ['notif_morning_picks',   '🌅 Morning picks briefing',       true],
+  ];
+  notifPrefs.forEach(function(item) {
+    var key = item[0]; var label = item[1]; var def = item[2];
+    var val = _settCfg[key] !== undefined ? _settCfg[key] : def;
+    var trackBg  = val ? 'var(--accent)' : 'var(--border)';
+    var thumbLeft = val ? '23px' : '3px';
+    var checked  = val ? 'checked' : '';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">';
+    html += '<div style="font-size:13px">' + label + '</div>';
+    html += '<label style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer">';
+    html += '<input type="checkbox" id="notif-' + key + '" ' + checked + ' onchange="saveNotifPref(\'' + key + '\', this.checked)" style="opacity:0;width:0;height:0;position:absolute">';
+    html += '<span style="position:absolute;top:0;left:0;right:0;bottom:0;background:' + trackBg + ';border-radius:12px;transition:.3s" id="notif-track-' + key + '"></span>';
+    html += '<span style="position:absolute;top:3px;left:' + thumbLeft + ';width:18px;height:18px;background:#fff;border-radius:50%;transition:.3s" id="notif-thumb-' + key + '"></span>';
+    html += '</label>';
+    html += '</div>';
+  });
+  html += '</div>';
+
   body.innerHTML = html;
+  const _isLight = document.documentElement.classList.contains('light-theme');
+  const _themeBtn = document.getElementById('theme-toggle-btn');
+  const _themeLabel = document.getElementById('theme-label');
+  if (_themeBtn) _themeBtn.textContent = _isLight ? '☀️ Light' : '🌙 Dark';
+  if (_themeLabel) _themeLabel.textContent = _isLight ? 'Light' : 'Dark';
+}
+
+async function saveNotifPref(key, value) {
+  tg.HapticFeedback?.selectionChanged();
+  // Update toggle visual immediately
+  const track = document.getElementById('notif-track-' + key);
+  const thumb = document.getElementById('notif-thumb-' + key);
+  if (track) track.style.background = value ? 'var(--accent)' : 'var(--border)';
+  if (thumb) thumb.style.left = value ? '23px' : '3px';
+  try {
+    await api('/api/miniapp/settings/update', 'POST', { key, value });
+    _settCfg[key] = value;
+  } catch(e) {
+    showToast('⚠️ Could not save preference');
+  }
 }
 
 async function runDefine() {
@@ -4497,6 +4654,16 @@ async function runDefine() {
   } catch (e) {
     result.innerHTML = '<span style="color:var(--red)">Couldn\'t fetch explanation — try again.</span>';
   }
+}
+
+function toggleTheme() {
+  const isLight = document.documentElement.classList.toggle('light-theme');
+  try { localStorage.setItem('sp_theme', isLight ? 'light' : 'dark'); } catch(_) {}
+  const btn = document.getElementById('theme-toggle-btn');
+  const label = document.getElementById('theme-label');
+  if (btn)   btn.textContent   = isLight ? '☀️ Light' : '🌙 Dark';
+  if (label) label.textContent = isLight ? 'Light'    : 'Dark';
+  tg.HapticFeedback?.selectionChanged();
 }
 
 function setDefine(term) {

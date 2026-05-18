@@ -1444,6 +1444,55 @@ def run_price_alerts():
         except Exception as exc:
             print(f"[agent] Intraday trade check failed for {uid} (non-critical): {exc}")
 
+    # ── Watchlist big-move alerts (>3% intraday) ─────────────────────────────
+    try:
+        from cache_layer import get_cache, set_cache
+        from datetime import date as _date
+        for uid in _all_recipients():
+            try:
+                log = load_user_trade_log(uid)
+                watch_tickers = log.get("watchlist", [])
+                if not watch_tickers:
+                    continue
+                raw_w = yf.download(
+                    " ".join(watch_tickers), period="2d", interval="1d",
+                    progress=False, auto_adjust=True
+                )
+                if raw_w.empty:
+                    continue
+                close = raw_w["Close"]
+                for t in watch_tickers:
+                    try:
+                        col = close[t] if t in close.columns else close
+                        vals = col.dropna()
+                        if len(vals) < 2:
+                            continue
+                        prev, curr = float(vals.iloc[-2]), float(vals.iloc[-1])
+                        pct_chg = (curr - prev) / prev * 100
+                        if abs(pct_chg) < 3:
+                            continue
+                        key = f"watch_move_{uid}_{t}_{_date.today().isoformat()}"
+                        if get_cache(key):
+                            continue
+                        set_cache(key, "1", ttl=86400)
+                        emoji = "🚀" if pct_chg > 0 else "🔻"
+                        sign  = "+" if pct_chg > 0 else ""
+                        send_inline_keyboard(
+                            f"{emoji} <b>{t}</b> is moving <b>{sign}{pct_chg:.1f}%</b> today\n"
+                            f"Price: <code>${curr:.2f}</code>  (was <code>${prev:.2f}</code>)",
+                            [[
+                                {"text": f"📊 View {t} Chart",  "callback_data": f"cmd|CHART {t}"},
+                                {"text": "🔔 Set Alert",         "callback_data": f"alert|{t}"},
+                            ]],
+                            chat_id=uid,
+                        )
+                    except Exception:
+                        pass
+            except Exception as exc:
+                print(f"[agent] Watchlist move check failed for {uid}: {exc}")
+    except Exception as exc:
+        print(f"[agent] Watchlist move alerts failed (non-critical): {exc}")
+
     # ── Auto-stop alerts for today's AI picks ────────────────────────────────
     picks = load_picks()
     if picks:
