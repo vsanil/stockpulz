@@ -1056,6 +1056,10 @@ def run_screener(
         if days_to_cover    is not None: entry["days_to_cover"]      = days_to_cover
         if inst_own_pct     is not None: entry["inst_own_pct"]       = inst_own_pct
         if days_to_earnings is not None: entry["days_to_earnings"]   = days_to_earnings
+        # rs_vs_spy lives in st_metrics_extra — hoist to top level so _opt_extra
+        # can include it in LT candidate data (it's a valid LT signal: rs > 0% = holding up vs market)
+        rs = st_metrics_extra.get("rs_vs_spy")
+        if rs is not None: entry["rs_vs_spy"] = rs
 
         return ticker, entry
 
@@ -1135,6 +1139,7 @@ def run_screener(
             "week52_high", "week52_low", "pct_below_52w_high",
             "short_float_pct", "days_to_cover",
             "inst_own_pct", "days_to_earnings",
+            "rs_vs_spy",   # relative strength vs SPY (20d) — LT signal too
         ):
             if e.get(field) is not None:
                 out[field] = e[field]

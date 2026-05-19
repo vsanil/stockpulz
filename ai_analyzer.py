@@ -370,34 +370,50 @@ _COMMODITY_TICKERS = [
 
 def _build_commodity_candidates() -> list[dict]:
     """
-    Fetch current price + 14-day RSI for each commodity ETF via yfinance.
-    Returns lightweight candidate dicts — Claude picks 0-2 based on market context.
+    Fetch price, 1-month return, 14-day RSI, and volume ratio for each
+    commodity ETF via yfinance.  These three signals are what the
+    COMMODITY CONVICTION RUBRIC scores — without them the AI can't
+    rate anything above ★★ and correctly returns [].
     Called once per morning run; no screener required.
     """
     candidates = []
     for ticker, name, commodity in _COMMODITY_TICKERS:
         try:
-            fi    = yf.Ticker(ticker).fast_info
-            price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
-            if not price:
+            hist = yf.Ticker(ticker).history(period="3mo", interval="1d")
+            if len(hist) < 22:          # need at least ~1 month of data
                 continue
+
+            close      = hist["Close"]
+            volume     = hist["Volume"]
+            price      = round(float(close.iloc[-1]), 2)
+
+            # 1-month return (approx 21 trading days)
+            ret_1m = None
+            if len(close) >= 22:
+                ret_1m = round((float(close.iloc[-1]) / float(close.iloc[-22]) - 1) * 100, 2)
+
+            # 14-day RSI
             rsi = None
-            try:
-                hist = yf.Ticker(ticker).history(period="3mo", interval="1d")
-                if len(hist) >= 15:
-                    delta = hist["Close"].diff()
-                    gain  = delta.clip(lower=0).rolling(14).mean()
-                    loss  = (-delta.clip(upper=0)).rolling(14).mean()
-                    rs    = gain / loss
-                    rsi   = round(float((100 - 100 / (1 + rs)).iloc[-1]), 1)
-            except Exception:
-                pass
+            if len(close) >= 15:
+                delta = close.diff()
+                gain  = delta.clip(lower=0).rolling(14).mean()
+                loss  = (-delta.clip(upper=0)).rolling(14).mean()
+                rs    = gain / loss
+                rsi   = round(float((100 - 100 / (1 + rs)).iloc[-1]), 1)
+
+            # Volume ratio: today's volume vs 20-day average
+            vol_ratio = None
+            if len(volume) >= 21 and float(volume.iloc[-21:-1].mean()) > 0:
+                vol_ratio = round(float(volume.iloc[-1]) / float(volume.iloc[-21:-1].mean()), 2)
+
             candidates.append({
                 "ticker":        ticker,
                 "name":          name,
                 "commodity":     commodity,
-                "current_price": round(float(price), 2),
+                "current_price": price,
+                "ret_1m":        ret_1m,
                 "rsi":           rsi,
+                "vol_ratio":     vol_ratio,
             })
         except Exception as exc:
             print(f"[ai_analyzer] Commodity candidate error for {ticker}: {exc}")
@@ -506,29 +522,41 @@ def _build_user_prompt(
         regime_name = r['regime'].lower()
         if regime_name == 'bull':
             signal_priority = (
-                "  SIGNAL PRIORITY (bull regime): Weight MOST → rs_vs_spy > +5%, breakout_today, "
+                "  ST SIGNAL PRIORITY (bull regime — applies to short_term picks only): "
+                "Weight MOST → rs_vs_spy > +5%, breakout_today, "
                 "bullish patterns, options bullish_flow/sweep. Weight LESS → defensive fundamentals alone. "
-                "Momentum backed by volume is your best friend here."
+                "Momentum backed by volume is your best friend here.\n"
+                "  LT SIGNAL PRIORITY: Regime does NOT change LT evaluation — always use the "
+                "LT STOCK CONVICTION RUBRIC (fundamental signals only). Ignore technical signals for LT."
             )
         elif regime_name == 'elevated':
             signal_priority = (
-                "  SIGNAL PRIORITY (elevated regime): Weight MOST → analyst_consensus buy + eps_beats "
+                "  ST SIGNAL PRIORITY (elevated regime — applies to short_term picks only): "
+                "Weight MOST → analyst_consensus buy + eps_beats "
                 "combination, insider_activity cluster, low debt_to_equity, high inst_own_pct. "
                 "Weight LESS → pure price momentum without fundamental backing. "
-                "Require at least 1 fundamental signal alongside any technical signal."
+                "Require at least 1 fundamental signal alongside any technical signal.\n"
+                "  LT SIGNAL PRIORITY: Regime does NOT change LT evaluation — always use the "
+                "LT STOCK CONVICTION RUBRIC (fundamental signals only). Ignore technical signals for LT."
             )
         elif regime_name in ('volatile', 'bear'):
             signal_priority = (
-                f"  SIGNAL PRIORITY ({regime_name} regime): Weight MOST → insider_activity (especially cluster), "
+                f"  ST SIGNAL PRIORITY ({regime_name} regime — applies to short_term picks only): "
+                "Weight MOST → insider_activity (especially cluster), "
                 "analyst_consensus buy with high buy count, defensive sector membership, low atr_pct, "
                 "high inst_own_pct. Weight LEAST → social_sentiment, short_float squeeze thesis, "
-                "pure momentum. Reject any pick whose primary thesis is price momentum alone."
+                "pure momentum. Reject any pick whose primary thesis is price momentum alone.\n"
+                "  LT SIGNAL PRIORITY: Regime does NOT change LT evaluation — always use the "
+                "LT STOCK CONVICTION RUBRIC (fundamental signals only). Ignore technical signals for LT."
             )
         else:  # neutral
             signal_priority = (
-                "  SIGNAL PRIORITY (neutral regime): Balanced weighting across all signals. "
+                "  ST SIGNAL PRIORITY (neutral regime — applies to short_term picks only): "
+                "Balanced weighting across all signals. "
                 "Prefer picks with 2+ signal types confirming (e.g. technical + fundamental, "
-                "or technical + insider). Single-signal picks require conviction ★★★★ minimum."
+                "or technical + insider). Single-signal picks require conviction ★★★★ minimum.\n"
+                "  LT SIGNAL PRIORITY: Regime does NOT change LT evaluation — always use the "
+                "LT STOCK CONVICTION RUBRIC (fundamental signals only). Ignore technical signals for LT."
             )
 
         regime_block = (
@@ -612,7 +640,7 @@ LT STOCK CONVICTION RUBRIC — applies to long_term stock picks only (DO NOT use
     • analyst_consensus = "buy" AND analyst_upside_pct > 10% (Wall Street sees meaningful upside)
     • eps_beats >= 3 out of last 4 quarters (consistent earnings execution)
     • PE below sector median (trading at discount to peers — value opportunity)
-    • inst_own_pct > 55% (institutional conviction — smart money already in)
+    • inst_own_pct > 50% (institutional conviction — smart money already in)
     • rs_vs_spy > 0% over 20 days (holding up or outperforming the market)
     • congress_score >= 6 (cluster buy — 2+ members disclosed purchases)
     • insider_activity present AND is_cluster = True (insider cluster buy)
