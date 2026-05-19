@@ -420,6 +420,13 @@ def format_daily_message(picks: dict, config: dict,
             tickers_str = ", ".join(wl_evaluated[:5])
             lines += ["", f"👁 <i>Your watchlist ({tickers_str}) was screened — none qualified today.</i>"]
 
+    # ── One-time sector filter discovery tip ──────────────────────────────────
+    # Show only when: user has no excluded sectors AND has received 3+ alerts
+    excluded_sectors = config.get("excluded_sectors") or []
+    alerts_sent      = config.get("alerts_sent_count", 0)
+    if not excluded_sectors and alerts_sent == 3:
+        lines += ["", "💡 <i>Don't want picks from certain sectors? Tap ⚙️ Settings → Preferences → Excluded Sectors in the dashboard to filter them out.</i>"]
+
     # ── Footer ────────────────────────────────────────────────────────────────
     lines += [
         "",
