@@ -579,14 +579,14 @@ def _build_user_prompt(
 
     return f"""Analyze these stock AND crypto candidates for a personal investor.
 {f"{mode_note}" + chr(10) if mode_note else ""}{(perf_context + chr(10) + chr(10)) if perf_context else ""}
-CONVICTION RUBRIC — ASSIGN 1-5 STARS USING THESE CRITERIA:
+ST STOCK CONVICTION RUBRIC — applies to short_term stock picks only:
   ★★★★★ (5) — EXCEPTIONAL: 4+ confirming signals below. Reserved for rare high-conviction setups.
   ★★★★  (4) — STRONG: 3 confirming signals. Clear setup with multi-factor confirmation.
   ★★★   (3) — MODERATE: 2 confirming signals. Acceptable for aggressive risk profiles only.
-  ★★    (2) — WEAK: 1 confirming signal or conflicting signals. Watchlist items only; cap near earnings.
+  ★★    (2) — WEAK: 1 confirming signal or conflicting signals. Do not include.
   ★     (1) — DO NOT INCLUDE. Return [] instead.
 
-  WHAT COUNTS AS ONE "CONFIRMING SIGNAL":
+  WHAT COUNTS AS ONE ST "CONFIRMING SIGNAL":
     • RSI 35-55 AND MACD crossover present (both together = 1 signal)
     • volume_ratio > 1.5 AND obv_positive = True (together = 1 signal)
     • breakout_today = True OR patterns include "bull_flag" or "bullish_engulfing"
@@ -598,7 +598,31 @@ CONVICTION RUBRIC — ASSIGN 1-5 STARS USING THESE CRITERIA:
     • congress_score >= 6 (cluster buy by multiple members)
   Do NOT count the same data point twice under different signal names.
 
-CONVICTION GATE (ABSOLUTE RULE — READ BEFORE ANYTHING ELSE):
+LT STOCK CONVICTION RUBRIC — applies to long_term stock picks only (DO NOT use ST rubric for LT):
+  LT picks are quality buy-and-hold candidates. Technical signals (RSI, breakout, volume) are
+  IRRELEVANT for LT selection — use only fundamental and institutional signals below.
+
+  ★★★★★ (5) — EXCEPTIONAL: 4+ LT signals. Rare — a quality compounder at a good price with institutional backing.
+  ★★★★  (4) — STRONG: 3 LT signals. Clear fundamental thesis with multiple quality markers.
+  ★★★   (3) — MODERATE: 2 LT signals. Solid candidate worth buying over time.
+  ★★    (2) — WEAK: 1 signal only. Skip.
+  ★     (1) — DO NOT INCLUDE.
+
+  WHAT COUNTS AS ONE LT "CONFIRMING SIGNAL":
+    • analyst_consensus = "buy" AND analyst_upside_pct > 10% (Wall Street sees meaningful upside)
+    • eps_beats >= 3 out of last 4 quarters (consistent earnings execution)
+    • PE below sector median (trading at discount to peers — value opportunity)
+    • inst_own_pct > 55% (institutional conviction — smart money already in)
+    • rs_vs_spy > 0% over 20 days (holding up or outperforming the market)
+    • congress_score >= 6 (cluster buy — 2+ members disclosed purchases)
+    • insider_activity present AND is_cluster = True (insider cluster buy)
+    • last_eps_surprise_pct > 5% (strong recent beat — business momentum)
+  Do NOT use RSI, MACD, volume_ratio, breakout, or options flow as LT signals — these are irrelevant.
+
+  LT CONVICTION GATE: Minimum ★★★ (2 LT signals) for ALL risk profiles.
+  LT picks are long-horizon — the bar is quality, not momentum. Return [] only if nothing reaches 2 signals.
+
+ST STOCK CONVICTION GATE (ABSOLUTE RULE):
   - Minimum conviction is set by the risk profile (conservative ★★★★+, moderate ★★★★+, aggressive ★★★+).
   - Do NOT pad to hit pick count targets. Fewer genuine picks beats more filler picks EVERY time.
   - A pick that barely squeaks past the threshold should be DROPPED, not included.
@@ -611,10 +635,15 @@ ANALYSIS FRAMEWORK — WORK THROUGH THESE STEPS MENTALLY BEFORE SELECTING ANY PI
     elevated → tighten standards; require quality signals alongside technicals; mention risk in every thesis
     volatile → technicals alone are insufficient; require fundamental or insider backing too
     bear     → defensive sectors only; reject all momentum/breakout plays regardless of score
-  Step 2 — SIGNAL COUNT: For each candidate, count confirming signals strictly using the rubric above.
+  Step 2 — SIGNAL COUNT: Use the CORRECT rubric for the pick type:
+    ST stocks → use ST STOCK CONVICTION RUBRIC (technical signals)
+    LT stocks → use LT STOCK CONVICTION RUBRIC (fundamental signals ONLY — no technicals)
+    ETFs      → use ETF CONVICTION RUBRIC
+    Commodities → use COMMODITY CONVICTION RUBRIC
     If you are uncertain whether a signal qualifies, it does NOT qualify. Marginal = fail.
   Step 3 — STRESS TEST (devil's advocate): For each candidate that passes Step 2, ask:
-    "What are the 2 most likely reasons this pick fails in the next 2–4 weeks?"
+    "What are the 2 most likely reasons this pick fails?"
+    ST: within 2–4 weeks. LT: within 6–12 months.
     If those reasons outweigh the thesis → DROP the pick.
     If they are meaningful but manageable → lower conviction by 1 star and note the risk.
   Step 4 — NEWS CATALYST QUALITY: For each pick, assess the catalyst honestly:
@@ -724,10 +753,19 @@ ETF Candidates:
 Commodity Candidates:
 {json.dumps(commodity_candidates or [], indent=2)}
 
+COMMODITY CONVICTION RUBRIC (applies to commodity picks only — use instead of ST stock rubric):
+  Commodity signals available: ret_1m (1-month momentum %), rsi (14-day), vol_ratio, macro context.
+  ★★★★★ (5) — ALL THREE: ret_1m > +5%, RSI 40-65, vol_ratio > 1.1 AND clear macro catalyst
+  ★★★★  (4) — TWO of: ret_1m > +3%, RSI recovering or healthy, vol_ratio > 1.05, macro catalyst present
+  ★★★   (3) — ONE strong signal: either ret_1m > +5% alone, or clear macro catalyst (rate cut bets, supply shock, inflation hedge)
+  ★★    (2) — Marginal or macro noise only. Skip.
+  ★     (1) — DO NOT INCLUDE. Return [] instead.
+  Minimum conviction for commodities: ★★★. Return [] when nothing clears this bar.
+
 COMMODITIES (OPTIONAL — 0–2 picks):
-  Use only tickers from the commodity candidates above. Include a pick ONLY if there is a
-  clear macro or technical setup (e.g. gold breaking out on rate cut bets, oil supply shock,
-  silver momentum surge). Return [] for both short_term and long_term when no strong thesis exists.
+  Use only tickers from the commodity candidates above. Apply the COMMODITY CONVICTION RUBRIC above.
+  Good examples: gold breaking out on rate cut bets, oil supply shock, silver momentum surge.
+  Return [] for both short_term and long_term when nothing reaches ★★★.
   Short-term: entry/target/stop, 2-4 week horizon.
   Long-term: entry/target only, 3-12 month horizon.
 
