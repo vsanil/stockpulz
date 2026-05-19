@@ -1648,9 +1648,13 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
     <div class="live-dot"></div>
   </div>
   <div class="header-date" id="hdr-date"></div>
-  <div style="position:relative;cursor:pointer" onclick="openAlertsSheet()">
-    <span style="font-size:22px;line-height:1" id="bell-icon">🔔</span>
-    <span id="bell-badge" style="display:none;position:absolute;top:-2px;right:-2px;width:8px;height:8px;background:var(--red);border-radius:50%"></span>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div style="position:relative;cursor:pointer" onclick="openAlertsSheet()">
+      <span style="font-size:22px;line-height:1" id="bell-icon">🔔</span>
+      <span id="bell-badge" style="display:none;position:absolute;top:-2px;right:-2px;width:8px;height:8px;background:var(--red);border-radius:50%"></span>
+    </div>
+    <!-- User avatar — populated by JS from tg.initDataUnsafe.user -->
+    <div id="hdr-avatar" style="display:none;width:32px;height:32px;border-radius:50%;background:var(--avatar-bg);border:1.5px solid var(--border);overflow:hidden;cursor:pointer;flex-shrink:0;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--text)" onclick="gotoTab('settings')"></div>
   </div>
 </div>
 
@@ -1680,6 +1684,14 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
       </div>
       <div id="ticker-search-result" style="display:none;margin-top:8px;padding:12px 14px;
            background:var(--card);border-radius:12px;border:1px solid var(--border)"></div>
+    </div>
+
+    <!-- Profile badge — populated after settings load -->
+    <div id="picks-profile-badge" style="display:none;margin-bottom:10px;padding:9px 14px;
+         background:var(--card);border-radius:12px;border:1px solid var(--border);
+         display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div id="ppb-greeting" style="flex:1;min-width:0;font-size:13px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      <div id="ppb-risk" style="font-size:11px;padding:3px 10px;border-radius:20px;background:rgba(79,142,247,0.12);color:var(--accent);font-weight:600;white-space:nowrap"></div>
     </div>
 
     <div id="picks-spinner">
@@ -2042,6 +2054,32 @@ tg.onEvent('themeChanged', _applyTheme);
 
 document.getElementById('hdr-date').textContent =
   new Date().toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+
+// ── User identity from Telegram ───────────────────────────────────────────────
+(function _initUserIdentity() {
+  const u = tgUser;
+  if (!u || !u.id) return;
+
+  const displayName = u.first_name || u.username || '';
+  const initials    = (u.first_name ? u.first_name[0] : (u.username ? u.username[0] : '?')).toUpperCase();
+  const avatarEl    = document.getElementById('hdr-avatar');
+  if (!avatarEl) return;
+
+  if (u.photo_url) {
+    // Show actual Telegram profile photo
+    avatarEl.innerHTML = `<img src="${u.photo_url}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.textContent='${initials}'" />`;
+  } else {
+    // Fallback: colorful initials circle
+    const colors = ['#4f8ef7','#00d4aa','#a78bfa','#ffb800','#ff5a5a'];
+    const color  = colors[(u.id || 0) % colors.length];
+    avatarEl.style.background = color + '22';
+    avatarEl.style.borderColor = color + '55';
+    avatarEl.style.color = color;
+    avatarEl.textContent = initials;
+  }
+  avatarEl.style.display = 'flex';
+  avatarEl.title = displayName ? `Signed in as ${displayName}` : '';
+})();
 
 // ── App state ─────────────────────────────────────────────────────────────────
 let curTab        = 'picks';
@@ -3978,6 +4016,24 @@ async function loadStats_REMOVED() {
 
 let _settCfg = {};
 
+// ── Profile badge on Picks tab ────────────────────────────────────────────────
+function _updateProfileBadge() {
+  const badge = document.getElementById('picks-profile-badge');
+  const greetEl = document.getElementById('ppb-greeting');
+  const riskEl  = document.getElementById('ppb-risk');
+  if (!badge || !greetEl || !riskEl) return;
+
+  const u    = tgUser || {};
+  const name = u.first_name || u.username || '';
+  const profile = (_settCfg && _settCfg.risk_profile) || 'moderate';
+  const riskMap = { conservative: '🛡 Conservative', moderate: '⚖️ Moderate', aggressive: '🔥 Aggressive', degen: '🎰 Degen' };
+  const riskTxt = riskMap[profile] || '⚖️ Moderate';
+
+  greetEl.textContent = name ? `Hi, ${name}!` : 'Your picks';
+  riskEl.textContent  = riskTxt;
+  badge.style.display = 'flex';
+}
+
 const RISK_CYCLE   = ['conservative', 'moderate', 'aggressive', 'degen'];
 const ASSETS_CYCLE = ['stocks', 'crypto', 'both'];
 const riskLabels   = { conservative: '🛡 Conservative', moderate: '⚖️ Moderate', aggressive: '🔥 Aggressive', degen: '🎰 Degen' };
@@ -4489,6 +4545,7 @@ async function loadSettings() {
     body.style.display = 'block';
 
     renderSettings();
+    _updateProfileBadge();
   } catch (e) {
     document.getElementById('sett-spinner').innerHTML =
       '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load settings</div></div>';
@@ -4822,12 +4879,14 @@ async function cycleRisk() {
   tg.HapticFeedback?.selectionChanged();
   renderPrefsSheet();
   renderSettings();
+  _updateProfileBadge();
   try {
     await api('/api/miniapp/update_settings', 'POST', { risk_profile: next });
   } catch (e) {
     _settCfg.risk_profile = cur;  // revert on failure
     renderPrefsSheet();
     renderSettings();
+    _updateProfileBadge();
     showToast('Could not save — try again');
   }
 }

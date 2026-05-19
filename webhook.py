@@ -77,13 +77,33 @@ def webhook():
     if not message:
         return jsonify({"status": "ignored", "reason": "no message"}), 200
 
-    text    = message.get("text", "").strip()
-    chat_id = str(message.get("chat", {}).get("id", ""))
+    text       = message.get("text", "").strip()
+    chat_id    = str(message.get("chat", {}).get("id", ""))
+    _from      = message.get("from", {})
+    first_name = _from.get("first_name", "")
+    username   = _from.get("username", "")
 
     if not text or not chat_id:
         return jsonify({"status": "ignored", "reason": "empty text or chat_id"}), 200
 
     print(f"[webhook] Received from {chat_id}: {text!r}")
+
+    # Persist display name so morning picks can greet the user by name
+    if first_name or username:
+        def _persist_name():
+            try:
+                from config_manager import update_user_config_multi, get_user_config
+                cur = get_user_config(chat_id)
+                updates = {}
+                if first_name and cur.get("first_name") != first_name:
+                    updates["first_name"] = first_name
+                if username and cur.get("username") != username:
+                    updates["username"] = username
+                if updates:
+                    update_user_config_multi(chat_id, updates)
+            except Exception:
+                pass
+        threading.Thread(target=_persist_name, daemon=True).start()
 
     # ── Access control ────────────────────────────────────────────────────────
     owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
