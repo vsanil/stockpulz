@@ -164,6 +164,7 @@ def handle_callback_query(callback_query: dict) -> None:
         "buy_pick":           "🛒 Loading pick details…",
         "confirm_buy":        "⏳ Logging position…",
         "skip_buy":           "👍 Skipped.",
+        "change_buy_amount":  "✏️ Enter your amount…",
         "updatelevel_pick":   "⏳ Loading…",
         "unalert_confirm":    "⏳ Removing alert…",
         "paper_reset_confirm":"⏳ Resetting…",
@@ -235,16 +236,10 @@ def handle_callback_query(callback_query: dict) -> None:
         asset_type = parts[2] if len(parts) > 2 else "stock"
         if not ticker:
             return
-        render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
-        if render_url:
-            mini_url = f"{render_url}/miniapp?chart={ticker}&asset_type={asset_type}"
-            send_inline_keyboard(
-                f"📊 <b>{ticker}</b> chart — tap to open in the dashboard:",
-                [[{"text": f"📊 View {ticker} Chart  ↗", "web_app": {"url": mini_url}}]],
-                chat_id=chat_id,
-            )
-        else:
-            send_message(f"📊 Open the dashboard to view the {ticker} chart.", chat_id=chat_id)
+        send_typing_action(chat_id)
+        threading.Thread(
+            target=_send_chart, args=(ticker, asset_type, chat_id), daemon=True
+        ).start()
         return
 
     if action == "noop":
@@ -759,19 +754,56 @@ def handle_callback_query(callback_query: dict) -> None:
                 + f"🎯 Target: <code>${_p(target_price)}</code> ({tp}% above entry)\n\n"
                 + "Tap Confirm to log this position."
             )
-            confirm_cb = f"confirm_buy|{ticker}|{entry_raw}|{shares}|{asset_type}|{stop_price}|{target_price}"
-            skip_cb    = f"skip_buy|{ticker}"
+            confirm_cb     = f"confirm_buy|{ticker}|{entry_raw}|{shares}|{asset_type}|{stop_price}|{target_price}"
+            skip_cb        = f"skip_buy|{ticker}"
+            change_amt_cb  = f"change_buy_amount|{ticker}|{entry_raw}|{asset_type}|{stop_pct}|{target_pct}"
             send_inline_keyboard(
                 confirm_msg,
-                [[
-                    {"text": "✅ Confirm Buy", "callback_data": confirm_cb},
-                    {"text": "❌ Skip",        "callback_data": skip_cb},
-                ]],
+                [
+                    [
+                        {"text": "✅ Confirm Buy", "callback_data": confirm_cb},
+                        {"text": "❌ Skip",        "callback_data": skip_cb},
+                    ],
+                    [
+                        {"text": f"✏️ Bought at ${_p(entry)}/share", "callback_data": change_amt_cb},
+                    ],
+                ],
                 chat_id=chat_id,
             )
         except Exception as exc:
             print(f"[bot] buy_pick failed for {ticker}: {exc}")
             send_message(f"⚠️ Something went wrong — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
+        return
+
+    elif action == "change_buy_amount":
+        # User tapped [✏️ Change Amount] — ask for a dollar amount then re-show confirmation.
+        # callback_data: change_buy_amount|TICKER|ENTRY|ASSET_TYPE|STOP_PCT|TARGET_PCT
+        ticker     = parts[1].upper() if len(parts) > 1 else ""
+        entry_raw  = parts[2]         if len(parts) > 2 else ""
+        asset_type = parts[3]         if len(parts) > 3 else "stock"
+        stop_pct   = parts[4]         if len(parts) > 4 else "7"
+        target_pct = parts[5]         if len(parts) > 5 else "15"
+        if not ticker or not entry_raw:
+            send_message("⚠️ Couldn't load pick details. Try <code>/bought {}</code> instead.".format(ticker), chat_id=chat_id)
+            return
+        try:
+            entry = float(entry_raw)
+        except ValueError:
+            send_message("⚠️ Invalid entry price.", chat_id=chat_id)
+            return
+        save_pending_state(chat_id, "change_buy_amount", step=1, data={
+            "ticker":     ticker,
+            "entry":      entry_raw,
+            "asset_type": asset_type,
+            "stop_pct":   stop_pct,
+            "target_pct": target_pct,
+        })
+        send_inline_keyboard(
+            f"✏️ <b>What price did you pay per share of {ticker}?</b>\n"
+            f"<i>Suggested entry: <code>${_p(entry)}</code> — type your actual fill price</i>",
+            [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
         return
 
     elif action == "confirm_buy":
@@ -1402,6 +1434,67 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return ""
 
     # ── Single-step param commands ────────────────────────────────────────────
+    if command == "change_buy_amount":
+        # User typed their actual fill price per share — recalculate and re-show confirmation.
+        raw_price  = text.strip().replace(",", "").replace("$", "")
+        if not _is_number(raw_price):
+            return "⚠️ Please send just the price per share, e.g. <code>61.50</code>"
+        new_entry  = float(raw_price)
+        ticker     = data.get("ticker", "")
+        entry_raw  = data.get("entry", "")
+        asset_type = data.get("asset_type", "stock")
+        stop_pct   = data.get("stop_pct", "7")
+        target_pct = data.get("target_pct", "15")
+        try:
+            orig_entry   = float(entry_raw)
+            sp           = float(stop_pct)
+            tp           = float(target_pct)
+            stop_price   = round(new_entry * (1 - sp / 100), 2)
+            target_price = round(new_entry * (1 + tp / 100), 2)
+        except (ValueError, ZeroDivisionError):
+            return "⚠️ Couldn't calculate levels. Try <code>/bought {}</code> instead.".format(ticker)
+        # ── Sanity check: flag if price looks like a typo ─────────────────────
+        warning_line = ""
+        if orig_entry > 0:
+            ratio = new_entry / orig_entry
+            if ratio >= 10:
+                warning_line = (
+                    f"\n⚠️ <b>Heads up:</b> <code>${_p(new_entry)}</code> is "
+                    f"{ratio:.0f}× the suggested price of <code>${_p(orig_entry)}</code> — typo?"
+                )
+            elif ratio <= 0.1:
+                warning_line = (
+                    f"\n⚠️ <b>Heads up:</b> <code>${_p(new_entry)}</code> is far below "
+                    f"the suggested <code>${_p(orig_entry)}</code> — typo?"
+                )
+        new_entry_raw = str(new_entry)
+        confirm_msg = (
+            "🛒 <b>Ready to log your buy?</b>\n"
+            + f"📌 <b>{ticker}</b>\n"
+            + f"💰 Entry: <code>${_p(new_entry)}</code>\n"
+            + f"🛡 Stop-loss: <code>${_p(stop_price)}</code> ({sp}% below entry)\n"
+            + f"🎯 Target: <code>${_p(target_price)}</code> ({tp}% above entry)"
+            + warning_line + "\n\n"
+            + "Tap Confirm to log this position."
+        )
+        confirm_cb    = f"confirm_buy|{ticker}|{new_entry_raw}||{asset_type}|{stop_price}|{target_price}"
+        skip_cb       = f"skip_buy|{ticker}"
+        change_amt_cb = f"change_buy_amount|{ticker}|{new_entry_raw}|{asset_type}|{stop_pct}|{target_pct}"
+        send_inline_keyboard(
+            confirm_msg,
+            [
+                [
+                    {"text": "✅ Confirm Buy", "callback_data": confirm_cb},
+                    {"text": "❌ Skip",        "callback_data": skip_cb},
+                ],
+                [
+                    {"text": f"✏️ Bought at ${_p(new_entry)}/share", "callback_data": change_amt_cb},
+                ],
+            ],
+            chat_id=chat_id,
+        )
+        return ""
+
     if command == "explain":
         return _explain_pick(text)
 

@@ -338,36 +338,45 @@ def format_daily_message(picks: dict, config: dict,
     def _row_options(o):
         t, action = o.get("ticker",""), o.get("action","CALL").upper()
         icon = "📈" if action == "CALL" else "📉"
-        row = (f"{icon} <b>{_esc(t)}</b>  {_esc(action)}  "
-               f"strike <code>${_p(o.get('strike'))}</code>  "
-               f"exp <i>{_esc(o.get('expiry',''))}</i>")
+        row = f"{icon} <b>{_esc(t)}</b>  {_esc(action)}"
+        strike, expiry = o.get("strike"), o.get("expiry","")
+        if strike:
+            row += f"  strike <code>${_p(strike)}</code>"
+        if expiry:
+            row += f"  exp <i>{_esc(expiry)}</i>"
         if o.get("note"): row += f"\n  <i>{_esc(o['note'])}</i>"
         return row
 
-    # ── Sections ──────────────────────────────────────────────────────────────
+    # ── Sections — each pick is its own expandable blockquote ─────────────────
     if st_picks:
-        body = "\n\n".join(_row_st(s) for s in st_picks)
-        lines += ["", f"<blockquote expandable>📈 <b>STOCKS — SHORT TERM</b>\n\n{body}</blockquote>"]
+        lines += ["", "📈 <b>STOCKS — SHORT TERM</b>"]
+        for s in st_picks:
+            lines += [f"<blockquote expandable>{_row_st(s)}</blockquote>"]
 
     if lt_picks:
-        body = "\n\n".join(_row_lt(s) for s in lt_picks)
-        lines += ["", f"<blockquote expandable>🏦 <b>STOCKS — LONG TERM</b>\n\n{body}</blockquote>"]
+        lines += ["", "🏦 <b>STOCKS — LONG TERM</b>"]
+        for s in lt_picks:
+            lines += [f"<blockquote expandable>{_row_lt(s)}</blockquote>"]
 
     if cst_picks:
-        body = "\n\n".join(_row_crypto(c) for c in cst_picks)
-        lines += ["", f"<blockquote expandable>🪙 <b>CRYPTO</b>  <i>· high risk</i>\n\n{body}</blockquote>"]
+        lines += ["", "🪙 <b>CRYPTO</b>  <i>· high risk</i>"]
+        for c in cst_picks:
+            lines += [f"<blockquote expandable>{_row_crypto(c)}</blockquote>"]
 
     if etf_picks:
-        body = "\n\n".join(_row_etf(e) for e in etf_picks)
-        lines += ["", f"<blockquote expandable>📦 <b>ETFs</b>\n\n{body}</blockquote>"]
+        lines += ["", "📦 <b>ETFs</b>"]
+        for e in etf_picks:
+            lines += [f"<blockquote expandable>{_row_etf(e)}</blockquote>"]
 
     if comm_picks:
-        body = "\n\n".join(_row_commodity(c) for c in comm_picks)
-        lines += ["", f"<blockquote expandable>🛢 <b>COMMODITIES</b>\n\n{body}</blockquote>"]
+        lines += ["", "🛢 <b>COMMODITIES</b>"]
+        for c in comm_picks:
+            lines += [f"<blockquote expandable>{_row_commodity(c)}</blockquote>"]
 
     if options_plays:
-        body = "\n\n".join(_row_options(o) for o in options_plays)
-        lines += ["", f"<blockquote expandable>🎯 <b>OPTIONS</b>  <i>· illustrative only</i>\n\n{body}</blockquote>"]
+        lines += ["", "🎯 <b>OPTIONS</b>  <i>· illustrative only</i>"]
+        for o in options_plays:
+            lines += [f"<blockquote expandable>{_row_options(o)}</blockquote>"]
 
     # ── Footer ────────────────────────────────────────────────────────────────
     lines += [
