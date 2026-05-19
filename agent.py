@@ -2965,6 +2965,12 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             else:
                 kb = build_picks_keyboard(picks, user_cfg)
                 outbox.append({"chat_id": uid, "text": message, "keyboard": kb or None})
+                # Track how many alerts this user has received (for discovery tips)
+                try:
+                    update_user_config(uid, "alerts_sent_count",
+                                       user_cfg.get("alerts_sent_count", 0) + 1)
+                except Exception:
+                    pass
         except Exception as exc:
             print(f"[agent] WARNING: Could not prepare morning message for {uid}: {exc}")
 

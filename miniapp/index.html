@@ -2631,7 +2631,8 @@ async function loadPicks(isRetry = false) {
   } catch (e) {
     if (hadCache) return;         // already showing stale data — don't show error
     const is403    = e.status === 403 || (e.message && e.message.includes('403'));
-    const isWakeup = e.isTimeout || _coldStartOccurred; // check live value, not pre-fetch snapshot
+    // 503 = Render still waking up (quick response before 4s cold-start timer fires)
+    const isWakeup = e.isTimeout || _coldStartOccurred || e.status === 503;
     if (!is403 && !isRetry && isWakeup) {
       const spinner = document.getElementById('picks-spinner');
       if (spinner) {
@@ -2646,9 +2647,10 @@ async function loadPicks(isRetry = false) {
     }
     const icon  = is403 ? '🔒' : '😕';
     const title = is403 ? 'Not authorised' : 'Couldn\'t load picks';
+    const errCode = e.status ? ` (${e.status})` : '';
     const sub   = is403
       ? 'Open this app from your StockPulz bot chat.'
-      : 'Check your connection and try again.';
+      : `Check your connection and try again.${errCode}`;
     document.getElementById('picks-spinner').innerHTML =
       `<div class="empty"><div class="empty-icon">${icon}</div>` +
       `<div class="empty-title">${title}</div>` +
@@ -2930,10 +2932,17 @@ function renderPicks(filter) {
     }
   }
 
-  html += '<div class="filter-row">';
+  const excludedCount = (_settCfg && _settCfg.excluded_sectors) ? _settCfg.excluded_sectors.length : 0;
+  const sectorChipLbl = excludedCount > 0 ? `🚫 ${excludedCount} sector${excludedCount > 1 ? 's' : ''} hidden` : '🚫 Filter sectors';
+  const sectorChipStyle = excludedCount > 0
+    ? 'background:rgba(255,90,90,0.10);border-color:rgba(255,90,90,0.30);color:var(--red)'
+    : 'background:transparent;border-color:var(--border);color:var(--hint)';
+
+  html += '<div class="filter-row" style="align-items:center">';
   pillDefs.forEach(([f, lbl]) => {
     html += `<button class="pill${filter === f ? ' on' : ''}" onclick="renderPicks('${f}')">${lbl}</button>`;
   });
+  html += `<button onclick="openPrefsSheet()" style="margin-left:auto;flex-shrink:0;padding:6px 12px;border-radius:20px;border:1.5px solid;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;${sectorChipStyle}">${sectorChipLbl}</button>`;
   html += '</div>';
 
   // Define collapsible sections per filter
@@ -3732,7 +3741,7 @@ function onAlertTickerInput(val) {
   }, 350);
 }
 
-function openAddAlert() {
+function openAddAlert(prefillTicker = '') {
   const ti   = document.getElementById('alert-ticker-input');
   const pi   = document.getElementById('alert-price-input');
   const hint = document.getElementById('alert-price-hint');
@@ -3746,7 +3755,13 @@ function openAddAlert() {
   if (btn) { btn.disabled = false; btn.textContent = 'Set Alert'; }
   openOverlay('alert-overlay');
   tg.HapticFeedback?.impactOccurred('light');
-  setTimeout(() => { if (ti) ti.focus(); }, 250);
+  if (prefillTicker && ti) {
+    ti.value = prefillTicker.toUpperCase();
+    // Trigger quote lookup immediately (same as user typing the ticker)
+    setTimeout(() => onAlertTickerInput(ti.value), 100);
+  } else {
+    setTimeout(() => { if (ti) ti.focus(); }, 250);
+  }
 }
 
 async function submitAlert() {
@@ -4770,7 +4785,7 @@ async function searchTicker() {
       '</div>' +
       '<div style="margin-top:10px;display:flex;gap:8px">' +
         '<button onclick="openChart(\'' + sym + '\',\'' + assetType + '\')" style="flex:1;padding:9px 0;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer">📊 View Chart</button>' +
-        '<button onclick="document.getElementById(\'alert-ticker-input\').value=\'' + sym + '\';openOverlay(\'alert-overlay\')" style="flex:1;padding:9px 0;border-radius:10px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:600;cursor:pointer">🔔 Set Alert</button>' +
+        '<button onclick="openAddAlert(\'' + sym + '\')" style="flex:1;padding:9px 0;border-radius:10px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:13px;font-weight:600;cursor:pointer">🔔 Set Alert</button>' +
       '</div>';
   } catch(e) {
     result.innerHTML = '<span style="color:var(--red)">Ticker not found — try a different symbol.</span>';

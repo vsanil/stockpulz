@@ -624,8 +624,10 @@ def _miniapp_auth() -> str | None:
     """
     if request.method == "POST":
         body      = request.get_json(silent=True) or {}
-        chat_id   = str(body.get("chat_id", "")).strip()
-        init_data = body.get("init_data", "")
+        # JS api() helper always appends auth to the URL; body.get() is primary,
+        # request.args fallback handles bodyless POSTs (e.g. clear_alerts).
+        chat_id   = str(body.get("chat_id", "") or request.args.get("chat_id", "")).strip()
+        init_data = body.get("init_data", "") or request.args.get("init_data", "")
     else:
         chat_id   = str(request.args.get("chat_id", "")).strip()
         init_data = request.args.get("init_data", "")
@@ -719,8 +721,10 @@ def miniapp_picks():
         return jsonify(picks)
 
     except Exception as exc:
+        import traceback
         print(f"[miniapp_picks] ERROR: {exc}")
-        return jsonify({"error": "server_error", "_meta": {"weekend": False, "has_picks": False}}), 500
+        traceback.print_exc()
+        return jsonify({"error": "server_error", "detail": str(exc), "_meta": {"weekend": False, "has_picks": False}}), 500
 
 
 @app.route("/api/miniapp/positions")
