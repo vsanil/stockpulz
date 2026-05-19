@@ -195,11 +195,21 @@ def format_daily_message(picks: dict, config: dict,
     Concise daily Telegram message — scannable in under 10 seconds.
     Each pick is 2 lines: prices + thesis. Full detail lives in the mini app.
     """
-    today       = date.today().strftime("%a %b %d")
-    pick_mode   = config.get("pick_mode", "both")
-    show_st     = pick_mode in ("st", "both")
-    show_lt     = pick_mode in ("lt", "both")
-    show_crypto = config.get("show_crypto", True)
+    today        = date.today().strftime("%a %b %d")
+    pick_mode    = config.get("pick_mode", "both")
+    show_st      = pick_mode in ("st", "both")
+    show_lt      = pick_mode in ("lt", "both")
+    show_crypto  = config.get("show_crypto", True)
+    first_name   = config.get("first_name", "")
+    risk_profile = config.get("risk_profile", "moderate")
+    watchlist    = [t.upper() for t in (config.get("watchlist") or [])]
+
+    _RISK_LABEL = {
+        "conservative": "conservative",
+        "moderate":     "moderate",
+        "aggressive":   "aggressive",
+    }
+    risk_lbl = _RISK_LABEL.get(risk_profile, "moderate")
 
     stocks      = picks.get("stocks", picks)
     crypto      = picks.get("crypto", {})
@@ -227,7 +237,8 @@ def format_daily_message(picks: dict, config: dict,
         elif any(w in lo for w in ("cautious", "volatile", "uncertain", "fear", "risk-off", "elevated")):
             mood_emoji = "⚠️"
 
-    lines = [f"{mood_emoji} <b>{today}</b>"]
+    greeting = f"Good morning, {_esc(first_name)}! 👋\n" if first_name else ""
+    lines = [f"{greeting}{mood_emoji} <b>{today}</b>"]
     if mood:
         lines.append(f"<i>{mood}</i>")
 
@@ -352,31 +363,62 @@ def format_daily_message(picks: dict, config: dict,
         lines += ["", "📈 <b>STOCKS — SHORT TERM</b>"]
         for s in st_picks:
             lines += [f"<blockquote expandable>{_row_st(s)}</blockquote>"]
+    elif show_st:
+        lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· skipped — candidates didn't show enough confirming signals (RSI, volume, momentum) for a {risk_lbl} entry today</i>"]
 
     if lt_picks:
         lines += ["", "🏦 <b>STOCKS — LONG TERM</b>"]
         for s in lt_picks:
             lines += [f"<blockquote expandable>{_row_lt(s)}</blockquote>"]
+    elif show_lt:
+        lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· skipped — no stock cleared the fundamental quality bar your {risk_lbl} profile requires (2+ of: analyst buy, EPS beats, PE below median, high institutional ownership)</i>"]
 
     if cst_picks:
         lines += ["", "🪙 <b>CRYPTO</b>  <i>· high risk</i>"]
         for c in cst_picks:
             lines += [f"<blockquote expandable>{_row_crypto(c)}</blockquote>"]
+    elif show_crypto:
+        lines += ["", "🪙 <b>CRYPTO</b>  <i>· skipped — no coin showed strong 24h momentum with healthy RSI and volume confirmation</i>"]
 
     if etf_picks:
         lines += ["", "📦 <b>ETFs</b>"]
         for e in etf_picks:
             lines += [f"<blockquote expandable>{_row_etf(e)}</blockquote>"]
+    else:
+        lines += ["", "📦 <b>ETFs</b>  <i>· skipped — no sector ETF aligned with the current market regime and volume trend</i>"]
 
     if comm_picks:
         lines += ["", "🛢 <b>COMMODITIES</b>"]
         for c in comm_picks:
             lines += [f"<blockquote expandable>{_row_commodity(c)}</blockquote>"]
+    else:
+        lines += ["", "🛢 <b>COMMODITIES</b>  <i>· skipped — no commodity showed 1-month momentum + healthy RSI + macro catalyst together</i>"]
 
     if options_plays:
         lines += ["", "🎯 <b>OPTIONS</b>  <i>· illustrative only</i>"]
         for o in options_plays:
             lines += [f"<blockquote expandable>{_row_options(o)}</blockquote>"]
+    elif st_picks:
+        # Only show when ST stocks exist but none hit conviction 4+
+        lines += ["", "🎯 <b>OPTIONS</b>  <i>· skipped — options plays need a stock pick with conviction ★★★★+; today's picks didn't reach that bar</i>"]
+
+    # ── Watchlist callout ──────────────────────────────────────────────────────
+    if watchlist:
+        # Find which watchlist tickers appeared in any section today
+        all_tickers = (
+            [s.get("ticker","").upper() for s in st_picks + lt_picks] +
+            [c.get("symbol","").upper() for c in cst_picks] +
+            [e.get("ticker","").upper() for e in etf_picks] +
+            [c.get("ticker","").upper() for c in comm_picks]
+        )
+        wl_in_picks  = [t for t in watchlist if t in all_tickers]
+        wl_evaluated = [t for t in watchlist if t not in all_tickers]
+        if wl_in_picks:
+            tickers_str = ", ".join(f"<b>{t}</b>" for t in wl_in_picks)
+            lines += ["", f"👁 <i>Your watchlist: {tickers_str} made today's picks!</i>"]
+        elif wl_evaluated:
+            tickers_str = ", ".join(wl_evaluated[:5])
+            lines += ["", f"👁 <i>Your watchlist ({tickers_str}) was screened — none qualified today.</i>"]
 
     # ── Footer ────────────────────────────────────────────────────────────────
     lines += [

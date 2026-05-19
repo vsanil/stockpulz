@@ -54,12 +54,19 @@ def get_current_prices(picks: dict) -> dict:
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
 
-    # ── Stock prices via yfinance (1-min intraday — avoids stale close cache) ──
+    # ── Stock / ETF / Commodity prices via yfinance ───────────────────────────
     stock_tickers = set()
     for section in ("short_term", "long_term"):
         for s in stocks.get(section, []):
             if s.get("ticker"):
                 stock_tickers.add(s["ticker"])
+    # Also include ETFs and commodities — they use the same yfinance path
+    for asset_key in ("etfs", "commodities"):
+        bucket = picks.get(asset_key, {})
+        for section in ("short_term", "long_term"):
+            for e in bucket.get(section, []):
+                if e.get("ticker"):
+                    stock_tickers.add(e["ticker"])
 
     def _fetch_stock_price(ticker: str) -> tuple[str, float | None]:
         """Fetch current price for one stock. Returns (ticker, price|None)."""
