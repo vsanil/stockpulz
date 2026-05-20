@@ -24,6 +24,7 @@ _CRYPTO_SYMBOLS = {
     "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "DOT", "MATIC",
     "LINK", "UNI", "ATOM", "LTC", "BCH", "ALGO", "XLM", "VET", "ICP", "FIL",
     "TRX", "NEAR", "OP", "ARB", "SUI", "APT", "INJ", "SEI", "TIA",
+    "SHIB", "PEPE", "BONK", "WLD", "FLOKI", "TON",
 }
 
 
@@ -61,6 +62,8 @@ def _current_price(ticker: str) -> float | None:
                 "ICP": "internet-computer", "FIL": "filecoin", "TRX": "tron",
                 "NEAR": "near", "OP": "optimism", "ARB": "arbitrum",
                 "SUI": "sui", "APT": "aptos", "INJ": "injective-protocol",
+                "SHIB": "shiba-inu", "PEPE": "pepe", "BONK": "bonk",
+                "WLD": "worldcoin-wld", "FLOKI": "floki", "TON": "the-open-network",
             }
             cg_id = _COINGECKO_IDS.get(ticker)
             if cg_id:

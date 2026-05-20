@@ -1762,6 +1762,21 @@ _NAME_TO_TICKER = {
     "NIO": "NIO",
     "BAIDU": "BIDU",
     "ALIBABA": "BABA",
+    # Crypto name aliases
+    "BITCOIN": "BTC",
+    "ETHEREUM": "ETH", "ETHER": "ETH",
+    "SOLANA": "SOL",
+    "DOGECOIN": "DOGE", "DOGE COIN": "DOGE",
+    "SHIBA": "SHIB", "SHIBAINUOIN": "SHIB", "SHIBAINU": "SHIB",
+    "CARDANO": "ADA",
+    "RIPPLE": "XRP",
+    "POLKADOT": "DOT",
+    "AVALANCHE": "AVAX",
+    "CHAINLINK": "LINK",
+    "POLYGON": "MATIC", "MATIC": "MATIC",
+    "PEPE": "PEPE",
+    "BONK": "BONK",
+    "WORLDCOIN": "WLD",
 }
 
 def _resolve_watchlist_ticker(raw: str) -> str:
