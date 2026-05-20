@@ -48,6 +48,14 @@ def _current_price(ticker: str) -> float | None:
             return float(price)
     except Exception:
         pass
+    # For unknown tickers, try TICKER-USD anyway — catches any crypto not in _CRYPTO_SYMBOLS
+    if ticker not in _CRYPTO_SYMBOLS:
+        try:
+            price = yf.Ticker(f"{ticker}-USD").fast_info.last_price
+            if price:
+                return float(price)
+        except Exception:
+            pass
     # Fallback: try CoinGecko for crypto if yfinance failed
     if ticker in _CRYPTO_SYMBOLS:
         try:
