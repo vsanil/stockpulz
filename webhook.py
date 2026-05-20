@@ -659,6 +659,7 @@ def _miniapp_auth() -> str | None:
 
 _picks_mem_cache = {"data": None, "ts": 0}
 _PICKS_CACHE_TTL = 300  # 5 minutes — picks only change once per day
+_bot_username_cache = os.environ.get("TELEGRAM_BOT_USERNAME", "")  # set in Render env to skip API call
 
 @app.route("/api/miniapp/picks")
 def miniapp_picks():
@@ -1504,19 +1505,24 @@ def miniapp_dividends():
 @app.route("/api/miniapp/share_link")
 def miniapp_share_link():
     """Return a shareable invite link for the current user."""
+    global _bot_username_cache
     chat_id = _miniapp_auth()
     if not chat_id:
         return jsonify({"error": "unauthorised"}), 403
 
-    try:
-        import requests as _req
-        r = _req.get(
-            f"{os.environ.get('TELEGRAM_API_BASE', 'https://api.telegram.org')}/bot{os.environ.get('TELEGRAM_BOT_TOKEN', '')}/getMe",
-            timeout=5,
-        )
-        bot_username = r.json().get("result", {}).get("username", "")
-    except Exception:
-        bot_username = ""
+    bot_username = _bot_username_cache
+    if not bot_username:
+        try:
+            import requests as _req
+            r = _req.get(
+                f"{os.environ.get('TELEGRAM_API_BASE', 'https://api.telegram.org')}/bot{os.environ.get('TELEGRAM_BOT_TOKEN', '')}/getMe",
+                timeout=5,
+            )
+            bot_username = r.json().get("result", {}).get("username", "")
+            if bot_username:
+                _bot_username_cache = bot_username  # cache for all future requests
+        except Exception:
+            pass
 
     if not bot_username:
         return jsonify({"error": "could not fetch bot username"}), 500
@@ -1532,54 +1538,76 @@ def miniapp_share_link():
 
 @app.route("/api/miniapp/earnings")
 def miniapp_earnings():
-    """Return upcoming earnings dates for given tickers (from watchlist)."""
+    """Return upcoming earnings with EPS estimates via Finnhub."""
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     raw = request.args.get("tickers", "")
     tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
     if not tickers:
         return jsonify({"ok": True, "earnings": []})
-    try:
-        import yfinance as yf
-        from datetime import date, timedelta
-        results = []
-        today = date.today()
-        for ticker in tickers[:20]:  # cap to 20 to avoid slow responses
-            try:
-                info = yf.Ticker(ticker).info
-                # yfinance stores earnings date as a timestamp or string
-                ed = info.get("earningsTimestamp") or info.get("earningsDate")
-                if ed:
-                    if isinstance(ed, (int, float)):
-                        from datetime import datetime as _dt
-                        ed_date = _dt.utcfromtimestamp(ed).date()
-                    else:
-                        from datetime import datetime as _dt
-                        ed_date = _dt.fromisoformat(str(ed)).date()
+
+    from datetime import date, timedelta
+    import requests as _req
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
+    today    = date.today()
+    end_date = today + timedelta(days=90)
+    results  = []
+
+    for ticker in tickers[:20]:
+        try:
+            if finnhub_key:
+                r = _req.get(
+                    "https://finnhub.io/api/v1/calendar/earnings",
+                    params={"symbol": ticker, "from": today.isoformat(),
+                            "to": end_date.isoformat(), "token": finnhub_key},
+                    timeout=5,
+                )
+                events = r.json().get("earningsCalendar", []) if r.ok else []
+                if events:
+                    ev = events[0]  # nearest upcoming event
+                    ed_str = ev.get("date", "")
+                    if not ed_str:
+                        continue
+                    ed_date    = date.fromisoformat(ed_str)
                     days_until = (ed_date - today).days
-                    if -1 <= days_until <= 90:  # include yesterday through next 90 days
-                        timing = info.get("earningsCallTimestamp")
-                        timing_str = ""
-                        if timing:
-                            try:
-                                from datetime import datetime as _dt2
-                                t_obj = _dt2.utcfromtimestamp(timing)
-                                hour = t_obj.hour
-                                timing_str = "Before open" if hour < 12 else "After close"
-                            except Exception:
-                                pass
-                        results.append({
-                            "ticker":     ticker,
-                            "date":       ed_date.strftime("%b %d"),
-                            "days_until": max(0, days_until),
-                            "timing":     timing_str,
-                        })
-            except Exception:
-                pass
-        results.sort(key=lambda x: x["days_until"])
-        return jsonify({"ok": True, "earnings": results})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)})
+                    if days_until < -1 or days_until > 90:
+                        continue
+                    hour       = (ev.get("hour") or "").lower()
+                    timing_str = "Before open" if hour == "bmo" else "After close" if hour == "amc" else ""
+                    eps_est    = ev.get("epsEstimate")
+                    eps_act    = ev.get("epsActual")
+                    rev_est    = ev.get("revenueEstimate")
+                    results.append({
+                        "ticker":       ticker,
+                        "date":         ed_date.strftime("%b %d"),
+                        "days_until":   max(0, days_until),
+                        "timing":       timing_str,
+                        "eps_estimate": round(eps_est, 2) if eps_est is not None else None,
+                        "eps_actual":   round(eps_act, 2) if eps_act is not None else None,
+                        "rev_estimate": int(rev_est) if rev_est else None,
+                    })
+                    continue
+
+            # Fallback: yfinance (no EPS data)
+            import yfinance as yf
+            info = yf.Ticker(ticker).info
+            ed   = info.get("earningsTimestamp") or info.get("earningsDate")
+            if ed:
+                from datetime import datetime as _dt
+                ed_date = _dt.utcfromtimestamp(ed).date() if isinstance(ed, (int, float)) \
+                          else _dt.fromisoformat(str(ed)).date()
+                days_until = (ed_date - today).days
+                if -1 <= days_until <= 90:
+                    results.append({
+                        "ticker": ticker, "date": ed_date.strftime("%b %d"),
+                        "days_until": max(0, days_until), "timing": "",
+                        "eps_estimate": None, "eps_actual": None, "rev_estimate": None,
+                    })
+        except Exception:
+            pass
+
+    results.sort(key=lambda x: x["days_until"])
+    return jsonify({"ok": True, "earnings": results})
 
 
 @app.route("/api/miniapp/watchlist")

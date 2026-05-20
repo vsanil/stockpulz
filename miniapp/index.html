@@ -2857,7 +2857,7 @@ function switchPicksView(view) {
 function renderPickCard(p, idx = 0) {
   const sym      = p._sym;
   const isBought = boughtSet.has(sym);
-  const conv     = (p.conviction || '').toLowerCase();
+  const conv     = String(p.conviction || '').toLowerCase();
   const convCls  = conv.includes('high') ? 'conv-high' : conv.includes('low') ? 'conv-low' : 'conv-medium';
   const convIcon = conv.includes('high') ? '🔥' : conv.includes('low') ? '⚡' : '✨';
   const cardCls  = (p._type === 'crypto' ? ' crypto' : p._type === 'etf' ? ' etf' : '') + (isBought ? ' bought' : '');
@@ -2958,7 +2958,7 @@ function renderPicks(filter) {
 
   // Sort each group: High conviction first, then Medium, then Low
   const _convRank = p => {
-    const c = (p.conviction || '').toLowerCase();
+    const c = String(p.conviction || '').toLowerCase();
     if (c.includes('high'))   return 0;
     if (c.includes('medium')) return 1;
     return 2;
@@ -4548,7 +4548,7 @@ async function renderWatchlist(tickers) {
         const q = await api('/api/miniapp/quote?ticker=' + encodeURIComponent(t));
         const el = document.getElementById('wprice-' + t);
         if (el && q.price != null) {
-          el.textContent = '$' + Number(q.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:6});
+          el.textContent = '$' + Number(q.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
           el.style.opacity = '1';
         }
       } catch(_) {}
@@ -4566,10 +4566,34 @@ async function _loadEarnings(tickers) {
       el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">No upcoming earnings for your watchlist</div>';
       return;
     }
-    el.innerHTML = items.map((e, i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0${i < items.length-1 ? ';border-bottom:1px solid var(--border)' : ''}">
-      <div><span style="font-size:15px;font-weight:700">${e.ticker}</span><span style="font-size:12px;opacity:.5;margin-left:6px">${e.date}</span></div>
-      <div style="text-align:right;font-size:12px">${e.days_until===0?'<span style="color:var(--accent);font-weight:700">Today</span>':e.days_until===1?'<span style="color:var(--accent)">Tomorrow</span>':`<span style="opacity:.6">in ${e.days_until}d</span>`}<div style="font-size:11px;opacity:.4">${e.timing||''}</div></div>
-    </div>`).join('');
+    el.innerHTML = items.map((e, i) => {
+      const dayStr = e.days_until === 0
+        ? '<span style="color:var(--accent);font-weight:700">Today</span>'
+        : e.days_until === 1
+        ? '<span style="color:var(--accent)">Tomorrow</span>'
+        : `<span style="opacity:.6">in ${e.days_until}d</span>`;
+      const timingStr = e.timing
+        ? `<div style="font-size:11px;opacity:.4">${e.timing}</div>` : '';
+      let epsStr = '';
+      if (e.eps_actual != null) {
+        const color = e.eps_actual >= (e.eps_estimate || 0) ? 'var(--green)' : 'var(--red)';
+        epsStr = `<div style="font-size:11px;margin-top:3px;opacity:.8">EPS <span style="color:${color};font-weight:700">${e.eps_actual >= 0 ? '+' : ''}${e.eps_actual}</span> <span style="opacity:.5">vs est ${e.eps_estimate ?? '—'}</span></div>`;
+      } else if (e.eps_estimate != null) {
+        epsStr = `<div style="font-size:11px;margin-top:3px;opacity:.5">EPS est <span style="font-weight:600;opacity:1">${e.eps_estimate}</span></div>`;
+      }
+      const revStr = e.rev_estimate
+        ? `<div style="font-size:11px;opacity:.4">Rev est $${(e.rev_estimate/1e9).toFixed(1)}B</div>` : '';
+      return `<div style="padding:9px 0${i < items.length-1 ? ';border-bottom:1px solid var(--border)' : ''}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <span style="font-size:15px;font-weight:700">${e.ticker}</span>
+            <span style="font-size:12px;opacity:.5;margin-left:6px">${e.date}</span>
+            ${epsStr}${revStr}
+          </div>
+          <div style="text-align:right;font-size:12px;flex-shrink:0;margin-left:8px">${dayStr}${timingStr}</div>
+        </div>
+      </div>`;
+    }).join('');
   } catch(e) {
     el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center">Earnings unavailable</div>';
   }
@@ -4685,7 +4709,7 @@ function renderSettings() {
     </div>
     <div class="setting-row">
       <span class="setting-key">Daily Picks</span>
-      <div class="toggle${paused ? '' : ' on'}" id="pause-toggle" onclick="togglePaused(${paused})"></div>
+      <div class="toggle${paused ? '' : ' on'}" id="pause-toggle" onclick="togglePaused()"></div>
     </div>
   </div>`;
 
@@ -4846,7 +4870,7 @@ async function searchTicker() {
   try {
     const d = await api('/api/miniapp/quote?ticker=' + encodeURIComponent(ticker));
     const sym   = (d.ticker || ticker).toUpperCase();
-    const price = d.price != null ? '$' + Number(d.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:6}) : '—';
+    const price = d.price != null ? '$' + Number(d.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
     const isCrypto = /BTC|ETH|SOL|DOGE|ADA|XRP|AVAX|BNB|DOT|LINK|MATIC|UNI/.test(sym);
     const assetType = isCrypto ? 'crypto' : 'stock';
     if (sym !== ticker) { input.value = sym; }
@@ -5040,9 +5064,11 @@ async function saveThreshold(key) {
   }
 }
 
-async function togglePaused(currentlyPaused) {
+async function togglePaused() {
   const el = document.getElementById('pause-toggle');
   if (!el) return;
+  // Read live state from the element — avoids stale baked-in value
+  const currentlyPaused = _settCfg ? !!_settCfg.paused : !el.classList.contains('on');
   // Optimistic update — flip immediately so the toggle feels instant
   el.classList.toggle('on');
   tg.HapticFeedback?.selectionChanged();
@@ -5050,7 +5076,16 @@ async function togglePaused(currentlyPaused) {
     await api('/api/miniapp/toggle_paused', 'POST', { paused: !currentlyPaused });
     // Keep in-memory config in sync so re-renders don't revert the toggle
     if (_settCfg) _settCfg.paused = !currentlyPaused;
-    showToast(currentlyPaused ? 'Daily picks enabled' : 'Daily picks paused');
+    // Update status card live without waiting for a full reload
+    if (_statusData) {
+      _statusData.pick_active = currentlyPaused; // was paused → now active, or vice versa
+      const pickDot = document.querySelectorAll('.status-row')[1];
+      if (pickDot) {
+        const nowActive = currentlyPaused; // toggling away from paused = now active
+        pickDot.innerHTML = `<span>${nowActive ? '<span class="status-dot-active">●</span>' : '<span class="status-dot-paused">●</span>'} Your Picks</span>${nowActive ? '<span style="color:var(--green)">Active</span>' : '<span style="color:var(--hint)">Paused</span>'}`;
+      }
+    }
+    showToast(currentlyPaused ? '✅ Daily picks enabled' : '⏸ Daily picks paused');
   } catch (e) {
     // Revert on failure
     el.classList.toggle('on');
