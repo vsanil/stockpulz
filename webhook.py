@@ -1633,9 +1633,10 @@ def miniapp_watchlist_add():
     ticker = (body.get("ticker") or "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400
 
-    # Resolve company names → ticker symbol (same logic as /quote endpoint)
+    # Resolve company names → ticker symbol
     from price_alert_manager import _current_price
     if _current_price(ticker) is None:
+        # 1. Try stock name resolver
         try:
             from cmd_helpers import _resolve_ticker_candidates
             candidates = _resolve_ticker_candidates(ticker)
@@ -1645,6 +1646,11 @@ def miniapp_watchlist_add():
                     ticker = resolved
         except Exception:
             pass
+    if _current_price(ticker) is None:
+        # 2. Try dynamic crypto name resolution via CoinGecko search
+        crypto_sym = _resolve_crypto_name_dynamic(ticker)
+        if crypto_sym and _current_price(crypto_sym) is not None:
+            ticker = crypto_sym
 
     log = load_user_trade_log(chat_id)
     watchlist = log.get("watchlist", [])
@@ -1716,6 +1722,34 @@ def miniapp_status():
 
 
 # Fast company-name → ticker map (no Haiku needed)
+# In-memory cache for dynamically resolved crypto names (lives until restart)
+_resolved_crypto_cache: dict = {}
+
+
+def _resolve_crypto_name_dynamic(query: str) -> str | None:
+    """Search CoinGecko for a crypto name/symbol and return the ticker symbol.
+    Results are cached in _resolved_crypto_cache for the process lifetime."""
+    key = query.upper().strip()
+    if key in _resolved_crypto_cache:
+        return _resolved_crypto_cache[key]
+    try:
+        import requests as _req
+        resp = _req.get(
+            "https://api.coingecko.com/api/v3/search",
+            params={"query": query},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        coins = resp.json().get("coins", [])
+        if coins:
+            symbol = coins[0]["symbol"].upper()
+            _resolved_crypto_cache[key] = symbol
+            return symbol
+    except Exception:
+        pass
+    return None
+
+
 _NAME_TO_TICKER = {
     "NVIDIA": "NVDA", "NVIDEA": "NVDA", "NVDIA": "NVDA",
     "APPLE": "AAPL",
