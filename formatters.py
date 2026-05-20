@@ -451,6 +451,9 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     crypto = picks.get("crypto", {})
     etfs   = picks.get("etfs", {})
 
+    # Hoist here so _pair can close over it
+    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+
     def _header(label: str) -> list[dict]:
         return [{"text": label, "callback_data": "noop"}]
 
@@ -479,9 +482,15 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     def _pair(pick: dict, asset_type: str) -> list[dict]:
         """Return [Buy, 📊 Chart] for one pick — used to build 2-per-row layouts."""
         ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
+        chart_btn = (
+            {"text": "📊 Chart",
+             "web_app": {"url": f"{render_url}/miniapp?chart={ticker}&asset_type={asset_type}"}}
+            if render_url else
+            {"text": "📊 Chart", "callback_data": f"chart|{ticker}|{asset_type}"}
+        )
         return [
             {"text": f"✅ Buy {ticker}", "callback_data": _buy_callback(pick, asset_type)},
-            {"text": "📊 Chart",         "callback_data": f"chart|{ticker}|{asset_type}"},
+            chart_btn,
         ]
 
     def _add_section(picks_list: list, get_sym, asset_type: str, header: str, icon: str = ""):
@@ -514,7 +523,6 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     buttons = []
 
     # ── Mini App launch button — top, full-width, prominent ───────────────────
-    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
     if render_url:
         buttons.append([{
             "text":    "🚀 Open Dashboard  ↗",

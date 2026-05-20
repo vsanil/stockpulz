@@ -101,8 +101,11 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
     chat_alerts = alerts.setdefault(str(chat_id), [])
 
     # Prevent duplicate — raise so the API returns 400 instead of silent success
+    # Use tolerance comparison (< 0.005) so decimal prices like 199.99 match correctly
     for a in chat_alerts:
-        if a["ticker"] == ticker and a["target"] == target_price and a["direction"] == direction:
+        if (a["ticker"] == ticker
+                and abs(a["target"] - target_price) < 0.005
+                and a["direction"] == direction):
             raise ValueError(f"Alert already exists: {ticker} {direction} ${target_price:,.2f}")
 
     chat_alerts.append({
@@ -131,9 +134,10 @@ def remove_alert(chat_id: str, ticker: str, target_price: float | None = None) -
     before      = len(chat_alerts)
 
     if target_price is not None:
+        # Use tolerance comparison so decimal prices like 199.99 match correctly
         chat_alerts = [
             a for a in chat_alerts
-            if not (a["ticker"] == ticker and a["target"] == target_price)
+            if not (a["ticker"] == ticker and abs(a["target"] - target_price) < 0.005)
         ]
     else:
         chat_alerts = [a for a in chat_alerts if a["ticker"] != ticker]
