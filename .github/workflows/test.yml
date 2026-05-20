@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    env:
+      TELEGRAM_BOT_TOKEN: fake_bot_token
+      TELEGRAM_CHAT_ID: "9999999"
+      FLASK_SECRET_KEY: test_secret
+      GH_GIST_TOKEN: fake_gist_token
+      GIST_ID: fake_gist_id
+      ANTHROPIC_API_KEY: fake_anthropic_key
+      ALPACA_KEY_ID: fake_alpaca_key
+      ALPACA_SECRET_KEY: fake_alpaca_secret
+      POLYGON_API_KEY: fake_polygon_key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -q --tb=short
