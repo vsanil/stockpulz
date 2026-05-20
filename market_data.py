@@ -16,7 +16,7 @@ import requests
 from datetime import date, timedelta, datetime, timezone
 
 # ── Credentials ──────────────────────────────────────────────────────────────
-ALPACA_KEY    = os.environ.get("ALPACA_API_KEY", "")
+ALPACA_KEY    = os.environ.get("ALPACA_KEY_ID", "")      # matches Render env var name
 ALPACA_SECRET = os.environ.get("ALPACA_SECRET_KEY", "")
 POLYGON_KEY   = os.environ.get("POLYGON_API_KEY", "")
 
