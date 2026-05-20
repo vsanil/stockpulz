@@ -736,27 +736,10 @@ def miniapp_positions():
 
     from config_manager import load_user_trade_log
     from datetime import date as _date
-    import yfinance as _yf
+    from market_data import get_live_price as _price
 
     log      = load_user_trade_log(chat_id)
     open_pos = log.get("open", [])
-
-    _CRYPTO_SYMBOLS = {
-        "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
-        "LINK","UNI","ATOM","LTC","BCH","ALGO","XLM","VET","ICP","FIL",
-        "TRX","NEAR","OP","ARB","SUI","APT","INJ","SEI","TIA","HYPE",
-    }
-
-    def _price(ticker):
-        ticker = ticker.upper()
-        yf_sym = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
-        try:
-            fi = _yf.Ticker(yf_sym).fast_info
-            p  = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
-            if p: return float(p)
-        except Exception:
-            pass
-        return None
 
     result = []
     today  = _date.today()
@@ -982,23 +965,26 @@ def miniapp_chart(ticker):
     ticker     = ticker.upper()
     asset_type = request.args.get("asset_type", "")
     is_crypto  = asset_type == "crypto" or ticker in _CHART_CRYPTO
-    yf_sym     = f"{ticker}-USD" if is_crypto else ticker
 
     try:
-        import yfinance as _yf
-        hist = _yf.Ticker(yf_sym).history(period="3mo", interval="1d")
-        if hist.empty:
+        from market_data import get_ohlcv
+        data = get_ohlcv(ticker)
+
+        # No data — try resolving company name (e.g. "AMAZON" → "AMZN")
+        if not data and not is_crypto:
+            try:
+                from cmd_helpers import _resolve_ticker_candidates
+                candidates = _resolve_ticker_candidates(ticker)
+                if candidates:
+                    resolved = candidates[0]["ticker"].upper()
+                    if resolved != ticker:
+                        data   = get_ohlcv(resolved)
+                        ticker = resolved
+            except Exception:
+                pass
+
+        if not data:
             return jsonify({"error": "no data", "ticker": ticker}), 404
-        data = []
-        for ts, row in hist.iterrows():
-            data.append({
-                "time":   ts.strftime("%Y-%m-%d"),
-                "open":   round(float(row["Open"]),  4),
-                "high":   round(float(row["High"]),  4),
-                "low":    round(float(row["Low"]),   4),
-                "close":  round(float(row["Close"]), 4),
-                "volume": int(row["Volume"]),
-            })
         return jsonify({"ticker": ticker, "data": data})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -1290,22 +1276,10 @@ def miniapp_paper():
     from config_manager import load_user_paper
     data = load_user_paper(chat_id)
     # Enrich positions with live prices
-    import yfinance as yf
+    from market_data import get_live_prices
     positions = data.get("positions", [])
-    tickers = list({p["ticker"] for p in positions})
-    prices = {}
-    if tickers:
-        try:
-            raw = yf.download(tickers, period="1d", progress=False, auto_adjust=True)
-            close = raw["Close"] if "Close" in raw else raw
-            for tk in tickers:
-                try:
-                    col = close[tk] if tk in close.columns else close
-                    prices[tk] = float(col.dropna().iloc[-1])
-                except Exception:
-                    pass
-        except Exception:
-            pass
+    tickers   = list({p["ticker"] for p in positions})
+    prices    = get_live_prices(tickers) if tickers else {}
     for p in positions:
         p["live_price"] = prices.get(p["ticker"])
         if p.get("live_price") and p.get("entry_price"):
@@ -1355,8 +1329,18 @@ def miniapp_update_settings():
 def miniapp_live_prices():
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
+
+    # When ?tickers= is provided (e.g. from watchlist chips), fetch those
+    # specific tickers and return a plain {TICKER: price} dict so the
+    # frontend can do direct key lookups without parsing a list.
+    raw_tickers = request.args.get("tickers", "").strip()
+    if raw_tickers:
+        from market_data import get_live_prices
+        tickers = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
+        prices  = get_live_prices(tickers)
+        return jsonify({"ok": True, "prices": prices})
+
     from config_manager import load_picks
-    import yfinance as yf
     picks_data = load_picks()
     if not picks_data:
         return jsonify({"ok": True, "prices": []})
@@ -1392,33 +1376,8 @@ def miniapp_live_prices():
         return jsonify({"ok": True, "prices": []})
 
     tickers = [p["ticker"] for p in all_picks]
-    from price_alert_manager import _CRYPTO_SYMBOLS as _CRYPTO_SYMS
-    yf_tickers = [f"{t}-USD" if t in _CRYPTO_SYMS else t for t in tickers]
-
-    prices = {}
-    # Fetch prices in parallel using fast_info (much faster than yf.download for live quotes)
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    def _fetch_one(orig, yft):
-        try:
-            fi = yf.Ticker(yft).fast_info
-            price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
-            if price:
-                return orig, float(price)
-        except Exception:
-            pass
-        return orig, None
-
-    try:
-        with ThreadPoolExecutor(max_workers=min(len(tickers), 10)) as executor:
-            futures = {executor.submit(_fetch_one, orig, yft): orig
-                       for orig, yft in zip(tickers, yf_tickers)}
-            for fut in as_completed(futures, timeout=8):
-                orig, price = fut.result()
-                if price is not None:
-                    prices[orig] = price
-    except Exception:
-        pass
+    from market_data import get_live_prices
+    prices  = get_live_prices(tickers)
 
     result = []
     for p in all_picks:
@@ -1636,13 +1595,29 @@ def miniapp_watchlist():
 
 @app.route("/api/miniapp/watchlist/add", methods=["POST"])
 def miniapp_watchlist_add():
-    """Add a ticker to the user's watchlist."""
+    """Add a ticker to the user's watchlist.
+    Resolves company names (e.g. 'AMAZON' → 'AMZN') before storing.
+    """
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     from config_manager import load_user_trade_log, save_user_trade_log
     body   = request.get_json(silent=True) or {}
     ticker = (body.get("ticker") or "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400
+
+    # Resolve company names → ticker symbol (same logic as /quote endpoint)
+    from price_alert_manager import _current_price
+    if _current_price(ticker) is None:
+        try:
+            from cmd_helpers import _resolve_ticker_candidates
+            candidates = _resolve_ticker_candidates(ticker)
+            if candidates:
+                resolved = candidates[0]["ticker"].upper()
+                if resolved != ticker and _current_price(resolved) is not None:
+                    ticker = resolved
+        except Exception:
+            pass
+
     log = load_user_trade_log(chat_id)
     watchlist = log.get("watchlist", [])
     if ticker in watchlist:
