@@ -2681,9 +2681,15 @@ async function loadPicks(isRetry = false) {
   if (cached && !picksCache) {
     picksCache    = cached;
     picksLoadedAt = Date.now();
-    renderPicksView();          // instant render from cache
-    // Kick off background prefetch of other tabs now that picks are on screen
-    _prefetchOtherTabs();
+    try {
+      renderPicksView();        // instant render from cache
+      // Kick off background prefetch of other tabs now that picks are on screen
+      _prefetchOtherTabs();
+    } catch(_cacheErr) {
+      // Cache data is corrupt/stale — clear it and fall through to fresh API fetch
+      picksCache = null;
+      try { localStorage.removeItem(_PICKS_LS_KEY); } catch(_) {}
+    }
   }
 
   // ── 2. Regime fetch in parallel ────────────────────────────────────────────
