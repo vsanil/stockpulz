@@ -3193,7 +3193,10 @@ async function loadPortfolio() {
   }
 
   try {
-    const data = await api('/api/miniapp/positions');
+    const [data, pnlData] = await Promise.all([
+      api('/api/miniapp/positions'),
+      api('/api/miniapp/pnl_history').catch(() => null),
+    ]);
     positionsCache = data.positions || [];
 
     document.getElementById('port-spinner').style.display = 'none';
@@ -3229,7 +3232,7 @@ async function loadPortfolio() {
       </div>
       <button class="btn-add-position" onclick="openAddPosition()">➕ Add Position</button>`;
       body.innerHTML = html;
-      _renderPnlChart();
+      _renderPnlChart(pnlData);
       return;
     }
 
@@ -3318,7 +3321,7 @@ async function loadPortfolio() {
 </div>`;
 
     body.innerHTML = html;
-    _renderPnlChart();
+    _renderPnlChart(pnlData);
   } catch (e) {
     _tabError('port-spinner', loadPortfolio, e);
   }
@@ -3357,11 +3360,11 @@ async function exportPortfolioCSV() {
 }
 
 let _pnlChartInstance = null;
-async function _renderPnlChart() {
+async function _renderPnlChart(prefetched) {
   const canvas = document.getElementById('pnl-chart-canvas');
   if (!canvas) return;
   try {
-    const d = await api('/api/miniapp/pnl_history');
+    const d = prefetched || await api('/api/miniapp/pnl_history');
     const pts = d.points || [];
 
     // Update stats
