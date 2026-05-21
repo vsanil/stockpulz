@@ -2617,7 +2617,7 @@ function fmtPrice(v) {
   if (n >= 100000) return (n / 1000).toFixed(1) + 'K';   // e.g. $104.4K for BTC
   if (n >= 10000)  return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
   if (n >= 100)    return n.toFixed(2);
-  if (n >= 1)      return n.toFixed(3);
+  if (n >= 1)      return n.toFixed(2);
   return n.toFixed(4);
 }
 function fmtPct(v, showPlus = true) {
@@ -2812,8 +2812,9 @@ async function confirmSell() {
     closeSellSheet();
 
     // Refresh portfolio
+    _invalidatePortfolioCache();
     loadedTabs['portfolio'] = false;
-    if (curTab === 'portfolio') { loadPortfolio(); }
+    if (curTab === 'portfolio') { loadPortfolio(true); }
 
     // Also invalidate performance so it refreshes next visit
     loadedTabs['performance'] = false;
@@ -2961,8 +2962,9 @@ async function confirmAddPosition() {
     if (res.existed) {
       showToast(`ℹ️ ${ticker} is already in your portfolio`, 'info');
     } else {
+      _invalidatePortfolioCache();
       loadedTabs['portfolio'] = false;
-      if (curTab === 'portfolio') { loadPortfolio(); }
+      if (curTab === 'portfolio') { loadPortfolio(true); }
       if (entry || stop) showToast(`✅ ${ticker} added with levels`, 'success');
     }
   } catch (e) {
@@ -3631,6 +3633,20 @@ async function markBought(sym, assetType, tf) {
 
 let portfolioMode = 'real'; // 'real' | 'paper'
 
+// Per-mode response cache — avoids a fresh API round-trip when the user taps
+// Real ↔ Paper within the same session (5-minute TTL).
+const _PORT_CACHE_TTL = 5 * 60 * 1000;
+const _portCache = {
+  real:  { positions: null, pnlData: null, html: null, ts: 0 },
+  paper: { data: null, html: null, ts: 0 },
+};
+// Call this after any mutation (sell, add position, add cash, edit levels, etc.)
+// so the next load fetches fresh data instead of showing stale cache.
+function _invalidatePortfolioCache() {
+  _portCache.real  = { positions: null, pnlData: null, html: null, ts: 0 };
+  _portCache.paper = { data: null, html: null, ts: 0 };
+}
+
 // ── Shared tab error/retry helper ────────────────────────────────────────────
 function _tabError(spinnerId, retryFn, err) {
   const el = document.getElementById(spinnerId);
@@ -3778,15 +3794,27 @@ function _reRenderPositions() {
   while (tmp.firstChild) parent.insertBefore(tmp.firstChild, addBtn);
 }
 
-async function loadPortfolio() {
+async function loadPortfolio(forceRefresh = false) {
+  if (portfolioMode === 'paper') {
+    await loadPaperPortfolio(forceRefresh);
+    return;
+  }
+
+  // Serve from cache if data is fresh and not a forced refresh
+  const _rc = _portCache.real;
+  if (!forceRefresh && _rc.html !== null && (Date.now() - _rc.ts) < _PORT_CACHE_TTL) {
+    positionsCache = _rc.positions;
+    document.getElementById('port-spinner').style.display = 'none';
+    const _body = document.getElementById('port-body');
+    _body.style.display = 'block';
+    _body.innerHTML = _rc.html;
+    _renderPnlChart(_rc.pnlData);   // canvas must be re-drawn after innerHTML swap
+    return;
+  }
+
   document.getElementById('port-spinner').style.display = 'block';
   const body = document.getElementById('port-body');
   body.style.display = 'none';
-
-  if (portfolioMode === 'paper') {
-    await loadPaperPortfolio();
-    return;
-  }
 
   try {
     const [data, pnlData] = await Promise.all([
@@ -3794,6 +3822,7 @@ async function loadPortfolio() {
       api('/api/miniapp/pnl_history').catch(() => null),
     ]);
     positionsCache = data.positions || [];
+    _portCache.real = { positions: positionsCache, pnlData, ts: Date.now() };
     window._portfolioUpdatedAt = Date.now();
 
     document.getElementById('port-spinner').style.display = 'none';
@@ -3956,7 +3985,7 @@ async function loadPortfolio() {
       <span>Active Positions</span>
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:10px;color:var(--hint);opacity:.7">Updated ${_updLabel}</span>
-        <button onclick="loadPortfolio()" title="Refresh prices"
+        <button onclick="_invalidatePortfolioCache(); loadPortfolio(true)" title="Refresh prices"
           style="background:none;border:none;cursor:pointer;font-size:15px;color:var(--hint);padding:2px 4px;line-height:1"
           id="port-refresh-btn">↻</button>
       </div>
@@ -4042,6 +4071,7 @@ async function loadPortfolio() {
 </div>`;
 
     body.innerHTML = html;
+    _portCache.real.html = html;   // store for instant cache-hit re-render
     _renderPnlChart(pnlData);
   } catch (e) {
     _tabError('port-spinner', loadPortfolio, e);
@@ -4447,8 +4477,9 @@ async function savePositionDetail() {
     });
     tg.HapticFeedback?.notificationOccurred('success');
     closeOverlay('posdetail-overlay');
+    _invalidatePortfolioCache();
     loadedTabs['portfolio'] = false;
-    if (curTab === 'portfolio') loadPortfolio();
+    if (curTab === 'portfolio') loadPortfolio(true);
   } catch (e) {
     btn.disabled    = false;
     btn.textContent = 'Save';
@@ -4515,7 +4546,20 @@ async function switchPortfolioMode(mode) {
   loadPortfolio();
 }
 
-async function loadPaperPortfolio() {
+async function loadPaperPortfolio(forceRefresh = false) {
+  // Serve from cache if fresh
+  const _pc = _portCache.paper;
+  if (!forceRefresh && _pc.html !== null && (Date.now() - _pc.ts) < _PORT_CACHE_TTL) {
+    document.getElementById('port-spinner').style.display = 'none';
+    const _body = document.getElementById('port-body');
+    _body.style.display = 'block';
+    _body.innerHTML = _pc.html;
+    return;
+  }
+
+  document.getElementById('port-spinner').style.display = 'block';
+  document.getElementById('port-body').style.display = 'none';
+
   try {
     const data = await api('/api/miniapp/paper');
     document.getElementById('port-spinner').style.display = 'none';
@@ -4610,6 +4654,7 @@ async function loadPaperPortfolio() {
     }
 
     body.innerHTML = html;
+    _portCache.paper = { html, data: null, ts: Date.now() };   // store for cache-hit re-render
   } catch (e) {
     _tabError('port-spinner', loadPortfolio, e);
   }
@@ -5532,7 +5577,7 @@ function renderSettings() {
     }
     html += `<div class="status-card">
       <div class="status-row"><span>${botDot} Bot</span>${botTxt}</div>
-      <div class="status-row"><span>${pickDot} Your Picks</span>${pickTxt}</div>
+      <div class="status-row" id="picks-status-row"><span>${pickDot} Your Picks</span>${pickTxt}</div>
       ${nextHtml}
     </div>`;
   }
@@ -5982,7 +6027,7 @@ async function togglePaused() {
   const el = document.getElementById('pause-toggle');
   if (!el) return;
   // Read live state from the element — avoids stale baked-in value
-  const currentlyPaused = _settCfg ? !!_settCfg.paused : !el.classList.contains('on');
+  const currentlyPaused = !el.classList.contains('on');
   // Optimistic update — flip immediately so the toggle feels instant
   el.classList.toggle('on');
   tg.HapticFeedback?.selectionChanged();
@@ -5993,7 +6038,7 @@ async function togglePaused() {
     // Update status card live without waiting for a full reload
     if (_statusData) {
       _statusData.pick_active = currentlyPaused; // was paused → now active, or vice versa
-      const pickDot = document.querySelectorAll('.status-row')[1];
+      const pickDot = document.getElementById('picks-status-row');
       if (pickDot) {
         const nowActive = currentlyPaused; // toggling away from paused = now active
         pickDot.innerHTML = `<span>${nowActive ? '<span class="status-dot-active">●</span>' : '<span class="status-dot-paused">●</span>'} Your Picks</span>${nowActive ? '<span style="color:var(--green)">Active</span>' : '<span style="color:var(--hint)">Paused</span>'}`;
@@ -6227,7 +6272,8 @@ async function cancelPaperPosition(ticker) {
   try {
     await api('/api/miniapp/paper_cancel', 'POST', { ticker });
     tg.HapticFeedback?.notificationOccurred('success');
-    loadPortfolio();   // refresh paper view
+    _invalidatePortfolioCache();
+    loadPortfolio(true);   // refresh paper view
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
     tg.showPopup?.({ message: 'Could not remove position — try again.' });
@@ -6255,7 +6301,8 @@ async function confirmAddCash() {
     await api('/api/miniapp/paper_add_cash', 'POST', { amount });
     tg.HapticFeedback?.notificationOccurred('success');
     closeOverlay('addcash-overlay');
-    loadPortfolio();   // refresh with new cash balance
+    _invalidatePortfolioCache();
+    loadPortfolio(true);   // refresh with new cash balance
   } catch (e) {
     btn.disabled = false;
     btn.textContent = 'Add Cash';
@@ -6388,8 +6435,9 @@ renderPricesView = async function() {
     _portRefreshTimer = setInterval(() => {
       if (curTab !== 'portfolio') return;
       // Silently re-fetch positions (will update live P&L numbers)
+      _invalidatePortfolioCache();
       loadedTabs['portfolio'] = false;
-      loadPortfolio();
+      loadPortfolio(true);
     }, _PORT_INTERVAL);
   }
 
@@ -6427,6 +6475,72 @@ loadPicks();
     };
     setTimeout(_waitAndOpen, 600);
   }
+})();
+
+// ── Back-navigation: hardware back / Telegram BackButton ─────────────────────
+(function _setupBackNav() {
+  const HOME_TAB = 'picks';
+
+  function _anySheetOpen() {
+    return !!document.querySelector('.overlay.open');
+  }
+
+  function _updateBackButton() {
+    if (curTab !== HOME_TAB || _anySheetOpen()) {
+      tg.BackButton?.show();
+    } else {
+      tg.BackButton?.hide();
+    }
+  }
+
+  function _handleBack() {
+    // 1. Close any open overlay first
+    const openEl = document.querySelector('.overlay.open');
+    if (openEl) {
+      closeOverlay(openEl.id);
+      _updateBackButton();
+      return;
+    }
+    // 2. Return to home tab
+    if (curTab !== HOME_TAB) {
+      gotoTab(HOME_TAB);
+      return;
+    }
+    // 3. Already home — close the Mini App
+    tg.close?.();
+  }
+
+  // Telegram in-app back button (top-left chevron)
+  tg.BackButton?.onClick(_handleBack);
+
+  // Android hardware back button via History API
+  history.pushState({ _sp: 'app' }, '');
+  window.addEventListener('popstate', function() {
+    _handleBack();
+    history.pushState({ _sp: 'app' }, ''); // keep the sentinel in history
+  });
+
+  // Patch gotoTab to keep BackButton in sync
+  const _origGoto = gotoTab;
+  window.gotoTab = function(name) {
+    _origGoto(name);
+    _updateBackButton();
+  };
+
+  // Patch openOverlay / closeOverlay to keep BackButton in sync
+  const _origOpen = openOverlay;
+  window.openOverlay = function(id) {
+    _origOpen(id);
+    _updateBackButton();
+  };
+  const _origClose = closeOverlay;
+  window.closeOverlay = function(id) {
+    _origClose(id);
+    _updateBackButton();
+  };
+
+  // Initial state (starts on picks tab, no sheets)
+  _updateBackButton();
 })();
 </script>
 </body>

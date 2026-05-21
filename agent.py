@@ -597,12 +597,6 @@ def run_morning(config: dict, now_et: datetime):
 
     _send_morning_personalised(picks, config, label="8:00 AM Morning Briefing")
 
-    # ── Auto stop-loss + entry alerts for morning picks ───────────────────────
-    try:
-        _auto_set_pick_alerts(picks, _all_recipients())
-    except Exception as exc:
-        print(f"[agent] _auto_set_pick_alerts wrapper failed (non-critical): {exc}")
-
     # ── Monday "Week Ahead" block ─────────────────────────────────────────────
     if now_et.weekday() == 0:   # Monday only
         try:

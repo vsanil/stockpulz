@@ -272,11 +272,28 @@ def format_daily_message(picks: dict, config: dict,
                if of.get("iv_label") == "EXTREME" else ""
 
     def _clean_thesis(thesis: str) -> str:
-        """Strip mechanical (signal N) labels and normalise semicolons → middots."""
+        """Strip mechanical signal labels, humanize field names, normalise semicolons → middots."""
         import re as _re
         if not thesis:
             return ""
+        # (signal N), (LT signal N), (signal 1 + signal 2) — number after word
         t = _re.sub(r'\s*\(\s*(?:LT )?signal \d+(?:\s*\+\s*(?:LT )?signal \d+)*\s*\)', '', thesis)
+        # (1 signal), (2 signals) — number before word
+        t = _re.sub(r'\s*\(\s*\d+\s*signals?\s*\)', '', t)
+        # Humanize known snake_case field names leaked from AI output
+        _snake = {
+            'bullish_engulfing': 'bullish engulfing',
+            'bearish_engulfing': 'bearish engulfing',
+            'bullish_flow':      'bullish options flow',
+            'bearish_flow':      'bearish options flow',
+            'ret_1m':            '1M return',
+            'ret_3m':            '3M return',
+            'vol_ratio':         'volume ratio',
+            'price_vs_52w':      'vs 52W high',
+            'rs_vs_spy':         'RS vs SPY',
+        }
+        for raw, human in _snake.items():
+            t = t.replace(raw, human)
         t = _re.sub(r';\s+', ' · ', t)
         return t.strip().rstrip('.')
 
