@@ -271,8 +271,17 @@ def format_daily_message(picks: dict, config: dict,
         return "\n  🔴 <i>IV extreme — high crush risk on options</i>" \
                if of.get("iv_label") == "EXTREME" else ""
 
+    def _clean_thesis(thesis: str) -> str:
+        """Strip mechanical (signal N) labels and normalise semicolons → middots."""
+        import re as _re
+        if not thesis:
+            return ""
+        t = _re.sub(r'\s*\(\s*(?:LT )?signal \d+(?:\s*\+\s*(?:LT )?signal \d+)*\s*\)', '', thesis)
+        t = _re.sub(r';\s+', ' · ', t)
+        return t.strip().rstrip('.')
+
     def _tline(thesis, catalyst):
-        parts = [_esc(thesis)] if thesis else []
+        parts = [_esc(_clean_thesis(thesis))] if thesis else []
         if catalyst:
             parts.append(f"🎯 {_esc(catalyst)}")
         return "  <i>" + "  ·  ".join(parts) + "</i>" if parts else ""
@@ -286,8 +295,6 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(e,tgt)}</i>{stop_str}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
         if tl: row += f"\n{tl}"
-        pe = s.get("plain_english", "")
-        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         row += _iv_warn(s)
         ew = _entry_window(e, stop, budget=config.get("stock_budget"), is_long_term=False, is_crypto=False)
         if ew: row += f"\n{ew}"
@@ -302,8 +309,6 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(e,tgt)}</i>{hz}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
         if tl: row += f"\n{tl}"
-        pe = s.get("plain_english", "")
-        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         ew = _entry_window(e, None, budget=config.get("stock_budget"), is_long_term=True, is_crypto=False)
         if ew: row += f"\n{ew}"
         return row
@@ -316,8 +321,6 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(e,tgt)}</i>{stop_str}")
         tl = _tline(c.get("thesis"), c.get("catalyst"))
         if tl: row += f"\n{tl}"
-        pe = c.get("plain_english", "")
-        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         row += _iv_warn(c)
         ew = _entry_window(e, stop, budget=config.get("crypto_budget"), is_long_term=False, is_crypto=True)
         if ew: row += f"\n{ew}"
@@ -333,8 +336,6 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(ep,tgt)}</i>{stop_str}{hz}")
         tl = _tline(e.get("thesis"), e.get("catalyst"))
         if tl: row += f"\n{tl}"
-        pe = e.get("plain_english", "")
-        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         return row
 
     def _row_commodity(c):
@@ -346,8 +347,6 @@ def format_daily_message(picks: dict, config: dict,
                f"<i>{_upside(ep,tgt)}</i>{stop_str}")
         tl = _tline(c.get("thesis"), c.get("catalyst"))
         if tl: row += f"\n{tl}"
-        pe = c.get("plain_english", "")
-        if pe: row += f"\n  💡 <i>{_esc(pe)}</i>"
         return row
 
     def _row_options(o):
@@ -508,9 +507,8 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
 
     def _add_section(picks_list: list, get_sym, asset_type: str, header: str, icon: str = ""):
         """
-        Append a section header + picks paired 2-per-row.
+        Append a section header + one pick per row (3 buttons: Buy, Watch, Chart).
         Single pick: skip the header row, fold the icon into the button text.
-        Odd pick at end: place its Buy + Chart on one row (no empty columns).
         """
         if not picks_list:
             return
@@ -524,14 +522,8 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
             buttons.append(pair)
             return
         buttons.append(_header(header))
-        it = iter(picks_list)
-        for p in it:
-            right = next(it, None)
-            if right is None:
-                # Last odd pick — buy + chart on one row, no empty columns
-                buttons.append(_pair(p, asset_type))
-            else:
-                buttons.append(_pair(p, asset_type) + _pair(right, asset_type))
+        for p in picks_list:
+            buttons.append(_pair(p, asset_type))
 
     buttons = []
 
