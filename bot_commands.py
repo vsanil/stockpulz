@@ -162,6 +162,7 @@ def handle_callback_query(callback_query: dict) -> None:
         "sold_confirm":       "⏳ Closing position…",
         "bought_confirm":     "⏳ Logging position…",
         "buy_pick":           "🛒 Loading pick details…",
+        "watch_pick":         "👁 Adding to watchlist…",
         "confirm_buy":        "⏳ Logging position…",
         "skip_buy":           "👍 Skipped.",
         "change_buy_amount":  "✏️ Enter your amount…",
@@ -888,7 +889,7 @@ def handle_callback_query(callback_query: dict) -> None:
                         {"text": "❌ Skip",        "callback_data": skip_cb},
                     ],
                     [
-                        {"text": f"✏️ Bought at ${_p(entry)}/share", "callback_data": change_amt_cb},
+                        {"text": f"✏️ Edit entry price  ·  ${_p(entry)}/share", "callback_data": change_amt_cb},
                     ],
                 ],
                 chat_id=chat_id,
