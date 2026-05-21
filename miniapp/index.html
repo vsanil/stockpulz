@@ -2930,13 +2930,13 @@ function calcPositionSize() {
   if (!account || !riskPct) { res.textContent = ''; return; }
   if (!entry || !stop || stop >= entry) {
     const riskAmt = (account * riskPct / 100).toFixed(2);
-    res.innerHTML = \`Risk amount: <b>$\${riskAmt}</b>  ·  Set entry &amp; stop to get share count.\`;
+    res.innerHTML = `Risk amount: <b>$${riskAmt}</b>  ·  Set entry &amp; stop to get share count.`;
     return;
   }
   const riskPerShare = entry - stop;
   const shares = Math.floor((account * riskPct / 100) / riskPerShare);
   const cost   = (shares * entry).toFixed(2);
-  res.innerHTML = \`<b>\${shares} shares</b> @ $\${entry.toFixed(2)}  ·  Cost ~<b>$\${cost}</b>  ·  Risk <b>$\${(shares * riskPerShare).toFixed(2)}</b>\`;
+  res.innerHTML = `<b>${shares} shares</b> @ $${entry.toFixed(2)}  ·  Cost ~<b>$${cost}</b>  ·  Risk <b>$${(shares * riskPerShare).toFixed(2)}</b>`;
   if (shares > 0) {
     document.getElementById('addpos-shares').value = shares;
   }
