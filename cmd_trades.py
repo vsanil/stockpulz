@@ -24,7 +24,7 @@ from cmd_helpers import (
     _CRYPTO_SYMBOLS,
     _get_client,
 )
-from cmd_trade_exec import _execute_bought, _execute_sold, _execute_update_level, _send_chart
+from cmd_trade_exec import _execute_bought, _execute_sold, _execute_update_level, _execute_add, _execute_trim, _send_chart, _offer_setstop_if_needed
 from cmd_settings import _prompt_for_param, _send_settings_panel
 from cmd_nlp import _nl_parse_trade, _nl_extract_tickers_list
 
@@ -32,6 +32,284 @@ from cmd_nlp import _nl_parse_trade, _nl_extract_tickers_list
 def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
     """Real-money trade commands."""
     # ── /bought [TICKER|name [price] [shares]] ───────────────────────────────
+    # ── /add TICKER [PRICE] [SHARES] — scale into existing position ──────────
+    # ── /trim TICKER [SHARES] [PRICE] — partial close ────────────────────────
+    if text.startswith("TRIM "):
+        import re as _re
+        parts  = text[5:].strip().split()
+        ticker = parts[0].upper() if parts else ""
+        if not ticker:
+            return (
+                "✂️ <b>Trim a position</b>\n\n"
+                "Usage: <code>/trim TICKER [SHARES] [PRICE]</code>\n"
+                "e.g. <code>/trim NVDA</code>  — sells half at live price\n"
+                "e.g. <code>/trim NVDA 10</code>  — sells 10 shares at live price\n"
+                "e.g. <code>/trim NVDA 10 145.50</code>  — sells 10 shares at $145.50\n\n"
+                "<i>Logs a partial close. Use /sold to close the full position.</i>"
+            )
+        shares_arg = None
+        price_arg  = None
+        nums = [p for p in parts[1:] if _re.match(r"[\d.,]+$", p)]
+        if len(nums) >= 1:
+            try:
+                shares_arg = float(nums[0].replace(",", ""))
+            except ValueError:
+                pass
+        if len(nums) >= 2:
+            try:
+                price_arg = float(nums[1].replace(",", ""))
+            except ValueError:
+                pass
+        return _execute_trim(ticker, chat_id, shares_arg, price_arg)
+
+    if text == "TRIM":
+        return (
+            "✂️ <b>Trim a position</b>\n\n"
+            "Usage: <code>/trim TICKER [SHARES] [PRICE]</code>\n"
+            "e.g. <code>/trim NVDA</code>  — sells half at live price\n"
+            "e.g. <code>/trim NVDA 10</code>  — sells 10 shares at live price\n\n"
+            "<i>Logs a partial close. Use /sold to close the full position.</i>"
+        )
+
+    # ── /add TICKER [PRICE] [SHARES] — scale into existing position ──────────
+    if text.startswith("ADD "):
+        import re as _re
+        parts  = text[4:].strip().split()
+        ticker = parts[0].upper() if parts else ""
+        if not ticker:
+            return (
+                "➕ <b>Scale into a position</b>\n\n"
+                "Usage: <code>/add TICKER PRICE SHARES</code>\n"
+                "e.g. <code>/add NVDA 138.50 10</code>\n\n"
+                "<i>Recalculates your average entry across all shares.</i>"
+            )
+        price_arg  = None
+        shares_arg = None
+        nums = [p for p in parts[1:] if _re.match(r"[\d.,]+$", p)]
+        if len(nums) >= 1:
+            try:
+                price_arg = float(nums[0].replace(",", ""))
+            except ValueError:
+                pass
+        if len(nums) >= 2:
+            try:
+                shares_arg = float(nums[1].replace(",", ""))
+            except ValueError:
+                pass
+        return _execute_add(ticker, chat_id, price_arg, shares_arg)
+
+    if text == "ADD":
+        return (
+            "➕ <b>Scale into a position</b>\n\n"
+            "Usage: <code>/add TICKER PRICE SHARES</code>\n"
+            "e.g. <code>/add NVDA 138.50 10</code>\n\n"
+            "<i>Recalculates your average entry across all shares.</i>"
+        )
+
+    # ── /size TICKER [RISK%] — standalone position sizing ────────────────────
+    if text.startswith("SIZE ") or text == "SIZE":
+        import re as _re
+        raw = text[5:].strip() if text.startswith("SIZE ") else ""
+        if not raw:
+            return (
+                "📐 <b>Position size calculator</b>\n\n"
+                "Usage: <code>/size TICKER [RISK%]</code>\n"
+                "e.g. <code>/size NVDA</code>  — uses your default risk %\n"
+                "e.g. <code>/size NVDA 1.5</code>  — override to 1.5% risk\n\n"
+                "<i>Calculates shares and allocation based on portfolio size, "
+                "risk per trade, and live ATR-based stop.</i>"
+            )
+        parts  = raw.split()
+        ticker = parts[0].upper()
+        # Optional custom risk% override
+        custom_risk = None
+        for p in parts[1:]:
+            try:
+                custom_risk = float(p.replace("%", ""))
+                break
+            except ValueError:
+                pass
+
+        try:
+            from config_manager import get_user_config
+            from cmd_trade_exec import _suggest_atr_stop
+            u_cfg    = get_user_config(chat_id)
+            port_cfg = u_cfg.get("portfolio", {}) if isinstance(u_cfg.get("portfolio"), dict) else {}
+            cap      = port_cfg.get("portfolio_size")
+            risk_pct = custom_risk if custom_risk is not None else float(port_cfg.get("risk_per_trade_pct", 1.0))
+
+            live = _fetch_live_price(ticker)
+            if not live:
+                return f"❌ Could not fetch live price for <b>{ticker}</b>. Try again in a moment."
+
+            atr_stop = _suggest_atr_stop(ticker, live)
+            stop_str = f"<code>${_p(atr_stop)}</code> (1.5× ATR)" if atr_stop else "<i>unavailable</i>"
+
+            lines = [f"📐 <b>{ticker}</b> position sizing  ·  live <code>${_p(live)}</code>"]
+
+            if cap and atr_stop and atr_stop > 0:
+                cap_f        = float(cap)
+                risk_dollars = cap_f * risk_pct / 100
+                risk_per_sh  = live - atr_stop
+                if risk_per_sh > 0:
+                    shares    = int(risk_dollars / risk_per_sh)
+                    alloc     = round(shares * live, 2)
+                    alloc_pct = alloc / cap_f * 100
+                    rr_str    = ""
+                    lines += [
+                        "",
+                        f"  Portfolio size:  <code>${cap_f:,.0f}</code>",
+                        f"  Risk per trade:  <code>{risk_pct:.1f}%</code>  → <b>${risk_dollars:,.2f}</b>",
+                        f"  Suggested stop:  {stop_str}",
+                        f"  Risk per share:  <code>${risk_per_sh:.2f}</code>",
+                        "",
+                        f"  <b>Recommended:</b> <b>{shares} shares</b>  ≈ <code>${alloc:,.2f}</code>  ({alloc_pct:.1f}% of portfolio)",
+                        "",
+                        f"  <i>Max loss if stop hit: ${risk_dollars:,.2f} ({risk_pct:.1f}%)</i>",
+                    ]
+                else:
+                    lines.append(f"\n  Suggested stop: {stop_str}\n  <i>Stop is above live price — cannot size.</i>")
+            else:
+                missing = []
+                if not cap:
+                    missing.append("portfolio size (<code>/settings</code>)")
+                if not atr_stop:
+                    missing.append("ATR stop (insufficient price history)")
+                lines += [
+                    f"\n  Suggested stop: {stop_str}",
+                    f"\n⚠️ Need {' and '.join(missing)} to calculate shares.",
+                ]
+
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"❌ Size calculation failed: {exc}"
+
+    # ── /pause TICKER — mute nudges for a position (toggle) ─────────────────
+    if text.startswith("PAUSE ") or text == "PAUSE":
+        from config_manager import save_user_trade_log
+        raw = text[6:].strip().upper() if text.startswith("PAUSE ") else ""
+        if not raw:
+            return (
+                "🔇 <b>Pause nudges for a position</b>\n\n"
+                "Usage: <code>/pause TICKER</code>\n"
+                "e.g. <code>/pause NVDA</code>\n\n"
+                "Mutes trailing stop nudges, stale alerts, and partial profit prompts "
+                "for that position until you run <code>/pause TICKER</code> again to resume."
+            )
+        ticker = raw.split()[0]
+        log    = load_user_trade_log(chat_id)
+        found  = False
+        for trade in log.get("open", []):
+            if (trade.get("ticker") or "").upper() == ticker:
+                currently_paused = trade.get("_paused", False)
+                trade["_paused"] = not currently_paused
+                found = True
+                action = "🔇 <b>Nudges paused</b>" if trade["_paused"] else "🔔 <b>Nudges resumed</b>"
+                break
+        if not found:
+            return f"❌ No open position found for <b>{ticker}</b>. Check <code>/positions</code>."
+        save_user_trade_log(chat_id, log)
+        verb = "paused" if trade.get("_paused") else "resumed"
+        note = " You won't receive trailing stop, stale, or partial profit alerts for this position." if trade.get("_paused") else " Nudges are active again."
+        return f"{action} for <b>{ticker}</b>.{note}"
+
+    # ── /import — bulk import CSV trade history ───────────────────────────────
+    if text == "IMPORT":
+        return (
+            "📥 <b>Import trade history</b>\n\n"
+            "Paste your CSV text directly after the command:\n"
+            "<code>/import TICKER,ENTRY,EXIT,SHARES,ENTRY_DATE,EXIT_DATE</code>\n\n"
+            "<b>Example:</b>\n"
+            "<code>/import\n"
+            "AAPL,150.00,162.50,10,2024-01-05,2024-01-19\n"
+            "MSFT,310.00,335.00,5,2024-01-10,2024-01-24\n"
+            "TSLA,225.00,210.00,8,2024-02-01,2024-02-15</code>\n\n"
+            "Columns: <code>ticker, entry_price, exit_price, shares, entry_date, exit_date</code>\n"
+            "Header row is optional and will be ignored.\n"
+            "Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>."
+        )
+
+    if text.startswith("IMPORT\n") or text.startswith("IMPORT "):
+        import csv as _csv
+        import io as _io
+        from config_manager import save_user_trade_log
+
+        # everything after "IMPORT" (strip leading newline or space)
+        raw_csv = text[6:].lstrip("\n ")
+        if not raw_csv.strip():
+            return "📥 No CSV data found. Send <code>/import</code> for usage instructions."
+
+        reader = _csv.reader(_io.StringIO(raw_csv))
+        imported = 0
+        skipped  = 0
+        errors   = []
+        log      = load_user_trade_log(chat_id)
+
+        for row_num, row in enumerate(reader, start=1):
+            if not row or not any(c.strip() for c in row):
+                continue
+            # Skip header row
+            first = row[0].strip().upper()
+            if first in ("TICKER", "SYMBOL", "STOCK", "ASSET"):
+                continue
+            if len(row) < 4:
+                errors.append(f"Row {row_num}: too few columns ({len(row)})")
+                skipped += 1
+                continue
+            try:
+                ticker     = row[0].strip().upper()
+                entry_p    = float(row[1].strip().replace(",", ""))
+                exit_p     = float(row[2].strip().replace(",", ""))
+                shares_v   = float(row[3].strip().replace(",", ""))
+                entry_date = row[4].strip() if len(row) > 4 else ""
+                exit_date  = row[5].strip() if len(row) > 5 else ""
+
+                # Normalise date format
+                def _norm_date(d: str) -> str:
+                    import re as _re2
+                    if _re2.match(r"\d{4}-\d{2}-\d{2}", d):
+                        return d
+                    m = _re2.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", d)
+                    if m:
+                        return f"{m.group(3)}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+                    return d
+
+                entry_date = _norm_date(entry_date)
+                exit_date  = _norm_date(exit_date)
+
+                ret_pct = (exit_p - entry_p) / entry_p * 100 if entry_p else 0
+                gain    = (exit_p - entry_p) * shares_v
+
+                record = {
+                    "ticker":       ticker,
+                    "entry_price":  round(entry_p, 4),
+                    "exit_price":   round(exit_p, 4),
+                    "shares":       shares_v,
+                    "return_pct":   round(ret_pct, 2),
+                    "gain_usd":     round(gain, 2),
+                    "bought_at":    entry_date,
+                    "closed_date":  exit_date,
+                    "source":       "import",
+                }
+                log.setdefault("closed", []).append(record)
+                imported += 1
+            except Exception as exc:
+                errors.append(f"Row {row_num}: {exc}")
+                skipped += 1
+
+        if imported:
+            save_user_trade_log(chat_id, log)
+
+        msg = f"📥 <b>Import complete</b> — <b>{imported}</b> trade{'s' if imported != 1 else ''} added."
+        if skipped:
+            msg += f"\n⚠️ {skipped} row{'s' if skipped != 1 else ''} skipped."
+        if errors:
+            err_detail = "\n".join(f"  • {e}" for e in errors[:5])
+            msg += f"\n\n<i>Errors:\n{err_detail}</i>"
+        if imported:
+            msg += "\n\nRun /stats to see your updated performance."
+        return msg
+
     if text == "BOUGHT":
         _prompt_for_param("bought", chat_id)
         return ""
@@ -637,9 +915,22 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             return ""
 
         if text.startswith(prefix):
-            parts = text[len(prefix):].strip().split()
+            raw_upd = text[len(prefix):].strip()
+            label   = "stop-loss" if _field == "stop_loss" else "target"
+
+            # First try NL parse (handles "update my apple stop to 170", "nvda 500", etc.)
+            _nl_upd = _nl_parse_trade("bought", raw_upd)  # reuse bought parser for ticker+price
+            nl_ticker = (_nl_upd.get("ticker") or "").strip(".,;") or None
+            nl_price  = _nl_upd.get("price")
+
+            if nl_ticker and nl_price is not None:
+                _upd_cands = _resolve_ticker_candidates(nl_ticker)
+                ticker     = _upd_cands[0]["ticker"].upper() if _upd_cands else nl_ticker.upper()
+                return _execute_update_level(ticker, _field, float(nl_price), chat_id)
+
+            # Fallback: simple space-split — "AAPL 170" or "AAPL" (one token)
+            parts = raw_upd.split()
             if len(parts) >= 2 and _is_number(parts[-1]):
-                # Everything except last token = ticker/name, last token = price
                 new_price    = float(parts[-1].replace(",", ""))
                 ticker_input = " ".join(parts[:-1])
                 _upd_cands   = _resolve_ticker_candidates(ticker_input)
@@ -649,7 +940,6 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 # Got ticker/name only — resolve then prompt for price
                 _upd_cands = _resolve_ticker_candidates(parts[0])
                 ticker     = _upd_cands[0]["ticker"].upper() if _upd_cands else parts[0].upper()
-                label  = "stop-loss" if _field == "stop_loss" else "target"
                 save_pending_state(chat_id, _cmd.lower(), step=2, data={"ticker": ticker})
                 send_inline_keyboard(
                     f"📝 New {label} price for <b>{ticker}</b>?",
@@ -659,6 +949,142 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 return ""
             else:
                 return f"⚠️ Usage: <code>/{_cmd.lower()} TICKER PRICE</code>  e.g. <code>/{_cmd.lower()} NVDA 118</code>"
+
+    # ── /note TICKER text... — save a note on an open position ──────────────
+    if text == "NOTE":
+        log         = load_user_trade_log(chat_id)
+        open_trades = log.get("open", [])
+        if not open_trades:
+            return "📭 No open positions. Log a buy with /bought first."
+        buttons = [[{"text": t["ticker"], "callback_data": f"note_pick|{t['ticker']}"}]
+                   for t in open_trades]
+        send_inline_keyboard("📝 <b>Add a note to which position?</b>", buttons, chat_id=chat_id)
+        return ""
+
+    if text.startswith("NOTE "):
+        parts   = text[5:].strip().split(None, 1)
+        if not parts:
+            return "⚠️ Usage: <code>/note TICKER Your note here</code>"
+        ticker_raw = parts[0].strip(".,;")
+        note_text  = parts[1].strip() if len(parts) > 1 else ""
+        candidates = _resolve_ticker_candidates(ticker_raw)
+        ticker     = candidates[0]["ticker"].upper() if candidates else ticker_raw.upper()
+        if not note_text:
+            # No note text — prompt
+            save_pending_state(chat_id, "note", step=2, data={"ticker": ticker})
+            send_inline_keyboard(
+                f"📝 What note do you want to add to <b>{ticker}</b>?",
+                [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+                chat_id=chat_id,
+            )
+            return ""
+        # Save note
+        from config_manager import save_user_trade_log
+        log = load_user_trade_log(chat_id)
+        saved = False
+        for t in log.get("open", []):
+            if t["ticker"] == ticker:
+                t["notes"] = note_text[:500]
+                saved = True
+                break
+        if not saved:
+            return f"⚠️ <b>{ticker}</b> not found in your open positions."
+        save_user_trade_log(chat_id, log)
+        return f"📝 Note saved for <b>{ticker}</b>:\n<i>{note_text[:200]}</i>"
+
+    # ── /recap — daily open-position check-in ───────────────────────────────
+    if text == "RECAP":
+        import yfinance as yf
+
+        log         = load_user_trade_log(chat_id)
+        open_trades = log.get("open", [])
+        if not open_trades:
+            return "📭 No open positions.\n\nLog a buy with <code>/bought</code> first."
+
+        # Deduplicate by ticker
+        seen_r: set  = set()
+        unique_r: list = []
+        for t in open_trades:
+            if t["ticker"] not in seen_r:
+                seen_r.add(t["ticker"])
+                unique_r.append(t)
+
+        lines_r    = ["📊 <b>POSITION RECAP</b>\n"]
+        warnings_r = []
+
+        for t in unique_r:
+            ticker = t["ticker"]
+            entry  = t.get("entry_price")
+            stop   = t.get("stop_loss")
+            target = t.get("target_price")
+            yf_sym = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
+
+            current_r = None
+            prev_r    = None
+            try:
+                fi_r      = yf.Ticker(yf_sym).fast_info
+                current_r = getattr(fi_r, "last_price", None) or getattr(fi_r, "regular_market_price", None)
+                prev_r    = getattr(fi_r, "previous_close", None)
+                if current_r: current_r = float(current_r)
+                if prev_r:    prev_r    = float(prev_r)
+            except Exception:
+                pass
+
+            if current_r is None:
+                lines_r.append(f"<b>{ticker}</b>  <i>price unavailable</i>")
+                continue
+
+            # 24h change
+            day_str_r = ""
+            if prev_r and prev_r > 0:
+                day_pct_r  = (current_r - prev_r) / prev_r * 100
+                day_sign_r = "+" if day_pct_r >= 0 else ""
+                day_dot_r  = "🟢" if day_pct_r >= 0 else "🔴"
+                day_str_r  = f"  {day_dot_r} {day_sign_r}{day_pct_r:.1f}% today"
+
+            # P&L vs entry
+            pnl_str_r = ""
+            if entry and float(entry) > 0:
+                pnl_r  = (current_r - float(entry)) / float(entry) * 100
+                sign_r = "+" if pnl_r >= 0 else ""
+                pnl_str_r = f"  <i>({sign_r}{pnl_r:.1f}% from entry)</i>"
+
+            # Stop/target proximity badges
+            badge_r = ""
+            if stop and float(stop) > 0:
+                pct_from_stop_r = (current_r - float(stop)) / float(stop) * 100
+                if current_r <= float(stop):
+                    badge_r = "  🔴 <b>STOP HIT</b>"
+                    warnings_r.append(
+                        f"🔴 <b>{ticker}</b> has hit its stop at <code>${_p(stop)}</code>! "
+                        f"Send <code>/sold {ticker}</code> to exit."
+                    )
+                elif pct_from_stop_r <= 5:
+                    badge_r = f"  ⚠️ {pct_from_stop_r:.1f}% above stop"
+                    warnings_r.append(
+                        f"⚠️ <b>{ticker}</b> is only {pct_from_stop_r:.1f}% above stop "
+                        f"(<code>${_p(stop)}</code>)."
+                    )
+
+            if target and float(target) > 0:
+                pct_from_tgt_r = (float(target) - current_r) / float(target) * 100
+                if current_r >= float(target):
+                    badge_r += "  🎯 <b>TARGET HIT</b>"
+                elif pct_from_tgt_r <= 5:
+                    badge_r += f"  🎯 {pct_from_tgt_r:.1f}% from target"
+
+            lines_r.append(
+                f"<b>{ticker}</b>  <code>${_p(current_r)}</code>{day_str_r}{pnl_str_r}{badge_r}"
+            )
+
+        if warnings_r:
+            lines_r.append("")
+            lines_r.append("──────────────────")
+            lines_r.extend(warnings_r)
+
+        lines_r.append("")
+        lines_r.append("<i>/sold TICKER to close  ·  /updatestop to adjust levels</i>")
+        return "\n".join(lines_r)
 
     # ── /positions / /portfolio ───────────────────────────────────────────────
     if text in ("POSITIONS", "PORTFOLIO"):
@@ -863,27 +1289,1083 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
 
             lines.append("")
 
-        lines.append("<i>Tap a button to remove a holding, or /bought to add one</i>")
+        lines.append("<i>Use the buttons below to act on any position.</i>")
         send_message("\n".join(lines), chat_id=chat_id)
 
-        # ── Quick-close buttons — route through sold_pick so exit price is
-        # captured and P&L is recorded in /stats.  confirm_sell (no price) is
-        # intentionally NOT used here because it calls remove_holding() which
-        # drops the trade from log["open"] without ever writing to log["closed"],
-        # meaning the trade never counts toward win-rate or expectancy.
+        # ── Per-position quick-action buttons ────────────────────────────────
+        # Each position gets a row: [✏️ Edit levels] [💸 Close] [📝 Note]
         buttons = []
         for t in unique_trades:
             ticker = t["ticker"]
-            buttons.append([{
-                "text":          f"💸 Close {ticker}",
-                "callback_data": f"sold_pick|{ticker}",
-            }])
+            entry  = t.get("entry_price", "")
+            live   = prices.get(ticker, "")
+            stop   = t.get("stop_loss", "")
+            target = t.get("target_price", "")
+            buttons.append([
+                {"text": f"✏️ {ticker}",
+                 "callback_data": f"posdetail|{ticker}|{entry}|{live}|{stop}|{target}"},
+                {"text": f"💸 Close",
+                 "callback_data": f"sold_pick|{ticker}"},
+                {"text": f"📝 Note",
+                 "callback_data": f"note_prompt|{ticker}"},
+            ])
         if buttons:
             send_inline_keyboard(
-                "💸 <b>Close a position</b> — I'll ask for your exit price and record P&amp;L:",
+                "⚡ <b>Quick actions</b>",
                 buttons,
                 chat_id=chat_id,
             )
         return ""
+
+    # ── /export — send closed trades as a CSV document ───────────────────────
+    if text == "EXPORT":
+        import csv, io, os
+        from telegram_api import _bot_token
+        import requests as _req
+        log    = load_user_trade_log(chat_id)
+        closed = log.get("closed", [])
+        if not closed:
+            return "📭 No closed trades to export yet."
+
+        # Build CSV in memory
+        buf = io.StringIO()
+        fields = ["ticker", "asset_type", "opened_date", "closed_date",
+                  "entry_price", "closed_price", "shares", "return_pct",
+                  "gain_usd", "outcome"]
+        writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore",
+                                lineterminator="\n")
+        writer.writeheader()
+        for t in sorted(closed, key=lambda x: x.get("closed_date", "")):
+            writer.writerow({f: t.get(f, "") for f in fields})
+
+        csv_bytes = buf.getvalue().encode("utf-8")
+        filename  = f"stockpulz_trades_{chat_id}.csv"
+
+        # Send via Telegram sendDocument
+        try:
+            resp = _req.post(
+                f"https://api.telegram.org/bot{_bot_token()}/sendDocument",
+                data={"chat_id": chat_id,
+                      "caption": f"📊 <b>Trade history export</b> — {len(closed)} closed trades\n"
+                                  "<i>Open in Excel or Google Sheets to analyse your performance.</i>",
+                      "parse_mode": "HTML"},
+                files={"document": (filename, csv_bytes, "text/csv")},
+                timeout=15,
+            )
+            if resp.ok:
+                return ""  # document sent — no additional text reply needed
+            return f"⚠️ Could not send file: {resp.text[:120]}"
+        except Exception as exc:
+            return f"⚠️ Export failed: {exc}"
+
+    # ── /week — this week's trades, P&L and win rate ──────────────────────────
+    if text == "WEEK":
+        import datetime as _dt
+        log    = load_user_trade_log(chat_id)
+        closed = log.get("closed", [])
+        open_t = log.get("open",   [])
+
+        today      = _dt.date.today()
+        week_start = today - _dt.timedelta(days=today.weekday())  # Monday
+        ws         = week_start.isoformat()
+
+        # Trades opened this week
+        opened_wk = [t for t in open_t   if t.get("opened_date", "") >= ws]
+        opened_wk += [t for t in closed  if t.get("opened_date", "") >= ws]
+
+        # Trades closed this week
+        closed_wk = [t for t in closed if t.get("closed_date", "") >= ws]
+
+        if not opened_wk and not closed_wk:
+            return (
+                f"📅 <b>This Week</b>  <i>({week_start.strftime('%b %d')} – today)</i>\n\n"
+                "No trades opened or closed this week yet.\n"
+                "<i>Log one with /bought.</i>"
+            )
+
+        lines = [f"📅 <b>This Week</b>  <i>({week_start.strftime('%b %d')} – {today.strftime('%b %d')})</i>\n"]
+
+        # Opened
+        if opened_wk:
+            lines.append(f"🟢 <b>Opened ({len(opened_wk)})</b>")
+            for t in opened_wk:
+                entry = t.get("entry_price")
+                lines.append(f"  • <b>{t['ticker']}</b>" + (f" @ ${_p(entry)}" if entry else ""))
+
+        # Closed — wins/losses + P&L
+        if closed_wk:
+            wins     = [t for t in closed_wk if float(t.get("return_pct", 0)) > 0]
+            losses   = [t for t in closed_wk if float(t.get("return_pct", 0)) <= 0]
+            net_usd  = sum(float(t.get("gain_usd", 0)) for t in closed_wk)
+            net_sign = "+" if net_usd >= 0 else ""
+            wr       = int(len(wins) / len(closed_wk) * 100)
+            best     = max(closed_wk, key=lambda t: float(t.get("return_pct", 0)))
+            worst    = min(closed_wk, key=lambda t: float(t.get("return_pct", 0)))
+
+            lines.append(f"\n🔴 <b>Closed ({len(closed_wk)})</b>  ·  {len(wins)}W / {len(losses)}L  ·  {wr}% WR")
+            for t in closed_wk:
+                ret  = float(t.get("return_pct", 0))
+                sign = "+" if ret >= 0 else ""
+                icon = "✅" if ret > 0 else "❌"
+                lines.append(f"  {icon} <b>{t['ticker']}</b>  {sign}{ret:.1f}%")
+
+            pnl_color = "green" if net_usd >= 0 else "red"
+            lines.append(
+                f"\n💰 <b>Net P&amp;L:</b>  "
+                f"<b>{net_sign}${abs(net_usd):,.2f}</b>\n"
+                f"🏆 Best: <b>{best['ticker']}</b> {'+' if float(best.get('return_pct',0))>0 else ''}{float(best.get('return_pct',0)):.1f}%  "
+                f"·  Worst: <b>{worst['ticker']}</b> {'+' if float(worst.get('return_pct',0))>0 else ''}{float(worst.get('return_pct',0)):.1f}%"
+            )
+
+        return "\n".join(lines)
+
+    # ── /journal — trade journal: closed trades with lesson notes ────────────
+    if text == "JOURNAL":
+        log    = load_user_trade_log(chat_id)
+        closed = log.get("closed", [])
+
+        # Only show trades that have a journal note
+        noted  = [t for t in closed if t.get("journal_note")]
+        all_ct = len(closed)
+
+        if not noted:
+            if all_ct == 0:
+                return (
+                    "📓 <b>Trade Journal</b>\n\n"
+                    "No closed trades yet.\n"
+                    "<i>After closing a trade with /sold, you'll be prompted to add a note.</i>"
+                )
+            return (
+                f"📓 <b>Trade Journal</b>\n\n"
+                f"You have {all_ct} closed trade(s) but no journal notes yet.\n"
+                f"<i>After your next /sold, tap 'Add a note' to start building your journal.</i>"
+            )
+
+        lines = [f"📓 <b>Trade Journal</b>  ·  {len(noted)} entr{'y' if len(noted)==1 else 'ies'}\n"]
+        for t in reversed(noted):  # most recent first
+            tk       = t.get("ticker", "?")
+            ret      = t.get("return_pct")
+            closed_d = str(t.get("closed_date") or t.get("closed_at", ""))[:10]
+            note     = t.get("journal_note", "")
+            sign     = "+" if ret and float(ret) >= 0 else ""
+            ret_str  = f"  {sign}{float(ret):.1f}%" if ret is not None else ""
+            emoji    = "📈" if ret and float(ret) >= 0 else "📉"
+            lines.append(
+                f"{emoji} <b>{tk}</b>{ret_str}"
+                + (f"  <i>{closed_d}</i>" if closed_d else "")
+            )
+            lines.append(f'<i>&#8220;{_esc(note[:300])}&#8221;</i>\n')
+
+        return "\n".join(lines)
+
+    # ── /mymovers — today's best & worst movers among open positions ──────────
+    if text == "MYMOVERS":
+        log         = load_user_trade_log(chat_id)
+        open_trades = log.get("open", [])
+        if not open_trades:
+            return (
+                "📭 You have no open positions.\n"
+                "<i>Log one with /bought to start tracking.</i>"
+            )
+
+        tickers = list({t["ticker"] for t in open_trades})
+        send_message("📡 <i>Fetching live prices…</i>", chat_id=chat_id)
+
+        prices = {}
+        for tk in tickers:
+            p = _fetch_live_price(tk)
+            if p:
+                prices[tk] = p
+
+        if not prices:
+            return "⚠️ Could not fetch live prices right now. Try again shortly."
+
+        # Build move list: compare live price vs entry
+        moves = []
+        for t in open_trades:
+            tk    = t["ticker"]
+            live  = prices.get(tk)
+            entry = t.get("entry_price")
+            if not live or not entry:
+                continue
+            try:
+                pct = (float(live) - float(entry)) / float(entry) * 100
+                moves.append((tk, float(live), float(entry), pct))
+            except Exception:
+                continue
+
+        if not moves:
+            return "⚠️ Could not calculate moves — missing entry prices for your positions."
+
+        moves.sort(key=lambda x: x[3], reverse=True)
+
+        lines = ["📊 <b>My Movers</b>  ·  live vs entry\n"]
+        for i, (tk, live, entry, pct) in enumerate(moves):
+            sign  = "+" if pct >= 0 else ""
+            if pct >= 3:
+                icon = "🚀"
+            elif pct >= 1:
+                icon = "📈"
+            elif pct >= -1:
+                icon = "➡️"
+            elif pct >= -3:
+                icon = "📉"
+            else:
+                icon = "🔻"
+            lines.append(
+                f"{icon} <b>{tk}</b>  {sign}{pct:.1f}%  "
+                f"<code>${_p(live)}</code>  <i>entry ${_p(entry)}</i>"
+            )
+
+        best  = moves[0]
+        worst = moves[-1]
+        if len(moves) > 1:
+            lines.append(
+                f"\n🏆 <b>Best:</b> {best[0]} ({'+' if best[3]>=0 else ''}{best[3]:.1f}%)  "
+                f"·  <b>Worst:</b> {worst[0]} ({'+' if worst[3]>=0 else ''}{worst[3]:.1f}%)"
+            )
+
+        return "\n".join(lines)
+
+    # ── /card — shareable performance card PNG ───────────────────────────────
+    if text == "CARD":
+        log    = load_user_trade_log(chat_id)
+        closed = log.get("closed", [])
+        if not closed:
+            return (
+                "📊 <b>Performance Card</b>\n\n"
+                "No closed trades yet — close a position with /sold first.\n"
+                "<i>After your first trade, /card will generate a shareable stats card.</i>"
+            )
+
+        send_message("🎨 <i>Generating your performance card…</i>", chat_id=chat_id)
+
+        def _send_card():
+            try:
+                from card_generator import generate_performance_card
+                from telegram_api import send_photo
+                img = generate_performance_card(chat_id)
+                if img:
+                    rets    = [float(t["return_pct"]) for t in closed if t.get("return_pct") is not None]
+                    wins    = [r for r in rets if r > 0]
+                    wr      = len(wins) / len(rets) * 100 if rets else 0
+                    caption = (
+                        f"📊 <b>My StockPulz stats</b>\n"
+                        f"Win rate: <b>{wr:.0f}%</b>  ·  "
+                        f"{len(closed)} trades closed\n"
+                        f"<i>Generated by StockPulz</i>"
+                    )
+                    send_photo(img, caption=caption, chat_id=chat_id)
+                else:
+                    send_message("⚠️ Could not generate card — try again shortly.", chat_id=chat_id)
+            except Exception as exc:
+                send_message(f"⚠️ Card generation failed: {exc}", chat_id=chat_id)
+
+        import threading
+        threading.Thread(target=_send_card, daemon=True).start()
+        return None
+
+    # ── /top — all-time best closed trades ───────────────────────────────────
+    if text == "TOP" or text.startswith("TOP "):
+        # Optionally: /top 10 — default is 5
+        n = 5
+        parts = text.split()
+        if len(parts) > 1:
+            try:
+                n = max(1, min(int(parts[1]), 20))
+            except ValueError:
+                pass
+
+        log    = load_user_trade_log(chat_id)
+        closed = log.get("closed", [])
+        if not closed:
+            return (
+                "📭 No closed trades yet.\n"
+                "<i>Log your first position with /bought — then /sold to close it.</i>"
+            )
+
+        # Build sortable list from closed trades
+        scored = []
+        for t in closed:
+            ret = t.get("return_pct")
+            if ret is None:
+                continue
+            try:
+                scored.append(t)
+            except Exception:
+                continue
+
+        if not scored:
+            return "⚠️ No trades with P&L data found."
+
+        # Sort by return_pct descending
+        scored.sort(key=lambda x: float(x.get("return_pct", 0)), reverse=True)
+        top_n    = scored[:n]
+        bottom_n = scored[-n:][::-1]  # worst n, reversed so biggest loss is first
+
+        lines = [f"🏆 <b>Your Top {n} Trades</b>  (all-time)\n"]
+        for i, t in enumerate(top_n, 1):
+            ret   = float(t.get("return_pct", 0))
+            sign  = "+" if ret >= 0 else ""
+            tk    = t.get("ticker", "?")
+            pnl   = t.get("gain_usd") or t.get("pnl_usd")
+            pnl_str = f"  <code>${abs(float(pnl)):,.0f}</code>" if pnl else ""
+            closed_d = str(t.get("closed_date") or t.get("closed_at", ""))[:10]
+            lines.append(
+                f"{i}. 🟢 <b>{tk}</b>  <b>{sign}{ret:.1f}%</b>{pnl_str}"
+                + (f"  <i>{closed_d}</i>" if closed_d else "")
+            )
+
+        if len(scored) > n:
+            lines.append(f"\n📉 <b>Toughest {min(n, len(bottom_n))} Trades</b>\n")
+            for i, t in enumerate(bottom_n[:n], 1):
+                ret   = float(t.get("return_pct", 0))
+                sign  = "+" if ret >= 0 else ""
+                tk    = t.get("ticker", "?")
+                pnl   = t.get("gain_usd") or t.get("pnl_usd")
+                pnl_str = f"  <code>${abs(float(pnl)):,.0f}</code>" if pnl else ""
+                closed_d = str(t.get("closed_date") or t.get("closed_at", ""))[:10]
+                lines.append(
+                    f"{i}. 🔴 <b>{tk}</b>  <b>{sign}{ret:.1f}%</b>{pnl_str}"
+                    + (f"  <i>{closed_d}</i>" if closed_d else "")
+                )
+
+        # Summary stats
+        all_rets = [float(t.get("return_pct", 0)) for t in scored]
+        wins     = [r for r in all_rets if r > 0]
+        losses   = [r for r in all_rets if r < 0]
+        win_rate = len(wins) / len(all_rets) * 100 if all_rets else 0
+        avg_win  = sum(wins) / len(wins)   if wins   else 0
+        avg_loss = sum(losses) / len(losses) if losses else 0
+        lines.append(
+            f"\n<i>{len(scored)} closed trades  ·  "
+            f"{win_rate:.0f}% win rate  ·  "
+            f"avg win {avg_win:+.1f}%  ·  avg loss {avg_loss:+.1f}%</i>"
+        )
+
+        return "\n".join(lines)
+
+    # ── /goal — annual return goal progress bar ──────────────────────────────
+    if text == "GOAL" or text.startswith("GOAL "):
+        from config_manager import get_user_config, update_user_config
+        from datetime import date as _date
+        import re as _re
+
+        arg = text[5:].strip() if text.startswith("GOAL ") else ""
+
+        # Setting a new goal: /goal 25 or /goal 25%
+        if arg:
+            num_match = _re.search(r"(\d+(?:\.\d+)?)", arg)
+            if num_match:
+                goal_pct = float(num_match.group(1))
+                update_user_config(chat_id, "goal_return_pct", goal_pct)
+                update_user_config(chat_id, "goal_year",       _date.today().year)
+                return (
+                    f"🎯 Goal set: <b>+{goal_pct:.0f}%</b> return in {_date.today().year}.\n"
+                    f"<i>I'll track your progress here. Send /goal anytime to check in.</i>"
+                )
+            return "⚠️ Usage: <code>/goal 25</code> to set a 25% annual return target."
+
+        # Show progress
+        cfg      = get_user_config(chat_id)
+        goal_pct = cfg.get("goal_return_pct")
+        goal_yr  = cfg.get("goal_year", _date.today().year)
+
+        if not goal_pct:
+            return (
+                "🎯 <b>Annual Return Goal</b>\n\n"
+                "You haven't set a goal yet.\n"
+                "Use <code>/goal 25</code> to set a +25% annual return target.\n\n"
+                "<i>I'll track your closed P&amp;L against it throughout the year.</i>"
+            )
+
+        # Compute progress from closed trades this year
+        log      = load_user_trade_log(chat_id)
+        closed   = log.get("closed", [])
+        cap      = float(cfg.get("portfolio", {}).get("portfolio_size") or 10_000) \
+                   if isinstance(cfg.get("portfolio"), dict) else 10_000
+
+        year_pnl = 0.0
+        yr_str   = str(goal_yr)
+        for t in closed:
+            cd = str(t.get("closed_date") or t.get("closed_at", ""))
+            if cd.startswith(yr_str):
+                try:
+                    year_pnl += float(t.get("gain_usd") or t.get("pnl_usd") or 0)
+                except Exception:
+                    pass
+
+        goal_usd    = cap * float(goal_pct) / 100
+        progress    = min(year_pnl / goal_usd, 1.0) if goal_usd else 0
+        pct_done    = progress * 100
+        actual_pct  = year_pnl / cap * 100 if cap else 0
+
+        # Progress bar: 20 chars
+        filled = int(progress * 20)
+        bar    = "█" * filled + "░" * (20 - filled)
+
+        # Days remaining in year
+        today     = _date.today()
+        year_end  = _date(goal_yr, 12, 31)
+        days_left = max((year_end - today).days, 0)
+        pace_note = ""
+        if days_left > 0 and today.year == goal_yr:
+            day_of_year  = today.timetuple().tm_yday
+            expected_pct = day_of_year / 365 * 100
+            if pct_done >= expected_pct:
+                pace_note = "  ✅ <i>ahead of pace</i>"
+            else:
+                pace_note = "  ⚠️ <i>behind pace</i>"
+
+        sign = "+" if year_pnl >= 0 else ""
+        lines = [
+            f"🎯 <b>Goal: +{goal_pct:.0f}% in {goal_yr}</b>\n",
+            f"<code>[{bar}]</code>  {pct_done:.0f}%{pace_note}",
+            f"Earned: <b>{sign}${year_pnl:,.0f}</b>  ·  Target: <b>${goal_usd:,.0f}</b>",
+            f"Return so far: <b>{actual_pct:+.1f}%</b>  ·  {days_left} days left",
+        ]
+        if pct_done >= 100:
+            lines.append("\n🏆 <b>Goal achieved!</b> Consider raising it: <code>/goal NEW%</code>")
+        elif year_pnl < 0:
+            lines.append(f"\n<i>Currently in the red — need ${goal_usd - year_pnl:,.0f} more to hit goal.</i>")
+        else:
+            lines.append(f"\n<i>Need ${goal_usd - year_pnl:,.0f} more to hit goal.</i>")
+
+        lines.append("<i>Update goal: <code>/goal 30</code></i>")
+        return "\n".join(lines)
+
+    # ── /missed — picks user skipped and their outcome ───────────────────────
+    if text == "MISSED":
+        try:
+            from config_manager import load_weekly_picks
+            weekly = load_weekly_picks()
+        except Exception:
+            weekly = {}
+
+        if not weekly:
+            return (
+                "📭 No recent picks data available.\n"
+                "<i>Weekly picks are stored Mon–Fri; check back after the next morning run.</i>"
+            )
+
+        log    = load_user_trade_log(chat_id)
+        bought = {t["ticker"].upper() for t in log.get("open", []) + log.get("closed", [])}
+
+        # Collect all picks across all days this week
+        all_picks: list[dict] = []
+        for day_picks in weekly.values():
+            stocks = day_picks.get("stocks", day_picks)
+            for bucket in ("short_term", "long_term"):
+                for p in stocks.get(bucket, []):
+                    tk = p.get("ticker", "").upper()
+                    if tk and tk not in bought:
+                        all_picks.append({"ticker": tk, "entry": p.get("entry_price"),
+                                          "target": p.get("target_price"), "thesis": p.get("thesis", "")})
+
+        # Deduplicate by ticker
+        seen: set = set()
+        unique_picks = []
+        for p in all_picks:
+            if p["ticker"] not in seen:
+                seen.add(p["ticker"])
+                unique_picks.append(p)
+
+        if not unique_picks:
+            return "✅ You didn't miss any picks this week — you caught them all!"
+
+        # Fetch live prices for each missed pick
+        missed_tickers = [p["ticker"] for p in unique_picks]
+        prices: dict = {}
+        try:
+            import yfinance as _yf
+            raw = _yf.download(" ".join(missed_tickers), period="1d",
+                                interval="1d", progress=False, auto_adjust=True)
+            if not raw.empty:
+                close = raw["Close"]
+                if hasattr(close, "columns"):
+                    for tk in missed_tickers:
+                        if tk in close.columns:
+                            try:
+                                prices[tk] = float(close[tk].dropna().iloc[-1])
+                            except Exception:
+                                pass
+                else:
+                    if missed_tickers:
+                        try:
+                            prices[missed_tickers[0]] = float(close.dropna().iloc[-1])
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        lines = [f"👀 <b>Picks you skipped this week</b>  ({len(unique_picks)} missed)\n"]
+        for p in unique_picks[:10]:
+            tk     = p["ticker"]
+            entry  = p["entry"]
+            curr   = prices.get(tk)
+            if entry and curr:
+                move   = (curr - float(entry)) / float(entry) * 100
+                emoji  = "🟢" if move > 0 else "🔴"
+                move_s = f"{move:+.1f}%"
+            elif entry:
+                emoji  = "⬜"
+                move_s = "—"
+            else:
+                emoji  = "⬜"
+                move_s = "—"
+            entry_s = f"  <i>entry ${_p(float(entry))}</i>" if entry else ""
+            lines.append(f"{emoji} <b>{tk}</b>  {move_s}{entry_s}")
+
+        lines.append(
+            "\n<i>These are picks from this week you didn't log a /bought on.\n"
+            "Use /bought TICKER to add any you still want to track.</i>"
+        )
+        return "\n".join(lines)
+
+    # ── /best-setup — win rate analysis by sector / asset type / timeframe ──────
+    if text == "BESTSETUP":
+        log    = load_user_trade_log(chat_id)
+        closed = [t for t in log.get("closed", []) if not t.get("partial")]
+        if len(closed) < 5:
+            return (
+                "🔬 <b>Best Setup Analysis</b>\n\n"
+                "You need at least 5 closed trades to find meaningful patterns.\n"
+                "<i>Keep trading and check back!</i>"
+            )
+        # Group by asset_type
+        from collections import defaultdict as _dd
+        by_type: dict = _dd(list)
+        by_tf:   dict = _dd(list)
+        for t in closed:
+            atype = (t.get("asset_type") or "stock").lower()
+            tf    = (t.get("timeframe") or "short_term").lower()
+            by_type[atype].append(t)
+            by_tf[tf].append(t)
+
+        def _wr(trades: list) -> tuple:
+            wins = sum(1 for t in trades if float(t.get("return_pct", 0)) > 0)
+            avg  = sum(float(t.get("return_pct", 0)) for t in trades) / len(trades) if trades else 0
+            return wins, len(trades), round(avg, 1)
+
+        lines = ["🔬 <b>Your Best Setup Analysis</b>", ""]
+
+        # Asset type breakdown
+        if len(by_type) > 1:
+            lines.append("<b>By asset type:</b>")
+            for atype, trades in sorted(by_type.items(), key=lambda x: _wr(x[1])[0] / _wr(x[1])[1], reverse=True):
+                w, n, avg = _wr(trades)
+                wr_pct = int(w / n * 100)
+                icon = "🟢" if wr_pct >= 55 else ("🟡" if wr_pct >= 40 else "🔴")
+                lines.append(f"  {icon} <b>{atype.replace('_', ' ').title()}</b>  {w}/{n}  ({wr_pct}% win rate)  avg {avg:+.1f}%")
+            lines.append("")
+
+        # Timeframe breakdown
+        tf_labels = {"short_term": "Short-term (ST)", "long_term": "Long-term (LT)"}
+        if len(by_tf) > 1:
+            lines.append("<b>By timeframe:</b>")
+            for tf, trades in sorted(by_tf.items(), key=lambda x: _wr(x[1])[0] / _wr(x[1])[1], reverse=True):
+                w, n, avg = _wr(trades)
+                wr_pct = int(w / n * 100)
+                icon = "🟢" if wr_pct >= 55 else ("🟡" if wr_pct >= 40 else "🔴")
+                label = tf_labels.get(tf, tf)
+                lines.append(f"  {icon} <b>{label}</b>  {w}/{n}  ({wr_pct}% win rate)  avg {avg:+.1f}%")
+            lines.append("")
+
+        # Sector breakdown via yfinance (cached on trade records, fallback to lookup)
+        try:
+            import yfinance as yf
+            by_sector: dict = _dd(list)
+            for t in closed:
+                sector = t.get("_sector")
+                if not sector:
+                    try:
+                        sector = yf.Ticker(t["ticker"]).info.get("sector", "Unknown")
+                        t["_sector"] = sector   # cache on record (not persisted, but useful in this run)
+                    except Exception:
+                        sector = "Unknown"
+                if sector and sector != "Unknown":
+                    by_sector[sector].append(t)
+
+            if len(by_sector) >= 2:
+                lines.append("<b>By sector</b> (≥3 trades):")
+                ranked = sorted(
+                    [(s, ts) for s, ts in by_sector.items() if len(ts) >= 3],
+                    key=lambda x: _wr(x[1])[0] / _wr(x[1])[1],
+                    reverse=True,
+                )
+                for sector, trades in ranked[:5]:
+                    w, n, avg = _wr(trades)
+                    wr_pct = int(w / n * 100)
+                    icon = "🟢" if wr_pct >= 55 else ("🟡" if wr_pct >= 40 else "🔴")
+                    lines.append(f"  {icon} <b>{sector}</b>  {w}/{n}  ({wr_pct}% win rate)  avg {avg:+.1f}%")
+
+                # Edge call-out
+                best = ranked[0] if ranked else None
+                worst = ranked[-1] if ranked and len(ranked) > 1 else None
+                if best and worst and best[0] != worst[0]:
+                    bw, bn, _ = _wr(best[1])
+                    ww, wn, _ = _wr(worst[1])
+                    if int(bw/bn*100) - int(ww/wn*100) >= 15:
+                        lines += [
+                            "",
+                            f"💡 <b>Your edge:</b> {int(bw/bn*100)}% win rate in <b>{best[0]}</b> "
+                            f"vs {int(ww/wn*100)}% in {worst[0]}. "
+                            f"Stick to your strengths."
+                        ]
+        except Exception:
+            pass
+
+        lines += ["", "<i>Based on your closed trade history · /review for deeper AI coaching</i>"]
+        return "\n".join(lines)
+
+    # ── /playbook — personal trading rules ───────────────────────────────────
+    if text == "PLAYBOOK" or text.startswith("PLAYBOOK "):
+        from config_manager import get_user_config, update_user_config
+        u_cfg = get_user_config(chat_id)
+        rules = list(u_cfg.get("playbook_rules") or [])
+
+        sub = text[9:].strip() if text.startswith("PLAYBOOK ") else ""
+
+        # /playbook add <rule>
+        if sub.upper().startswith("ADD "):
+            rule = sub[4:].strip()
+            if not rule:
+                return "Usage: <code>/playbook add Never hold through earnings</code>"
+            if len(rules) >= 8:
+                return "📋 You already have 8 rules — the max. Remove one first with <code>/playbook remove N</code>."
+            rules.append(rule)
+            update_user_config(chat_id, "playbook_rules", rules)
+            return f"📋 Rule added: <i>{_esc(rule)}</i>\n\nYou now have {len(rules)} rule{'s' if len(rules) != 1 else ''}. It will surface during /bought and stale nudges."
+
+        # /playbook remove N
+        if sub.upper().startswith("REMOVE ") or sub.upper().startswith("DEL "):
+            idx_str = sub.split()[-1]
+            try:
+                idx = int(idx_str) - 1
+                if 0 <= idx < len(rules):
+                    removed = rules.pop(idx)
+                    update_user_config(chat_id, "playbook_rules", rules)
+                    return f"📋 Removed: <i>{_esc(removed)}</i>"
+                else:
+                    return f"❌ No rule #{idx_str}. You have {len(rules)} rule{'s' if len(rules) != 1 else ''}."
+            except ValueError:
+                return "Usage: <code>/playbook remove 2</code> (use the rule number)"
+
+        # /playbook clear
+        if sub.upper() == "CLEAR":
+            update_user_config(chat_id, "playbook_rules", [])
+            return "📋 All playbook rules cleared."
+
+        # Default: show playbook
+        if not rules:
+            return (
+                "📋 <b>Your Trading Playbook</b>\n\n"
+                "No rules yet. Add your personal trading rules — they'll be shown "
+                "when you enter trades and during position check-ins.\n\n"
+                "<b>Examples:</b>\n"
+                "  • <i>Never hold through earnings</i>\n"
+                "  • <i>Always take 50% off at 2R</i>\n"
+                "  • <i>Only trade with the trend (above 50 EMA)</i>\n\n"
+                "Add one: <code>/playbook add Never hold through earnings</code>"
+            )
+        rule_lines = "\n".join(f"  {i+1}. {_esc(r)}" for i, r in enumerate(rules))
+        return (
+            f"📋 <b>Your Trading Playbook</b>\n\n"
+            f"{rule_lines}\n\n"
+            f"<code>/playbook add &lt;rule&gt;</code> · <code>/playbook remove N</code>"
+        )
+
+    # ── /remind — ticker reminder in N days ──────────────────────────────────
+    if text == "REMIND" or text.startswith("REMIND "):
+        from config_manager import get_user_config, update_user_config
+        from datetime import date as _date, timedelta as _timedelta
+
+        if text == "REMIND":
+            # Show current reminders
+            u_cfg = get_user_config(chat_id)
+            reminders = list(u_cfg.get("reminders") or [])
+            today_str = _date.today().isoformat()
+            # Filter expired reminders
+            reminders = [r for r in reminders if r.get("date", "") >= today_str]
+            update_user_config(chat_id, "reminders", reminders)
+            if not reminders:
+                return (
+                    "⏰ <b>Trade Reminders</b>\n\n"
+                    "No active reminders.\n\n"
+                    "Add one: <code>/remind NVDA in 3 days</code>\n"
+                    "Or by date: <code>/remind NVDA on 2026-06-01</code>"
+                )
+            lines = ["⏰ <b>Your Trade Reminders</b>\n"]
+            for i, r in enumerate(reminders, 1):
+                ticker = r.get("ticker", "?")
+                d = r.get("date", "")
+                note = r.get("note", "")
+                note_part = f" — {_esc(note)}" if note else ""
+                lines.append(f"  {i}. <b>{ticker}</b> on {d}{note_part}")
+            lines.append(f"\n<code>/remind remove N</code> to cancel one")
+            return "\n".join(lines)
+
+        arg = text[7:].strip()  # everything after "REMIND "
+
+        # /remind remove N  — cancel a reminder
+        if arg.upper().startswith("REMOVE ") or arg.upper().startswith("DEL "):
+            idx_str = arg.split()[-1]
+            try:
+                idx = int(idx_str) - 1
+                u_cfg = get_user_config(chat_id)
+                reminders = list(u_cfg.get("reminders") or [])
+                if 0 <= idx < len(reminders):
+                    removed = reminders.pop(idx)
+                    update_user_config(chat_id, "reminders", reminders)
+                    return f"⏰ Reminder for <b>{removed.get('ticker','?')}</b> on {removed.get('date','')} removed."
+                else:
+                    return f"❌ No reminder #{idx_str}."
+            except ValueError:
+                return "Usage: <code>/remind remove 2</code>"
+
+        # Parse: TICKER [in N days | in N weeks | on YYYY-MM-DD] [optional note]
+        import re as _re
+        reminder_date = None
+        ticker = ""
+        note = ""
+
+        # "TICKER in N days"
+        m = _re.match(r"^([A-Z]{1,6})\s+IN\s+(\d+)\s+(DAY|DAYS|WEEK|WEEKS)", arg, _re.I)
+        if m:
+            ticker = m.group(1).upper()
+            n = int(m.group(2))
+            unit = m.group(3).lower()
+            delta = n * 7 if "week" in unit else n
+            reminder_date = (_date.today() + _timedelta(days=delta)).isoformat()
+            note = arg[m.end():].strip().lstrip("-—").strip()
+
+        # "TICKER on YYYY-MM-DD"
+        if not reminder_date:
+            m = _re.match(r"^([A-Z]{1,6})\s+ON\s+(\d{4}-\d{2}-\d{2})", arg, _re.I)
+            if m:
+                ticker = m.group(1).upper()
+                reminder_date = m.group(2)
+                note = arg[m.end():].strip().lstrip("-—").strip()
+
+        if not (ticker and reminder_date):
+            return (
+                "⏰ <b>Set a Trade Reminder</b>\n\n"
+                "Usage:\n"
+                "  <code>/remind NVDA in 3 days</code>\n"
+                "  <code>/remind TSLA in 2 weeks</code>\n"
+                "  <code>/remind AAPL on 2026-06-15</code>\n"
+                "  <code>/remind MSFT in 5 days earnings check</code> (with note)"
+            )
+
+        today_str = _date.today().isoformat()
+        if reminder_date < today_str:
+            return "❌ That date is in the past. Please pick a future date."
+
+        u_cfg = get_user_config(chat_id)
+        reminders = list(u_cfg.get("reminders") or [])
+        reminders.append({"ticker": ticker, "date": reminder_date, "note": note})
+        # Keep sorted by date, cap at 20
+        reminders = sorted(reminders, key=lambda x: x.get("date", ""))[:20]
+        update_user_config(chat_id, "reminders", reminders)
+
+        note_part = f"\n\U0001f4dd Note: <i>{_esc(note)}</i>" if note else ""
+        return (
+            f"⏰ Reminder set!\n\n"
+            f"<b>{ticker}</b> — {reminder_date}{note_part}\n\n"
+            f"I'll send you a push notification on that day.\n"
+            f"See all reminders: <code>/remind</code>"
+        )
+
+    # ── /quiethours — enable/disable quiet hours and set window ─────────────
+    if text == "QUIETHOURS" or text.startswith("QUIETHOURS "):
+        from config_manager import get_user_config, update_user_config
+        import re as _re
+
+        arg = text[12:].strip() if text.startswith("QUIETHOURS ") else ""
+
+        # Show current status when no argument
+        if not arg:
+            cfg      = get_user_config(chat_id)
+            enabled  = cfg.get("quiet_hours_enabled", False)
+            q_from   = cfg.get("quiet_from", "22:00")
+            q_to     = cfg.get("quiet_to",   "07:00")
+            status   = "🔕 <b>ON</b>" if enabled else "🔔 <b>OFF</b>"
+            return (
+                f"🌙 <b>Quiet Hours</b>\n\n"
+                f"Status: {status}\n"
+                f"Window: <code>{q_from}</code> → <code>{q_to}</code> ET\n\n"
+                f"<b>Commands:</b>\n"
+                f"  <code>/quiethours on</code> — enable\n"
+                f"  <code>/quiethours off</code> — disable\n"
+                f"  <code>/quiethours 22:00 07:00</code> — set from/to times (ET)\n\n"
+                f"<i>During quiet hours, non-urgent position alerts are suppressed.</i>"
+            )
+
+        arg_lower = arg.lower()
+
+        if arg_lower == "on":
+            update_user_config(chat_id, "quiet_hours_enabled", True)
+            cfg    = get_user_config(chat_id)
+            q_from = cfg.get("quiet_from", "22:00")
+            q_to   = cfg.get("quiet_to",   "07:00")
+            return (
+                f"🔕 Quiet hours <b>enabled</b>.\n"
+                f"Window: <code>{q_from}</code> → <code>{q_to}</code> ET\n\n"
+                f"<i>To change the window: <code>/quiethours HH:MM HH:MM</code></i>"
+            )
+
+        if arg_lower == "off":
+            update_user_config(chat_id, "quiet_hours_enabled", False)
+            return "🔔 Quiet hours <b>disabled</b>. You'll receive all alerts."
+
+        # Parse "HH:MM HH:MM"
+        time_match = _re.match(r"^(\d{1,2}:\d{2})\s+(\d{1,2}:\d{2})$", arg)
+        if time_match:
+            def _valid_time(s: str) -> bool:
+                try:
+                    h, m = s.split(":")
+                    return 0 <= int(h) <= 23 and 0 <= int(m) <= 59
+                except Exception:
+                    return False
+
+            from_t = time_match.group(1).zfill(5)  # e.g. "9:00" → "09:00"
+            to_t   = time_match.group(2).zfill(5)
+            if not (_valid_time(from_t) and _valid_time(to_t)):
+                return "❌ Invalid times. Use 24-hour format, e.g. <code>/quiethours 22:00 07:00</code>"
+
+            update_user_config(chat_id, "quiet_from", from_t)
+            update_user_config(chat_id, "quiet_to",   to_t)
+            update_user_config(chat_id, "quiet_hours_enabled", True)
+            return (
+                f"🔕 Quiet hours set and <b>enabled</b>.\n"
+                f"Window: <code>{from_t}</code> → <code>{to_t}</code> ET\n\n"
+                f"<i>Disable anytime with <code>/quiethours off</code></i>"
+            )
+
+        return (
+            "❓ Unknown quiet hours command.\n\n"
+            "Usage:\n"
+            "  <code>/quiethours</code> — show status\n"
+            "  <code>/quiethours on</code> / <code>off</code>\n"
+            "  <code>/quiethours 22:00 07:00</code> — set window (ET)"
+        )
+
+    # ── /review — AI critique of recent trades ────────────────────────────────
+    if text == "REVIEW":
+        log    = load_user_trade_log(chat_id)
+        closed = log.get("closed", [])
+        if len(closed) < 3:
+            return (
+                "📊 <b>Trade Review</b>\n\n"
+                "You need at least 3 closed trades for a pattern analysis.\n"
+                "<i>Close more positions with /sold to unlock this.</i>"
+            )
+
+        send_message("🔍 <i>Analyzing your recent trades…</i>", chat_id=chat_id)
+
+        def _run_review():
+            try:
+                recent = sorted(
+                    closed,
+                    key=lambda t: str(t.get("closed_date") or t.get("closed_at", "")),
+                    reverse=True
+                )[:10]
+
+                trade_lines = []
+                for t in recent:
+                    tk    = t.get("ticker", "?")
+                    ret   = t.get("return_pct")
+                    held  = t.get("held_days") or t.get("days_held")
+                    entry = t.get("entry_price")
+                    stop  = t.get("stop_loss")
+                    tgt   = t.get("target_price")
+                    note  = t.get("journal_note", "")
+                    line  = f"{tk}: {'+' if ret and float(ret)>=0 else ''}{float(ret):.1f}%" if ret else f"{tk}: P&L unknown"
+                    if held:    line += f", held {held}d"
+                    if entry and stop:
+                        risk_pct = abs(float(entry) - float(stop)) / float(entry) * 100
+                        line += f", risk {risk_pct:.1f}%"
+                    if entry and tgt:
+                        rr = abs(float(tgt) - float(entry)) / max(abs(float(entry) - float(stop or entry)), 0.01)
+                        line += f", R:R {rr:.1f}"
+                    if note:    line += f", note: {note[:80]}"
+                    trade_lines.append(line)
+
+                prompt = (
+                    "You are a candid, experienced trading coach. "
+                    "Review these recent trades and give ONE specific, actionable observation "
+                    "about a pattern you notice — could be holding time, risk sizing, cutting losses too early, "
+                    "letting losers run, chasing entries, or anything concrete. "
+                    "Be direct and honest. 2-3 sentences max. No generic advice.\n\n"
+                    "Trades (most recent first):\n" + "\n".join(trade_lines)
+                )
+
+                client = _get_client()
+                resp   = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=250,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                insight = resp.content[0].text.strip()
+
+                wins    = [t for t in recent if t.get("return_pct") and float(t["return_pct"]) > 0]
+                losses  = [t for t in recent if t.get("return_pct") and float(t["return_pct"]) <= 0]
+                wr      = len(wins) / len(recent) * 100 if recent else 0
+
+                msg = (
+                    f"🧠 <b>Your Trade Review</b>  <i>(last {len(recent)} trades)</i>\n\n"
+                    f"Win rate: <b>{wr:.0f}%</b>  ·  {len(wins)}W / {len(losses)}L\n\n"
+                    f"<b>Coach's take:</b>\n{_esc(insight)}\n\n"
+                    f"<i>Use /journal to add notes to individual trades, "
+                    f"or /stats for full stats.</i>"
+                )
+                send_message(msg, chat_id=chat_id)
+            except Exception as exc:
+                send_message(f"⚠️ Review failed: {exc}", chat_id=chat_id)
+
+        import threading as _threading
+        _threading.Thread(target=_run_review, daemon=True).start()
+        return None
+
+    # ── /since DATE — date-range P&L ─────────────────────────────────────────
+    if text == "SINCE" or text.startswith("SINCE "):
+        from datetime import datetime, date as _date
+        import re as _re
+
+        raw_arg = text[6:].strip() if text.startswith("SINCE ") else ""
+        if not raw_arg:
+            return (
+                "📅 <b>Date-range P&amp;L</b>\n\n"
+                "Usage: <code>/since jan</code>  or  <code>/since 2025-01-01</code>\n"
+                "Shows your win rate and P&amp;L for trades closed on or after that date."
+            )
+
+        # Parse flexible date: "jan", "jan 2025", "2025-01-01", "01/01/2025"
+        since_date = None
+        raw_lower  = raw_arg.lower().strip()
+        month_map  = {
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+        }
+        try:
+            for abbr, mn in month_map.items():
+                if raw_lower.startswith(abbr):
+                    yr_match = _re.search(r"\d{4}", raw_lower)
+                    yr = int(yr_match.group()) if yr_match else _date.today().year
+                    since_date = _date(yr, mn, 1)
+                    break
+            if not since_date:
+                for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"):
+                    try:
+                        since_date = datetime.strptime(raw_arg, fmt).date()
+                        break
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+        if not since_date:
+            return f"⚠️ Couldn't parse date: <code>{_esc(raw_arg)}</code>\nTry: <code>/since jan</code> or <code>/since 2025-01-01</code>"
+
+        log    = load_user_trade_log(chat_id)
+        closed = log.get("closed", [])
+
+        filtered = []
+        for t in closed:
+            cd = t.get("closed_date") or t.get("closed_at", "")
+            try:
+                t_date = datetime.strptime(str(cd)[:10], "%Y-%m-%d").date()
+                if t_date >= since_date:
+                    filtered.append(t)
+            except Exception:
+                pass
+
+        if not filtered:
+            return (
+                f"📅 No closed trades found since <b>{since_date.strftime('%b %d, %Y')}</b>.\n"
+                f"<i>Total closed trades in log: {len(closed)}</i>"
+            )
+
+        rets      = [float(t["return_pct"]) for t in filtered if t.get("return_pct") is not None]
+        pnl_vals  = [float(t.get("gain_usd") or t.get("pnl_usd") or 0) for t in filtered if t.get("gain_usd") or t.get("pnl_usd")]
+        wins      = [r for r in rets if r > 0]
+        losses    = [r for r in rets if r < 0]
+        win_rate  = len(wins) / len(rets) * 100 if rets else 0
+        net_pnl   = sum(pnl_vals)
+        avg_win   = sum(wins)   / len(wins)   if wins   else 0
+        avg_loss  = sum(losses) / len(losses) if losses else 0
+        best      = max(rets)  if rets else 0
+        worst     = min(rets)  if rets else 0
+
+        pnl_str   = f"  ·  est. <b>{'+'if net_pnl>=0 else ''}${net_pnl:,.0f}</b>" if pnl_vals else ""
+        lines = [
+            f"📅 <b>Since {since_date.strftime('%b %d, %Y')}</b>\n",
+            f"Trades: <b>{len(filtered)}</b>  ·  Win rate: <b>{win_rate:.0f}%</b>{pnl_str}",
+        ]
+        if rets:
+            lines.append(f"Avg win: <b>{avg_win:+.1f}%</b>  ·  Avg loss: <b>{avg_loss:+.1f}%</b>")
+            lines.append(f"Best: <b>{best:+.1f}%</b>  ·  Worst: <b>{worst:+.1f}%</b>")
+
+        # List the trades
+        lines.append("")
+        for t in sorted(filtered, key=lambda x: str(x.get("closed_date") or x.get("closed_at","")), reverse=True)[:15]:
+            ret  = float(t["return_pct"]) if t.get("return_pct") is not None else None
+            tk   = t.get("ticker", "?")
+            cd   = str(t.get("closed_date") or t.get("closed_at", ""))[:10]
+            ret_str = f"<b>{ret:+.1f}%</b>" if ret is not None else "—"
+            emoji   = "🟢" if ret and ret > 0 else "🔴" if ret and ret < 0 else "⬜"
+            lines.append(f"{emoji} <b>{tk}</b>  {ret_str}  <i>{cd}</i>")
+
+        if len(filtered) > 15:
+            lines.append(f"<i>…and {len(filtered)-15} more</i>")
+
+        return "\n".join(lines)
+
+    # ── /share [TICKER] — single trade brag card ─────────────────────────────
+    if text == "TRADESHARE" or text.startswith("TRADESHARE "):
+        arg    = text[11:].strip().upper() if text.startswith("TRADESHARE ") else ""
+        log    = load_user_trade_log(chat_id)
+        closed = log.get("closed", [])
+
+        if not closed:
+            return "📭 No closed trades yet. Close a position with /sold first."
+
+        trade = None
+        if arg:
+            for t in reversed(closed):
+                if t.get("ticker", "").upper() == arg:
+                    trade = t
+                    break
+            if not trade:
+                return f"⚠️ No closed trade found for <b>{_esc(arg)}</b>."
+        else:
+            # Default to best trade (highest return_pct)
+            scored = [t for t in closed if t.get("return_pct") is not None]
+            if not scored:
+                return "⚠️ No trades with P&L data to share."
+            trade = max(scored, key=lambda t: float(t.get("return_pct", 0)))
+
+        tk      = trade.get("ticker", "?")
+        ret     = trade.get("return_pct")
+        ret_str = f"{float(ret):+.1f}%" if ret is not None else ""
+        caption = f"📊 <b>{tk}</b>  {ret_str}  via StockPulz"
+
+        send_message("🎨 <i>Generating trade card…</i>", chat_id=chat_id)
+
+        def _send_share(t=trade, cap=caption):
+            try:
+                from card_generator import generate_trade_card
+                from telegram_api import send_photo
+                img = generate_trade_card(t)
+                if img:
+                    send_photo(img, caption=cap, chat_id=chat_id)
+                else:
+                    send_message("⚠️ Could not generate card.", chat_id=chat_id)
+            except Exception as exc:
+                send_message(f"⚠️ Card error: {exc}", chat_id=chat_id)
+
+        import threading as _threading
+        _threading.Thread(target=_send_share, daemon=True).start()
+        return None
 
     return None

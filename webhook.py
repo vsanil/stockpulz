@@ -613,6 +613,13 @@ def miniapp_index():
     return send_from_directory(_MINIAPP_DIR, "index.html")
 
 
+@app.route("/miniapp/manifest.json")
+def miniapp_manifest():
+    """Serve the PWA web app manifest."""
+    return send_from_directory(_MINIAPP_DIR, "manifest.json",
+                               mimetype="application/manifest+json")
+
+
 def _miniapp_auth() -> str | None:
     """
     Extract and validate chat_id from the Mini App request.
@@ -756,89 +763,27 @@ def miniapp_positions():
             days = (today - _date.fromisoformat(t.get("opened_date", ""))).days
         except Exception:
             pass
+        shares  = t.get("shares")
+        pnl_usd = None
+        if pnl is not None and entry and shares:
+            pnl_usd = round(float(shares) * float(entry) * pnl / 100, 2)
         result.append({
             "ticker":        sym,
             "symbol":        sym,
             "asset_type":    t.get("asset_type", "stock"),
+            "timeframe":     t.get("timeframe"),
             "entry_price":   entry,
             "current_price": round(cur, 4) if cur else None,
             "target_price":  t.get("target_price"),
             "stop_loss":     t.get("stop_loss"),
             "pnl_pct":       pnl,
+            "pnl_usd":       pnl_usd,
+            "shares":        float(shares) if shares is not None else None,
             "days_held":     days,
+            "notes":         t.get("notes") or "",
         })
 
     return jsonify({"positions": result})
-
-
-@app.route("/api/miniapp/stats")
-def miniapp_stats():
-    """Return trade stats + closed trade history for the Mini App."""
-    chat_id = _miniapp_auth()
-    if not chat_id:
-        return jsonify({"error": "unauthorised"}), 403
-
-    from trade_logger import get_performance_stats
-    from config_manager import load_user_trade_log, load_backtest_trades
-
-    stats  = get_performance_stats(chat_id) or {}
-    log    = load_user_trade_log(chat_id)
-    closed = sorted(
-        log.get("closed", []),
-        key=lambda t: t.get("closed_date", ""),
-        reverse=True,
-    )
-
-    has_simulated = False
-    real_count    = len(closed)
-
-    # When user has fewer than 5 real trades, supplement with backtest trades
-    # so the Stats section isn't empty. Compute stats manually from combined set.
-    if real_count < 5:
-        bt = load_backtest_trades(chat_id)
-        if bt:
-            has_simulated = True
-            combined = closed + bt
-            returns  = [t.get("return_pct", 0) for t in combined]
-            wins_l   = [r for r in returns if r > 0]
-            losses_l = [r for r in returns if r <= 0]
-            wr       = round(len(wins_l) / len(returns) * 100, 1) if returns else 0
-            ag       = round(sum(wins_l)   / len(wins_l)   if wins_l   else 0, 2)
-            al       = round(sum(losses_l) / len(losses_l) if losses_l else 0, 2)
-            cum      = round(sum(returns), 2)
-            best_t   = max(combined, key=lambda t: t.get("return_pct", 0))
-            worst_t  = min(combined, key=lambda t: t.get("return_pct", 0))
-            mapped   = {
-                "count":                 len(combined),
-                "wins":                  len(wins_l),
-                "losses":                len(losses_l),
-                "win_rate":              wr,
-                "avg_gain":              ag,
-                "avg_loss":              al,
-                "best":                  [best_t.get("ticker","—"),  best_t.get("return_pct", 0)],
-                "worst":                 [worst_t.get("ticker","—"), worst_t.get("return_pct", 0)],
-                "cumulative_return_pct": cum,
-                "streak":                0,
-                "has_simulated":         True,
-                "real_count":            real_count,
-            }
-            return jsonify({"stats": mapped, "closed": sorted(combined, key=lambda t: t.get("closed_date",""), reverse=True), "has_simulated": True})
-
-    # Map field names for the Mini App
-    mapped = {
-        "count":                 stats.get("count", 0),
-        "wins":                  stats.get("wins", 0),
-        "losses":                stats.get("losses", 0),
-        "win_rate":              stats.get("win_rate", 0),
-        "avg_gain":              stats.get("avg_gain", 0),
-        "avg_loss":              stats.get("avg_loss", 0),
-        "best":                  list(stats["best"])  if stats.get("best")  else ["—", 0],
-        "worst":                 list(stats["worst"]) if stats.get("worst") else ["—", 0],
-        "cumulative_return_pct": stats.get("cumulative_return_pct", 0),
-        "streak":                stats.get("streak", 0),
-    } if stats else {}
-
-    return jsonify({"stats": mapped, "closed": closed, "has_simulated": False})
 
 
 @app.route("/api/miniapp/seed_backtest", methods=["POST"])
@@ -887,11 +832,48 @@ def miniapp_log_bought():
     if not ticker:
         return jsonify({"error": "missing ticker"}), 400
 
+    entry_override  = body.get("entry_price")
+    stop_override   = body.get("stop_loss")
+    shares_override = body.get("shares")
+
     from trade_logger import add_holding
     from config_manager import load_picks
     picks = load_picks() or {}
-    trade, existed = add_holding(ticker, chat_id, picks=picks)
+    trade, existed = add_holding(ticker, chat_id, picks=picks,
+                                 entry_override=entry_override,
+                                 stop_override=stop_override,
+                                 shares_override=shares_override)
+
+    # Auto-create a stop-loss alert if a stop is set on the new position
+    if not existed:
+        stop_for_alert = trade.get("stop_loss")
+        if stop_for_alert:
+            try:
+                from price_alert_manager import add_alert
+                add_alert(str(chat_id), ticker, float(stop_for_alert), direction="below")
+            except ValueError:
+                pass  # alert already exists — skip silently
+            except Exception as exc:
+                print(f"[webhook] auto-stop alert failed (non-critical): {exc}")
+
     return jsonify({"ok": True, "existed": existed, "trade": trade})
+
+
+@app.route("/api/miniapp/unlog_bought", methods=["POST"])
+def miniapp_unlog_bought():
+    """Remove a ticker from the user's bought list / open positions."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    body   = request.get_json(silent=True) or {}
+    ticker = str(body.get("ticker", "")).upper().strip()
+    if not ticker:
+        return jsonify({"error": "missing ticker"}), 400
+
+    from trade_logger import remove_holding
+    removed = remove_holding(ticker, chat_id)
+    return jsonify({"ok": True, "removed": removed})
 
 
 @app.route("/api/miniapp/settings")
@@ -903,13 +885,14 @@ def miniapp_settings():
 
     from config_manager import get_user_config
     ucfg = get_user_config(chat_id)
-    # Notification preference defaults (all on)
+    # Notification preference defaults (all on except auto_stop_alerts)
     _notif_defaults = {
         "notif_target_hit":       True,
         "notif_target_approach":  True,
         "notif_watchlist_move":   True,
         "notif_weekly_recap":     True,
         "notif_morning_picks":    True,
+        "auto_stop_alerts":       False,
     }
     notif_prefs = {k: ucfg.get(k, v) for k, v in _notif_defaults.items()}
     return jsonify({"settings": {
@@ -939,9 +922,10 @@ def miniapp_settings_update():
     # Allowlist of keys the Mini App is allowed to set
     _allowed = {
         "notif_target_hit", "notif_target_approach", "notif_watchlist_move",
-        "notif_weekly_recap", "notif_morning_picks",
+        "notif_weekly_recap", "notif_morning_picks", "auto_stop_alerts",
         "risk_profile", "stock_budget", "crypto_budget",
         "stop_loss_pct", "target_gain_pct",
+        "quiet_hours_enabled", "quiet_from", "quiet_to",
     }
     if not key or key not in _allowed:
         return jsonify({"error": f"key '{key}' not allowed"}), 400
@@ -1188,8 +1172,42 @@ def miniapp_alerts():
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     from price_alert_manager import _load_alerts
     all_alerts = _load_alerts()
-    alerts = all_alerts.get(str(chat_id), [])
-    return jsonify({"ok": True, "alerts": alerts})
+    alerts  = all_alerts.get(str(chat_id), [])
+    history = all_alerts.get(f"_history_{chat_id}", [])
+    return jsonify({"ok": True, "alerts": alerts, "triggered_history": history})
+
+
+@app.route("/api/miniapp/alerts", methods=["POST"])
+def miniapp_alerts_post():
+    """Add or remove a price alert from the Mini App watchlist."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    body   = request.get_json(silent=True) or {}
+    action = body.get("action", "add")   # "add" | "remove"
+    ticker = str(body.get("ticker", "")).strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    try:
+        if action == "remove":
+            from price_alert_manager import remove_alert
+            target_raw = body.get("target")
+            target     = float(target_raw) if target_raw is not None else None
+            msg = remove_alert(str(chat_id), ticker, target_price=target)
+            return jsonify({"ok": True, "message": msg})
+        else:
+            from price_alert_manager import add_alert
+            target_raw = body.get("target")
+            if target_raw is None:
+                return jsonify({"error": "target price required"}), 400
+            direction = body.get("direction", "auto")
+            recurring = bool(body.get("recurring", False))
+            msg = add_alert(str(chat_id), ticker, float(target_raw),
+                            direction=direction, recurring=recurring)
+            return jsonify({"ok": True, "message": msg})
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/miniapp/quote")
@@ -1203,10 +1221,22 @@ def miniapp_quote():
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400
     try:
-        from price_alert_manager import _current_price
+        from price_alert_manager import _current_price, _CRYPTO_SYMBOLS as _ALERT_CRYPTO
         price = _current_price(ticker)
         if price is not None:
-            return jsonify({"ticker": ticker, "price": round(price, 6)})
+            # Compute 24h change % via yfinance previous_close
+            change_pct = None
+            try:
+                import yfinance as _yf
+                yf_sym = f"{ticker}-USD" if ticker in _ALERT_CRYPTO else ticker
+                fi     = _yf.Ticker(yf_sym).fast_info
+                prev   = getattr(fi, "previous_close", None)
+                if prev and float(prev) > 0:
+                    change_pct = round((price - float(prev)) / float(prev) * 100, 2)
+            except Exception:
+                pass
+            return jsonify({"ticker": ticker, "price": round(price, 6),
+                            "change_pct": change_pct})
         # No price — try resolving as a company name via Haiku
         try:
             from cmd_helpers import _resolve_ticker_candidates
@@ -1216,10 +1246,36 @@ def miniapp_quote():
                 if resolved != ticker:
                     price = _current_price(resolved)
                     if price is not None:
-                        return jsonify({"ticker": resolved, "price": round(price, 6)})
+                        return jsonify({"ticker": resolved, "price": round(price, 6),
+                                        "change_pct": None})
         except Exception:
             pass
         return jsonify({"error": f"No price found for {ticker}"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/miniapp/news/<ticker>")
+def miniapp_news(ticker: str):
+    """Return up to 5 recent news headlines for a ticker via yfinance."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    ticker = ticker.strip().upper()
+    if not ticker: return jsonify({"error": "ticker required"}), 400
+    try:
+        import yfinance as _yf
+        from price_alert_manager import _CRYPTO_SYMBOLS as _ALERT_CRYPTO
+        yf_sym = f"{ticker}-USD" if ticker in _ALERT_CRYPTO else ticker
+        raw    = _yf.Ticker(yf_sym).news or []
+        items  = []
+        for n in raw[:5]:
+            title = n.get("title") or n.get("content", {}).get("title", "")
+            url   = n.get("link") or n.get("content", {}).get("canonicalUrl", {}).get("url", "")
+            pub   = n.get("providerPublishTime") or n.get("content", {}).get("pubDate", "")
+            src   = n.get("publisher") or n.get("content", {}).get("provider", {}).get("displayName", "")
+            if title and url:
+                items.append({"title": title, "url": url, "published": pub, "source": src})
+        return jsonify({"ticker": ticker, "news": items})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1230,13 +1286,14 @@ def miniapp_add_alert():
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     from price_alert_manager import add_alert
     body = request.get_json(silent=True) or {}
-    ticker = (body.get("ticker") or "").strip().upper()
-    target = body.get("target")
+    ticker    = (body.get("ticker") or "").strip().upper()
+    target    = body.get("target")
     direction = body.get("direction", "auto")
+    recurring = bool(body.get("recurring", False))
     if not ticker or target is None:
         return jsonify({"error": "ticker and target required"}), 400
     try:
-        msg = add_alert(chat_id, ticker, float(target), direction)
+        msg = add_alert(chat_id, ticker, float(target), direction, recurring=recurring)
         return jsonify({"ok": True, "message": msg})
     except ValueError as e:
         # add_alert raises ValueError for invalid ticker or duplicate — return 400
@@ -1424,6 +1481,14 @@ def miniapp_update_position():
             if "target_price" in body:
                 val = body["target_price"]
                 t["target_price"] = float(val) if val not in (None, "", "null") else None
+            if "entry_price" in body:
+                val = body["entry_price"]
+                t["entry_price"] = float(val) if val not in (None, "", "null") else None
+            if "notes" in body:
+                t["notes"] = str(body["notes"]).strip()[:500]  # cap at 500 chars
+            if "shares" in body:
+                val = body["shares"]
+                t["shares"] = float(val) if val not in (None, "", "null") else None
             updated = True
             break
     if not updated:
@@ -1536,9 +1601,16 @@ def miniapp_share_link():
     return jsonify({"ok": True, "url": bot_link, "text": share_text})
 
 
+_earnings_cache: dict = {"data": None, "date": ""}   # process-lifetime date-keyed cache
+
+
 @app.route("/api/miniapp/earnings")
 def miniapp_earnings():
-    """Return upcoming earnings with EPS estimates via Finnhub."""
+    """Return upcoming earnings for the user's watchlist tickers.
+
+    Uses a single bulk Finnhub calendar call (one HTTP request for all tickers)
+    and caches the full calendar per calendar-date so repeat loads are instant.
+    """
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     raw = request.args.get("tickers", "")
@@ -1550,50 +1622,74 @@ def miniapp_earnings():
     import requests as _req
     finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
     today    = date.today()
+    today_s  = today.isoformat()
     end_date = today + timedelta(days=90)
-    results  = []
 
-    for ticker in tickers[:20]:
-        try:
-            if finnhub_key:
+    # ── Serve from cache if same calendar day ────────────────────────────────
+    if _earnings_cache["date"] == today_s and _earnings_cache["data"] is not None:
+        calendar = _earnings_cache["data"]
+    else:
+        calendar = {}   # symbol → event dict
+        if finnhub_key:
+            try:
+                # ONE bulk call — no symbol filter, returns every company's next event
                 r = _req.get(
                     "https://finnhub.io/api/v1/calendar/earnings",
-                    params={"symbol": ticker, "from": today.isoformat(),
-                            "to": end_date.isoformat(), "token": finnhub_key},
-                    timeout=5,
+                    params={"from": today_s, "to": end_date.isoformat(), "token": finnhub_key},
+                    timeout=10,
                 )
-                events = r.json().get("earningsCalendar", []) if r.ok else []
-                if events:
-                    ev = events[0]  # nearest upcoming event
-                    ed_str = ev.get("date", "")
-                    if not ed_str:
-                        continue
-                    ed_date    = date.fromisoformat(ed_str)
-                    days_until = (ed_date - today).days
-                    if days_until < -1 or days_until > 90:
-                        continue
-                    hour       = (ev.get("hour") or "").lower()
-                    timing_str = "Before open" if hour == "bmo" else "After close" if hour == "amc" else ""
-                    eps_est    = ev.get("epsEstimate")
-                    eps_act    = ev.get("epsActual")
-                    rev_est    = ev.get("revenueEstimate")
-                    results.append({
-                        "ticker":       ticker,
-                        "date":         ed_date.strftime("%b %d"),
-                        "days_until":   max(0, days_until),
-                        "timing":       timing_str,
-                        "eps_estimate": round(eps_est, 2) if eps_est is not None else None,
-                        "eps_actual":   round(eps_act, 2) if eps_act is not None else None,
-                        "rev_estimate": int(rev_est) if rev_est else None,
-                    })
-                    continue
+                if r.ok:
+                    for ev in r.json().get("earningsCalendar", []):
+                        sym = (ev.get("symbol") or "").upper()
+                        if not sym:
+                            continue
+                        # Keep only the earliest event per ticker
+                        if sym not in calendar:
+                            calendar[sym] = ev
+            except Exception as exc:
+                print(f"[earnings] Finnhub bulk fetch failed: {exc}")
+        _earnings_cache["data"] = calendar
+        _earnings_cache["date"] = today_s
 
-            # Fallback: yfinance (no EPS data)
+    # ── Filter down to the user's tickers ────────────────────────────────────
+    results = []
+    ticker_set = set(tickers[:20])
+    for ticker in ticker_set:
+        try:
+            ev = calendar.get(ticker)
+            if ev:
+                ed_str = ev.get("date", "")
+                if not ed_str:
+                    continue
+                ed_date    = date.fromisoformat(ed_str)
+                days_until = (ed_date - today).days
+                if days_until < -1 or days_until > 90:
+                    continue
+                hour       = (ev.get("hour") or "").lower()
+                timing_str = "Before open" if hour == "bmo" else "After close" if hour == "amc" else ""
+                eps_est    = ev.get("epsEstimate")
+                eps_act    = ev.get("epsActual")
+                rev_est    = ev.get("revenueEstimate")
+                results.append({
+                    "ticker":       ticker,
+                    "date":         ed_date.strftime("%b %d"),
+                    "days_until":   max(0, days_until),
+                    "timing":       timing_str,
+                    "eps_estimate": round(eps_est, 2) if eps_est is not None else None,
+                    "eps_actual":   round(eps_act, 2) if eps_act is not None else None,
+                    "rev_estimate": int(rev_est) if rev_est else None,
+                })
+                continue
+
+            # Finnhub returned nothing for this ticker — yfinance fallback
             import yfinance as yf
-            info = yf.Ticker(ticker).info
-            ed   = info.get("earningsTimestamp") or info.get("earningsDate")
+            from datetime import datetime as _dt
+            info = yf.Ticker(ticker).fast_info
+            ed   = getattr(info, "earnings_date", None)
+            if ed is None:
+                full_info = yf.Ticker(ticker).info
+                ed = full_info.get("earningsTimestamp") or full_info.get("earningsDate")
             if ed:
-                from datetime import datetime as _dt
                 ed_date = _dt.utcfromtimestamp(ed).date() if isinstance(ed, (int, float)) \
                           else _dt.fromisoformat(str(ed)).date()
                 days_until = (ed_date - today).days
@@ -1612,13 +1708,38 @@ def miniapp_earnings():
 
 @app.route("/api/miniapp/watchlist")
 def miniapp_watchlist():
-    """Return user's watchlist tickers."""
+    """Return user's watchlist tickers with asset_type classification."""
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     from config_manager import load_user_trade_log
+    from price_checker import _SYMBOL_TO_CG_ID
     log = load_user_trade_log(chat_id)
     tickers = log.get("watchlist", [])
-    return jsonify({"ok": True, "tickers": tickers})
+    _crypto_syms = {s.upper() for s in _SYMBOL_TO_CG_ID}
+    asset_types  = {t: ("crypto" if t.upper() in _crypto_syms else "stock") for t in tickers}
+    return jsonify({"ok": True, "tickers": tickers, "asset_types": asset_types})
+
+
+@app.route("/api/miniapp/sparkline/<ticker>")
+def miniapp_sparkline(ticker: str):
+    """Return closing prices for a sparkline chart. period query param: 7d (default) or 30d."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    ticker = ticker.strip().upper()
+    from flask import request as _req
+    period = _req.args.get("period", "7d")
+    if period not in ("7d", "1mo", "3mo"):
+        period = "7d"
+    max_bars = {"7d": 7, "1mo": 30, "3mo": 90}.get(period, 7)
+    try:
+        import yfinance as _yf
+        from price_checker import _SYMBOL_TO_CG_ID as _ALERT_CRYPTO
+        yf_sym = f"{ticker}-USD" if ticker in {s.upper() for s in _ALERT_CRYPTO} else ticker
+        hist = _yf.Ticker(yf_sym).history(period=period, interval="1d", auto_adjust=True)
+        closes = [round(float(v), 4) for v in hist["Close"].dropna().tolist()[-max_bars:]]
+        return jsonify({"ticker": ticker, "closes": closes, "period": period})
+    except Exception as exc:
+        return jsonify({"error": str(exc), "closes": []}), 200
 
 
 @app.route("/api/miniapp/watchlist/add", methods=["POST"])

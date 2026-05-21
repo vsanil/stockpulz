@@ -187,6 +187,9 @@ def _send_settings_panel(chat_id: str) -> None:
     skip_eod    = bool(cfg.get("skip_eod",              False))
     skip_wl     = bool(cfg.get("skip_watchlist_alerts", False))
     skip_pre    = bool(cfg.get("skip_premarket",        False))
+    skip_earn   = bool(cfg.get("skip_earnings",         False))
+    skip_trail  = bool(cfg.get("skip_trail_nudge",      False))
+    skip_stopc  = bool(cfg.get("skip_stop_coverage",    False))
 
     # Portfolio sizing config
     portfolio_cfg  = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
@@ -226,7 +229,10 @@ def _send_settings_panel(chat_id: str) -> None:
         f"📨 10:30 confirm: <b>{'off' if skip_conf else 'on'}</b>   "
         f"🌅 EOD summary: <b>{'off' if skip_eod else 'on'}</b>   "
         f"👁 WL alerts: <b>{'off' if skip_wl else 'on'}</b>   "
-        f"🌅 Pre-market: <b>{'off' if skip_pre else 'on'}</b>"
+        f"🌅 Pre-market: <b>{'off' if skip_pre else 'on'}</b>\n"
+        f"🗓 Earnings warnings: <b>{'off' if skip_earn else 'on'}</b>   "
+        f"📈 Trail nudges: <b>{'off' if skip_trail else 'on'}</b>   "
+        f"🛡 Stop coverage: <b>{'off' if skip_stopc else 'on'}</b>"
     )
 
     buttons = [
@@ -275,6 +281,15 @@ def _send_settings_panel(chat_id: str) -> None:
              "callback_data": "settings_toggle|skip_watchlist_alerts"},
             {"text": f"🌅 Pre-market {'✅' if not skip_pre else '🔕 off'}",
              "callback_data": "settings_toggle|skip_premarket"},
+        ],
+        # Row 7c: earnings + trail nudges + stop coverage
+        [
+            {"text": f"🗓 Earnings {'✅' if not skip_earn else '🔕 off'}",
+             "callback_data": "settings_toggle|skip_earnings"},
+            {"text": f"📈 Trail nudges {'✅' if not skip_trail else '🔕 off'}",
+             "callback_data": "settings_toggle|skip_trail_nudge"},
+            {"text": f"🛡 Stop coverage {'✅' if not skip_stopc else '🔕 off'}",
+             "callback_data": "settings_toggle|skip_stop_coverage"},
         ],
         # Row 8a: portfolio sizing — capital + risk
         [

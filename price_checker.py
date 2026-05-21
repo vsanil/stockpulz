@@ -104,16 +104,20 @@ def get_current_prices(picks: dict) -> dict:
     # ── Crypto prices via CoinGecko (one bulk call) ───────────────────────────
     # Build symbol→id map from picks, filling any gaps with the fallback table
     crypto_symbols = set()
-    for c in crypto.get("short_term", []):
-        sym = c.get("symbol", "").upper()
-        if sym:
-            crypto_symbols.add(sym)
+    for _tf in ("short_term", "long_term"):
+        for c in crypto.get(_tf, []):
+            sym = c.get("symbol", "").upper()
+            if sym:
+                crypto_symbols.add(sym)
+
+    # Collect all crypto picks across both timeframes for id lookup
+    _all_crypto_picks = crypto.get("short_term", []) + crypto.get("long_term", [])
 
     symbol_to_id: dict[str, str] = {}
     for sym in crypto_symbols:
         # Prefer id from picks (Claude may supply it), else use fallback table
         cid = ""
-        for c in crypto.get("short_term", []):
+        for c in _all_crypto_picks:
             if c.get("symbol", "").upper() == sym and c.get("id"):
                 cid = c["id"]
                 break

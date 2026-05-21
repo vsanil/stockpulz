@@ -1,0 +1,26 @@
+{
+  "name": "StockPulz",
+  "short_name": "StockPulz",
+  "description": "AI-powered stock & crypto picks, alerts, and portfolio tracker",
+  "start_url": "/miniapp/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1a1a2e",
+  "theme_color": "#1a1a2e",
+  "icons": [
+    {
+      "src": "/miniapp/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/miniapp/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance"],
+  "lang": "en-US"
+}

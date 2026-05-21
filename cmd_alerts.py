@@ -102,4 +102,47 @@ def _cmd_alerts(text: str, original: str, chat_id: str) -> "str | None":
         )
         return ""
 
+    # ── /alertall — create stop-loss alerts for all open positions with a stop ─
+    if text == "ALERTALL":
+        from price_alert_manager import add_alert
+        from config_manager import load_user_trade_log
+        log = load_user_trade_log(chat_id)
+        open_trades = log.get("open", [])
+
+        # Only consider positions that have a stop_loss price set
+        with_stop = [t for t in open_trades if t.get("stop_loss")]
+        if not with_stop:
+            return (
+                "⚠️ None of your open positions have a stop-loss price set.\n"
+                "Use <code>/updatestop TICKER PRICE</code> to set one, "
+                "then run /alertall again."
+            )
+
+        created, skipped, errors = [], [], []
+        for trade in with_stop:
+            ticker     = trade["ticker"]
+            stop_price = float(trade["stop_loss"])
+            try:
+                add_alert(chat_id, ticker, stop_price, direction="below")
+                created.append((ticker, stop_price))
+            except ValueError as exc:
+                if "already exists" in str(exc).lower():
+                    skipped.append(ticker)
+                else:
+                    errors.append(f"{ticker}: {exc}")
+
+        lines = []
+        if created:
+            lines.append(f"🔔 <b>Created {len(created)} stop alert{'s' if len(created) != 1 else ''}:</b>")
+            for t, p in created:
+                lines.append(f"  📉 <b>{t}</b> → alert below <code>${_p(p)}</code>")
+        if skipped:
+            lines.append(f"\n⏭ <b>Already set ({len(skipped)}):</b> {', '.join(skipped)}")
+        if errors:
+            lines.append(f"\n⚠️ Errors: {'; '.join(errors)}")
+        if not created and not errors:
+            lines.append("✅ All stop-loss alerts are already active — nothing new to create.")
+
+        return "\n".join(lines)
+
     return None

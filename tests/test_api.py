@@ -564,3 +564,229 @@ class TestMisc:
     def test_seed_backtest_returns_ok(self, client):
         r = post(client, "/api/miniapp/seed_backtest", {})
         assert r.status_code == 200
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW: update_position entry_price (Task #146 regression)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestUpdatePositionEntryPrice:
+    """update_position should persist entry_price when included in the body."""
+
+    def _seed_open_trade(self):
+        """Return a picks dict that open_trades() understands."""
+        return {
+            "stocks": {
+                "short_term": [{
+                    "ticker": "AAPL",
+                    "entry_price": 180.0,
+                    "target_price": 200.0,
+                    "stop_loss": 170.0,
+                    "allocation": 1000,
+                    "conviction": "high",
+                    "thesis": "test",
+                }],
+                "long_term": [],
+            },
+            "crypto": {"short_term": [], "long_term": []},
+        }
+
+    def test_update_entry_price_persists(self, client):
+        """POST entry_price=185.0 for AAPL should be stored in the trade log."""
+        # First seed an open position via log_bought
+        post(client, "/api/miniapp/log_bought",
+             {"ticker": "AAPL", "entry_price": 180.0, "shares": 1})
+        # Now update entry price
+        r = post(client, "/api/miniapp/update_position",
+                 {"ticker": "AAPL", "entry_price": 185.0})
+        assert r.status_code == 200
+        assert r.get_json()["ok"] is True
+        # Verify positions endpoint reflects updated entry
+        positions = get(client, "/api/miniapp/positions").get_json()["positions"]
+        aapl = next((p for p in positions if p["ticker"] == "AAPL"), None)
+        assert aapl is not None
+        assert aapl.get("entry_price") == pytest.approx(185.0, abs=0.01)
+
+    def test_update_entry_price_null_clears_field(self, client):
+        """Passing entry_price=null should clear the entry price."""
+        post(client, "/api/miniapp/log_bought",
+             {"ticker": "AAPL", "entry_price": 180.0, "shares": 1})
+        r = post(client, "/api/miniapp/update_position",
+                 {"ticker": "AAPL", "entry_price": None})
+        assert r.status_code == 200
+        positions = get(client, "/api/miniapp/positions").get_json()["positions"]
+        aapl = next((p for p in positions if p["ticker"] == "AAPL"), None)
+        assert aapl is not None
+        assert aapl.get("entry_price") is None
+
+    def test_update_position_missing_ticker_returns_400(self, client):
+        r = post(client, "/api/miniapp/update_position", {"entry_price": 185.0})
+        assert r.status_code == 400
+
+    def test_update_position_nonexistent_ticker_returns_404(self, client):
+        r = post(client, "/api/miniapp/update_position",
+                 {"ticker": "FAKEXYZ", "entry_price": 99.0})
+        assert r.status_code == 404
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW: Watchlist alert endpoint (Task #157)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestWatchlistAlert:
+    """POST /api/miniapp/alerts add/remove actions from the watchlist 🔔 button."""
+
+    def test_add_alert_via_post_returns_ok(self, client):
+        r = post(client, "/api/miniapp/alerts",
+                 {"action": "add", "ticker": "AAPL", "target": 200.0, "direction": "above"})
+        assert r.status_code == 200
+        assert r.get_json()["ok"] is True
+
+    def test_add_alert_auto_direction(self, client):
+        # AAPL = 189.50 → target 200 → auto → above
+        r = post(client, "/api/miniapp/alerts",
+                 {"action": "add", "ticker": "AAPL", "target": 200.0, "direction": "auto"})
+        assert r.get_json()["ok"] is True
+
+    def test_add_alert_shows_in_list(self, client):
+        post(client, "/api/miniapp/alerts",
+             {"action": "add", "ticker": "NVDA", "target": 900.0, "direction": "above"})
+        alerts = get(client, "/api/miniapp/alerts").get_json()["alerts"]
+        assert any(a["ticker"] == "NVDA" for a in alerts)
+
+    def test_add_duplicate_alert_returns_400(self, client):
+        post(client, "/api/miniapp/alerts",
+             {"action": "add", "ticker": "AAPL", "target": 200.0, "direction": "above"})
+        r = post(client, "/api/miniapp/alerts",
+                 {"action": "add", "ticker": "AAPL", "target": 200.0, "direction": "above"})
+        assert r.status_code == 400
+
+    def test_remove_alert_via_post(self, client):
+        post(client, "/api/miniapp/alerts",
+             {"action": "add", "ticker": "AAPL", "target": 200.0, "direction": "above"})
+        r = post(client, "/api/miniapp/alerts",
+                 {"action": "remove", "ticker": "AAPL", "target": 200.0})
+        assert r.status_code == 200
+        assert r.get_json()["ok"] is True
+
+    def test_missing_ticker_returns_400(self, client):
+        r = post(client, "/api/miniapp/alerts",
+                 {"action": "add", "target": 200.0})
+        assert r.status_code == 400
+
+    def test_add_missing_target_returns_400(self, client):
+        r = post(client, "/api/miniapp/alerts",
+                 {"action": "add", "ticker": "AAPL"})
+        assert r.status_code == 400
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW: trade_logger open_trades — long-term crypto tracking (Task #151)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestOpenTradesLtCrypto:
+    """open_trades() must log both short_term and long_term crypto picks."""
+
+    def test_lt_crypto_appears_in_open_trades(self):
+        """Long-term crypto picks should be tracked after open_trades() is called."""
+        from trade_logger import open_trades
+        from config_manager import load_user_trade_log, save_user_trade_log
+
+        chat_id = "test_lt_crypto"
+        # Seed empty log
+        save_user_trade_log(chat_id, {"open": [], "closed": []})
+
+        picks = {
+            "stocks":  {"short_term": [], "long_term": []},
+            "crypto": {
+                "short_term": [{
+                    "symbol": "BTC", "entry_price": 65000, "target_price": 75000,
+                    "stop_loss": 60000, "allocation": 500, "conviction": "high", "thesis": "test",
+                }],
+                "long_term": [{
+                    "symbol": "ETH", "entry_price": 3200, "target_price": 4000,
+                    "stop_loss": 2800, "allocation": 300, "conviction": "medium", "thesis": "test",
+                }],
+            },
+        }
+        open_trades(picks, chat_id)
+
+        log = load_user_trade_log(chat_id)
+        tickers = [t["ticker"] for t in log["open"]]
+        assert "BTC" in tickers, "short_term crypto should be tracked"
+        assert "ETH" in tickers, "long_term crypto should be tracked"
+
+    def test_lt_crypto_timeframe_field_is_long_term(self):
+        """Trades opened from long_term picks should have timeframe='long_term'."""
+        from trade_logger import open_trades
+        from config_manager import load_user_trade_log, save_user_trade_log
+
+        chat_id = "test_lt_crypto_tf"
+        save_user_trade_log(chat_id, {"open": [], "closed": []})
+
+        picks = {
+            "stocks":  {"short_term": [], "long_term": []},
+            "crypto": {
+                "short_term": [],
+                "long_term": [{
+                    "symbol": "SOL", "entry_price": 150, "target_price": 200,
+                    "stop_loss": 130, "allocation": 200, "conviction": "high", "thesis": "test",
+                }],
+            },
+        }
+        open_trades(picks, chat_id)
+
+        log = load_user_trade_log(chat_id)
+        sol = next((t for t in log["open"] if t["ticker"] == "SOL"), None)
+        assert sol is not None
+        assert sol["timeframe"] == "long_term"
+
+    def test_st_crypto_timeframe_field_is_short_term(self):
+        """Trades opened from short_term picks should have timeframe='short_term'."""
+        from trade_logger import open_trades
+        from config_manager import load_user_trade_log, save_user_trade_log
+
+        chat_id = "test_st_crypto_tf"
+        save_user_trade_log(chat_id, {"open": [], "closed": []})
+
+        picks = {
+            "stocks":  {"short_term": [], "long_term": []},
+            "crypto": {
+                "short_term": [{
+                    "symbol": "DOGE", "entry_price": 0.15, "target_price": 0.20,
+                    "stop_loss": 0.12, "allocation": 100, "conviction": "medium", "thesis": "memes",
+                }],
+                "long_term": [],
+            },
+        }
+        open_trades(picks, chat_id)
+
+        log = load_user_trade_log(chat_id)
+        doge = next((t for t in log["open"] if t["ticker"] == "DOGE"), None)
+        assert doge is not None
+        assert doge["timeframe"] == "short_term"
+
+    def test_open_trades_deduplicates_on_rerun(self):
+        """Calling open_trades twice should not double-add tickers."""
+        from trade_logger import open_trades
+        from config_manager import load_user_trade_log, save_user_trade_log
+
+        chat_id = "test_lt_dedup"
+        save_user_trade_log(chat_id, {"open": [], "closed": []})
+
+        picks = {
+            "stocks":  {"short_term": [], "long_term": []},
+            "crypto": {
+                "short_term": [],
+                "long_term": [{
+                    "symbol": "AVAX", "entry_price": 40, "target_price": 55,
+                    "stop_loss": 35, "allocation": 200, "conviction": "high", "thesis": "test",
+                }],
+            },
+        }
+        open_trades(picks, chat_id)
+        open_trades(picks, chat_id)  # second call should not duplicate
+
+        log = load_user_trade_log(chat_id)
+        avax_entries = [t for t in log["open"] if t["ticker"] == "AVAX"]
+        assert len(avax_entries) == 1, "duplicate trade should not be added"
