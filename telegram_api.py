@@ -310,9 +310,14 @@ def broadcast_all(payloads: list[dict]) -> dict[str, bool]:
             if len(txt) <= limit:
                 parts.append(txt)
                 break
-            at = txt.rfind("\n", 0, limit)
-            if at == -1:
-                at = limit
+            # Prefer splitting after a complete </blockquote> to keep HTML valid
+            bq_end = txt.rfind("</blockquote>", 0, limit)
+            if bq_end != -1:
+                at = bq_end + len("</blockquote>")
+            else:
+                at = txt.rfind("\n", 0, limit)
+                if at == -1:
+                    at = limit
             parts.append(txt[:at])
             txt = txt[at:].lstrip("\n")
         return parts

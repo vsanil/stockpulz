@@ -3122,15 +3122,32 @@ async function loadPicks(isRetry = false) {
     }
   });
 
-  // ── 3. Fresh fetch — silently update if cache was shown ────────────────────
-  const wasCold = _coldStartOccurred;
+  // ── 3. Skeleton watchdog — replace skeleton with a message after 5s ──────────
+  // The 25s AbortController timeout can be suspended when the WebApp goes to
+  // the background, leaving the skeleton frozen indefinitely. This timer ensures
+  // the user always sees feedback within 5s even if the fetch is stuck.
+  const _skelTimer = !hadCache ? setTimeout(() => {
+    if (!picksCache) {
+      const sp = document.getElementById('picks-spinner');
+      if (sp && sp.querySelector('.skeleton-card')) {
+        sp.innerHTML =
+          `<div class="empty"><div class="empty-icon" style="font-size:32px">📡</div>` +
+          `<div class="empty-title">Loading market data…</div>` +
+          `<div class="empty-sub">Waking up the server, hang tight.</div></div>`;
+      }
+    }
+  }, 5000) : null;
+
+  // ── 4. Fresh fetch — silently update if cache was shown ────────────────────
   try {
     const data = await api('/api/miniapp/picks');
+    clearTimeout(_skelTimer);
     _coldStartOccurred = false;
     _savePicks(data);             // update cache
     picksCache    = data;
     picksLoadedAt = Date.now();
   } catch (e) {
+    clearTimeout(_skelTimer);
     if (hadCache) return;         // already showing stale data — don't show error
     const is403    = e.status === 403 || (e.message && e.message.includes('403'));
     // 503 = Render still waking up (quick response before 4s cold-start timer fires)
@@ -3165,6 +3182,16 @@ async function loadPicks(isRetry = false) {
     renderPicksView();
   } catch (renderErr) {
     console.error('[picks] render error:', renderErr);
+    // Render failed after data arrived — show a retry button so the user isn't stuck
+    const sp = document.getElementById('picks-spinner');
+    if (sp) {
+      sp.innerHTML =
+        `<div class="empty"><div class="empty-icon">😕</div>` +
+        `<div class="empty-title">Something went wrong</div>` +
+        `<div class="empty-sub">Tap to retry.</div>` +
+        `<button class="btn-retry" onclick="retryLoadPicks()">↻ Try Again</button></div>`;
+      sp.style.display = 'block';
+    }
   }
   if (!hadCache) _prefetchOtherTabs(); // first load: prefetch after picks appear
 }
