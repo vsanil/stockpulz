@@ -190,7 +190,9 @@ def format_daily_message(picks: dict, config: dict,
                          personal_notes: dict | None = None,
                          pick_streaks: dict | None = None,
                          buy_counts: dict | None = None,
-                         recent_stats: dict | None = None) -> str:
+                         recent_stats: dict | None = None,
+                         earnings_this_week: dict | None = None,
+                         held_tickers: set | None = None) -> str:
     """
     Concise daily Telegram message — scannable in under 10 seconds.
     Each pick is 2 lines: prices + thesis. Full detail lives in the mini app.
@@ -278,7 +280,8 @@ def format_daily_message(picks: dict, config: dict,
     def _row_st(s):
         t, e, tgt, stop = s.get("ticker",""), s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop else ""
-        row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}  "
+        held_badge = "  📌 <i>holding</i>" if held_tickers and t.upper() in held_tickers else ""
+        row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}{held_badge}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(e,tgt)}</i>{stop_str}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
@@ -293,7 +296,8 @@ def format_daily_message(picks: dict, config: dict,
     def _row_lt(s):
         t, e, tgt = s.get("ticker",""), s.get("entry_price"), s.get("target_price")
         hz = f"  ·  <i>{_esc(s.get('horizon',''))}</i>" if s.get("horizon") else ""
-        row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}  "
+        held_badge = "  📌 <i>holding</i>" if held_tickers and t.upper() in held_tickers else ""
+        row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}{held_badge}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(e,tgt)}</i>{hz}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
@@ -427,6 +431,14 @@ def format_daily_message(picks: dict, config: dict,
     if not excluded_sectors and alerts_sent == 3:
         lines += ["", "💡 <i>Don't want picks from certain sectors? Tap ⚙️ Settings → Preferences → Excluded Sectors in the dashboard to filter them out.</i>"]
 
+    # ── Earnings this week (across today's picks) ─────────────────────────────
+    if earnings_this_week:
+        e_lines = []
+        for ticker, date_str in sorted(earnings_this_week.items(), key=lambda x: x[1])[:6]:
+            e_lines.append(f"  📅 <b>{ticker}</b> — {date_str}")
+        lines += ["", "🗓 <b>Earnings This Week</b>  <i>(today's picks)</i>"]
+        lines += e_lines
+
     # ── Footer ────────────────────────────────────────────────────────────────
     lines += [
         "",
@@ -480,7 +492,7 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         return f"buy_pick|{ticker}|{entry_str}|{shares}|{asset_type}|{stop_pct}|{target_pct}"
 
     def _pair(pick: dict, asset_type: str) -> list[dict]:
-        """Return [Buy, 📊 Chart] for one pick — used to build 2-per-row layouts."""
+        """Return [Buy, 👁 Watch, 📊 Chart] for one pick."""
         ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
         chart_btn = (
             {"text": "📊 Chart",
@@ -489,7 +501,8 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
             {"text": "📊 Chart", "callback_data": f"chart|{ticker}|{asset_type}"}
         )
         return [
-            {"text": f"✅ Buy {ticker}", "callback_data": _buy_callback(pick, asset_type)},
+            {"text": f"✅ Buy {ticker}",  "callback_data": _buy_callback(pick, asset_type)},
+            {"text": f"👁 Watch",         "callback_data": f"watch_pick|{ticker}"},
             chart_btn,
         ]
 
@@ -948,6 +961,44 @@ def format_eod_full_summary(
             _, row = _row(h["ticker"], h.get("entry_price"),
                           h.get("target_price"), h.get("stop_loss"))
             lines.append(row)
+
+    # ── Portfolio P&L summary ─────────────────────────────────────────────────
+    # Show the user's open-position P&L using today's closing prices.
+    all_holdings = list(open_holdings)  # already passed in
+    port_rows = []
+    for h in all_holdings:
+        tk    = h.get("ticker")
+        entry = h.get("entry_price")
+        price = current_prices.get(tk) if tk else None
+        if not (tk and entry and price):
+            continue
+        try:
+            pct = (float(price) - float(entry)) / float(entry) * 100
+            qty = float(h.get("shares") or 0)
+            pnl_usd = (float(price) - float(entry)) * qty if qty else None
+            port_rows.append((tk, pct, pnl_usd))
+        except Exception:
+            continue
+
+    if port_rows:
+        total_pnl     = sum(r[2] for r in port_rows if r[2] is not None)
+        gainers       = [r for r in port_rows if r[1] > 0]
+        losers        = [r for r in port_rows if r[1] < 0]
+        avg_port_pct  = sum(r[1] for r in port_rows) / len(port_rows)
+        sign          = "+" if avg_port_pct >= 0 else ""
+        pnl_sign      = "+" if total_pnl >= 0 else "-"
+        pnl_emoji     = "📈" if avg_port_pct >= 0 else "📉"
+
+        lines.append("")
+        lines.append(f"<b>{pnl_emoji} Portfolio P&amp;L today</b>")
+        lines.append(
+            f"Avg move: <b>{sign}{avg_port_pct:.1f}%</b>  "
+            f"·  {len(gainers)} up  ·  {len(losers)} down"
+        )
+        if total_pnl != 0:
+            lines.append(
+                f"Est. gain/loss: <b>{pnl_sign}${abs(total_pnl):,.2f}</b>"
+            )
 
     # ── Day averages ──────────────────────────────────────────────────────────
     lines.append("")

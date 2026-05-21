@@ -92,7 +92,7 @@ def _current_price(ticker: str) -> float | None:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def add_alert(chat_id: str, ticker: str, target_price: float,
-              direction: str = "auto") -> str:
+              direction: str = "auto", recurring: bool = False) -> str:
     """
     Set a price alert.
 
@@ -119,19 +119,23 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
                 and a["direction"] == direction):
             raise ValueError(f"Alert already exists: {ticker} {direction} ${target_price:,.2f}")
 
-    chat_alerts.append({
+    entry: dict = {
         "ticker":       ticker,
         "target":       target_price,
         "direction":    direction,
         "set_at":       datetime.utcnow().isoformat(),
         "price_at_set": round(current, 2),
-    })
+    }
+    if recurring:
+        entry["recurring"] = True
+    chat_alerts.append(entry)
     _save_alerts(alerts)
 
     pct  = abs(target_price - current) / current * 100
     arrow = "📈" if direction == "above" else "📉"
+    recurring_note = "  🔁 Recurring" if recurring else ""
     return (
-        f"{arrow} <b>Alert set</b>\n"
+        f"{arrow} <b>Alert set</b>{recurring_note}\n"
         f"Notify when <b>{ticker}</b> goes <b>{direction} ${target_price:,.2f}</b>\n"
         f"Currently <b>${current:,.2f}</b> ({pct:.1f}% away)"
     )
@@ -217,13 +221,25 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
         if hit:
             arrow  = "📈" if a["direction"] == "above" else "📉"
             change = (current - a["price_at_set"]) / a["price_at_set"] * 100
+            recurring_note = "  🔁 <i>(recurring)</i>" if a.get("recurring") else ""
             msg    = (
                 f"🔔 <b>PRICE ALERT TRIGGERED</b> {arrow}\n\n"
                 f"<b>{t}</b> is now <b>${current:,.2f}</b>\n"
-                f"Target: {a['direction']} ${a['target']:,.2f} ✅\n"
+                f"Target: {a['direction']} ${a['target']:,.2f} ✅{recurring_note}\n"
                 f"<i>Change since alert set: {change:+.1f}%</i>"
             )
             triggered.append(msg)
+            # Record history so the Mini App can show "fired at $X · Nh ago"
+            hist_key = f"_history_{chat_id}"
+            hist     = alerts.setdefault(hist_key, [])
+            hist.append({
+                "ticker":          t,
+                "triggered_price": round(current, 2),
+                "triggered_at":    datetime.utcnow().isoformat(),
+                "target":          a["target"],
+                "direction":       a["direction"],
+            })
+            alerts[hist_key] = hist[-50:]  # keep last 50 per user
             if send_keyboard_fn:
                 keyboard = [[{
                     "text": f"🔔 Re-arm at ${a['target']:,.2f}",
@@ -232,6 +248,13 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
                 send_keyboard_fn(msg, keyboard, chat_id=str(chat_id))
             elif send_fn:
                 send_fn(msg)  # _alert() broadcasts to all; no chat_id needed
+            # If recurring, re-add alert with updated price_at_set
+            if a.get("recurring"):
+                remaining.append({
+                    **a,
+                    "price_at_set": round(current, 2),
+                    "set_at":       datetime.utcnow().isoformat(),
+                })
         else:
             remaining.append(a)
 

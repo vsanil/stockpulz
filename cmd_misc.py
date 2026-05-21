@@ -16,6 +16,7 @@ def _cmd_misc(text: str, original: str, chat_id: str) -> "str | None":
             "\n<b>📈 Daily Picks</b>"
             "\n/today — Today's stock &amp; crypto picks"
             "\n/prices — Live prices vs entry for today's picks"
+            "\n/ask — Ask me anything: market questions, your portfolio, trading advice"
             "\n/explain — Ask any market question or why a stock was picked"
             "\n/define — Plain-English explanation of any financial term (e.g. /define RSI)"
             "\n/chart — Candlestick chart for any ticker\n"

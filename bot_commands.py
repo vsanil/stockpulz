@@ -56,7 +56,7 @@ from cmd_helpers import (
     _fetch_live_price, _resolve_ticker_candidates, _resolve_ticker_and_price,
     _nl_param, _send_release_broadcast,
 )
-from cmd_trade_exec import _send_chart, _execute_bought, _execute_sold, _execute_update_level
+from cmd_trade_exec import _send_chart, _execute_bought, _execute_sold, _execute_update_level, _offer_setstop_if_needed
 from cmd_nlp import _explain_pick, _handle_natural_language, _nl_extract_tickers_list, _nl_parse_trade
 from cmd_settings import (
     _BUDGET_BUCKETS, _RISK_OPTIONS, _ASSET_OPTIONS,
@@ -166,6 +166,7 @@ def handle_callback_query(callback_query: dict) -> None:
         "skip_buy":           "👍 Skipped.",
         "change_buy_amount":  "✏️ Enter your amount…",
         "updatelevel_pick":   "⏳ Loading…",
+        "note_pick":          "📝 Loading…",
         "unalert_confirm":    "⏳ Removing alert…",
         "paper_reset_confirm":"⏳ Resetting…",
         "pause_confirm":      "⏳ Pausing picks…",
@@ -175,6 +176,10 @@ def handle_callback_query(callback_query: dict) -> None:
         "sell":               "⏳ Closing position…",
         "alert":              "🔔 Setting alert…",
         "noop":               "",
+        "setstop_skip":       "👍",
+        "setstop_prompt":     "📉 Enter stop price…",
+        "be_stop":            "⏳ Updating stop…",
+        "be_stop_dismiss":    "👍 Got it.",
     }
     toast = _TOASTS.get(action, "⏳ Working…") if action not in ("noop", "cancel_pending", "cancel_abort") else ""
     answer_callback_query(cq_id, text=toast)
@@ -323,6 +328,22 @@ def handle_callback_query(callback_query: dict) -> None:
         send_inline_keyboard(
             f"📝 New {label} for <b>{ticker}</b>?{hint}\n"
             f"<i>Type the price below.</i>",
+            [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+        return
+
+    if action == "note_pick":
+        # User tapped a position from the /note picker — prompt for note text
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        log       = load_user_trade_log(chat_id)
+        cur_notes = next((t.get("notes", "") for t in log.get("open", []) if t["ticker"] == ticker), "")
+        hint      = f"\n<i>Current note: {cur_notes[:80]}</i>" if cur_notes else ""
+        save_pending_state(chat_id, "note", step=2, data={"ticker": ticker})
+        send_inline_keyboard(
+            f"📝 <b>Note for {ticker}</b>{hint}\n<i>Type your note below:</i>",
             [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
             chat_id=chat_id,
         )
@@ -700,9 +721,111 @@ def handle_callback_query(callback_query: dict) -> None:
         try:
             result = _execute_bought(ticker, chat_id, price=price_raw or None, shares=shares_raw or None)
             send_message(result, chat_id=chat_id)
+            _offer_setstop_if_needed(ticker.upper(), chat_id)
         except Exception as exc:
             print(f"[bot] bought_confirm failed for {ticker}: {exc}")
             send_message(f"⚠️ Couldn't log <b>{ticker}</b> — try <code>/bought {ticker}</code> instead.", chat_id=chat_id)
+
+    elif action == "setstop_prompt":
+        # User tapped "Set Stop Loss" after logging a buy — ask for the stop price
+        ticker = parts[1] if len(parts) > 1 else ""
+        if not ticker:
+            return
+        save_pending_state(chat_id, "setstop", step=1, data={"ticker": ticker})
+        send_inline_keyboard(
+            f"📉 Stop loss price for <b>{ticker}</b>? (e.g. <code>170.00</code>)",
+            [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+
+    elif action == "setstop_use":
+        # User tapped "Set Stop @ $X (ATR)" — apply the suggested stop directly
+        ticker     = parts[1].upper() if len(parts) > 1 else ""
+        stop_price = parts[2]         if len(parts) > 2 else ""
+        if not ticker or not stop_price:
+            return
+        try:
+            stop_val = float(stop_price)
+        except ValueError:
+            return
+        result = _execute_update_level(ticker, "stop_loss", stop_val, chat_id)
+        # Also auto-create a price alert at this stop level
+        try:
+            from price_alert_manager import add_alert
+            add_alert(chat_id, ticker, stop_val, direction="below")
+        except Exception:
+            pass
+        send_message(result, chat_id=chat_id)
+
+    elif action == "journal_prompt":
+        # User tapped "Add a note" on the post-sell journal prompt
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        save_pending_state(chat_id, "journal_note", step=1, data={"ticker": ticker})
+        send_inline_keyboard(
+            f"📓 What did you learn from your <b>{ticker}</b> trade?\n"
+            f"<i>Type your note below — a sentence or two is plenty.</i>",
+            [[{"text": "❌ Cancel", "callback_data": f"cancel_pending|{chat_id}"}]],
+            chat_id=chat_id,
+        )
+
+    elif action == "journal_skip":
+        # User tapped Skip on journal prompt — nothing to do
+        return
+
+    elif action == "setstop_skip":
+        # User tapped Skip — toast already sent via _TOASTS above
+        return
+
+    elif action == "be_stop":
+        # User tapped "✅ Set stop to break-even" from the +8% nudge.
+        # callback_data: be_stop|TICKER|ENTRY_PRICE
+        ticker     = parts[1].upper() if len(parts) > 1 else ""
+        entry_str  = parts[2] if len(parts) > 2 else ""
+        if not (ticker and entry_str):
+            return
+        try:
+            from cmd_trade_exec import _execute_update_level
+            result = _execute_update_level(ticker, "stop", entry_str, chat_id)
+            send_message(
+                result or f"✅ Stop for <b>{ticker}</b> moved to break-even (<code>${entry_str}</code>). "
+                f"You can't lose on this trade now.",
+                chat_id=chat_id,
+            )
+        except Exception as exc:
+            send_message(f"❌ Couldn't update stop: {exc}", chat_id=chat_id)
+
+    elif action == "be_stop_dismiss":
+        # User tapped "Not yet" — acknowledge silently
+        return
+
+    elif action == "watch_pick":
+        # User tapped [👁 Watch] on a morning pick.
+        # callback_data: watch_pick|TICKER
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        if not ticker:
+            return
+        try:
+            from config_manager import get_user_config, update_user_config
+            cfg       = get_user_config(chat_id)
+            watchlist = list(cfg.get("watchlist") or [])
+            if ticker.upper() not in [w.upper() for w in watchlist]:
+                watchlist.append(ticker.upper())
+                update_user_config(chat_id, "watchlist", watchlist)
+                send_message(
+                    f"👁 <b>{ticker}</b> added to your watchlist.\n"
+                    f"<i>You'll see it in /watchlist and the Mini App dashboard.</i>",
+                    chat_id=chat_id,
+                )
+            else:
+                send_message(
+                    f"👁 <b>{ticker}</b> is already on your watchlist.",
+                    chat_id=chat_id,
+                )
+        except Exception as exc:
+            send_message(f"⚠️ Could not add to watchlist: {exc}", chat_id=chat_id)
+        return
 
     elif action == "buy_pick":
         # User tapped [✅ Buy TICKER] on the morning picks message.
@@ -909,6 +1032,19 @@ def handle_callback_query(callback_query: dict) -> None:
                         threading.Thread(target=_send_debrief, daemon=True).start()
                 except Exception as _de:
                     print(f"[bot] debrief setup failed (non-critical): {_de}")
+
+            # Journal prompt — ask what the user learned (non-blocking)
+            if result.startswith("✅"):
+                try:
+                    send_inline_keyboard(
+                        f"📓 <b>Trade Journal</b>\nWhat did you learn from this <b>{ticker}</b> trade? "
+                        f"(Optional — helps you improve over time)",
+                        [[{"text": "✍️ Add a note", "callback_data": f"journal_prompt|{ticker.upper()}"},
+                          {"text": "Skip",           "callback_data": f"journal_skip|{ticker.upper()}"}]],
+                        chat_id=chat_id,
+                    )
+                except Exception:
+                    pass
         except Exception as exc:
             print(f"[bot] sold_confirm failed for {ticker}: {exc}")
             send_message(f"⚠️ Couldn't close <b>{ticker}</b> — try <code>/sold {ticker}</code> instead.", chat_id=chat_id)
@@ -1354,7 +1490,10 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
                 send_inline_keyboard(f"🔍 Which one did you mean by <b>{_esc(name_raw)}</b>?",
                                      buttons, chat_id=chat_id)
                 return ""
-            return _execute_bought(candidates[0]["ticker"], chat_id)
+            resolved_ticker = candidates[0]["ticker"]
+            result = _execute_bought(resolved_ticker, chat_id)
+            _offer_setstop_if_needed(resolved_ticker, chat_id)
+            return result
 
         # Multiple items — resolve and add each, report results
         results = []
@@ -1498,6 +1637,25 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "explain":
         return _explain_pick(text)
 
+    if command == "ask":
+        # /ask <question> — portfolio-aware AI Q&A in background thread
+        query = text.strip()
+        if not query:
+            return (
+                "🤖 <b>Ask me anything</b>\n\n"
+                "Examples:\n"
+                "  • <code>/ask Should I hold my NVDA position?</code>\n"
+                "  • <code>/ask What's a good stop-loss strategy?</code>\n"
+                "  • <code>/ask Why is tech selling off today?</code>"
+            )
+        from cmd_nlp import _ask_ai
+        send_message("🤔 <i>Thinking…</i>", chat_id=chat_id)
+        def _run_ask():
+            answer = _ask_ai(query, chat_id)
+            send_message(answer, chat_id=chat_id)
+        threading.Thread(target=_run_ask, daemon=True).start()
+        return None
+
     if command == "feedback":
         feedback_text = text.strip()
         if not feedback_text:
@@ -1555,6 +1713,26 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         ).start()
         return None
 
+    if command == "setstop":
+        # User typed a stop loss price after the post-buy prompt
+        ticker = data.get("ticker", "")
+        raw_stop = text.strip().replace(",", "").replace("$", "")
+        if not ticker:
+            return "⚠️ Couldn't find the ticker. Please use <code>/updatestop TICKER PRICE</code> instead."
+        if not _is_number(raw_stop):
+            return "⚠️ Please send just the price, e.g. <code>170.00</code>"
+        stop_price = float(raw_stop)
+        try:
+            _log = load_user_trade_log(chat_id)
+            for t in _log.get("open", []):
+                if t["ticker"] == ticker:
+                    t["stop_loss"] = stop_price
+                    break
+            save_user_trade_log(chat_id, _log)
+            return f"🛑 Stop loss set for <b>{ticker}</b> at <code>${_p(stop_price)}</code>\n<i>I'll alert you if the price drops to this level.</i>"
+        except Exception as exc:
+            return f"⚠️ Couldn't set stop loss: {exc}"
+
     if command in ("updatestop", "updatetarget"):
         field = "stop_loss" if command == "updatestop" else "target_price"
         if step == 1:
@@ -1578,6 +1756,49 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             if not ticker or not _is_number(text.strip()):
                 return "⚠️ Please send just the new price, e.g. <code>118.50</code>"
             return _execute_update_level(ticker, field, float(text.strip().replace(",", "")), chat_id)
+
+    if command == "note":
+        # step 2: received note text for a ticker
+        ticker = data.get("ticker", "")
+        if not ticker:
+            return "⚠️ Couldn't find the ticker. Please try /note TICKER again."
+        note_text = text.strip()[:500]
+        if not note_text:
+            return "⚠️ Note can't be empty."
+        log = load_user_trade_log(chat_id)
+        saved = False
+        for t in log.get("open", []):
+            if t["ticker"] == ticker:
+                t["notes"] = note_text
+                saved = True
+                break
+        if not saved:
+            return f"⚠️ <b>{ticker}</b> not found in your open positions."
+        save_user_trade_log(chat_id, log)
+        return f"📝 Note saved for <b>{ticker}</b>:\n<i>{note_text[:200]}</i>"
+
+    if command == "journal_note":
+        # User typed a lesson/reflection after closing a trade
+        ticker    = data.get("ticker", "")
+        note_text = text.strip()[:600]
+        if not note_text:
+            return "⚠️ Note can't be empty — skipping journal entry."
+        log = load_user_trade_log(chat_id)
+        # Store on the most-recently-closed trade for this ticker
+        saved = False
+        for t in reversed(log.get("closed", [])):
+            if t.get("ticker") == ticker:
+                t["journal_note"] = note_text
+                saved = True
+                break
+        if saved:
+            save_user_trade_log(chat_id, log)
+            return (
+                f"📓 <b>Journal saved</b> for {ticker}:\n"
+                f"<i>{_esc(note_text[:300])}</i>\n\n"
+                f"<i>View all your notes with /journal</i>"
+            )
+        return f"⚠️ Couldn't find a closed trade for <b>{ticker}</b> to attach the note to."
 
     if command == "accuracy":
         return _parse_and_execute("ACCURACY", original="/accuracy", chat_id=chat_id)
@@ -1939,8 +2160,72 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "start":
         return _parse_and_execute("START", original="/start", chat_id=chat_id)
 
-    if command in ("share", "invite"):
-        return _parse_and_execute("SHARE", original="/share", chat_id=chat_id)
+    if command == "invite":
+        return _parse_and_execute("SHARE", original="/invite", chat_id=chat_id)
+
+    if command in ("tradeshare", "share"):
+        arg      = text.strip().upper() if text.strip() else ""
+        cmd_text = f"TRADESHARE {arg}" if arg else "TRADESHARE"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command == "trim":
+        arg      = text.strip() if text.strip() else ""
+        cmd_text = f"TRIM {arg.upper()}" if arg else "TRIM"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command == "size":
+        arg      = text.strip().upper() if text.strip() else ""
+        cmd_text = f"SIZE {arg}" if arg else "SIZE"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command == "pause":
+        arg      = text.strip().upper() if text.strip() else ""
+        cmd_text = f"PAUSE {arg}" if arg else "PAUSE"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command == "import":
+        # text may be empty (shows help) or contain CSV lines
+        body     = text.strip()
+        cmd_text = f"IMPORT\n{body}" if body else "IMPORT"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command in ("bestsetup", "best_setup", "setup"):
+        return _parse_and_execute("BESTSETUP", original=original, chat_id=chat_id)
+
+    if command == "playbook":
+        body     = text.strip()
+        cmd_text = f"PLAYBOOK {body}" if body else "PLAYBOOK"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command == "remind":
+        body     = text.strip()
+        cmd_text = f"REMIND {body}" if body else "REMIND"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command in ("quiethours", "quiet", "dnd"):
+        body     = text.strip()
+        cmd_text = f"QUIETHOURS {body}" if body else "QUIETHOURS"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command == "add":
+        arg      = text.strip() if text.strip() else ""
+        cmd_text = f"ADD {arg.upper()}" if arg else "ADD"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command == "goal":
+        arg      = text.strip() if text.strip() else ""
+        cmd_text = f"GOAL {arg}" if arg else "GOAL"
+        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+
+    if command == "missed":
+        return _parse_and_execute("MISSED", original="/missed", chat_id=chat_id)
+
+    if command == "review":
+        return _parse_and_execute("REVIEW", original="/review", chat_id=chat_id)
+
+    if command == "since":
+        arg = text.strip() if text.strip() else ""
+        return _parse_and_execute(f"SINCE {arg}" if arg else "SINCE", original=original, chat_id=chat_id)
 
     if command == "adduser":
         return _parse_and_execute(f"ADDUSER {text}", original=f"/adduser {text}", chat_id=chat_id)

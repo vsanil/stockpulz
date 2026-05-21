@@ -22,7 +22,7 @@ from config_manager import load_user_trade_log, save_user_trade_log
 
 def open_trades(picks: dict, chat_id: str) -> None:
     """
-    Add today's short-term picks (stocks + crypto) to a user's open trades list.
+    Add today's short-term and long-term picks (stocks + crypto) to a user's open trades list.
     Skips duplicates — safe to call multiple times.
     """
     today = date.today().isoformat()
@@ -34,42 +34,45 @@ def open_trades(picks: dict, chat_id: str) -> None:
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
 
-    for s in stocks.get("short_term", []):
-        ticker = s.get("ticker")
-        if not ticker or ticker in open_tickers:
-            continue
-        entry = s.get("entry_price")
-        log["open"].append({
-            "ticker":       ticker,
-            "asset_type":   "stock",
-            "entry_price":  entry,
-            "target_price": s.get("target_price"),
-            "stop_loss":    s.get("stop_loss"),
-            "allocation":   s.get("allocation"),
-            "conviction":   s.get("conviction"),
-            "thesis":       s.get("thesis", ""),
-            "opened_date":  today,
-        })
-        open_tickers.add(ticker)
-        new_count += 1
+    for timeframe in ("short_term", "long_term"):
+        for s in stocks.get(timeframe, []):
+            ticker = s.get("ticker")
+            if not ticker or ticker in open_tickers:
+                continue
+            log["open"].append({
+                "ticker":       ticker,
+                "asset_type":   "stock",
+                "entry_price":  s.get("entry_price"),
+                "target_price": s.get("target_price"),
+                "stop_loss":    s.get("stop_loss"),
+                "allocation":   s.get("allocation"),
+                "conviction":   s.get("conviction"),
+                "thesis":       s.get("thesis", ""),
+                "timeframe":    timeframe,
+                "opened_date":  today,
+            })
+            open_tickers.add(ticker)
+            new_count += 1
 
-    for c in crypto.get("short_term", []):
-        ticker = c.get("symbol", "").upper()
-        if not ticker or ticker in open_tickers:
-            continue
-        log["open"].append({
-            "ticker":       ticker,
-            "asset_type":   "crypto",
-            "entry_price":  c.get("entry_price"),
-            "target_price": c.get("target_price"),
-            "stop_loss":    c.get("stop_loss"),
-            "allocation":   c.get("allocation"),
-            "conviction":   c.get("conviction"),
-            "thesis":       c.get("thesis", ""),
-            "opened_date":  today,
-        })
-        open_tickers.add(ticker)
-        new_count += 1
+    for timeframe in ("short_term", "long_term"):
+        for c in crypto.get(timeframe, []):
+            ticker = c.get("symbol", "").upper()
+            if not ticker or ticker in open_tickers:
+                continue
+            log["open"].append({
+                "ticker":       ticker,
+                "asset_type":   "crypto",
+                "entry_price":  c.get("entry_price"),
+                "target_price": c.get("target_price"),
+                "stop_loss":    c.get("stop_loss"),
+                "allocation":   c.get("allocation"),
+                "conviction":   c.get("conviction"),
+                "thesis":       c.get("thesis", ""),
+                "timeframe":    timeframe,
+                "opened_date":  today,
+            })
+            open_tickers.add(ticker)
+            new_count += 1
 
     if new_count:
         save_user_trade_log(chat_id, log)
@@ -222,19 +225,33 @@ def get_performance_stats(chat_id: str, asset_type: str | None = None) -> dict |
     }
 
 
-def add_holding(ticker: str, chat_id: str, picks: dict | None = None) -> tuple[dict, bool]:
+def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
+                entry_override=None, stop_override=None,
+                shares_override=None) -> tuple[dict, bool]:
     """
     Add a ticker to a user's portfolio (no price/qty needed).
     Uses today's pick levels for target/stop alerts if available.
+    entry_override / stop_override: user-supplied prices from the Mini App that
+    take priority over (or fill in for) AI pick levels.
     Returns (trade_dict, already_existed).
     """
     today  = date.today().isoformat()
     log    = load_user_trade_log(chat_id)
     ticker = ticker.upper()
 
-    # Already watching — don't duplicate
+    # Already watching — update price levels if overrides supplied, don't duplicate
     for t in log["open"]:
         if t["ticker"] == ticker:
+            updated = False
+            if entry_override is not None:
+                t["entry_price"] = float(entry_override)
+                updated = True
+            if stop_override is not None:
+                t["stop_loss"] = float(stop_override)
+                updated = True
+            if updated:
+                save_user_trade_log(chat_id, log)
+                print(f"[trade_logger] Updated levels for existing {ticker} ({chat_id})")
             return t, True
 
     # Look up pick levels from today's picks
@@ -259,6 +276,12 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None) -> tuple[d
                     asset_type = "crypto"
                 break
 
+    # User-supplied overrides take priority over (or supplement) AI pick levels
+    if entry_override is not None:
+        entry = float(entry_override)
+    if stop_override is not None:
+        stop = float(stop_override)
+
     trade = {
         "ticker":       ticker,
         "asset_type":   asset_type,
@@ -267,10 +290,11 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None) -> tuple[d
         "stop_loss":    stop,
         "opened_date":  today,
         "manual":       True,
+        "shares":       float(shares_override) if shares_override is not None else None,
     }
     log["open"].append(trade)
     save_user_trade_log(chat_id, log)
-    print(f"[trade_logger] Added holding: {ticker} for {chat_id}")
+    print(f"[trade_logger] Added holding: {ticker} entry={entry} stop={stop} for {chat_id}")
     return trade, False
 
 

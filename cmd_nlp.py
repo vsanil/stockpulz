@@ -307,6 +307,81 @@ Rules:
     return _explain_pick(query)
 
 
+def _ask_ai(query: str, chat_id: str) -> str:
+    """
+    /ask <question> — answer any market or portfolio question using Haiku,
+    with the user's open positions + today's picks as context.
+    This is a richer, portfolio-aware version of /explain.
+    """
+    from config_manager import load_user_trade_log, get_user_config
+    import json as _json
+
+    # Build portfolio context
+    portfolio_lines = []
+    try:
+        log = load_user_trade_log(chat_id)
+        for t in log.get("open", []):
+            tk    = t.get("ticker", "")
+            entry = t.get("entry_price")
+            stop  = t.get("stop_loss")
+            tgt   = t.get("target_price")
+            qty   = t.get("shares")
+            line  = f"  {tk}"
+            if entry: line += f"  entry=${entry}"
+            if stop:  line += f"  stop=${stop}"
+            if tgt:   line += f"  target=${tgt}"
+            if qty:   line += f"  qty={qty}"
+            portfolio_lines.append(line)
+    except Exception:
+        pass
+
+    # Build picks context
+    picks_lines = []
+    try:
+        picks = load_picks()
+        if picks:
+            stocks = picks.get("stocks", picks)
+            crypto = picks.get("crypto", {})
+            all_p  = (
+                stocks.get("short_term", []) + stocks.get("long_term", []) +
+                crypto.get("short_term", []) + crypto.get("long_term", [])
+            )
+            for p in all_p[:8]:
+                sym = p.get("ticker") or p.get("symbol", "")
+                thesis = p.get("thesis") or p.get("reason", "")
+                picks_lines.append(f"  {sym}: {thesis[:80]}" if thesis else f"  {sym}")
+    except Exception:
+        pass
+
+    port_ctx  = "\n".join(portfolio_lines) if portfolio_lines else "  (no open positions)"
+    picks_ctx = "\n".join(picks_lines)     if picks_lines     else "  (no picks today)"
+
+    system = (
+        "You are a knowledgeable, concise personal trading assistant. "
+        "Answer the user's question in 3-6 sentences max. "
+        "Use plain English — no jargon without explanation. "
+        "Reference their portfolio or today's picks only if directly relevant. "
+        "Do NOT add financial disclaimers or suggest they consult a financial advisor."
+    )
+    context = (
+        f"User's open positions:\n{port_ctx}\n\n"
+        f"Today's AI picks:\n{picks_ctx}\n\n"
+        f"Question: {query}"
+    )
+
+    try:
+        client  = _get_client()
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=450,
+            messages=[{"role": "user", "content": f"{system}\n\n{context}"}],
+        )
+        answer = message.content[0].text.strip()
+        return f"🤖 {answer}"
+    except Exception as exc:
+        return f"⚠️ Could not get an answer: {exc}"
+
+
 def _nl_extract_tickers_list(raw: str) -> list[str]:
     """
     Use Haiku to extract a list of stock/crypto names or tickers from a natural-language string.

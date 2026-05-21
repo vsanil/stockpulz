@@ -225,6 +225,346 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         except Exception as exc:
             return f"⚠️ Could not load stats: {exc}"
 
+    if text == "STREAK":
+        try:
+            from trade_logger import get_performance_stats
+            stats = get_performance_stats(chat_id)
+            if not stats or stats["count"] == 0:
+                return (
+                    "🔥 <b>Your Streak</b>\n\n"
+                    "No closed trades yet — streaks build up as you trade.\n\n"
+                    "Log your first exit with <code>/sold TICKER</code> to start tracking."
+                )
+
+            log    = load_user_trade_log(chat_id)
+            closed = sorted(log.get("closed", []),
+                            key=lambda t: t.get("closed_date", ""))
+            results = [float(t["return_pct"]) for t in closed]
+
+            # Current streak (from most recent trade backwards)
+            current_streak     = 0
+            current_direction  = None   # "win" | "loss"
+            for r in reversed(results):
+                direction = "win" if r > 0 else "loss"
+                if current_direction is None:
+                    current_direction = direction
+                if direction == current_direction:
+                    current_streak += 1
+                else:
+                    break
+
+            # Best win streak (all-time)
+            best_win_streak = 0
+            run = 0
+            for r in results:
+                if r > 0:
+                    run += 1
+                    best_win_streak = max(best_win_streak, run)
+                else:
+                    run = 0
+
+            # Worst loss streak (all-time)
+            worst_loss_streak = 0
+            run = 0
+            for r in results:
+                if r <= 0:
+                    run += 1
+                    worst_loss_streak = max(worst_loss_streak, run)
+                else:
+                    run = 0
+
+            # Build message
+            if current_direction == "win" and current_streak >= 2:
+                streak_line = f"🔥 <b>Active win streak:  {current_streak}</b>"
+            elif current_direction == "win" and current_streak == 1:
+                streak_line = "✅ Last trade was a <b>win</b> — streak of 1."
+            elif current_direction == "loss" and current_streak >= 2:
+                streak_line = f"❄️ <b>Active losing streak:  {current_streak}</b>"
+            else:
+                streak_line = "📉 Last trade was a <b>loss</b>."
+
+            msg = (
+                f"🔥 <b>Your Streaks</b>\n\n"
+                f"{streak_line}\n\n"
+                f"🏆 Best win streak ever:     <b>{best_win_streak}</b>\n"
+                f"💔 Worst losing streak ever: <b>{worst_loss_streak}</b>\n\n"
+                f"<i>Based on {stats['count']} closed trade{'s' if stats['count'] != 1 else ''}. "
+                f"Overall win rate: {stats['win_rate']}%.</i>"
+            )
+            return msg
+        except Exception as exc:
+            return f"⚠️ Could not compute streaks: {exc}"
+
+    if text.startswith("COMPARE"):
+        parts = text.split()
+        if len(parts) < 3:
+            return (
+                "📊 Usage: <code>/compare TICKER1 TICKER2</code>\n"
+                "Example: <code>/compare AAPL MSFT</code>"
+            )
+        t1, t2 = parts[1].upper(), parts[2].upper()
+        try:
+            import yfinance as yf
+            with typing_until_done(chat_id):
+                info1 = yf.Ticker(t1).info
+                info2 = yf.Ticker(t2).info
+
+            def _fv(v, fmt=None):
+                if v is None:
+                    return "N/A"
+                if fmt == "pct":
+                    return f"{v:+.1f}%"
+                if fmt == "money":
+                    return f"${v:,.2f}"
+                if fmt == "big":
+                    if v >= 1e12: return f"${v/1e12:.1f}T"
+                    if v >= 1e9:  return f"${v/1e9:.1f}B"
+                    if v >= 1e6:  return f"${v/1e6:.1f}M"
+                    return f"${v:,.0f}"
+                if isinstance(v, float):
+                    return f"{v:.1f}"
+                return str(v)
+
+            def _row(label, v1, v2, fmt=None, higher_is_better=True):
+                """Return a Telegram HTML row with ◀ ▶ winner marker."""
+                s1, s2 = _fv(v1, fmt), _fv(v2, fmt)
+                winner = ""
+                try:
+                    if v1 is not None and v2 is not None:
+                        is1 = float(v1) > float(v2) if higher_is_better else float(v1) < float(v2)
+                        winner = f" ◀" if is1 else f" ▶"
+                        if is1:
+                            s1 = f"<b>{s1}</b>"
+                        else:
+                            s2 = f"<b>{s2}</b>"
+                except Exception:
+                    pass
+                return f"<code>{label:<18}</code>  {s1}  /  {s2}{winner}"
+
+            # Extract metrics
+            p1   = info1.get("currentPrice") or info1.get("regularMarketPrice")
+            p2   = info2.get("currentPrice") or info2.get("regularMarketPrice")
+            hi1  = info1.get("fiftyTwoWeekHigh");  hi2 = info2.get("fiftyTwoWeekHigh")
+            lo1  = info1.get("fiftyTwoWeekLow");   lo2 = info2.get("fiftyTwoWeekLow")
+            gap1 = round((p1-hi1)/hi1*100,1) if (p1 and hi1) else None
+            gap2 = round((p2-hi2)/hi2*100,1) if (p2 and hi2) else None
+            pe1  = info1.get("trailingPE");   pe2  = info2.get("trailingPE")
+            fwd1 = info1.get("forwardPE");    fwd2 = info2.get("forwardPE")
+            mc1  = info1.get("marketCap");    mc2  = info2.get("marketCap")
+            m1w1 = info1.get("fiftyTwoWeekChangePercent")
+            m1w2 = info2.get("fiftyTwoWeekChangePercent")
+            if m1w1: m1w1 = round(m1w1*100,1)
+            if m1w2: m1w2 = round(m1w2*100,1)
+            div1 = info1.get("dividendYield"); div2 = info2.get("dividendYield")
+            if div1: div1 = round(div1*100,2)
+            if div2: div2 = round(div2*100,2)
+            tgt1 = info1.get("targetMeanPrice"); tgt2 = info2.get("targetMeanPrice")
+            ups1 = round((tgt1-p1)/p1*100,1) if (tgt1 and p1) else None
+            ups2 = round((tgt2-p2)/p2*100,1) if (tgt2 and p2) else None
+            ar1  = info1.get("recommendationKey","").replace("_"," ").title()
+            ar2  = info2.get("recommendationKey","").replace("_"," ").title()
+
+            lines = [
+                f"📊 <b>{t1} vs {t2}</b>",
+                f"<i>◀ = {t1} wins that metric  ▶ = {t2} wins</i>",
+                "",
+                _row("Price",          p1,   p2,   fmt="money"),
+                _row("Market Cap",     mc1,  mc2,  fmt="big"),
+                _row("1yr Return",     m1w1, m1w2, fmt="pct"),
+                _row("vs 52w High",    gap1, gap2, fmt="pct",  higher_is_better=False),
+                _row("P/E trailing",   pe1,  pe2,  higher_is_better=False),
+                _row("P/E forward",    fwd1, fwd2, higher_is_better=False),
+                _row("Analyst Upside", ups1, ups2, fmt="pct"),
+                _row("Dividend Yield", div1, div2, fmt="pct"),
+                "",
+                f"<code>{'Analyst':18}</code>  {ar1 or 'N/A'}  /  {ar2 or 'N/A'}",
+                "",
+                "<i>Data: Yahoo Finance.</i>",
+            ]
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"⚠️ Compare failed: {exc}"
+
+    if text == "RISK":
+        try:
+            log         = load_user_trade_log(chat_id)
+            open_trades = log.get("open", [])
+            if not open_trades:
+                return (
+                    "🛡 <b>Risk Report</b>\n\n"
+                    "You have no open positions. Nothing at risk right now."
+                )
+
+            total_risk_usd   = 0.0
+            total_deployed   = 0.0
+            unprotected      = []
+            rows             = []
+            _s = lambda x: ("+" if x >= 0 else "") + str(x)
+
+            for t in open_trades:
+                ticker = t.get("ticker", "?")
+                entry  = t.get("entry_price")
+                stop   = t.get("stop_loss")
+                shares = t.get("shares")
+                alloc  = t.get("allocation") or (float(entry) * float(shares) if entry and shares else None)
+
+                if alloc:
+                    total_deployed += float(alloc)
+
+                if entry and stop and shares:
+                    risk_per_share = float(entry) - float(stop)
+                    risk_usd       = risk_per_share * float(shares)
+                    risk_pct_pos   = risk_per_share / float(entry) * 100
+                    if risk_usd > 0:
+                        total_risk_usd += risk_usd
+                        rows.append(
+                            f"  <b>{ticker}</b>  risk <code>${risk_usd:,.0f}</code>  "
+                            f"<i>({risk_pct_pos:.1f}% of position)</i>"
+                        )
+                    elif risk_usd < 0:
+                        # Stop is above entry — locked in a gain
+                        locked = abs(risk_usd)
+                        rows.append(
+                            f"  <b>{ticker}</b>  🔒 <i>stop above entry — "
+                            f"${locked:,.0f} locked in</i>"
+                        )
+                elif not stop:
+                    unprotected.append(ticker)
+
+            # Build message
+            lines = ["🛡 <b>Position Risk Report</b>\n"]
+
+            if rows:
+                lines.append("\n".join(rows))
+
+            if unprotected:
+                lines.append(
+                    f"\n⚠️ <b>No stop set:</b> {', '.join(f'<b>{t}</b>' for t in unprotected)}"
+                    f"\n<i>These positions have unlimited downside until a stop is set.</i>"
+                )
+
+            if total_risk_usd > 0:
+                pct_of_deployed = (total_risk_usd / total_deployed * 100) if total_deployed else 0
+                risk_label = (
+                    "🟢 well within normal range"    if pct_of_deployed <= 5  else
+                    "🟡 moderate — watch closely"     if pct_of_deployed <= 10 else
+                    "🔴 high — consider tightening stops"
+                )
+                lines.append(
+                    f"\n💵 <b>Total $ at risk:</b>  <code>${total_risk_usd:,.0f}</code>"
+                )
+                if total_deployed > 0:
+                    lines.append(
+                        f"📊 <b>% of deployed capital:</b>  "
+                        f"<b>{pct_of_deployed:.1f}%</b>  {risk_label}"
+                    )
+            elif not unprotected:
+                lines.append("\n✅ All stops are above entry — all gains are protected.")
+
+            lines.append(
+                "\n<i>Risk = (entry − stop) × shares per position. "
+                "Use <code>/updatestop TICKER PRICE</code> to adjust.</i>"
+            )
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"⚠️ Could not compute risk: {exc}"
+
+    if text == "TAX":
+        try:
+            from datetime import date as _date
+            log    = load_user_trade_log(chat_id)
+            closed = log.get("closed", [])
+            year   = _date.today().year
+
+            # Filter to current year
+            ytd = []
+            for t in closed:
+                ds = t.get("closed_date") or t.get("closed_at", "")
+                try:
+                    if str(ds)[:4] == str(year):
+                        ytd.append(t)
+                except Exception:
+                    pass
+
+            if not ytd:
+                return (
+                    f"📋 <b>Tax Summary {year}</b>\n\n"
+                    "No closed trades yet this year.\n\n"
+                    "<i>P&amp;L from closed trades will appear here. "
+                    "Use <code>/sold TICKER PRICE</code> to record exits.</i>"
+                )
+
+            st_gains = st_losses = lt_gains = lt_losses = 0.0
+            st_trades = lt_trades = []
+            st_trades, lt_trades = [], []
+
+            for t in ytd:
+                gain = float(t.get("gain_usd") or 0)
+                # Determine holding period
+                opened = t.get("opened_date") or t.get("opened_at", "")
+                closed_d = t.get("closed_date") or t.get("closed_at", "")
+                long_term = False
+                try:
+                    days = (_date.fromisoformat(str(closed_d)[:10]) -
+                            _date.fromisoformat(str(opened)[:10])).days
+                    long_term = days >= 365
+                except Exception:
+                    pass
+
+                if long_term:
+                    lt_trades.append(t)
+                    if gain >= 0: lt_gains  += gain
+                    else:         lt_losses += abs(gain)
+                else:
+                    st_trades.append(t)
+                    if gain >= 0: st_gains  += gain
+                    else:         st_losses += abs(gain)
+
+            st_net = st_gains - st_losses
+            lt_net = lt_gains - lt_losses
+            total_net = st_net + lt_net
+
+            # Rough federal tax estimates (2024 brackets, single filer, gains only)
+            # ST taxed as ordinary income — use 22% as mid-bracket estimate
+            # LT: 0% ≤$47k, 15% ≤$518k, 20% above
+            st_tax_est  = max(0, st_net) * 0.22
+            lt_tax_rate = 0.15  # most retail traders land here
+            lt_tax_est  = max(0, lt_net) * lt_tax_rate
+            total_tax   = st_tax_est + lt_tax_est
+
+            sign = lambda x: f"+${x:,.0f}" if x >= 0 else f"-${abs(x):,.0f}"
+
+            msg = (
+                f"📋 <b>Tax Summary {year}</b>\n\n"
+                f"<b>Short-term</b>  <i>(&lt;1 year, {len(st_trades)} trades)</i>\n"
+                f"  Gains:   <code>${st_gains:,.0f}</code>\n"
+                f"  Losses:  <code>-${st_losses:,.0f}</code>\n"
+                f"  Net:     <b>{sign(st_net)}</b>\n"
+                f"  Est. tax: ~<code>${st_tax_est:,.0f}</code>  <i>(~22% ordinary income rate)</i>\n\n"
+                f"<b>Long-term</b>  <i>(≥1 year, {len(lt_trades)} trades)</i>\n"
+                f"  Gains:   <code>${lt_gains:,.0f}</code>\n"
+                f"  Losses:  <code>-${lt_losses:,.0f}</code>\n"
+                f"  Net:     <b>{sign(lt_net)}</b>\n"
+                f"  Est. tax: ~<code>${lt_tax_est:,.0f}</code>  <i>(~15% preferential rate)</i>\n\n"
+                f"<b>Total net P&amp;L:</b>  <b>{sign(total_net)}</b>\n"
+                f"<b>Total estimated tax:</b>  ~<code>${total_tax:,.0f}</code>\n\n"
+            )
+
+            # Tax-loss harvesting opportunity
+            if st_net > 0 and lt_losses == 0:
+                msg += "💡 <i>Tip: Losses offset gains dollar-for-dollar. If you have underwater positions, realizing them before year-end can reduce your tax bill.</i>\n\n"
+            elif st_net > 500:
+                msg += f"💡 <i>Tip: Your short-term gains are taxed at your income rate. Consider holding new positions &gt;1yr to qualify for the lower long-term rate.</i>\n\n"
+
+            msg += (
+                "<i>⚠️ Estimates only — uses ~22% for short-term and ~15% for long-term. "
+                "Actual rates depend on your income, state taxes, and other factors. "
+                "Consult a tax professional for your filing.</i>"
+            )
+            return msg
+        except Exception as exc:
+            return f"⚠️ Could not compute tax summary: {exc}"
+
     if text == "COMMUNITY":
         try:
             from performance_tracker import build_community_stats
@@ -711,6 +1051,65 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         except Exception as exc:
             return f"⚠️ Could not fetch earnings dates: {exc}"
 
+    # ── /gainers, /losers, /movers ────────────────────────────────────────────
+    if text in ("GAINERS", "LOSERS", "MOVERS"):
+        try:
+            import yfinance as yf
+            # Representative liquid universe (~40 names across sectors)
+            _UNIVERSE = [
+                "AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA","AVGO","JPM","V",
+                "UNH","JNJ","XOM","WMT","PG","MA","HD","CVX","MRK","ABBV",
+                "LLY","KO","PEP","COST","BAC","NFLX","AMD","CRM","ORCL","ADBE",
+                "INTC","QCOM","TXN","GS","MS","SPY","QQQ","IWM","DIA","GLD",
+                "BTC-USD","ETH-USD",
+            ]
+            with typing_until_done(chat_id):
+                data = yf.download(
+                    _UNIVERSE, period="2d", interval="1d",
+                    progress=False, auto_adjust=True, threads=True,
+                )["Close"]
+
+            if data.empty or len(data) < 2:
+                return "⚠️ Could not fetch market data right now. Try again shortly."
+
+            prev  = data.iloc[-2]
+            curr  = data.iloc[-1]
+            moves = []
+            for sym in _UNIVERSE:
+                try:
+                    p, c = float(prev[sym]), float(curr[sym])
+                    if p > 0 and c > 0:
+                        moves.append((sym, c, round((c - p) / p * 100, 2)))
+                except Exception:
+                    pass
+
+            gainers = sorted(moves, key=lambda x: -x[2])[:5]
+            losers  = sorted(moves, key=lambda x:  x[2])[:5]
+
+            def _rows(items, up: bool) -> str:
+                lines = []
+                for sym, price, pct in items:
+                    icon = "🟢" if up else "🔴"
+                    lines.append(
+                        f"  {icon} <b>{sym}</b>  <code>${price:,.2f}</code>  "
+                        f"<b>{'+' if pct>=0 else ''}{pct:.1f}%</b>"
+                    )
+                return "\n".join(lines)
+
+            if text == "GAINERS":
+                return f"📈 <b>Today's Top Gainers</b>\n\n{_rows(gainers, True)}\n\n<i>From a universe of ~40 liquid names. Use /movers for both.</i>"
+            if text == "LOSERS":
+                return f"📉 <b>Today's Top Losers</b>\n\n{_rows(losers, False)}\n\n<i>From a universe of ~40 liquid names. Use /movers for both.</i>"
+            # MOVERS — both
+            return (
+                f"🔥 <b>Today's Movers</b>\n\n"
+                f"📈 <b>Top Gainers</b>\n{_rows(gainers, True)}\n\n"
+                f"📉 <b>Top Losers</b>\n{_rows(losers, False)}\n\n"
+                f"<i>From a universe of ~40 liquid names.</i>"
+            )
+        except Exception as exc:
+            return f"⚠️ Could not fetch movers: {exc}"
+
     # ── /size ─────────────────────────────────────────────────────────────────
     if text == "SIZE":
         return (
@@ -771,5 +1170,171 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             f"<i>Based on your ${budget:,.0f} budget &amp; {stop_pct}% stop. "
             f"Adjust with /set_budget &amp; /set_thresholds.</i>"
         )
+
+    # ── /heatmap — sector ETF performance grid ──────────────────────────────
+    if text == "HEATMAP":
+        import yfinance as _yf
+        _SECTORS = [
+            ("XLK",  "Tech"),
+            ("XLF",  "Finance"),
+            ("XLE",  "Energy"),
+            ("XLV",  "Health"),
+            ("XLC",  "Comm"),
+            ("XLY",  "Cons Disc"),
+            ("XLP",  "Cons Stpl"),
+            ("XLI",  "Industrl"),
+            ("XLB",  "Materials"),
+            ("XLRE", "Real Est"),
+            ("XLU",  "Utilities"),
+        ]
+        syms = [s for s, _ in _SECTORS]
+        try:
+            df = _yf.download(syms, period="2d", interval="1d",
+                              auto_adjust=True, progress=False)
+            closes = df["Close"] if "Close" in df else df
+            results = {}
+            for sym in syms:
+                try:
+                    col   = closes[sym].dropna()
+                    prev, curr = float(col.iloc[-2]), float(col.iloc[-1])
+                    results[sym] = round((curr - prev) / prev * 100, 2)
+                except Exception:
+                    results[sym] = None
+        except Exception as exc:
+            return f"⚠️ Could not fetch sector data: {exc}"
+
+        def _dot(pct):
+            if pct is None: return "⚪"
+            if pct >= 1.5:  return "🟢"
+            if pct >= 0.3:  return "🟩"
+            if pct >= -0.3: return "🟡"
+            if pct >= -1.5: return "🟧"
+            return "🔴"
+
+        lines = ["📊 <b>Sector Heatmap</b>  <i>(1-day % change)</i>\n"]
+        for sym, label in _SECTORS:
+            pct = results.get(sym)
+            dot = _dot(pct)
+            pct_str = f"{pct:+.2f}%" if pct is not None else "—"
+            lines.append(f"{dot} <code>{label:<10}</code> <b>{pct_str}</b>")
+
+        lines.append("\n<i>🟢 &gt;+1.5%   🟩 +0.3–1.5%   🟡 flat   🟧 −0.3–1.5%   🔴 &lt;−1.5%</i>")
+        return "\n".join(lines)
+
+    # ── /nextearnings — earnings dates for open positions ────────────────────
+    if text == "NEXTEARNINGS":
+        from config_manager import load_user_trade_log
+        from earnings_checker import get_upcoming_earnings
+        log = load_user_trade_log(chat_id)
+        open_pos = log.get("open", [])
+        stock_tickers = [t["ticker"] for t in open_pos if t.get("asset_type") != "crypto"]
+        if not stock_tickers:
+            return (
+                "📭 No open stock positions.\n"
+                "Log one with /bought — I'll track earnings dates for you."
+            )
+        try:
+            upcoming = get_upcoming_earnings(stock_tickers, days_ahead=45)
+        except Exception as exc:
+            return f"⚠️ Could not fetch earnings data: {exc}"
+
+        if not upcoming:
+            return (
+                f"📅 <b>No earnings in the next 45 days</b> for your open positions.\n"
+                f"<i>Checked: {', '.join(stock_tickers)}</i>"
+            )
+
+        sorted_earn = sorted(upcoming.items(), key=lambda x: x[1])
+        lines = ["📅 <b>Upcoming Earnings — your open positions</b>\n"]
+        import datetime as _dt
+        today_dt = _dt.date.today()
+        for ticker, date_str in sorted_earn:
+            try:
+                d          = _dt.date.fromisoformat(date_str)
+                days       = (d - today_dt).days
+                days_label = f"in {days}d" if days > 1 else ("tomorrow" if days == 1 else "today")
+                urgency    = "🔴" if days <= 3 else ("🟡" if days <= 7 else "🟢")
+            except Exception:
+                days_label = date_str
+                urgency    = "📅"
+            lines.append(f"  {urgency} <b>{ticker}</b> — {date_str}  <i>({days_label})</i>")
+
+        lines.append(
+            "\n<i>🔴 ≤3 days  🟡 ≤7 days  🟢 &gt;7 days\n"
+            "Consider closing/trimming before earnings to avoid volatility.</i>"
+        )
+        return "\n".join(lines)
+
+    # ── /digest — personalized morning check-in for open positions ───────────
+    if text == "DIGEST":
+        from config_manager import load_user_trade_log, get_user_config
+        from cmd_helpers import _fetch_live_price
+        from earnings_checker import get_upcoming_earnings
+
+        log    = load_user_trade_log(chat_id)
+        open_t = log.get("open", [])
+        if not open_t:
+            return (
+                "📭 No open positions to digest.\n"
+                "<i>Log one with /bought — I'll give you a morning brief on it each day.</i>"
+            )
+
+        send_message("🌅 <i>Building your morning digest…</i>", chat_id=chat_id)
+
+        tickers = [t["ticker"] for t in open_t]
+        lines   = ["🌅 <b>Morning Digest</b>  ·  your positions\n"]
+
+        # Live prices + vs entry
+        for t in open_t:
+            tk    = t["ticker"]
+            entry = t.get("entry_price")
+            stop  = t.get("stop_loss")
+            tgt   = t.get("target_price")
+            live  = _fetch_live_price(tk)
+
+            parts_row = [f"<b>{tk}</b>"]
+            if live:
+                parts_row.append(f"<code>${_p(live)}</code>")
+                if entry:
+                    try:
+                        pct  = (float(live) - float(entry)) / float(entry) * 100
+                        sign = "+" if pct >= 0 else ""
+                        parts_row.append(f"<b>{sign}{pct:.1f}%</b> vs entry")
+                    except Exception:
+                        pass
+            # Proximity warnings
+            badges = []
+            if live and stop:
+                try:
+                    if float(live) <= float(stop) * 1.02:
+                        badges.append("⚠️ near stop")
+                except Exception:
+                    pass
+            if live and tgt:
+                try:
+                    if float(live) >= float(tgt) * 0.97:
+                        badges.append("🎯 near target")
+                except Exception:
+                    pass
+            if badges:
+                parts_row.append("  ".join(badges))
+            lines.append("  " + "  ·  ".join(parts_row))
+
+        # Earnings in the next 7 days
+        try:
+            stock_tickers = [tk for tk in tickers if not tk.endswith("-USD")]
+            earn_map = get_upcoming_earnings(stock_tickers, days_ahead=7)
+            if earn_map:
+                lines.append("")
+                lines.append("⚠️ <b>Earnings this week:</b>")
+                for tk, date_str in earn_map.items():
+                    lines.append(f"  🗓 <b>{tk}</b> — {date_str}")
+        except Exception:
+            pass
+
+        lines.append(
+            "\n<i>Use /mymovers for a full ranked view  ·  /positions for P&amp;L details</i>"
+        )
+        return "\n".join(lines)
 
     return None

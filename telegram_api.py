@@ -52,7 +52,7 @@ def send_message(text: str, chat_id: str | None = None) -> bool:
     chat_id = chat_id or _chat_id()
     url     = TELEGRAM_API.format(token=token, method="sendMessage")
 
-    # Split long messages — always break at newlines to avoid splitting inside HTML tags
+    # Split long messages — respect HTML blockquote boundaries to preserve expandable sections
     def _safe_split(txt: str, limit: int) -> list[str]:
         if len(txt) <= limit:
             return [txt]
@@ -61,9 +61,15 @@ def send_message(text: str, chat_id: str | None = None) -> bool:
             if len(txt) <= limit:
                 parts.append(txt)
                 break
-            split_at = txt.rfind("\n", 0, limit)
-            if split_at == -1:
-                split_at = limit        # no newline found — hard cut as last resort
+            # Prefer splitting after a complete </blockquote> so HTML stays valid
+            bq_end = txt.rfind("</blockquote>", 0, limit)
+            if bq_end != -1:
+                split_at = bq_end + len("</blockquote>")
+            else:
+                # Fall back to newline split
+                split_at = txt.rfind("\n", 0, limit)
+                if split_at == -1:
+                    split_at = limit    # no newline found — hard cut as last resort
             parts.append(txt[:split_at])
             txt = txt[split_at:].lstrip("\n")
         return parts
