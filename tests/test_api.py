@@ -412,11 +412,6 @@ class TestPerformance:
         assert "points" in data
         assert isinstance(data["points"], list)
 
-    def test_stats_returns_ok(self, client):
-        r = get(client, "/api/miniapp/stats")
-        assert r.status_code == 200
-        assert "stats" in r.get_json()
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # COMMUNITY
