@@ -443,8 +443,42 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.04); }
 
 .pick-thesis {
   font-size: 12.5px; color: var(--hint);
-  line-height: 1.5; margin-bottom: 12px;
+  line-height: 1.5; margin-bottom: 8px;
   position: relative; z-index: 1;
+}
+.pick-theme-row {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 6px; margin-bottom: 10px; position: relative; z-index: 1;
+}
+.theme-chip {
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+  background: rgba(167,139,250,.12); color: var(--purple);
+  border: 1px solid rgba(167,139,250,.25); letter-spacing: 0.01em;
+}
+.pick-edge {
+  font-size: 11px; color: var(--hint); font-style: italic; opacity: .8;
+  line-height: 1.4;
+}
+/* Today's Focus card */
+.focus-card {
+  background: linear-gradient(135deg, rgba(79,142,247,.10) 0%, rgba(0,212,170,.08) 100%);
+  border: 1px solid rgba(79,142,247,.22);
+  border-radius: 14px; padding: 14px 16px; margin-bottom: 12px;
+  position: relative; overflow: hidden;
+}
+.focus-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--green));
+}
+.focus-card-label {
+  font-size: 10px; font-weight: 700; color: var(--accent); letter-spacing: .06em;
+  text-transform: uppercase; margin-bottom: 6px; opacity: .8;
+}
+.focus-card-ticker {
+  font-size: 20px; font-weight: 800; color: var(--text); margin-bottom: 4px;
+}
+.focus-card-action {
+  font-size: 12.5px; color: var(--hint); line-height: 1.5;
 }
 
 /* Pick action row: Chart (small) + Buy (flex) */
@@ -3373,6 +3407,7 @@ function renderPickCard(p, idx = 0) {
       </div>
       <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
       ${p.thesis || p.reason ? `<div class="pick-thesis">${p.thesis || p.reason}</div>` : ''}
+      ${(p.theme || p.edge) ? `<div class="pick-theme-row">${p.theme ? `<span class="theme-chip">#${p.theme.replace(/[\s\-]+/g,'').replace(/(?:^|\s)\S/g,c=>c.toUpperCase())}</span>` : ''}${p.edge ? `<span class="pick-edge">${p.edge}</span>` : ''}</div>` : ''}
       <div class="pick-actions">
         <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
         <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
@@ -3471,6 +3506,44 @@ function renderPicks(filter) {
     }
   }
 
+  // ── Today's Focus card — top pick by conviction ─────────────────────────
+  const _allForFocus = [
+    ...(picksCache.stocks?.short_term || []).map(p => ({...p, _type:'stock',  _tf:'ST', _sym:p.ticker||''})),
+    ...(picksCache.stocks?.long_term  || []).map(p => ({...p, _type:'stock',  _tf:'LT', _sym:p.ticker||''})),
+    ...(picksCache.crypto?.short_term || []).map(p => ({...p, _type:'crypto', _tf:'ST', _sym:p.symbol||''})),
+  ];
+  if (_allForFocus.length > 0) {
+    const _convNum = p => {
+      const c = String(p.conviction||'').toLowerCase();
+      if (c.includes('high') || Number(p.conviction) >= 4) return 2;
+      if (c.includes('medium') || Number(p.conviction) === 3) return 1;
+      return 0;
+    };
+    const _focusPick = _allForFocus.slice().sort((a,b) => _convNum(b) - _convNum(a))[0];
+    if (_focusPick) {
+      const _fp = _focusPick;
+      const _fSym = _fp._sym;
+      const _fUpside = (_fp.entry_price && _fp.target_price)
+        ? (((parseFloat(_fp.target_price) - parseFloat(_fp.entry_price)) / parseFloat(_fp.entry_price)) * 100).toFixed(1)
+        : null;
+      const _fTypeTag = _fp._type === 'crypto' ? '₿ Crypto' : _fp._tf === 'LT' ? '🏛 Long-Term' : '⚡ Short-Term';
+      const _fAction = _fp.plain_english || _fp.thesis || '';
+      const _fThemeHtml = _fp.theme
+        ? `<span class="theme-chip" style="margin-left:8px">#${_fp.theme.replace(/[\s\-]+/g,'').replace(/(?:^|\s)\S/g,c=>c.toUpperCase())}</span>`
+        : '';
+      html += `<div class="focus-card" onclick="renderPicks('${filter}')">
+        <div class="focus-card-label">⭐ Today's Focus</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span class="focus-card-ticker">${_fSym}</span>
+          ${_fThemeHtml}
+          <span style="margin-left:auto;font-size:11px;font-weight:700;color:var(--hint);white-space:nowrap">${_fTypeTag}</span>
+        </div>
+        ${_fUpside ? `<div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:4px">+${_fUpside}% upside target</div>` : ''}
+        ${_fAction ? `<div class="focus-card-action">${_fAction}</div>` : ''}
+      </div>`;
+    }
+  }
+
   const excludedCount = (_settCfg && _settCfg.excluded_sectors) ? _settCfg.excluded_sectors.length : 0;
   const sectorChipLbl = excludedCount > 0 ? `🚫 ${excludedCount} sector${excludedCount > 1 ? 's' : ''} hidden` : '🚫 Filter sectors';
   const sectorChipStyle = excludedCount > 0
@@ -3508,15 +3581,27 @@ function renderPicks(filter) {
 
   if (!sections.length) {
     const _meta = picksCache._meta || {};
-    const emptyIcon  = _meta.weekend ? '📅' : '📭';
-    const emptyTitle = _meta.weekend ? `Markets closed — ${_meta.day || 'Weekend'}` : 'No picks yet today';
-    const emptySub   = _meta.weekend
-      ? 'StockPulz runs on trading days. Fresh picks arrive Monday around 9 AM ET.'
-      : 'Analysis runs every market day. Check back after 9 AM ET.';
+    let emptyIcon, emptyTitle, emptySub, emptyExtra = '';
+    if (_meta.weekend) {
+      emptyIcon  = '📅';
+      emptyTitle = `Markets closed — ${_meta.day || 'Weekend'}`;
+      emptySub   = 'StockPulz runs on trading days. Fresh picks arrive Monday around 9 AM ET.';
+    } else if (filter !== 'all') {
+      const _filterNames = { stock: 'stock', crypto: 'crypto', etf: 'ETF' };
+      emptyIcon  = '🔍';
+      emptyTitle = `No ${_filterNames[filter] || filter} picks today`;
+      emptySub   = `The AI screener didn't find a ${_filterNames[filter]||filter} setup that met the quality bar for today's market conditions.`;
+      emptyExtra = `<div style="margin-top:12px"><button class="pill on" onclick="renderPicks('all')">View all picks</button></div>`;
+    } else {
+      emptyIcon  = '📭';
+      emptyTitle = 'No picks yet today';
+      emptySub   = 'Analysis runs every market day. Check back after 9 AM ET or pull down to refresh.';
+    }
     html += `<div class="empty">
       <div class="empty-icon">${emptyIcon}</div>
       <div class="empty-title">${emptyTitle}</div>
       <div class="empty-sub">${emptySub}</div>
+      ${emptyExtra}
     </div>`;
   } else {
     const _collapsed = new Set(JSON.parse(sessionStorage.getItem('sp_collapsed') || '[]'));
@@ -3750,12 +3835,33 @@ function _reRenderPositions() {
     const _notesLine = p.notes
       ? `<div class="pos-notes">${p.notes.slice(0, 120)}${p.notes.length > 120 ? '…' : ''}</div>`
       : '';
+
+    // Per-position health badge (🟢/🟡/🔴)
+    let _posHealth = 100;
+    if (!p.stop_loss)  _posHealth -= 30;  // no protection
+    if (p.stop_loss && p.current_price) {
+      const _stopDist = (parseFloat(p.current_price) - parseFloat(p.stop_loss)) / parseFloat(p.current_price);
+      if (_stopDist < 0)    _posHealth -= 40;  // stop already breached
+      else if (_stopDist < 0.02) _posHealth -= 25;  // within 2% of stop
+      else if (_stopDist < 0.05) _posHealth -= 10;  // within 5% of stop
+    }
+    const _daysHeld = p.days_held || 0;
+    const _isLT = p.timeframe === 'long_term';
+    const _expectedHorizon = _isLT ? 365 : 20;
+    if (_daysHeld > _expectedHorizon * 1.5 && targetProgress < 40) _posHealth -= 20;  // overstaying
+    if (pct < -8)  _posHealth -= 15;  // down significantly
+    _posHealth = Math.max(0, Math.min(100, _posHealth));
+    const _phDot  = _posHealth >= 70 ? '🟢' : _posHealth >= 40 ? '🟡' : '🔴';
+    const _phTip  = _posHealth >= 70 ? 'Healthy' : _posHealth >= 40 ? 'Watch' : 'At Risk';
+    const _phColor = _posHealth >= 70 ? 'var(--green)' : _posHealth >= 40 ? '#f5a623' : 'var(--red)';
+    const _healthBadge = `<span style="font-size:10px;font-weight:700;color:${_phColor};background:rgba(0,0,0,0.18);padding:2px 6px;border-radius:8px;margin-left:4px;white-space:nowrap">${_phDot} ${_phTip}</span>`;
+
     html += `<div class="pos-card" data-sym="${sym}">
       <div class="pos-card-inner"><div class="pos-swipe-reveal" onclick="openSellSheet('${sym}')">🔴 Sell</div><div class="pos-card-main-wrap">
       <div class="pos-main">
         <div class="pos-avatar" style="background:${_avatarBg(sym,aType)}">${init}</div>
         <div class="pos-body">
-          <div class="pos-sym">${sym}${p.timeframe ? ` <span class="pos-tf-badge pos-tf-${p.timeframe === 'short_term' ? 'st' : 'lt'}">${p.timeframe === 'short_term' ? 'ST' : 'LT'}</span>` : ''}${!p.stop_loss ? ` <span class="pos-nostop" onclick="openPositionDetail(${_dA},'stop')">⚠️ No stop</span>` : ''}</div>
+          <div class="pos-sym">${sym}${p.timeframe ? ` <span class="pos-tf-badge pos-tf-${p.timeframe === 'short_term' ? 'st' : 'lt'}">${p.timeframe === 'short_term' ? 'ST' : 'LT'}</span>` : ''}${_healthBadge}${!p.stop_loss ? ` <span class="pos-nostop" onclick="openPositionDetail(${_dA},'stop')">⚠️ No stop</span>` : ''}</div>
           <div class="pos-sub"><span class="pos-level-tap" onclick="openPositionDetail(${_dA},'entry')">${entry}</span>${cur ? ` → ${cur}` : ''}</div>
           ${_levelsRow}
           ${p.target_price ? `<div class="target-bar"><div class="target-fill" style="width:${targetProgress}%"></div></div><div style="font-size:10px;color:var(--hint);margin-top:3px;opacity:.7">${Math.round(targetProgress)}% to target</div>` : ''}
