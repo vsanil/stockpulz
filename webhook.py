@@ -735,6 +735,27 @@ def miniapp_picks():
         return jsonify({"error": "server_error", "detail": str(exc), "_meta": {"weekend": False, "has_picks": False}}), 500
 
 
+@app.route("/api/miniapp/picks/history")
+def miniapp_picks_history():
+    """Return this week's past picks keyed by date, excluding today."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    try:
+        from datetime import date
+        from config_manager import load_weekly_picks
+        weekly = load_weekly_picks()
+        today  = date.today().isoformat()
+        # Exclude today (served by /api/miniapp/picks) and return sorted newest-first
+        history = {k: v for k, v in weekly.items() if k != today}
+        sorted_history = dict(sorted(history.items(), reverse=True))
+        return jsonify({"history": sorted_history})
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "server_error", "detail": str(exc)}), 500
+
+
 @app.route("/api/miniapp/positions")
 def miniapp_positions():
     """Return open positions with live P&L for the Mini App."""
@@ -850,7 +871,7 @@ def miniapp_log_bought():
         if stop_for_alert:
             try:
                 from price_alert_manager import add_alert
-                add_alert(str(chat_id), ticker, float(stop_for_alert), direction="below")
+                add_alert(str(chat_id), ticker, float(stop_for_alert), direction="below", auto=True)
             except ValueError:
                 pass  # alert already exists — skip silently
             except Exception as exc:

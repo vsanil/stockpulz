@@ -59,34 +59,44 @@
   --shadow-glow-r:  0 0 22px rgba(255,90,90,0.18);
 }
 
-.light-theme {
-  --bg:     #f2f2f7;
-  --card:   #ffffff;
-  --border: rgba(0,0,0,0.10);
-  --text:   #1c1c1e;
-  --hint:   #8e8e93;
-  --accent: #007aff;
-  --green:  #34c759;
-  --red:    #ff3b30;
-}
-
 /* ── Light-mode overrides ─────────────────────────────────────────────────── */
 body.tg-light {
-  --bg:        #f6f7fb;
-  --bg2:       #ffffff;
-  --bg3:       #ffffff;
-  --card:       rgba(0,0,0,0.035);
-  --card-hover: rgba(0,0,0,0.055);
-  --border:     rgba(0,0,0,0.09);
-  --border-hi:  rgba(0,0,0,0.16);
-  --card-hi:    rgba(255,255,255,0.65);
-  --avatar-bg:  rgba(0,0,0,0.06);
-  --header-bg:  rgba(248,249,252,0.85);
-  --sheet-bg:   rgba(255,255,255,0.98);
-  --skel-lo:    rgba(0,0,0,0.04);
-  --skel-hi:    rgba(0,0,0,0.09);
-  --green:  #0e9f7d;
-  --shadow-card:    0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(15,23,42,0.06);
+  /* Backgrounds */
+  --bg:         #f2f4f8;
+  --bg2:        #ffffff;
+  --bg3:        #f8f9fc;
+  /* Text */
+  --text:       #0d0f14;
+  --hint:       #6b7280;
+  /* Accent / interactive */
+  --link:       #2563eb;
+  --btn:        #2563eb;
+  --btn-text:   #ffffff;
+  --accent:     #2563eb;
+  --accent-2:   #3b82f6;
+  /* Status colours — slightly desaturated for light bg */
+  --green:      #059669;
+  --green-2:    #10b981;
+  --red:        #dc2626;
+  --amber:      #d97706;
+  --purple:     #7c3aed;
+  --gold:       #b45309;
+  /* Surfaces */
+  --card:       #ffffff;
+  --card-hover: #f0f2f8;
+  --card-hi:    rgba(255,255,255,0.9);
+  --border:     rgba(0,0,0,0.10);
+  --border-hi:  rgba(0,0,0,0.18);
+  --avatar-bg:  rgba(0,0,0,0.07);
+  --header-bg:  rgba(242,244,248,0.90);
+  --sheet-bg:   #ffffff;
+  --skel-lo:    rgba(0,0,0,0.05);
+  --skel-hi:    rgba(0,0,0,0.10);
+  /* Shadows */
+  --shadow-card:   0 1px 3px rgba(0,0,0,0.07), 0 6px 20px rgba(0,0,0,0.06);
+  --shadow-glow:   0 0 16px rgba(37,99,235,0.14);
+  --shadow-glow-g: 0 0 16px rgba(5,150,105,0.14);
+  --shadow-glow-r: 0 0 16px rgba(220,38,38,0.14);
 }
 /* Logo text: white gradient is invisible on light bg — override to dark */
 body.tg-light .header-logo-text {
@@ -1250,6 +1260,12 @@ body.tg-light .ticker-input { background: rgba(0,0,0,0.03); }
 .dir-badge.above { background: rgba(0,212,170,.14);  color: var(--green);  border-color: rgba(0,212,170,.26); }
 .dir-badge.below { background: rgba(255,90,90,.14);  color: var(--red);    border-color: rgba(255,90,90,.26); }
 .dir-badge.auto  { background: rgba(79,142,247,.14); color: var(--accent); border-color: rgba(79,142,247,.26); }
+.auto-badge {
+  display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.05em;
+  padding: 2px 5px; border-radius: 4px; margin-left: 5px; vertical-align: middle;
+  background: rgba(156,163,175,.15); color: var(--hint); border: 1px solid rgba(156,163,175,.25);
+  text-transform: uppercase;
+}
 .alert-del {
   background: transparent; border: none; color: var(--hint); font-size: 16px;
   cursor: pointer; padding: 4px 6px; flex-shrink: 0;
@@ -2426,7 +2442,8 @@ let sellTicker    = null;
 const loadedTabs  = {};
 
 // ── New feature state ─────────────────────────────────────────────────────────
-let picksView         = 'picks';   // 'picks' | 'prices'
+let picksView         = 'picks';   // 'picks' | 'prices' | 'history'
+let historyPicksCache = null;
 let livePricesCache   = null;
 let portSort          = 'pnl';     // 'pnl' | 'ticker' | 'tf'
 let portFilter        = 'all';     // 'all' | 'st' | 'lt'
@@ -3292,6 +3309,8 @@ function retryLoadPicks() {
 function renderPicksView() {
   if (picksView === 'prices') {
     renderPricesView();
+  } else if (picksView === 'history') {
+    renderHistoryPicks();
   } else {
     renderPicks(activeFilter);
   }
@@ -3305,6 +3324,7 @@ async function renderPricesView() {
   const toggleHtml = `<div class="view-toggle">
     <button class="view-toggle-btn" onclick="switchPicksView('picks')">Picks</button>
     <button class="view-toggle-btn active" onclick="switchPicksView('prices')">Prices</button>
+    <button class="view-toggle-btn" onclick="switchPicksView('history')">History</button>
   </div>`;
   const pillHtml = renderRegimePill(regimeCache);
 
@@ -3349,6 +3369,89 @@ function switchPicksView(view) {
   picksView = view;
   tg.HapticFeedback?.selectionChanged();
   renderPicksView();
+}
+
+const _viewToggleHtml = (active) => `<div class="view-toggle">
+  <button class="view-toggle-btn${active==='picks'?' active':''}" onclick="switchPicksView('picks')">Picks</button>
+  <button class="view-toggle-btn${active==='prices'?' active':''}" onclick="switchPicksView('prices')">Prices</button>
+  <button class="view-toggle-btn${active==='history'?' active':''}" onclick="switchPicksView('history')">History</button>
+</div>`;
+
+async function renderHistoryPicks() {
+  document.getElementById('picks-spinner').style.display = 'none';
+  const body = document.getElementById('picks-body');
+  body.style.display = 'block';
+
+  const _toggle = _viewToggleHtml('history');
+
+  if (!historyPicksCache) {
+    body.innerHTML = _toggle +
+      '<div class="loading" style="padding:40px 0"><div class="spinner"></div>Loading history…</div>';
+    try {
+      const data = await api('/api/miniapp/picks/history');
+      historyPicksCache = data.history || {};
+    } catch (e) {
+      body.innerHTML = _toggle +
+        '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load history</div><div class="empty-sub">Check your connection and try again.</div></div>';
+      return;
+    }
+  }
+
+  let html = _toggle;
+  const dates = Object.keys(historyPicksCache).sort((a, b) => b.localeCompare(a));
+
+  if (!dates.length) {
+    html += `<div class="empty">
+      <div class="empty-icon">📅</div>
+      <div class="empty-title">No history yet</div>
+      <div class="empty-sub">Past picks appear here after the first week of trading days.</div>
+    </div>`;
+    body.innerHTML = html;
+    return;
+  }
+
+  const _fmtDate = (iso) => {
+    const d = new Date(iso + 'T12:00:00Z');
+    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+
+  const _collapsed = new Set(JSON.parse(sessionStorage.getItem('sp_hist_collapsed') || '[]'));
+
+  dates.forEach(date => {
+    const dayPicks = historyPicksCache[date] || {};
+    const allP = [
+      ...(dayPicks.stocks?.short_term || []).map(p => ({...p, _type:'stock',  _tf:'ST', _sym: p.ticker || ''})),
+      ...(dayPicks.stocks?.long_term  || []).map(p => ({...p, _type:'stock',  _tf:'LT', _sym: p.ticker || ''})),
+      ...(dayPicks.crypto?.short_term || []).map(p => ({...p, _type:'crypto', _tf:'ST', _sym: p.symbol || ''})),
+      ...(dayPicks.etfs?.short_term   || []).map(p => ({...p, _type:'etf',   _tf:'ST', _sym: p.ticker || ''})),
+    ];
+    if (!allP.length) return;
+
+    const secId  = `hist-${date}`;
+    const isOpen = !_collapsed.has(secId);
+    const summary = dayPicks.daily_summary || '';
+
+    html += `<div class="expand-row" onclick="
+      (function(){
+        const s=document.getElementById('${secId}'),a=document.getElementById('${secId}-arrow');
+        const open=s.style.display!=='none';
+        s.style.display=open?'none':'block';
+        if(a)a.classList.toggle('open',!open);
+        try{const c=new Set(JSON.parse(sessionStorage.getItem('sp_hist_collapsed')||'[]'));open?c.add('${secId}'):c.delete('${secId}');sessionStorage.setItem('sp_hist_collapsed',JSON.stringify([...c]));}catch(_){}
+      })()">
+      <span class="expand-row-title">📅 ${_fmtDate(date)} <span style="color:var(--hint);font-weight:400;font-size:13px">(${allP.length} pick${allP.length!==1?'s':''})</span></span>
+      <span class="expand-arrow${isOpen?' open':''}" id="${secId}-arrow">▶</span>
+    </div>
+    <div id="${secId}"${isOpen?'':' style="display:none"'}>`;
+
+    if (summary) {
+      html += `<div style="font-size:12px;color:var(--hint);font-style:italic;padding:4px 4px 10px;line-height:1.5">${summary}</div>`;
+    }
+    allP.forEach((p, i) => { html += renderPickCard(p, i); });
+    html += `</div>`;
+  });
+
+  body.innerHTML = html;
 }
 
 function renderPickCard(p, idx = 0) {
@@ -3481,6 +3584,7 @@ function renderPicks(filter) {
   let html = `<div class="view-toggle">
     <button class="view-toggle-btn active" onclick="switchPicksView('picks')">Picks</button>
     <button class="view-toggle-btn" onclick="switchPicksView('prices')">Prices</button>
+    <button class="view-toggle-btn" onclick="switchPicksView('history')">History</button>
   </div>`;
   html += renderRegimePill(regimeCache);
 
@@ -4856,8 +4960,11 @@ async function loadAlerts() {
         } else if (ageLbl) {
           awayHtml = `<div class="alert-away">${ageLbl}</div>`;
         }
+        const autoBadge = a.auto
+          ? `<span class="auto-badge" title="System-generated stop alert">auto</span>`
+          : '';
         html += `<div class="alert-row">
-          <div class="alert-ticker">${a.ticker}</div>
+          <div class="alert-ticker">${a.ticker}${autoBadge}</div>
           <div class="alert-info">
             <div class="alert-price">$${fmtPrice(a.target)}</div>
             ${awayHtml}

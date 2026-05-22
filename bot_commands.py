@@ -753,7 +753,7 @@ def handle_callback_query(callback_query: dict) -> None:
         # Also auto-create a price alert at this stop level
         try:
             from price_alert_manager import add_alert
-            add_alert(chat_id, ticker, stop_val, direction="below")
+            add_alert(chat_id, ticker, stop_val, direction="below", auto=True)
         except Exception:
             pass
         send_message(result, chat_id=chat_id)
