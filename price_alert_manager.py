@@ -92,12 +92,16 @@ def _current_price(ticker: str) -> float | None:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def add_alert(chat_id: str, ticker: str, target_price: float,
-              direction: str = "auto", recurring: bool = False) -> str:
+              direction: str = "auto", recurring: bool = False,
+              auto: bool = False) -> str:
     """
     Set a price alert.
 
     direction: "above" | "below" | "auto"
       - "auto": alert fires above target if target > current price, below otherwise
+    auto: True means this was system-generated (stop-loss from pick/position).
+      When auto=True, any existing auto alert for the same ticker+direction is
+      replaced rather than duplicated. Manual alerts are never touched.
     Returns a formatted confirmation string for Telegram.
     """
     ticker  = ticker.upper()
@@ -111,13 +115,22 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
     alerts      = _load_alerts()
     chat_alerts = alerts.setdefault(str(chat_id), [])
 
-    # Prevent duplicate — raise so the API returns 400 instead of silent success
-    # Use tolerance comparison (< 0.005) so decimal prices like 199.99 match correctly
-    for a in chat_alerts:
-        if (a["ticker"] == ticker
-                and abs(a["target"] - target_price) < 0.005
-                and a["direction"] == direction):
-            raise ValueError(f"Alert already exists: {ticker} {direction} ${target_price:,.2f}")
+    if auto:
+        # For system-generated stops: replace any existing auto alert for same
+        # ticker+direction rather than stacking duplicates. Manual alerts untouched.
+        chat_alerts[:] = [
+            a for a in chat_alerts
+            if not (a["ticker"] == ticker
+                    and a["direction"] == direction
+                    and a.get("auto"))
+        ]
+    else:
+        # Manual alert: prevent exact-price duplicate (raise so UI returns 400)
+        for a in chat_alerts:
+            if (a["ticker"] == ticker
+                    and abs(a["target"] - target_price) < 0.005
+                    and a["direction"] == direction):
+                raise ValueError(f"Alert already exists: {ticker} {direction} ${target_price:,.2f}")
 
     entry: dict = {
         "ticker":       ticker,
@@ -128,6 +141,8 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
     }
     if recurring:
         entry["recurring"] = True
+    if auto:
+        entry["auto"] = True
     chat_alerts.append(entry)
     _save_alerts(alerts)
 

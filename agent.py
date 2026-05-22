@@ -3559,11 +3559,11 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
                     try:
                         stop = pick.get("stop_loss")
                         if stop:
-                            add_alert(uid, ticker, float(stop), direction="below")
+                            add_alert(uid, ticker, float(stop), direction="below", auto=True)
                             total_set += 1
                         entry_low = pick.get("entry_low")
                         if entry_low:
-                            add_alert(uid, ticker, float(entry_low), direction="below")
+                            add_alert(uid, ticker, float(entry_low), direction="below", auto=True)
                             total_set += 1
                     except Exception as exc:
                         print(f"[agent] _auto_set_pick_alerts: alert set failed for {ticker}/{uid}: {exc}")

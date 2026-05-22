@@ -182,7 +182,7 @@ def _execute_bought(ticker: str, chat_id: str,
     if stop and not existed:
         try:
             from price_alert_manager import add_alert
-            add_alert(chat_id, ticker, float(stop), direction="below")
+            add_alert(chat_id, ticker, float(stop), direction="below", auto=True)
         except ValueError:
             pass  # alert already exists — skip silently
         except Exception as exc:
