@@ -57,8 +57,10 @@ SLEEP_INFO     = 0.1   # Delay between individual .info calls
 # Fallback list: S&P 500 core + NASDAQ 100 extras + S&P MidCap 400 highlights
 # Used when live sources are unreachable. Covers large + quality mid-caps.
 
+# Minimal last-resort fallback — only ultra-stable mega-caps unlikely to ever
+# be acquired or delisted. The real universe comes from live sources or the
+# Redis/memory cache (see get_stock_universe). Keep this list short and boring.
 FALLBACK_TICKERS = [
-    # ── S&P 500 / Large-cap core ─────────────────────────────────────────────
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "META", "TSLA", "BRK-B", "AVGO",
     "LLY", "JPM", "V", "UNH", "XOM", "MA", "PG", "JNJ", "COST", "HD",
     "MRK", "ABBV", "CVX", "CRM", "BAC", "NFLX", "AMD", "KO", "WMT", "PEP",
@@ -69,56 +71,63 @@ FALLBACK_TICKERS = [
     "ITW", "NOC", "APD", "AON", "CME", "ICE", "ECL", "REGN", "HUM", "F",
     "GM", "UBER", "MMC", "PNC", "USB", "AXP", "BLK", "SCHW", "TJX", "DE",
     "ETN", "EMR", "ADI", "KLAC", "LRCX", "MCHP", "AMAT", "SNPS", "CDNS", "FTNT",
-    "ADP", "PAYX", "CTAS", "ROP", "IDXX", "FAST", "ODFL", "CPRT", "VRSK", "ANSS",
-    "IQV", "CRL", "MTD", "A", "ILMN", "WAT", "BIIB", "VRTX", "MRNA", "DXCM",
+    "ADP", "PAYX", "CTAS", "ROP", "IDXX", "FAST", "ODFL", "CPRT", "VRSK",
+    "IQV", "MTD", "A", "ILMN", "WAT", "BIIB", "VRTX", "MRNA", "DXCM",
     "CVS", "CNC", "MCK", "CAH", "HCA", "BAX", "BSX", "EW", "PODD", "PHM",
     "DHI", "LEN", "NVR", "TOL", "AMT", "CCI", "SBAC", "EQIX", "DLR", "PSA",
     "EXR", "AVB", "EQR", "ESS", "VTR", "WELL", "CFG", "KEY", "FITB", "MTB",
     "HBAN", "RF", "AEP", "EXC", "SRE", "PEG", "FE", "PPL", "CMS", "WEC",
-    "XOM", "CVX", "COP", "EOG", "DVN", "MRO", "HES", "OXY", "VLO", "MPC",
-    "PSX", "LIN", "PPG", "RPM", "VMC", "MLM", "CAT", "DE", "AGCO", "UAL",
-    "DAL", "AAL", "LUV", "ALK", "UNP", "CSX", "NSC", "CP", "CNI", "FDX",
-    "CHRW", "EXPD", "JBHT", "ODFL", "SAIA", "AZO", "ORLY", "GPC", "TSCO", "FIVE",
-    "LMT", "GD", "BA", "NOC", "HII", "TDG", "LDOS", "SAIC", "DRS", "KTOS",
-    "PFE", "NVO", "AZN", "SNY", "RHHBY", "HLN", "GSK", "TAK", "NVS", "BAYRY",
-    "JPM", "BAC", "C", "WFC", "GS", "MS", "BLK", "SCHW", "AXP", "COF",
-    "DFS", "SYF", "ALLY", "OMF", "WU", "FIS", "FI", "PYPL", "SQ", "AFRM",
-    # ── NASDAQ 100 extras (not already above) ────────────────────────────────
+    "COP", "DVN", "OXY", "VLO", "MPC", "PSX", "LIN", "PPG", "RPM", "VMC",
+    "MLM", "AGCO", "UAL", "DAL", "AAL", "LUV", "ALK", "UNP", "CSX", "NSC",
+    "CP", "CNI", "FDX", "CHRW", "EXPD", "JBHT", "SAIA", "AZO", "ORLY", "GPC",
+    "TSCO", "FIVE", "LMT", "GD", "BA", "HII", "TDG", "LDOS", "SAIC", "KTOS",
+    "PFE", "NVO", "AZN", "SNY", "GSK", "NVS", "C", "COF", "SYF", "ALLY",
+    "PYPL", "SQ", "AFRM", "FIS", "FI", "WU", "OMF",
+    # ── NASDAQ 100 ────────────────────────────────────────────────────────────
     "QCOM", "INTC", "MU", "SMCI", "ON", "MRVL", "ARM", "CRWD", "PANW", "ZS",
     "OKTA", "NET", "DDOG", "MDB", "SNOW", "PLTR", "RBLX", "U", "HOOD", "COIN",
     "SHOP", "MELI", "SE", "GRAB", "BABA", "JD", "PDD", "BIDU", "TCEHY", "NTES",
-    "ASML", "TSM", "SMSN", "SONY", "SAP", "ORCL", "IBM", "HPQ", "HPE", "DELL",
-    "LOGI", "STX", "WDC", "NTAP", "PSTG", "ANET", "JNPR", "F5", "FFIV", "ZBRA",
-    "TEAM", "HUBS", "ZM", "DOCU", "WIX", "BILL", "SMAR", "COUP", "APPF", "PCTY",
-    "ABNB", "LYFT", "DASH", "RDFN", "OPEN", "CVNA", "CARVANA", "KMX", "AN", "PAG",
-    "NDAQ", "CBOE", "MKTX", "VRTS", "LPLA", "RJF", "SF", "IBKR", "GCPAX", "BCRED",
-    "SGEN", "BMRN", "ALNY", "IONS", "INCY", "NBIX", "EXAS", "NTRA", "PACB", "TWST",
-    "CRSP", "NTLA", "BEAM", "EDIT", "FATE", "KYMR", "ARVN", "PRAX", "DNLI", "AKRO",
-    # ── S&P MidCap 400 highlights ─────────────────────────────────────────────
-    "DECK", "LULU", "PTON", "NKE", "UA", "SKX", "CROX", "HBI", "PVH", "RL",
-    "TPR", "CPRI", "TIF", "SIG", "CAKE", "TXRH", "BJRI", "JACK", "WEN", "QSR",
-    "YUM", "CMG", "SBUX", "DPZ", "PZZA", "FAT", "PLAY", "EAT", "DRI", "CBRL",
-    "CHUY", "DENN", "FWRG", "KRUS", "NATH", "FRSH", "XPOF", "PLNT", "BODY", "FIT",
-    "HIBB", "BOOT", "SHOO", "CATO", "AEO", "ANF", "URBN", "GPS", "BURL", "ROST",
-    "TGT", "DLTR", "DG", "WMT", "COST", "BJ", "PRGO", "SFM", "CASY", "MUSA",
-    "RH", "WSM", "BBBY", "PIR", "ARHAUS", "HVFD", "LOVE", "SNBR", "PRPL", "CSPR",
-    "BLMN", "ELF", "ULTA", "COTY", "REVLONQ", "SPB", "CHD", "CLX", "ENR", "HPC",
-    "MLI", "GFF", "APOG", "TREX", "AZEK", "AAON", "IBP", "BLDR", "BECN", "GMS",
-    "STLD", "NUE", "RS", "CMC", "ZEUS", "KALU", "CENX", "CRS", "ATI", "HWM",
-    "TKR", "GTLS", "FLOW", "GHM", "CECO", "FELE", "NNBR", "NN", "KRNT", "POWI",
-    "FORM", "MKSI", "ONTO", "ICHR", "ACLS", "CCMP", "ENTG", "UCTT", "KLIC", "COHU",
-    "EPC", "GEF", "SLGN", "BERY", "PTVE", "SILGAN", "SEE", "SON", "IP", "PKG",
-    "CRUS", "SLAB", "DIOD", "LSCC", "ALGM", "MTSI", "MACOM", "LITE", "IIVI", "ACIA",
-    "SMTC", "SWKS", "QRVO", "CIEN", "VIAV", "CALX", "INFN", "ADTRAN", "DCOM", "SHEN",
+    "ASML", "TSM", "SONY", "SAP", "ORCL", "IBM", "HPQ", "HPE", "DELL", "LOGI",
+    "STX", "WDC", "NTAP", "PSTG", "ANET", "FFIV", "ZBRA", "TEAM", "HUBS", "ZM",
+    "DOCU", "WIX", "BILL", "APPF", "PCTY", "ABNB", "LYFT", "DASH", "OPEN", "CVNA",
+    "KMX", "AN", "PAG", "NDAQ", "CBOE", "MKTX", "VRTS", "LPLA", "RJF", "IBKR",
+    "BMRN", "ALNY", "IONS", "INCY", "NBIX", "EXAS", "NTRA", "PACB", "TWST",
+    "CRSP", "NTLA", "BEAM", "EDIT", "ARVN", "PRAX", "DNLI",
+    # ── MidCap highlights (verified active as of 2025) ────────────────────────
+    "DECK", "LULU", "PTON", "NKE", "UA", "CROX", "HBI", "PVH", "RL", "TPR",
+    "CPRI", "SIG", "CAKE", "TXRH", "BJRI", "JACK", "WEN", "QSR", "YUM", "CMG",
+    "SBUX", "DPZ", "PZZA", "FAT", "PLAY", "EAT", "DRI", "CBRL", "DENN", "FWRG",
+    "KRUS", "FRSH", "XPOF", "PLNT", "BOOT", "SHOO", "CATO", "AEO", "ANF", "URBN",
+    "GAP", "BURL", "ROST", "DLTR", "DG", "BJ", "PRGO", "SFM", "CASY", "MUSA",
+    "RH", "WSM", "LOVE", "SNBR", "BLMN", "ELF", "ULTA", "COTY", "SPB", "CHD",
+    "CLX", "ENR", "MLI", "GFF", "APOG", "TREX", "AAON", "IBP", "BLDR", "BECN",
+    "GMS", "STLD", "NUE", "RS", "CMC", "ZEUS", "KALU", "CENX", "CRS", "ATI",
+    "HWM", "TKR", "GTLS", "FLOW", "GHM", "CECO", "FELE", "POWI", "FORM", "MKSI",
+    "ONTO", "ICHR", "ACLS", "ENTG", "UCTT", "KLIC", "COHU", "EPC", "GEF", "SLGN",
+    "BERY", "SEE", "SON", "IP", "PKG", "CRUS", "SLAB", "DIOD", "LSCC", "ALGM",
+    "MTSI", "LITE", "COHR", "SMTC", "SWKS", "QRVO", "CIEN", "VIAV", "CALX",
+    "ADTN", "DCOM", "SHEN",
 ]
+
+# Cache key + TTL for the live-fetched universe
+_UNIVERSE_CACHE_KEY = "ticker_universe"
+_UNIVERSE_CACHE_TTL = 7 * 24 * 3600  # 7 days — tickers change slowly
 
 
 def get_stock_universe() -> list[str]:
     """
     Build a broad US stock universe: S&P 500 + NASDAQ 100 + S&P MidCap 400.
-    Fetches live from multiple sources, deduplicates, caps at MAX_TICKERS.
-    Falls back to the built-in FALLBACK_TICKERS list on any failure.
+
+    Fetch priority:
+      1. Live sources (datahub.io, Wikipedia) — always fresh, current members only
+      2. Cache (Redis if configured, else in-process memory) — last good fetch,
+         TTL 7 days. Survives transient network failures without touching the
+         hardcoded list. Redis persists across GitHub Actions runs / restarts.
+      3. FALLBACK_TICKERS — minimal mega-cap list, last resort only.
     """
+    from cache_layer import get_cache
+    cache = get_cache()
+
     seen:    set[str]  = set()
     tickers: list[str] = []
 
@@ -176,13 +185,21 @@ def get_stock_universe() -> list[str]:
     except Exception as exc:
         print(f"[screener] MidCap 400 Wikipedia failed ({exc}) — skipping.")
 
+    # ── Live fetch succeeded — persist to cache and return ────────────────────
     if len(tickers) > 100:
         result = tickers[:MAX_TICKERS]
-        print(f"[screener] Universe: {len(result)} tickers (capped at {MAX_TICKERS}).")
+        print(f"[screener] Universe: {len(result)} tickers (capped at {MAX_TICKERS}). Caching for 7d.")
+        cache.set(_UNIVERSE_CACHE_KEY, result, ttl_seconds=_UNIVERSE_CACHE_TTL)
         return result
 
-    # ── All live sources failed — use built-in fallback ───────────────────────
-    print(f"[screener] All live sources failed. Using built-in fallback ({len(FALLBACK_TICKERS)} tickers).")
+    # ── Live sources failed — try cache ───────────────────────────────────────
+    cached = cache.get(_UNIVERSE_CACHE_KEY)
+    if cached and len(cached) > 100:
+        print(f"[screener] Live sources failed. Using cached universe ({len(cached)} tickers, backend={cache.name()}).")
+        return cached[:MAX_TICKERS]
+
+    # ── Cache cold — use minimal hardcoded mega-cap list ─────────────────────
+    print(f"[screener] No cache available. Using hardcoded fallback ({len(FALLBACK_TICKERS)} tickers).")
     return FALLBACK_TICKERS[:MAX_TICKERS]
 
 

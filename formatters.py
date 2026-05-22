@@ -303,15 +303,27 @@ def format_daily_message(picks: dict, config: dict,
             parts.append(f"🎯 {_esc(catalyst)}")
         return "  <i>" + "  ·  ".join(parts) + "</i>" if parts else ""
 
+    def _theme_tag(s):
+        """Return a styled inline theme hashtag, e.g. #AIInfrastructure"""
+        theme = s.get("theme", "")
+        if not theme:
+            return ""
+        # Collapse to hashtag: remove spaces/dashes, title-case each word
+        tag = "#" + "".join(w.capitalize() for w in _re.split(r'[\s\-]+', theme.strip()) if w)
+        return f"  <code>{_esc(tag)}</code>"
+
     def _row_st(s):
         t, e, tgt, stop = s.get("ticker",""), s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop else ""
         held_badge = "  📌 <i>holding</i>" if held_tickers and t.upper() in held_tickers else ""
         row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}{held_badge}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
-               f"<i>{_upside(e,tgt)}</i>{stop_str}")
+               f"<i>{_upside(e,tgt)}</i>{stop_str}{_theme_tag(s)}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
         if tl: row += f"\n{tl}"
+        edge = s.get("edge", "")
+        if edge:
+            row += f"\n  <i>Edge: {_esc(edge)}</i>"
         row += _iv_warn(s)
         ew = _entry_window(e, stop, budget=config.get("stock_budget"), is_long_term=False, is_crypto=False)
         if ew: row += f"\n{ew}"
@@ -323,9 +335,12 @@ def format_daily_message(picks: dict, config: dict,
         held_badge = "  📌 <i>holding</i>" if held_tickers and t.upper() in held_tickers else ""
         row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}{held_badge}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
-               f"<i>{_upside(e,tgt)}</i>{hz}")
+               f"<i>{_upside(e,tgt)}</i>{hz}{_theme_tag(s)}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
         if tl: row += f"\n{tl}"
+        edge = s.get("edge", "")
+        if edge:
+            row += f"\n  <i>Edge: {_esc(edge)}</i>"
         ew = _entry_window(e, None, budget=config.get("stock_budget"), is_long_term=True, is_crypto=False)
         if ew: row += f"\n{ew}"
         return row

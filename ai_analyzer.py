@@ -825,6 +825,8 @@ Return this exact JSON structure:
         "invalidation": "one condition that breaks this setup, max 12 words",
         "risk": "one sentence risk, max 10 words",
         "plain_english": "one sentence for a beginner — what this company does and why buying now, max 20 words",
+        "theme": "market theme / narrative this pick rides, 2–4 words (e.g. 'AI infrastructure', 'rate cut play', 'consumer resilience', 'energy transition')",
+        "edge": "why this ticker specifically over peers — max 15 words (e.g. 'Only pure-play with both fab and design', 'Highest margin in sector with accelerating buybacks')",
         "entry_low":  null,
         "entry_high": null,
         "earnings_date": "Thu May 1 or omit if no earnings this week"
@@ -843,6 +845,8 @@ Return this exact JSON structure:
         "catalyst": "single most important upcoming fundamental trigger, max 12 words",
         "invalidation": "one condition that breaks this setup, max 12 words",
         "plain_english": "one sentence for a beginner — what this company does and why buying now, max 20 words",
+        "theme": "market theme / narrative this pick rides, 2–4 words",
+        "edge": "why this ticker specifically over peers — max 15 words",
         "horizon": "2-3 years",
         "earnings_date": "Thu May 1 or omit if no earnings this week"
       }}
