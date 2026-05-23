@@ -8,7 +8,8 @@ Test groups
 -----------
   TestAuth            — 403 when no/invalid chat_id
   TestPicks           — /api/miniapp/picks
-  TestPositions       — /api/miniapp/positions, close_position, update_position
+  TestPositions       — /api/miniapp/positions, close_position, update_position,
+                        log_bought, remove_position
   TestSettings        — /api/miniapp/settings, settings/update, toggle_paused
   TestWatchlist       — /api/miniapp/watchlist, watchlist/add, watchlist/remove,
                         update_watchlist
@@ -355,6 +356,28 @@ class TestPositions:
         r = post(client, "/api/miniapp/log_bought",
                  {"ticker": "AAPL", "entry_price": 189.50, "shares": 5})
         assert r.status_code == 200
+
+    def test_remove_position_nonexistent_returns_ok(self, client):
+        """Removing a ticker not in portfolio should not crash."""
+        r = post(client, "/api/miniapp/remove_position", {"ticker": "FAKEXYZ"})
+        assert r.status_code == 200
+        data = r.get_json()
+        assert isinstance(data, dict)
+        assert "ok" in data
+
+    def test_remove_position_missing_ticker_returns_400(self, client):
+        r = post(client, "/api/miniapp/remove_position", {})
+        assert r.status_code == 400
+
+    def test_remove_position_then_gone(self, client):
+        """Log a position then remove it — should disappear from positions list."""
+        post(client, "/api/miniapp/log_bought",
+             {"ticker": "TSLA", "entry_price": 200.0})
+        r = post(client, "/api/miniapp/remove_position", {"ticker": "TSLA"})
+        assert r.get_json().get("ok") is True
+        positions = get(client, "/api/miniapp/positions").get_json()["positions"]
+        tickers = [p["ticker"] for p in positions]
+        assert "TSLA" not in tickers
 
 
 # ══════════════════════════════════════════════════════════════════════════════

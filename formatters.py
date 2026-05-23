@@ -192,7 +192,9 @@ def format_daily_message(picks: dict, config: dict,
                          buy_counts: dict | None = None,
                          recent_stats: dict | None = None,
                          earnings_this_week: dict | None = None,
-                         held_tickers: set | None = None) -> str:
+                         held_tickers: set | None = None,
+                         watchlist_prices: dict | None = None,
+                         user_alerts_map: dict | None = None) -> str:
     """
     Concise daily Telegram message — scannable in under 10 seconds.
     Each pick is 2 lines: prices + thesis. Full detail lives in the mini app.
@@ -218,15 +220,21 @@ def format_daily_message(picks: dict, config: dict,
     etfs        = picks.get("etfs", {})
     commodities = picks.get("commodities", {})
 
-    st_picks    = stocks.get("short_term",   []) if show_st else []
-    lt_picks    = stocks.get("long_term",    []) if show_lt else []
-    cst_picks   = crypto.get("short_term",   []) if show_crypto else []
-    etf_st      = etfs.get("short_term",     []) if show_st else []
-    etf_lt      = [{**e, "_lt": True} for e in etfs.get("long_term", [])] if show_lt else []
-    etf_picks   = etf_st + etf_lt
-    comm_st     = commodities.get("short_term", []) if show_st else []
-    comm_lt     = [{**c, "_lt": True} for c in commodities.get("long_term", [])] if show_lt else []
-    comm_picks  = comm_st + comm_lt
+    # ── Watchlist sort helper — float watched tickers to top of each section ──
+    def _wl_sort(lst: list, key: str = "ticker") -> list:
+        if not watchlist:
+            return lst
+        return sorted(lst, key=lambda p: (0 if p.get(key, "").upper() in watchlist else 1))
+
+    st_picks    = _wl_sort(stocks.get("short_term",   []) if show_st else [])
+    lt_picks    = _wl_sort(stocks.get("long_term",    []) if show_lt else [])
+    cst_picks   = _wl_sort(crypto.get("short_term",   []) if show_crypto else [], key="symbol")
+    etf_picks   = _wl_sort(etfs.get("short_term", []) if show_st else []) + \
+                  _wl_sort([{**e, "_lt": True} for e in etfs.get("long_term", [])] if show_lt else [])
+    comm_picks  = _wl_sort(
+        (commodities.get("short_term", []) if show_st else []) +
+        ([{**c, "_lt": True} for c in commodities.get("long_term", [])] if show_lt else [])
+    )
     options_plays = picks.get("options_plays", [])
 
     # ── Header ────────────────────────────────────────────────────────────────
@@ -437,23 +445,56 @@ def format_daily_message(picks: dict, config: dict,
         # Only show when ST stocks exist but none hit conviction 4+
         lines += ["", "🎯 <b>OPTIONS</b>  <i>· skipped — options plays need a stock pick with conviction ★★★★+; today's picks didn't reach that bar</i>"]
 
-    # ── Watchlist callout ──────────────────────────────────────────────────────
+    # ── Watchlist: hit callout + "On Your Radar" section ─────────────────────
     if watchlist:
-        # Find which watchlist tickers appeared in any section today
-        all_tickers = (
+        all_pick_tickers = set(
             [s.get("ticker","").upper() for s in st_picks + lt_picks] +
             [c.get("symbol","").upper() for c in cst_picks] +
             [e.get("ticker","").upper() for e in etf_picks] +
             [c.get("ticker","").upper() for c in comm_picks]
         )
-        wl_in_picks  = [t for t in watchlist if t in all_tickers]
-        wl_evaluated = [t for t in watchlist if t not in all_tickers]
+        wl_in_picks     = [t for t in watchlist if t in all_pick_tickers]
+        wl_not_in_picks = [t for t in watchlist if t not in all_pick_tickers]
+
+        # Celebrate watchlist hits (ticker already appears in picks above — no duplicate)
         if wl_in_picks:
             tickers_str = ", ".join(f"<b>{t}</b>" for t in wl_in_picks)
-            lines += ["", f"👁 <i>Your watchlist: {tickers_str} made today's picks!</i>"]
-        elif wl_evaluated:
-            tickers_str = ", ".join(wl_evaluated[:5])
-            lines += ["", f"👁 <i>Your watchlist ({tickers_str}) was screened — none qualified today.</i>"]
+            lines += ["", f"⭐ <i>Watchlist hit: {tickers_str} made today's picks!</i>"]
+
+        # Show live price/change for watched-but-not-picked tickers
+        if wl_not_in_picks:
+            radar_rows = []
+            for t in wl_not_in_picks[:8]:   # cap at 8 to keep message compact
+                data     = (watchlist_prices or {}).get(t)
+                alerts   = (user_alerts_map  or {}).get(t, [])
+                cur_price = data.get("price") if data else None
+
+                if cur_price:
+                    price_str = f"<code>${_p(cur_price)}</code>"
+                    chg = data.get("change_pct")
+                    if chg is not None:
+                        sign  = "+" if chg >= 0 else ""
+                        color = "📈" if chg >= 0 else "📉"
+                        chg_str = f"  {color} <i>{sign}{chg:.1f}%</i>"
+                    else:
+                        chg_str = ""
+
+                    # Alert proximity — pick the closest active alert
+                    alert_str = ""
+                    if alerts and cur_price:
+                        closest = min(alerts, key=lambda a: abs(a["target"] - cur_price))
+                        tgt     = closest["target"]
+                        pct_away = (tgt - cur_price) / cur_price * 100
+                        sign_a   = "+" if pct_away >= 0 else ""
+                        alert_str = f"  🔔 <i>alert ${_p(tgt)} ({sign_a}{pct_away:.1f}%)</i>"
+
+                    radar_rows.append(f"  <b>{_esc(t)}</b>  {price_str}{chg_str}{alert_str}")
+                else:
+                    radar_rows.append(f"  <b>{_esc(t)}</b>  <i>· not in today's picks</i>")
+
+            if radar_rows:
+                lines += ["", "👁 <b>On Your Radar</b>  <i>(watchlist — not in today's picks)</i>"]
+                lines += radar_rows
 
     # ── One-time sector filter discovery tip ──────────────────────────────────
     # Show only when: user has no excluded sectors AND has received 3+ alerts
