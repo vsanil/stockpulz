@@ -24,8 +24,25 @@ from telegram_notifier import handle_incoming_command, handle_callback_query, se
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or _sec.token_hex(32)
 
-# ── In-memory magic-link token store: {token: expiry_datetime_utc} ───────────
-_admin_tokens: dict = {}
+# ── Admin magic-link token store (Gist-backed, survives Render restarts) ──────
+_ADMIN_TOKEN_FILE = "admin_tokens.json"
+
+def _load_admin_tokens() -> dict:
+    """Load {token: expiry_ts} dict from Gist/storage. Returns {} on any error."""
+    try:
+        from config_manager import _load_gist_file
+        data = _load_gist_file(_ADMIN_TOKEN_FILE)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def _save_admin_tokens(tokens: dict) -> None:
+    """Persist token dict to Gist/storage."""
+    try:
+        from config_manager import _write_gist_file
+        _write_gist_file(_ADMIN_TOKEN_FILE, tokens)
+    except Exception as e:
+        print(f"[admin] WARNING: Could not save admin tokens: {e}")
 
 
 # ── Keep-alive (prevents Render free tier cold starts) ────────────────────────
@@ -419,10 +436,22 @@ function switchTab(k){
 function feedback(list){
   if(!list.length)return'<p class="empty">No feedback yet</p>';
   return list.slice(0,15).map(function(f){
-    var name=f.first_name||f.username||('user_'+f.chat_id.slice(-4));
-    var u=f.read?'':'<span class="unread"></span>';
-    return'<div class="fb-row"><div class="fb-meta">'+u+name+' &middot; '+age(f.submitted_at)+'</div>'
-      +'<div class="fb-text">'+f.text+'</div></div>';
+    var name=f.first_name||(f.username?'@'+f.username:'')||('user_'+String(f.chat_id).slice(-4));
+    var uname=f.username?'<span style="color:var(--muted);font-size:11px"> @'+f.username+'</span>':'';
+    var dot=f.read?'':'<span class="unread"></span>';
+    var activeDot=f.is_active?'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:4px;vertical-align:middle"></span>':'';
+    var plat=f.platform?'<span style="font-size:10px;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;margin-left:4px">'+f.platform+'</span>':'';
+    var pg=f.page?'<span style="font-size:10px;color:var(--muted)"> · on '+f.page+'</span>':'';
+    var pos=f.open_positions!==undefined&&f.open_positions!=='?'?'<span style="font-size:10px;color:var(--muted)"> · '+f.open_positions+' pos</span>':'';
+    var seen=f.last_seen?'<span style="font-size:10px;color:var(--muted)"> · seen '+age(f.last_seen)+'</span>':'';
+    var cid=f.chat_id||'';
+    var copyBtn='<button onclick="navigator.clipboard.writeText(\''+cid+'\');this.textContent=\'✓\';setTimeout(()=>this.textContent=\'ID: '+cid+'\',1200)" '
+      +'style="font-size:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:inherit;border-radius:4px;padding:2px 6px;cursor:pointer;margin-top:4px">ID: '+cid+'</button>';
+    return'<div class="fb-row">'
+      +'<div class="fb-meta">'+dot+activeDot+'<b>'+name+'</b>'+uname+plat+pg+pos+seen+' &middot; '+age(f.submitted_at)+'</div>'
+      +'<div class="fb-text">'+f.text+'</div>'
+      +'<div>'+copyBtn+'<span style="font-size:10px;color:var(--muted);margin-left:8px">↑ paste in Render log filter</span></div>'
+      +'</div>';
   }).join('');
 }
 
@@ -463,14 +492,16 @@ def admin_login():
 @app.route("/admin/request", methods=["POST"])
 def admin_request_link():
     """Generate a one-time magic link and send it to the owner's Telegram."""
-    # Purge expired tokens
-    now = _dt.utcnow()
-    for t in list(_admin_tokens):
-        if _admin_tokens[t] < now:
-            del _admin_tokens[t]
+    import time as _time
+    now_ts = _time.time()
+
+    # Load tokens from Gist, purge expired ones
+    tokens = _load_admin_tokens()
+    tokens = {t: exp for t, exp in tokens.items() if exp > now_ts}
 
     token = _sec.token_urlsafe(32)
-    _admin_tokens[token] = now + _td(minutes=5)
+    tokens[token] = now_ts + 600  # 10-minute window (survives cold starts)
+    _save_admin_tokens(tokens)
 
     base = (os.environ.get("RENDER_EXTERNAL_URL") or request.host_url).rstrip("/")
     link = f"{base}/admin/verify?t={token}"
@@ -480,7 +511,7 @@ def admin_request_link():
         return jsonify({"sent": False, "error": "TELEGRAM_CHAT_ID not set"}), 500
 
     send_message(
-        f"🔐 <b>StockPulz Admin login link</b>\n\nExpires in 5 minutes — single use only.\n\n{link}",
+        f"🔐 <b>StockPulz Admin login link</b>\n\nExpires in 10 minutes — single use only.\n\n{link}",
         chat_id=owner,
     )
     return jsonify({"sent": True})
@@ -489,12 +520,19 @@ def admin_request_link():
 @app.route("/admin/verify")
 def admin_verify():
     """Validate the magic-link token, set session cookie, redirect to dashboard."""
+    import time as _time
     token = request.args.get("t", "")
-    now = _dt.utcnow()
-    expiry = _admin_tokens.get(token)
-    if not expiry or now > expiry:
+    now_ts = _time.time()
+
+    tokens = _load_admin_tokens()
+    expiry = tokens.get(token)
+    if not expiry or now_ts > expiry:
         return redirect("/admin/login?error=expired")
-    del _admin_tokens[token]          # single-use: consume immediately
+
+    # Single-use: delete and persist immediately
+    del tokens[token]
+    _save_admin_tokens(tokens)
+
     session["admin"] = True
     session.permanent = False         # session expires when browser closes
     return redirect("/admin")
@@ -512,6 +550,21 @@ def admin_dashboard():
     return _ADMIN_DASH_HTML, 200
 
 
+def _enrich_feedback(entries: list, users: list) -> list:
+    """Merge live user stats into feedback entries for admin triage."""
+    user_map = {str(u["id"]): u for u in users}
+    result = []
+    for f in entries:
+        u = user_map.get(str(f.get("chat_id", "")), {})
+        result.append({
+            **f,
+            "open_positions": u.get("open_positions", "?"),
+            "last_seen":      u.get("last_seen", ""),
+            "is_active":      u.get("is_active", False),
+        })
+    return result
+
+
 @app.route("/admin/data")
 @_require_admin
 def admin_data():
@@ -519,8 +572,13 @@ def admin_data():
     from config_manager import (
         get_allowed_users, get_user_config, load_picks,
         load_user_trade_log, load_feedback, get_config,
-        count_unread_feedback,
+        count_unread_feedback, mark_feedback_read,
     )
+    # Viewing the admin panel counts as reading — clear unread flag
+    try:
+        mark_feedback_read()
+    except Exception:
+        pass
 
     cfg     = get_config()
     owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -596,7 +654,7 @@ def admin_data():
             "commodities_st": comm_st, "commodities_lt": comm_lt,
             "options_plays":  opts,
         },
-        "feedback":        load_feedback()[:20],
+        "feedback":        _enrich_feedback(load_feedback()[:20], users),
         "cron":            cron,
         "last_morning_run": cfg.get("last_morning_run", ""),
     })
@@ -1078,6 +1136,9 @@ def miniapp_feedback():
     if not text:
         return jsonify({"error": "empty feedback"}), 400
 
+    platform = (body.get("platform") or "").strip()[:32]   # e.g. "ios", "android", "tdesktop"
+    page     = (body.get("page")     or "").strip()[:64]   # mini app tab active at send time
+
     from config_manager import add_feedback
     # Fetch user profile for context
     username, first_name = "", ""
@@ -1093,20 +1154,9 @@ def miniapp_feedback():
     except Exception:
         pass
 
-    add_feedback(chat_id, text, username=username, first_name=first_name)
-
-    # Notify admin
-    try:
-        from telegram_api import send_message as _send
-        admin_id  = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
-        name_str  = first_name or f"user {chat_id}"
-        uname_str = f"  @{username}" if username else ""
-        _send(
-            f"💬 <b>New feedback</b> (miniapp) from <b>{name_str}</b>{uname_str}\n\n{text}",
-            admin_id,
-        )
-    except Exception:
-        pass
+    add_feedback(chat_id, text, username=username, first_name=first_name,
+                 platform=platform, page=page)
+    # Feedback is stored and surfaced in the admin mini app inbox — no Telegram alert sent.
 
     return jsonify({"ok": True})
 
