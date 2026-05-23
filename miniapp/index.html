@@ -2374,6 +2374,10 @@ const initData = tg.initData || '';
 
 tg.ready();
 tg.expand();
+// Prevent vertical swipe-to-close gesture from firing during normal scroll (Bot API 7.7+)
+if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+// Fallback: require explicit confirmation before closing (older clients)
+if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
 tg.setHeaderColor?.('bg_color');
 tg.setBackgroundColor?.('bg_color');
 
@@ -6292,7 +6296,11 @@ async function submitFeedback() {
   btn.disabled    = true;
   btn.textContent = 'Sending…';
   try {
-    await api('/api/miniapp/feedback', 'POST', { text });
+    await api('/api/miniapp/feedback', 'POST', {
+      text,
+      platform: tg.platform || '',          // "ios" | "android" | "tdesktop" | "web" etc.
+      page:     _currentTab || 'unknown',   // active tab when feedback was sent
+    });
     tg.HapticFeedback?.notificationOccurred('success');
     btn.textContent = '✅ Sent!';
     setTimeout(() => closeOverlay('feedback-overlay'), 900);
