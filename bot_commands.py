@@ -112,11 +112,17 @@ def handle_incoming_command(message_text: str, chat_id: str | None = None) -> st
                 )
             return ""
 
-    # Record last-seen timestamp for dashboard activity tracking (background — non-blocking)
+    # Record last-seen + log the command (background — non-blocking)
     def _record_seen():
         try:
             from datetime import datetime as _dt
             update_user_config(chat_id, "last_seen", _dt.utcnow().isoformat())
+        except Exception:
+            pass
+        try:
+            from config_manager import log_user_event
+            cmd_label = text.split()[0][:40] if text else "(empty)"
+            log_user_event(chat_id, "command", cmd_label)
         except Exception:
             pass
     threading.Thread(target=_record_seen, daemon=True).start()
@@ -2293,14 +2299,25 @@ def _parse_and_execute(text: str, original: str = "", chat_id: str | None = None
     text = text.lstrip("/").replace("_", " ")   # /set_st 30 → SET ST 30
 
 
-    for _handler in (_cmd_market, _cmd_alerts, _cmd_paper, _cmd_misc,
-                     _cmd_settings, _cmd_admin, _cmd_trades):
-        _result = _handler(text, original, chat_id)
-        if _result is not None:
-            return _result
+    try:
+        for _handler in (_cmd_market, _cmd_alerts, _cmd_paper, _cmd_misc,
+                         _cmd_settings, _cmd_admin, _cmd_trades):
+            _result = _handler(text, original, chat_id)
+            if _result is not None:
+                return _result
 
-    # ── Natural language fallback ─────────────────────────────────────────────
-    return _handle_natural_language(original or text, chat_id=chat_id)
+        # ── Natural language fallback ─────────────────────────────────────────
+        return _handle_natural_language(original or text, chat_id=chat_id)
+    except Exception as _top_exc:
+        import traceback
+        _tb = traceback.format_exc()
+        print(f"[bot] Unhandled error for {chat_id} cmd={original!r}: {_top_exc}\n{_tb}")
+        try:
+            from config_manager import log_user_event
+            log_user_event(chat_id, "error", f"{original!r}: {type(_top_exc).__name__}: {_top_exc}", level="error")
+        except Exception:
+            pass
+        return "⚠️ Something went wrong. Please try again in a moment."
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────

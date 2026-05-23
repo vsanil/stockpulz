@@ -220,39 +220,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;background:
 .card{background:#0f1117;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px 36px;width:100%;max-width:380px;text-align:center}
 h1{font-size:22px;font-weight:700;margin-bottom:8px}
 .sub{color:#7c8899;font-size:14px;margin-bottom:28px}
-button{background:#4f8ef7;color:#fff;border:none;border-radius:10px;padding:13px 24px;font-size:15px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s}
-button:hover{opacity:.88}
-button:disabled{opacity:.45;cursor:default}
-.msg{margin-top:16px;font-size:13px;color:#7c8899;min-height:20px}
-.msg.ok{color:#34d399}
-.msg.err{color:#f87171}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#34d399;margin-right:8px;vertical-align:middle}
+.gh-btn{display:flex;align-items:center;justify-content:center;gap:10px;background:#238636;color:#fff;border:none;border-radius:10px;padding:13px 24px;font-size:15px;font-weight:600;cursor:pointer;width:100%;text-decoration:none;transition:opacity .15s}
+.gh-btn:hover{opacity:.88}
+.gh-btn svg{flex-shrink:0}
+.msg{margin-top:16px;font-size:13px;color:#f87171;min-height:20px}
 </style>
 </head>
 <body>
 <div class="card">
   <h1>📈 StockPulz Admin</h1>
-  <p class="sub">Send a one-time login link to your Telegram.</p>
-  <button id="btn" onclick="go()">Send me a login link</button>
+  <p class="sub">Sign in with your GitHub account.</p>
+  <a class="gh-btn" href="/admin/github">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+    Login with GitHub
+  </a>
   <p class="msg" id="msg"></p>
 </div>
 <script>
-const errParam = new URLSearchParams(location.search).get('error');
-if(errParam){
-  const el=document.getElementById('msg');
-  el.textContent='Link expired or already used — try again.';
-  el.className='msg err';
-}
-async function go(){
-  const btn=document.getElementById('btn'),msg=document.getElementById('msg');
-  btn.disabled=true;
-  msg.textContent='Sending…';msg.className='msg';
-  try{
-    const r=await fetch('/admin/request',{method:'POST'});
-    const d=await r.json();
-    if(d.sent){msg.textContent='Check your Telegram — link expires in 5 min.';msg.className='msg ok';}
-    else{msg.textContent='Failed: '+d.error;msg.className='msg err';btn.disabled=false;}
-  }catch(e){msg.textContent='Network error — try again.';msg.className='msg err';btn.disabled=false;}
+const p=new URLSearchParams(location.search);
+if(p.get('error')){
+  document.getElementById('msg').textContent=
+    p.get('error')==='forbidden'?'Access denied — wrong GitHub account.':'Authentication failed — try again.';
 }
 </script>
 </body>
@@ -283,19 +271,26 @@ a{color:var(--accent);text-decoration:none}
 .topbar-right{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
 .btn-sm{background:var(--bg3);border:1px solid var(--border2);color:var(--muted2);padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit}
 .btn-sm:hover{border-color:var(--accent);color:var(--accent)}
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.btn-danger{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:var(--red);padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit}
+.btn-danger:hover{background:rgba(248,113,113,.2)}
+.btn-success{background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.3);color:var(--green);padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit}
+.btn-success:hover{background:rgba(52,211,153,.2)}
+.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}
 .metric{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px}
 .m-label{font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em}
-.m-val{font-size:30px;font-weight:700}
+.m-val{font-size:28px;font-weight:700}
 .m-sub{font-size:11px;color:var(--muted);margin-top:3px}
+.m-pending .m-val{color:var(--amber)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px}
-.card-title{font-size:11px;font-weight:600;color:var(--muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:.06em}
-.row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.card-title{font-size:11px;font-weight:600;color:var(--muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;justify-content:space-between}
+.row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;transition:background .1s;border-radius:6px;padding:8px 6px}
 .row:last-child{border-bottom:none}
+.row:hover{background:var(--bg3)}
 .avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
 .av-blue{background:#1c2e4a;color:var(--accent)}
 .av-green{background:#1a2e1a;color:var(--green)}
+.av-red{background:#2e1a1a;color:var(--red)}
 .u-info{flex:1;min-width:0}
 .u-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .u-meta{font-size:11px;color:var(--muted);margin-top:1px}
@@ -303,13 +298,13 @@ a{color:var(--accent);text-decoration:none}
 .p-active{background:rgba(52,211,153,.12);color:var(--green)}
 .p-paused{background:rgba(251,191,36,.12);color:var(--amber)}
 .p-idle{background:rgba(124,136,153,.12);color:var(--muted)}
+.p-banned{background:rgba(248,113,113,.12);color:var(--red)}
+.p-pending{background:rgba(167,139,250,.12);color:var(--purple)}
 .cron-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px}
 .cron-row:last-child{border-bottom:none}
 .cron-left{display:flex;align-items:center;gap:8px}
 .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.d-green{background:var(--green)}
-.d-amber{background:var(--amber)}
-.d-muted{background:var(--muted);opacity:.4}
+.d-green{background:var(--green)}.d-amber{background:var(--amber)}.d-muted{background:var(--muted);opacity:.4}
 .cron-time{color:var(--muted);font-size:11px;text-align:right}
 .tabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
 .tab{padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid var(--border);color:var(--muted);background:transparent;font-family:inherit}
@@ -325,9 +320,62 @@ a{color:var(--accent);text-decoration:none}
 .unread{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:middle}
 .empty{color:var(--muted);font-size:12px;text-align:center;padding:20px 0}
 .loading{color:var(--muted);font-size:13px;text-align:center;padding:60px 0}
+.pending-banner{background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.2);border-radius:var(--r);padding:12px 16px;margin-bottom:12px}
+.pending-title{font-size:12px;font-weight:600;color:var(--purple);margin-bottom:8px}
+.pending-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px}
+.pending-row:last-child{border-bottom:none}
+.broadcast-bar{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;margin-bottom:12px;display:flex;gap:8px;align-items:center}
+.broadcast-bar input{flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:7px 12px;color:var(--text);font-size:13px;font-family:inherit;outline:none}
+.broadcast-bar input:focus{border-color:var(--accent)}
+/* ── User detail drawer ── */
+#drawer{position:fixed;top:0;right:-480px;width:480px;height:100vh;background:var(--bg2);border-left:1px solid var(--border2);z-index:1000;transition:right .25s ease;overflow-y:auto;display:flex;flex-direction:column}
+#drawer.open{right:0}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;display:none}
+#overlay.open{display:block}
+.drawer-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0}
+.drawer-body{flex:1;overflow-y:auto;padding:16px 20px}
+.drawer-close{margin-left:auto;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1}
+.drawer-close:hover{color:var(--text)}
+.d-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:8px}
+.d-tab{padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;border:none;background:transparent;color:var(--muted);font-family:inherit}
+.d-tab.on{background:var(--bg4);color:var(--text)}
+.kv-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px}
+.kv-row:last-child{border-bottom:none}
+.kv-key{color:var(--muted)}
+.kv-val{font-weight:500;text-align:right;max-width:60%}
+.pos-row{padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.pos-row:last-child{border-bottom:none}
+.log-row{padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11px;display:flex;gap:8px}
+.log-row:last-child{border-bottom:none}
+.log-ts{color:var(--muted);flex-shrink:0;font-size:10px;padding-top:1px}
+.log-type{flex-shrink:0;width:60px;font-weight:600;font-size:10px;text-transform:uppercase}
+.lt-command{color:var(--accent)}.lt-error{color:var(--red)}.lt-alert{color:var(--amber)}.lt-position{color:var(--green)}.lt-system{color:var(--muted)}.lt-settings{color:var(--purple)}
+.log-detail{color:var(--muted2);word-break:break-word}
+.action-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.msg-area{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;font-family:inherit;outline:none;resize:vertical;min-height:60px;margin-top:10px}
+.msg-area:focus{border-color:var(--accent)}
+.section-hd{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px}
 </style>
 </head>
 <body>
+<div id="overlay" onclick="closeDrawer()"></div>
+<div id="drawer">
+  <div class="drawer-head">
+    <div class="avatar av-blue" id="dav">??</div>
+    <div><div id="dname" style="font-weight:700;font-size:15px"></div><div id="dmeta" style="font-size:11px;color:var(--muted);margin-top:2px"></div></div>
+    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="d-tabs">
+      <button class="d-tab on" onclick="dTab('overview')">Overview</button>
+      <button class="d-tab" onclick="dTab('positions')">Positions</button>
+      <button class="d-tab" onclick="dTab('alerts')">Alerts</button>
+      <button class="d-tab" onclick="dTab('logs')">Logs</button>
+      <button class="d-tab" onclick="dTab('actions')">Actions</button>
+    </div>
+    <div id="dpanel"><p class="loading">Loading…</p></div>
+  </div>
+</div>
 <div class="topbar">
   <div class="topbar-title">📈 StockPulz Admin <span class="live"></span></div>
   <div class="topbar-right">
@@ -338,60 +386,78 @@ a{color:var(--accent);text-decoration:none}
 </div>
 <div id="root"><p class="loading">Loading…</p></div>
 <script>
-var picks={},activeTab='';
+var picks={},activeTab='',_dData=null,_dTab='overview';
 
 function age(iso){
   if(!iso)return'—';
   try{
     var d=new Date(iso+(iso.endsWith('Z')?'':'Z')),now=new Date();
     var m=Math.round((now-d)/60000);
-    if(m<2)return'just now';
-    if(m<60)return m+'m ago';
-    if(m<1440)return Math.round(m/60)+'h ago';
-    return Math.round(m/1440)+'d ago';
+    if(m<2)return'just now';if(m<60)return m+'m ago';
+    if(m<1440)return Math.round(m/60)+'h ago';return Math.round(m/1440)+'d ago';
   }catch(e){return iso.slice(0,16).replace('T',' ');}
 }
-
-function ini(first,uname){
-  var s=(first||uname||'??');
-  return s.slice(0,2).toUpperCase();
-}
+function ini(a,b){return((a||b||'??').slice(0,2)).toUpperCase();}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 function metrics(s){
-  return '<div class="metrics">'
+  var pend=s.pending_count||0;
+  var pendCls=pend?'m-pending':'';
+  return'<div class="metrics">'
     +'<div class="metric"><div class="m-label">Total users</div><div class="m-val">'+s.total_users+'</div><div class="m-sub">'+s.active_today+' active today</div></div>'
+    +'<div class="metric '+pendCls+'"><div class="m-label">Pending</div><div class="m-val">'+pend+'</div><div class="m-sub">awaiting approval</div></div>'
     +'<div class="metric"><div class="m-label">Picks today</div><div class="m-val">'+s.total_picks+'</div><div class="m-sub">stocks · crypto · ETFs</div></div>'
     +'<div class="metric"><div class="m-label">Open positions</div><div class="m-val">'+s.open_positions+'</div><div class="m-sub">across all users</div></div>'
     +'<div class="metric"><div class="m-label">Unread feedback</div><div class="m-val">'+s.unread_feedback+'</div><div class="m-sub">&nbsp;</div></div>'
     +'</div>';
 }
 
-function users(list){
+function pendingSection(list){
+  if(!list||!list.length)return'';
+  var rows=list.map(function(p){
+    var name=p.first_name||(p.username?'@'+p.username:'')||('user_'+String(p.chat_id).slice(-4));
+    return'<div class="pending-row">'
+      +'<div style="flex:1"><b>'+esc(name)+'</b>'+(p.username?' <span style="color:var(--muted)">@'+esc(p.username)+'</span>':'')
+      +'<span style="font-size:10px;color:var(--muted);margin-left:6px">requested '+age(p.requested_at)+'</span></div>'
+      +'<button class="btn-success" style="padding:3px 10px;font-size:11px" onclick="approve(\''+p.chat_id+'\',this)">Approve</button>'
+      +' <button class="btn-danger" style="padding:3px 10px;font-size:11px" onclick="reject(\''+p.chat_id+'\',this)">Reject</button>'
+      +'</div>';
+  }).join('');
+  return'<div class="pending-banner"><div class="pending-title">⏳ '+list.length+' pending approval</div>'+rows+'</div>';
+}
+
+function broadcastBar(){
+  return'<div class="broadcast-bar">'
+    +'<input id="bcmsg" placeholder="Broadcast to all users…" onkeydown="if(event.key===\'Enter\')broadcast()">'
+    +'<button class="btn-sm" onclick="broadcast()">Send all</button>'
+    +'</div>';
+}
+
+function usersList(list){
   if(!list.length)return'<p class="empty">No users yet</p>';
   return list.map(function(u){
     var name=u.first_name||u.username||('user_'+u.id.slice(-4));
     var tag=u.is_admin?' <span style="color:var(--muted);font-weight:400;font-size:11px">(admin)</span>':'';
     var pill=u.paused?'<span class="pill p-paused">paused</span>':u.is_active?'<span class="pill p-active">active</span>':'<span class="pill p-idle">idle</span>';
     var avcls=u.is_admin?'av-green':'av-blue';
-    return'<div class="row"><div class="avatar '+avcls+'">'+ini(u.first_name,u.username)+'</div>'
-      +'<div class="u-info"><div class="u-name">'+name+tag+'</div>'
-      +'<div class="u-meta">'+u.open_positions+' position'+(u.open_positions!==1?'s':'')
-      +' &middot; last seen '+age(u.last_seen)+'</div></div>'+pill+'</div>';
+    return'<div class="row" onclick="openUser(\''+u.id+'\')">'
+      +'<div class="avatar '+avcls+'">'+ini(u.first_name,u.username)+'</div>'
+      +'<div class="u-info"><div class="u-name">'+esc(name)+tag+'</div>'
+      +'<div class="u-meta">'+u.open_positions+' pos &middot; last seen '+age(u.last_seen)+'</div></div>'
+      +pill+'<span style="color:var(--muted);font-size:14px;margin-left:2px">›</span></div>';
   }).join('');
 }
 
-var SCHED={
-  morning:'7:00 AM ET',premarket:'8:45 AM ET',confirmation:'10:30 AM ET',
+var SCHED={morning:'7:00 AM ET',premarket:'8:45 AM ET',confirmation:'10:30 AM ET',
   close_check:'3:30 PM ET',eod_summary:'4:15 PM ET',prescreener:'11:00 PM ET',
-  price_alerts:'every 30 min',weekly:'Sat 8:00 AM',week_ahead:'Sun 8:00 AM'
-};
+  price_alerts:'every 30 min',weekly:'Sat 8AM',week_ahead:'Sun 8AM'};
 
 function cron(c,lastMorning){
   return Object.keys(SCHED).map(function(k){
     var last=c[k]||(k==='morning'?lastMorning:'');
     var dc=last?'d-green':'d-muted';
     return'<div class="cron-row"><span class="cron-left"><span class="dot '+dc+'"></span>'+k.replace(/_/g,' ')+'</span>'
-      +'<span class="cron-time">'+(last?age(last):'not yet run')+' &middot; '+SCHED[k]+'</span></div>';
+      +'<span class="cron-time">'+(last?age(last):'not yet')+' &middot; '+SCHED[k]+'</span></div>';
   }).join('');
 }
 
@@ -399,17 +465,13 @@ function pickRows(arr,isCrypto){
   if(!arr||!arr.length)return'<p class="empty">No picks</p>';
   return arr.map(function(p){
     var sym=isCrypto?(p.symbol||p.ticker||''):(p.ticker||p.symbol||'');
-    var entry=p.entry_price||'—',tgt=p.target_price||'—',stop=p.stop_loss;
-    var det=stop?'entry $'+entry+' &middot; tgt $'+tgt+' &middot; stop $'+stop:'entry $'+entry+' &middot; tgt $'+tgt;
-    return'<div class="pick-row"><span class="ticker">'+sym+'</span><span class="detail">'+det+'</span></div>';
+    var det='entry $'+(p.entry_price||'—')+' &middot; tgt $'+(p.target_price||'—')+(p.stop_loss?' &middot; stop $'+p.stop_loss:'');
+    return'<div class="pick-row"><span class="ticker">'+esc(sym)+'</span><span class="detail">'+det+'</span></div>';
   }).join('');
 }
 
-var TABS=[
-  ['stocks_st','ST Stocks',false],['stocks_lt','LT Stocks',false],
-  ['crypto_st','Crypto ST',true],['crypto_lt','Crypto LT',true],
-  ['etfs_st','ETF ST',false],['etfs_lt','ETF LT',false]
-];
+var TABS=[['stocks_st','ST Stocks',false],['stocks_lt','LT Stocks',false],
+  ['crypto_st','Crypto ST',true],['crypto_lt','Crypto LT',true],['etfs_st','ETF ST',false],['etfs_lt','ETF LT',false]];
 
 function picksPanel(p){
   picks=p;
@@ -420,8 +482,7 @@ function picksPanel(p){
     return'<button class="tab'+(t[0]===activeTab?' on':'')+'" onclick="switchTab(\''+t[0]+'\')">'
       +t[1]+' ('+p[t[0]].length+')</button>';
   }).join('');
-  var isCrypto=activeTab.startsWith('crypto');
-  return'<div class="tabs" id="tabs">'+tabsHtml+'</div><div id="pcontent">'+pickRows(p[activeTab],isCrypto)+'</div>';
+  return'<div class="tabs">'+tabsHtml+'</div><div id="pcontent">'+pickRows(picks[activeTab],activeTab.startsWith('crypto'))+'</div>';
 }
 
 function switchTab(k){
@@ -437,35 +498,179 @@ function feedback(list){
   if(!list.length)return'<p class="empty">No feedback yet</p>';
   return list.slice(0,15).map(function(f){
     var name=f.first_name||(f.username?'@'+f.username:'')||('user_'+String(f.chat_id).slice(-4));
-    var uname=f.username?'<span style="color:var(--muted);font-size:11px"> @'+f.username+'</span>':'';
     var dot=f.read?'':'<span class="unread"></span>';
-    var activeDot=f.is_active?'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:4px;vertical-align:middle"></span>':'';
-    var plat=f.platform?'<span style="font-size:10px;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;margin-left:4px">'+f.platform+'</span>':'';
-    var pg=f.page?'<span style="font-size:10px;color:var(--muted)"> · on '+f.page+'</span>':'';
-    var pos=f.open_positions!==undefined&&f.open_positions!=='?'?'<span style="font-size:10px;color:var(--muted)"> · '+f.open_positions+' pos</span>':'';
-    var seen=f.last_seen?'<span style="font-size:10px;color:var(--muted)"> · seen '+age(f.last_seen)+'</span>':'';
+    var plat=f.platform?'<span style="font-size:10px;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;margin-left:4px">'+esc(f.platform)+'</span>':'';
+    var pg=f.page?'<span style="font-size:10px;color:var(--muted)"> · on '+esc(f.page)+'</span>':'';
     var cid=f.chat_id||'';
-    var copyBtn='<button onclick="navigator.clipboard.writeText(\''+cid+'\');this.textContent=\'✓\';setTimeout(()=>this.textContent=\'ID: '+cid+'\',1200)" '
-      +'style="font-size:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:inherit;border-radius:4px;padding:2px 6px;cursor:pointer;margin-top:4px">ID: '+cid+'</button>';
+    var copyBtn='<button onclick="navigator.clipboard.writeText(\''+cid+'\');this.textContent=\'✓\';setTimeout(()=>this.textContent=\''+cid+'\',1200)" '
+      +'style="font-size:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:inherit;border-radius:4px;padding:2px 6px;cursor:pointer;margin-top:4px">'+cid+'</button>';
     return'<div class="fb-row">'
-      +'<div class="fb-meta">'+dot+activeDot+'<b>'+name+'</b>'+uname+plat+pg+pos+seen+' &middot; '+age(f.submitted_at)+'</div>'
-      +'<div class="fb-text">'+f.text+'</div>'
-      +'<div>'+copyBtn+'<span style="font-size:10px;color:var(--muted);margin-left:8px">↑ paste in Render log filter</span></div>'
+      +'<div class="fb-meta">'+dot+'<b onclick="openUser(\''+cid+'\')" style="cursor:pointer;text-decoration:underline">'+esc(name)+'</b>'+plat+pg+' &middot; '+age(f.submitted_at)+'</div>'
+      +'<div class="fb-text">'+esc(f.text)+'</div>'
+      +'<div>'+copyBtn+' <span style="font-size:10px;color:var(--muted)">↑ Render log filter</span></div>'
       +'</div>';
   }).join('');
+}
+
+/* ── Pending actions ── */
+async function approve(cid,btn){
+  btn.disabled=true;btn.textContent='…';
+  await fetch('/admin/user/'+cid+'/approve',{method:'POST'});
+  load();
+}
+async function reject(cid,btn){
+  btn.disabled=true;btn.textContent='…';
+  await fetch('/admin/user/'+cid+'/reject',{method:'POST'});
+  load();
+}
+async function broadcast(){
+  var t=document.getElementById('bcmsg');
+  var msg=t.value.trim();if(!msg)return;
+  t.disabled=true;
+  var r=await fetch('/admin/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:msg})});
+  var d=await r.json();
+  t.value='';t.disabled=false;
+  alert('Sent to '+d.sent+' users'+(d.failed?' ('+d.failed+' failed)':'')+'.');
+}
+
+/* ── User detail drawer ── */
+async function openUser(cid){
+  _dTab='overview';
+  document.getElementById('overlay').className='open';
+  document.getElementById('drawer').className='open';
+  document.getElementById('dname').textContent='Loading…';
+  document.getElementById('dmeta').textContent='';
+  document.getElementById('dpanel').innerHTML='<p class="loading">Loading…</p>';
+  var r=await fetch('/admin/user/'+cid);
+  if(!r.ok){document.getElementById('dpanel').innerHTML='<p class="empty">Error loading user</p>';return;}
+  _dData=await r.json();
+  renderDrawerHead();
+  renderDrawerTab('overview');
+}
+
+function renderDrawerHead(){
+  var d=_dData;
+  var name=(d.first_name||d.username||('user_'+String(d.chat_id).slice(-4)));
+  document.getElementById('dav').textContent=ini(d.first_name,d.username);
+  document.getElementById('dname').textContent=name+(d.is_admin?' (admin)':'')+(d.is_banned?' 🚫':'');
+  document.getElementById('dmeta').textContent=(d.username?'@'+d.username+' · ':'')+d.chat_id+' · last seen '+age(d.last_seen);
+}
+
+function dTab(t){
+  _dTab=t;
+  document.querySelectorAll('.d-tab').forEach(function(b){
+    b.className='d-tab'+(b.getAttribute('onclick').includes("'"+t+"'")?' on':'');
+  });
+  renderDrawerTab(t);
+}
+
+function renderDrawerTab(t){
+  var d=_dData;
+  if(!d){return;}
+  var h='';
+  if(t==='overview'){
+    var cfg=d.config||{};
+    h='<div class="section-hd">Config</div>'
+      +'<div class="kv-row"><span class="kv-key">Risk profile</span><span class="kv-val">'+esc(cfg.risk_profile||'—')+'</span></div>'
+      +'<div class="kv-row"><span class="kv-key">Budget</span><span class="kv-val">$'+esc(cfg.budget||0)+'</span></div>'
+      +'<div class="kv-row"><span class="kv-key">Goal return</span><span class="kv-val">'+esc(cfg.goal_pct||0)+'%</span></div>'
+      +'<div class="kv-row"><span class="kv-key">Paused</span><span class="kv-val">'+esc(cfg.paused?'Yes':'No')+'</span></div>'
+      +'<div class="kv-row"><span class="kv-key">Referral code</span><span class="kv-val">'+esc(cfg.referral_code||'—')+'</span></div>'
+      +'<div class="section-hd">Summary</div>'
+      +'<div class="kv-row"><span class="kv-key">Open positions</span><span class="kv-val">'+d.open_positions.length+'</span></div>'
+      +'<div class="kv-row"><span class="kv-key">Closed trades</span><span class="kv-val">'+d.closed_positions_count+'</span></div>'
+      +'<div class="kv-row"><span class="kv-key">Active alerts</span><span class="kv-val">'+d.alerts.length+'</span></div>'
+      +'<div class="kv-row"><span class="kv-key">Watchlist items</span><span class="kv-val">'+d.watchlist.length+'</span></div>';
+    if(d.watchlist.length){
+      h+='<div class="section-hd">Watchlist</div><div style="font-size:12px;color:var(--muted2)">'+d.watchlist.map(function(w){return esc(w.ticker||w);}).join(', ')+'</div>';
+    }
+  }else if(t==='positions'){
+    if(!d.open_positions.length){h='<p class="empty">No open positions</p>';}
+    else{h=d.open_positions.map(function(p){
+      var ticker=p.ticker||p.symbol||'?';
+      var pnl=p.pnl_pct!=null?' · P&L: '+(p.pnl_pct>0?'+':'')+p.pnl_pct.toFixed(1)+'%':'';
+      return'<div class="pos-row"><b>'+esc(ticker)+'</b>'+pnl
+        +'<br><span style="color:var(--muted)">entry $'+(p.entry_price||'—')+' · stop $'+(p.stop_loss||'—')+' · tgt $'+(p.target_price||'—')+'</span></div>';
+    }).join('');}
+  }else if(t==='alerts'){
+    if(!d.alerts.length){h='<p class="empty">No active alerts</p>';}
+    else{h=d.alerts.map(function(a){
+      var dir=a.direction==='above'?'↑':'↓';
+      return'<div class="pos-row">'+dir+' <b>'+esc(a.ticker)+'</b> @ $'+a.price
+        +(a.auto?'<span style="font-size:10px;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;margin-left:6px">auto</span>':'')+'</div>';
+    }).join('');}
+  }else if(t==='logs'){
+    if(!d.logs.length){h='<p class="empty">No activity logged yet</p>';}
+    else{
+      h='<div style="font-size:11px;color:var(--muted);margin-bottom:8px">'+d.logs.length+' events (newest first)</div>';
+      h+=d.logs.map(function(l){
+        var lvlColor=l.level==='error'?'color:var(--red)':l.level==='warn'?'color:var(--amber)':'';
+        var typeCls='lt-'+(l.type||'command');
+        return'<div class="log-row" style="'+lvlColor+'">'
+          +'<span class="log-ts">'+age(l.ts)+'</span>'
+          +'<span class="log-type '+typeCls+'">'+esc(l.type||'')+'</span>'
+          +'<span class="log-detail">'+esc(l.detail)+'</span>'
+          +'</div>';
+      }).join('');
+    }
+    if(d.feedback.length){
+      h+='<div class="section-hd">Their feedback</div>';
+      h+=d.feedback.map(function(f){
+        return'<div class="fb-row"><div class="fb-meta">'+age(f.submitted_at)+'</div><div class="fb-text">'+esc(f.text)+'</div></div>';
+      }).join('');
+    }
+  }else if(t==='actions'){
+    var banBtn=d.is_banned
+      ?'<button class="btn-success" onclick="doAction(\'unban\')">Unban user</button>'
+      :'<button class="btn-danger" onclick="doAction(\'ban\')">Ban user</button>';
+    h='<div class="section-hd">Send message</div>'
+      +'<textarea class="msg-area" id="dmsg" placeholder="Type a message to this user…"></textarea>'
+      +'<div class="action-row"><button class="btn-sm" onclick="doAction(\'message\')">Send message</button>'+banBtn+'</div>'
+      +'<div id="daction-status" style="font-size:12px;color:var(--green);margin-top:8px"></div>'
+      +'<div class="section-hd" style="margin-top:16px">User IDs</div>'
+      +'<div class="kv-row"><span class="kv-key">chat_id</span>'
+      +'<button onclick="navigator.clipboard.writeText(\''+d.chat_id+'\');this.textContent=\'✓ Copied\';setTimeout(()=>this.textContent=\''+d.chat_id+'\',2000)" '
+      +'style="font-size:11px;background:rgba(255,255,255,.07);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:3px 8px;cursor:pointer">'+d.chat_id+'</button></div>';
+  }
+  document.getElementById('dpanel').innerHTML=h;
+}
+
+async function doAction(act){
+  var cid=_dData.chat_id;
+  var status=document.getElementById('daction-status');
+  if(act==='message'){
+    var txt=document.getElementById('dmsg').value.trim();
+    if(!txt){status.style.color='var(--red)';status.textContent='Enter a message first.';return;}
+    var r=await fetch('/admin/user/'+cid+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})});
+    status.style.color='var(--green)';status.textContent='Message sent!';
+    document.getElementById('dmsg').value='';
+  }else if(act==='ban'||act==='unban'){
+    if(!confirm((act==='ban'?'Ban':'Unban')+' this user?'))return;
+    await fetch('/admin/user/'+cid+'/'+act,{method:'POST'});
+    status.style.color='var(--amber)';status.textContent='Done — reload to refresh.';
+    openUser(cid);
+  }
+}
+
+function closeDrawer(){
+  document.getElementById('drawer').className='';
+  document.getElementById('overlay').className='';
+  _dData=null;
 }
 
 async function load(){
   var r;
   try{r=await fetch('/admin/data');}
-  catch(e){document.getElementById('root').innerHTML='<p class="empty">Network error — retrying in 60s</p>';return;}
+  catch(e){document.getElementById('root').innerHTML='<p class="empty">Network error</p>';return;}
   if(r.status===302||r.status===401){window.location='/admin/login';return;}
   if(!r.ok){document.getElementById('root').innerHTML='<p class="empty">Error '+r.status+'</p>';return;}
   var d=await r.json();
   document.getElementById('root').innerHTML=
     metrics(d.stats)
+    +pendingSection(d.pending)
+    +broadcastBar()
     +'<div class="grid2">'
-      +'<div class="card"><div class="card-title">Users</div>'+users(d.users)+'</div>'
+      +'<div class="card"><div class="card-title">Users <span style="font-weight:400;color:var(--muted)">(click to inspect)</span></div>'+usersList(d.users)+'</div>'
       +'<div class="card"><div class="card-title">Cron health</div>'+cron(d.cron,d.last_morning_run)+'</div>'
     +'</div>'
     +'<div class="grid2">'
@@ -489,52 +694,65 @@ def admin_login():
     return _ADMIN_LOGIN_HTML, 200
 
 
-@app.route("/admin/request", methods=["POST"])
-def admin_request_link():
-    """Generate a one-time magic link and send it to the owner's Telegram."""
-    import time as _time
-    now_ts = _time.time()
+@app.route("/admin/github")
+def admin_github_redirect():
+    """Kick off GitHub OAuth — redirect browser to GitHub authorization page."""
+    client_id = os.environ.get("GITHUB_CLIENT_ID", "")
+    if not client_id:
+        return "GITHUB_CLIENT_ID not configured", 500
+    # state token prevents CSRF
+    state = _sec.token_urlsafe(16)
+    session["oauth_state"] = state
+    params = f"client_id={client_id}&scope=read:user&state={state}"
+    return redirect(f"https://github.com/login/oauth/authorize?{params}")
 
-    # Load tokens from Gist, purge expired ones
-    tokens = _load_admin_tokens()
-    tokens = {t: exp for t, exp in tokens.items() if exp > now_ts}
 
-    token = _sec.token_urlsafe(32)
-    tokens[token] = now_ts + 600  # 10-minute window (survives cold starts)
-    _save_admin_tokens(tokens)
+@app.route("/admin/callback")
+def admin_github_callback():
+    """GitHub redirects here after user authorizes. Exchange code → token → verify username."""
+    error = request.args.get("error")
+    if error:
+        return redirect("/admin/login?error=oauth")
 
-    base = (os.environ.get("RENDER_EXTERNAL_URL") or request.host_url).rstrip("/")
-    link = f"{base}/admin/verify?t={token}"
+    code  = request.args.get("code", "")
+    state = request.args.get("state", "")
 
-    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not owner:
-        return jsonify({"sent": False, "error": "TELEGRAM_CHAT_ID not set"}), 500
+    # CSRF check
+    if not state or state != session.pop("oauth_state", None):
+        return redirect("/admin/login?error=oauth")
 
-    send_message(
-        f"🔐 <b>StockPulz Admin login link</b>\n\nExpires in 10 minutes — single use only.\n\n{link}",
-        chat_id=owner,
+    client_id     = os.environ.get("GITHUB_CLIENT_ID", "")
+    client_secret = os.environ.get("GITHUB_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        return "GitHub OAuth not configured", 500
+
+    # Exchange code for access token
+    import requests as _req
+    token_resp = _req.post(
+        "https://github.com/login/oauth/access_token",
+        json={"client_id": client_id, "client_secret": client_secret, "code": code},
+        headers={"Accept": "application/json"},
+        timeout=10,
     )
-    return jsonify({"sent": True})
+    access_token = token_resp.json().get("access_token", "")
+    if not access_token:
+        return redirect("/admin/login?error=oauth")
 
+    # Fetch GitHub user info
+    user_resp = _req.get(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        timeout=10,
+    )
+    github_username = user_resp.json().get("login", "")
 
-@app.route("/admin/verify")
-def admin_verify():
-    """Validate the magic-link token, set session cookie, redirect to dashboard."""
-    import time as _time
-    token = request.args.get("t", "")
-    now_ts = _time.time()
-
-    tokens = _load_admin_tokens()
-    expiry = tokens.get(token)
-    if not expiry or now_ts > expiry:
-        return redirect("/admin/login?error=expired")
-
-    # Single-use: delete and persist immediately
-    del tokens[token]
-    _save_admin_tokens(tokens)
+    # Check against allowed admin username
+    allowed = os.environ.get("GITHUB_ADMIN_USERNAME", "")
+    if not allowed or github_username.lower() != allowed.lower():
+        return redirect("/admin/login?error=forbidden")
 
     session["admin"] = True
-    session.permanent = False         # session expires when browser closes
+    session.permanent = False
     return redirect("/admin")
 
 
@@ -638,6 +856,14 @@ def admin_data():
     ]
     cron = {k: cfg.get(f"cron_last_{k}", "") for k in cron_keys}
 
+    # Pending users awaiting approval
+    from config_manager import get_pending_users
+    pending_raw = get_pending_users()
+    pending = [
+        {"chat_id": cid, **info}
+        for cid, info in pending_raw.items()
+    ]
+
     return jsonify({
         "stats": {
             "total_users":      len(users),
@@ -645,8 +871,10 @@ def admin_data():
             "total_picks":      total_picks,
             "open_positions":   total_open,
             "unread_feedback":  count_unread_feedback(),
+            "pending_count":    len(pending),
         },
-        "users": users,
+        "users":   users,
+        "pending": pending,
         "picks": {
             "stocks_st":      st,      "stocks_lt": lt,
             "crypto_st":      cst,     "crypto_lt": clt,
@@ -654,10 +882,132 @@ def admin_data():
             "commodities_st": comm_st, "commodities_lt": comm_lt,
             "options_plays":  opts,
         },
-        "feedback":        _enrich_feedback(load_feedback()[:20], users),
-        "cron":            cron,
+        "feedback":         _enrich_feedback(load_feedback()[:20], users),
+        "cron":             cron,
         "last_morning_run": cfg.get("last_morning_run", ""),
     })
+
+
+# ── Admin action routes ───────────────────────────────────────────────────────
+
+@app.route("/admin/user/<chat_id>")
+@_require_admin
+def admin_user_detail(chat_id):
+    """Full user snapshot for the detail drawer."""
+    from config_manager import (
+        get_user_config, load_user_trade_log, get_user_logs,
+        load_feedback, get_allowed_users, get_banned_users,
+    )
+    ucfg  = get_user_config(chat_id)
+    log   = load_user_trade_log(chat_id)
+    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+    alerts = []
+    try:
+        from price_alert_manager import PriceAlertManager
+        alerts = PriceAlertManager(chat_id).list_alerts()
+    except Exception:
+        pass
+
+    all_fb   = load_feedback()
+    user_fb  = [f for f in all_fb if str(f.get("chat_id", "")) == str(chat_id)]
+    user_logs = get_user_logs(chat_id, limit=100)
+
+    return jsonify({
+        "chat_id":    chat_id,
+        "first_name": ucfg.get("first_name", ""),
+        "username":   ucfg.get("username", ""),
+        "last_seen":  ucfg.get("last_seen", ""),
+        "is_admin":   chat_id == owner,
+        "is_banned":  chat_id in get_banned_users(),
+        "is_allowed": chat_id in get_allowed_users(),
+        "config": {
+            "risk_profile":  ucfg.get("risk_profile", "moderate"),
+            "budget":        ucfg.get("budget", 0),
+            "paused":        bool(ucfg.get("paused")),
+            "notifications": ucfg.get("notifications", {}),
+            "goal_pct":      ucfg.get("goal_pct", 0),
+            "referral_code": ucfg.get("referral_code", ""),
+        },
+        "open_positions":        log.get("open", []),
+        "closed_positions_count": len(log.get("closed", [])),
+        "alerts":    alerts,
+        "watchlist": ucfg.get("watchlist", []),
+        "feedback":  user_fb[:10],
+        "logs":      user_logs,
+    })
+
+
+@app.route("/admin/user/<chat_id>/approve", methods=["POST"])
+@_require_admin
+def admin_approve_user(chat_id):
+    from config_manager import add_allowed_user, remove_pending_user
+    add_allowed_user(chat_id)
+    remove_pending_user(chat_id)
+    send_message(
+        "✅ <b>Access approved!</b>\n\nWelcome to StockPulz. Send /start to begin.",
+        chat_id=chat_id,
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/user/<chat_id>/reject", methods=["POST"])
+@_require_admin
+def admin_reject_user(chat_id):
+    from config_manager import remove_pending_user
+    remove_pending_user(chat_id)
+    send_message(
+        "Sorry, your access request was not approved at this time.",
+        chat_id=chat_id,
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/user/<chat_id>/ban", methods=["POST"])
+@_require_admin
+def admin_ban_user(chat_id):
+    from config_manager import ban_user
+    try:
+        ban_user(chat_id)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/admin/user/<chat_id>/unban", methods=["POST"])
+@_require_admin
+def admin_unban_user(chat_id):
+    from config_manager import unban_user, add_allowed_user
+    unban_user(chat_id)
+    add_allowed_user(chat_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/user/<chat_id>/message", methods=["POST"])
+@_require_admin
+def admin_message_user(chat_id):
+    text = (request.json or {}).get("text", "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "No message text"}), 400
+    send_message(f"📣 <b>Message from admin:</b>\n\n{text}", chat_id=chat_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/broadcast", methods=["POST"])
+@_require_admin
+def admin_broadcast():
+    from config_manager import get_allowed_users
+    text = (request.json or {}).get("text", "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "No message text"}), 400
+    sent, failed = 0, 0
+    for uid in get_allowed_users():
+        try:
+            send_message(f"📣 <b>Announcement:</b>\n\n{text}", chat_id=uid)
+            sent += 1
+        except Exception:
+            failed += 1
+    return jsonify({"ok": True, "sent": sent, "failed": failed})
 
 
 # ── Mini App routes ───────────────────────────────────────────────────────────

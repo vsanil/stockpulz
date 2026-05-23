@@ -102,6 +102,11 @@ USER_PAPER_FILE        = "user_paper.json"      # Per-user paper portfolios
 FEEDBACK_FILE          = "feedback.json"        # User feedback submissions
 BACKTEST_TRADES_FILE   = "backtest_trades.json" # Simulated trades seeded from backtester (per-user)
 
+# ── User activity log (per-user, for admin troubleshooting) ──────────────────
+_USER_LOG_MAX       = 150   # max events kept per user in Gist
+_USER_LOG_FLUSH_AT  = 8     # flush in-memory buffer to Gist after this many events
+_user_event_buffer: dict = {}  # {chat_id: [event, …]}
+
 
 def _gist_headers() -> dict:
     token = os.environ.get("GH_GIST_TOKEN", "")
@@ -311,8 +316,9 @@ def remove_pending_user(chat_id: str) -> None:
 
 def save_picks(picks: dict) -> None:
     """Save morning picks to Gist as picks.json for the confirmation run."""
-    from datetime import date
-    picks["_saved_date"] = date.today().isoformat()
+    import pytz
+    from datetime import datetime
+    picks["_saved_date"] = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
     url = f"https://api.github.com/gists/{_gist_id()}"
     payload = {
         "files": {
@@ -330,8 +336,12 @@ def save_picks(picks: dict) -> None:
 
 
 def load_picks() -> dict | None:
-    """Load today's morning picks from Gist. Returns None if not found or stale."""
-    from datetime import date
+    """Load today's morning picks from Gist. Returns None if not found or stale.
+    Date comparison uses US/Eastern timezone so picks stay valid until midnight ET
+    (not midnight UTC which would expire them at 8 PM ET)."""
+    import pytz
+    from datetime import datetime
+    today_et = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
     try:
         url = f"https://api.github.com/gists/{_gist_id()}"
         resp = requests.get(url, headers=_gist_headers(), timeout=10)
@@ -342,8 +352,8 @@ def load_picks() -> dict | None:
             return None
         raw   = files[PICKS_FILENAME]["content"]
         picks = json.loads(raw)
-        # Only return picks saved today
-        if picks.get("_saved_date") != date.today().isoformat():
+        # Only return picks saved today (ET date)
+        if picks.get("_saved_date") != today_et:
             print("[config_manager] Picks are from a previous day — skipping confirmation.")
             return None
         return picks
@@ -729,18 +739,21 @@ def load_feedback() -> list:
     return data.get("entries", [])
 
 
-def add_feedback(chat_id: str, text: str, username: str = "", first_name: str = "") -> None:
-    """Append a new feedback entry."""
+def add_feedback(chat_id: str, text: str, username: str = "", first_name: str = "",
+                 platform: str = "", page: str = "") -> None:
+    """Append a new feedback entry with user + app context for admin triage."""
     from datetime import datetime
     data = _load_gist_file(FEEDBACK_FILE) or {"entries": []}
     data.setdefault("entries", [])
     data["entries"].insert(0, {
-        "chat_id":    str(chat_id),
-        "first_name": first_name,
-        "username":   username,
-        "text":       text,
+        "chat_id":      str(chat_id),
+        "first_name":   first_name,
+        "username":     username,
+        "text":         text,
         "submitted_at": datetime.utcnow().isoformat(),
-        "read":       False,
+        "read":         False,
+        "platform":     platform,   # e.g. "ios", "android", "tdesktop"
+        "page":         page,       # mini app tab active when feedback was sent
     })
     # Keep last 200 entries
     data["entries"] = data["entries"][:200]
@@ -759,6 +772,93 @@ def count_unread_feedback() -> int:
     """Return number of unread feedback entries."""
     entries = load_feedback()
     return sum(1 for e in entries if not e.get("read", False))
+
+
+# ── User activity log ────────────────────────────────────────────────────────
+
+def log_user_event(chat_id: str, event_type: str, detail: str, level: str = "info") -> None:
+    """
+    Append a structured event to the user's rolling activity log.
+    Buffered in-memory and flushed to Gist every _USER_LOG_FLUSH_AT events.
+    Levels: "info", "warn", "error"
+    Types: "command", "error", "alert", "position", "settings", "system"
+    """
+    from datetime import datetime
+    entry = {
+        "ts":     datetime.utcnow().isoformat(),
+        "level":  level,
+        "type":   event_type,
+        "detail": str(detail)[:300],
+    }
+    buf = _user_event_buffer.setdefault(str(chat_id), [])
+    buf.append(entry)
+    if len(buf) >= _USER_LOG_FLUSH_AT:
+        _flush_user_logs(str(chat_id))
+
+
+def _flush_user_logs(chat_id: str) -> None:
+    """Merge buffer into Gist and clear buffer. Called automatically or by admin read."""
+    buf = _user_event_buffer.get(str(chat_id), [])
+    if not buf:
+        return
+    filename = f"user_log_{chat_id}.json"
+    try:
+        existing = _load_gist_file(filename) or []
+        if not isinstance(existing, list):
+            existing = []
+        merged = existing + buf
+        if len(merged) > _USER_LOG_MAX:
+            merged = merged[-_USER_LOG_MAX:]
+        _write_gist_file(filename, merged)
+        _user_event_buffer[str(chat_id)] = []
+    except Exception as exc:
+        print(f"[config_manager] WARNING: Could not flush logs for {chat_id}: {exc}")
+
+
+def get_user_logs(chat_id: str, limit: int = 100) -> list:
+    """
+    Return the last N log events for a user, newest first.
+    Merges persisted Gist data with any un-flushed in-memory buffer.
+    """
+    # Flush first so we get the freshest data
+    _flush_user_logs(str(chat_id))
+    filename = f"user_log_{chat_id}.json"
+    logs = _load_gist_file(filename) or []
+    if not isinstance(logs, list):
+        return []
+    return list(reversed(logs[-limit:]))
+
+
+# ── Banned users ──────────────────────────────────────────────────────────────
+
+def get_banned_users() -> list:
+    """Return list of banned chat_ids."""
+    config = get_config()
+    return [str(u) for u in config.get("banned_users", [])]
+
+
+def ban_user(chat_id: str) -> None:
+    """Ban a user: remove from allowlist and add to banned list."""
+    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if str(chat_id) == str(owner):
+        raise ValueError("Cannot ban the bot owner.")
+    config = get_config()
+    banned = [str(u) for u in config.get("banned_users", [])]
+    if str(chat_id) not in banned:
+        banned.append(str(chat_id))
+        update_config("banned_users", banned)
+    try:
+        remove_allowed_user(chat_id)
+    except Exception:
+        pass
+    log_user_event(chat_id, "system", "User banned by admin", level="warn")
+
+
+def unban_user(chat_id: str) -> None:
+    """Remove a user from the banned list (does not re-approve, use add_allowed_user for that)."""
+    config = get_config()
+    banned = [str(u) for u in config.get("banned_users", []) if str(u) != str(chat_id)]
+    update_config("banned_users", banned)
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────
