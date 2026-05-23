@@ -419,8 +419,8 @@ function pendingSection(list){
     return'<div class="pending-row">'
       +'<div style="flex:1"><b>'+esc(name)+'</b>'+(p.username?' <span style="color:var(--muted)">@'+esc(p.username)+'</span>':'')
       +'<span style="font-size:10px;color:var(--muted);margin-left:6px">requested '+age(p.requested_at)+'</span></div>'
-      +'<button class="btn-success" style="padding:3px 10px;font-size:11px" onclick="approve(\''+p.chat_id+'\',this)">Approve</button>'
-      +' <button class="btn-danger" style="padding:3px 10px;font-size:11px" onclick="reject(\''+p.chat_id+'\',this)">Reject</button>'
+      +'<button class="btn-success" style="padding:3px 10px;font-size:11px" onclick="approve(\\''+p.chat_id+'\\',this)">Approve</button>'
+      +' <button class="btn-danger" style="padding:3px 10px;font-size:11px" onclick="reject(\\''+p.chat_id+'\\',this)">Reject</button>'
       +'</div>';
   }).join('');
   return'<div class="pending-banner"><div class="pending-title">⏳ '+list.length+' pending approval</div>'+rows+'</div>';
@@ -440,8 +440,8 @@ function usersList(list){
     var tag=u.is_admin?' <span style="color:var(--muted);font-weight:400;font-size:11px">(admin)</span>':'';
     var pill=u.paused?'<span class="pill p-paused">paused</span>':u.is_active?'<span class="pill p-active">active</span>':'<span class="pill p-idle">idle</span>';
     var avcls=u.is_admin?'av-green':'av-blue';
-    return'<div class="row" onclick="openUser(\''+u.id+'\')">'
-      +'<div class="avatar '+avcls+'">'+ini(u.first_name,u.username)+'</div>'
+    return'<div class="row" onclick="openUser(\\''+u.id+'\\')">'+
+      '<div class="avatar '+avcls+'">'+ini(u.first_name,u.username)+'</div>'
       +'<div class="u-info"><div class="u-name">'+esc(name)+tag+'</div>'
       +'<div class="u-meta">'+u.open_positions+' pos &middot; last seen '+age(u.last_seen)+'</div></div>'
       +pill+'<span style="color:var(--muted);font-size:14px;margin-left:2px">›</span></div>';
@@ -479,7 +479,7 @@ function picksPanel(p){
   if(!avail.length)return'<p class="empty">No picks today</p>';
   if(!avail.find(function(t){return t[0]===activeTab;}))activeTab=avail[0][0];
   var tabsHtml=avail.map(function(t){
-    return'<button class="tab'+(t[0]===activeTab?' on':'')+'" onclick="switchTab(\''+t[0]+'\')">'
+    return'<button class="tab'+(t[0]===activeTab?' on':'')+'" onclick="switchTab(\\''+t[0]+'\\')">'
       +t[1]+' ('+p[t[0]].length+')</button>';
   }).join('');
   return'<div class="tabs">'+tabsHtml+'</div><div id="pcontent">'+pickRows(picks[activeTab],activeTab.startsWith('crypto'))+'</div>';
@@ -502,10 +502,10 @@ function feedback(list){
     var plat=f.platform?'<span style="font-size:10px;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;margin-left:4px">'+esc(f.platform)+'</span>':'';
     var pg=f.page?'<span style="font-size:10px;color:var(--muted)"> · on '+esc(f.page)+'</span>':'';
     var cid=f.chat_id||'';
-    var copyBtn='<button onclick="navigator.clipboard.writeText(\''+cid+'\');this.textContent=\'✓\';setTimeout(()=>this.textContent=\''+cid+'\',1200)" '
+    var copyBtn='<button onclick="navigator.clipboard.writeText(\\''+cid+'\\');this.textContent=\\'✓\\';setTimeout(()=>this.textContent=\\''+cid+'\\',1200)" '
       +'style="font-size:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:inherit;border-radius:4px;padding:2px 6px;cursor:pointer;margin-top:4px">'+cid+'</button>';
     return'<div class="fb-row">'
-      +'<div class="fb-meta">'+dot+'<b onclick="openUser(\''+cid+'\')" style="cursor:pointer;text-decoration:underline">'+esc(name)+'</b>'+plat+pg+' &middot; '+age(f.submitted_at)+'</div>'
+      +'<div class="fb-meta">'+dot+'<b onclick="openUser(\\''+cid+'\\')" style="cursor:pointer;text-decoration:underline">'+esc(name)+'</b>'+plat+pg+' &middot; '+age(f.submitted_at)+'</div>'
       +'<div class="fb-text">'+esc(f.text)+'</div>'
       +'<div>'+copyBtn+' <span style="font-size:10px;color:var(--muted)">↑ Render log filter</span></div>'
       +'</div>';
@@ -621,15 +621,15 @@ function renderDrawerTab(t){
     }
   }else if(t==='actions'){
     var banBtn=d.is_banned
-      ?'<button class="btn-success" onclick="doAction(\'unban\')">Unban user</button>'
-      :'<button class="btn-danger" onclick="doAction(\'ban\')">Ban user</button>';
+      ?'<button class="btn-success" onclick="doAction(\\'unban\\')">Unban user</button>'
+      :'<button class="btn-danger" onclick="doAction(\\'ban\\')">Ban user</button>';
     h='<div class="section-hd">Send message</div>'
       +'<textarea class="msg-area" id="dmsg" placeholder="Type a message to this user…"></textarea>'
-      +'<div class="action-row"><button class="btn-sm" onclick="doAction(\'message\')">Send message</button>'+banBtn+'</div>'
+      +'<div class="action-row"><button class="btn-sm" onclick="doAction(\\'message\\')">Send message</button>'+banBtn+'</div>'
       +'<div id="daction-status" style="font-size:12px;color:var(--green);margin-top:8px"></div>'
       +'<div class="section-hd" style="margin-top:16px">User IDs</div>'
       +'<div class="kv-row"><span class="kv-key">chat_id</span>'
-      +'<button onclick="navigator.clipboard.writeText(\''+d.chat_id+'\');this.textContent=\'✓ Copied\';setTimeout(()=>this.textContent=\''+d.chat_id+'\',2000)" '
+      +'<button onclick="navigator.clipboard.writeText(\\''+d.chat_id+'\\');this.textContent=\\'✓ Copied\\';setTimeout(()=>this.textContent=\\''+d.chat_id+'\\',2000)" '
       +'style="font-size:11px;background:rgba(255,255,255,.07);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:3px 8px;cursor:pointer">'+d.chat_id+'</button></div>';
   }
   document.getElementById('dpanel').innerHTML=h;
