@@ -5582,8 +5582,6 @@ async function _loadNames(tickers) {
   });
 }
 
-let _alertCurrentPrice = null; // tracks resolved price for % buttons
-
 function _setPctBtnsEnabled(enabled) {
   const btns = document.querySelectorAll('#pct-row .pct-btn');
   btns.forEach(b => b.disabled = !enabled);
