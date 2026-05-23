@@ -3045,28 +3045,51 @@ function _lookupPickLevels(sym) {
   return sections.find(p => (p.ticker || p.symbol || '').toUpperCase() === sym) || {};
 }
 
-function openBuySheet(sym, assetType, tf) {
+async function openBuySheet(sym, assetType, tf) {
   _buyposSym  = sym;
   _buyposType = assetType;
   _buyposTf   = tf;
   const pick  = _lookupPickLevels(sym);
 
   document.getElementById('buypos-title').textContent = `✅ Log ${sym}`;
-  document.getElementById('buypos-hint').textContent  =
-    pick.entry_price
-      ? `AI pick levels pre-filled — edit if your actual entry differs.`
-      : `No pick data for ${sym} — enter your entry and stop for alerts.`;
 
   const entryEl  = document.getElementById('buypos-entry');
   const stopEl   = document.getElementById('buypos-stop');
   const targetEl = document.getElementById('buypos-target-row');
+  const hintEl   = document.getElementById('buypos-hint');
   const btn      = document.getElementById('buypos-btn');
 
-  entryEl.value = pick.entry_price  ? String(pick.entry_price)  : '';
-  stopEl.value  = pick.stop_loss    ? String(pick.stop_loss)    : '';
-  targetEl.textContent = pick.target_price ? `🎯 Target: $${pick.target_price}` : '';
   btn.disabled    = false;
   btn.textContent = 'Log Position';
+
+  if (pick.entry_price) {
+    entryEl.value = String(pick.entry_price);
+    stopEl.value  = pick.stop_loss ? String(pick.stop_loss) : '';
+    targetEl.textContent = pick.target_price ? `🎯 Target: $${pick.target_price}` : '';
+    hintEl.textContent = `AI pick levels pre-filled — edit if your actual entry differs.`;
+    hintEl.style.color = '';
+  } else {
+    entryEl.value = '';
+    stopEl.value  = '';
+    targetEl.textContent = '';
+    hintEl.textContent = `Fetching live price for ${sym}…`;
+    hintEl.style.color = 'var(--hint)';
+    // Fetch live price and pre-fill entry
+    try {
+      const data = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(sym)}`);
+      if (data && data.price) {
+        entryEl.value = String(data.price);
+        hintEl.textContent = `Live price $${fmtPrice(data.price)} pre-filled — adjust if your fill was different.`;
+        hintEl.style.color = 'var(--green)';
+      } else {
+        hintEl.textContent = `No pick data for ${sym} — enter your entry and stop for alerts.`;
+        hintEl.style.color = '';
+      }
+    } catch (_) {
+      hintEl.textContent = `No pick data for ${sym} — enter your entry and stop for alerts.`;
+      hintEl.style.color = '';
+    }
+  }
 
   openOverlay('buypos-overlay');
   tg.HapticFeedback?.impactOccurred('light');
