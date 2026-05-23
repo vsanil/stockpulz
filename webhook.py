@@ -1231,31 +1231,48 @@ def miniapp_alerts_post():
         return jsonify({"error": str(exc)}), 500
 
 
+# ── Quote cache: 60-second TTL, avoids double yfinance round-trips ────────────
+_quote_cache: dict = {}   # ticker → {"price", "change_pct", "ts"}
+_QUOTE_TTL = 60           # seconds
+
+def _fast_quote(ticker: str, crypto_set) -> tuple[float | None, float | None]:
+    """Single yfinance fast_info call that returns (price, change_pct).
+    Cached for _QUOTE_TTL seconds to avoid repeated slow lookups."""
+    now = time.time()
+    hit = _quote_cache.get(ticker)
+    if hit and now - hit["ts"] < _QUOTE_TTL:
+        return hit["price"], hit["change_pct"]
+    try:
+        import yfinance as _yf
+        yf_sym = f"{ticker}-USD" if ticker in crypto_set else ticker
+        fi     = _yf.Ticker(yf_sym).fast_info
+        price  = getattr(fi, "last_price", None)
+        prev   = getattr(fi, "previous_close", None)
+        if price:
+            price  = float(price)
+            change = round((price - float(prev)) / float(prev) * 100, 2) if prev and float(prev) > 0 else None
+            _quote_cache[ticker] = {"price": price, "change_pct": change, "ts": now}
+            return price, change
+    except Exception:
+        pass
+    return None, None
+
+
 @app.route("/api/miniapp/quote")
 def miniapp_quote():
     """Return current price for a single ticker — used by the New Alert form.
-    If the raw input isn't a valid ticker (e.g. 'COSTCO'), resolves via Haiku
+    If the raw input isn't a valid ticker (e.g. 'AMAZON'), resolves via Haiku
     and returns the resolved ticker so the frontend can update the input field.
+    Single yfinance call with 60-second cache avoids the previous double-fetch lag.
     """
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     ticker = request.args.get("ticker", "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400
     try:
-        from price_alert_manager import _current_price, _CRYPTO_SYMBOLS as _ALERT_CRYPTO
-        price = _current_price(ticker)
+        from price_alert_manager import _CRYPTO_SYMBOLS as _ALERT_CRYPTO
+        price, change_pct = _fast_quote(ticker, _ALERT_CRYPTO)
         if price is not None:
-            # Compute 24h change % via yfinance previous_close
-            change_pct = None
-            try:
-                import yfinance as _yf
-                yf_sym = f"{ticker}-USD" if ticker in _ALERT_CRYPTO else ticker
-                fi     = _yf.Ticker(yf_sym).fast_info
-                prev   = getattr(fi, "previous_close", None)
-                if prev and float(prev) > 0:
-                    change_pct = round((price - float(prev)) / float(prev) * 100, 2)
-            except Exception:
-                pass
             return jsonify({"ticker": ticker, "price": round(price, 6),
                             "change_pct": change_pct})
         # No price — try resolving as a company name via Haiku
@@ -1265,10 +1282,10 @@ def miniapp_quote():
             if candidates:
                 resolved = candidates[0]["ticker"].upper()
                 if resolved != ticker:
-                    price = _current_price(resolved)
+                    price, change_pct = _fast_quote(resolved, _ALERT_CRYPTO)
                     if price is not None:
                         return jsonify({"ticker": resolved, "price": round(price, 6),
-                                        "change_pct": None})
+                                        "change_pct": change_pct})
         except Exception:
             pass
         return jsonify({"error": f"No price found for {ticker}"}), 404
@@ -1775,9 +1792,13 @@ def miniapp_watchlist_add():
     ticker = (body.get("ticker") or "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400
 
-    # Resolve company names → ticker symbol
-    from price_alert_manager import _current_price
-    if _current_price(ticker) is None:
+    # Resolve company names → ticker symbol.
+    # Heuristic: tickers are 1–5 uppercase chars; anything longer is likely a
+    # company name (e.g. "AMAZON" → "AMZN", "COSTCO" → "COST") even if yfinance
+    # accidentally returns a price for it from some other symbol.
+    from price_alert_manager import _current_price, _CRYPTO_SYMBOLS as _ALERT_CRYPTO_SET
+    likely_name = len(ticker) > 5
+    if likely_name or _current_price(ticker) is None:
         # 1. Try stock name resolver
         try:
             from cmd_helpers import _resolve_ticker_candidates

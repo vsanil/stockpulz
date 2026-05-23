@@ -46,8 +46,9 @@ DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
 MOCK_DATA = os.environ.get("MOCK_DATA", "false").lower() == "true"
 
 # Default conviction threshold — picks below this are filtered before broadcast.
-# Users can lower to 3 in /settings (aggressive mode already allows ★★★).
-DEFAULT_MIN_CONVICTION = 4
+# 3 = allow ★★★ (2 confirming signals); 4 = require ★★★★ (3 signals).
+# Set to 3 so moderate-days still surface picks; conservative users can raise in /settings.
+DEFAULT_MIN_CONVICTION = 3
 
 
 # ── Conviction gate ───────────────────────────────────────────────────────────
@@ -442,7 +443,7 @@ def run_morning(config: dict, now_et: datetime):
                 # Re-apply LT quality floor — guards against cached results from
                 # before the quality gate was added (task #102) or stale midnight
                 # runs where some candidates have been scored well below threshold.
-                _LT_FLOOR = 25   # same spirit as the liquidity gate in run_screener()
+                _LT_FLOOR = 15   # floor raised from 25→15 to keep more LT candidates for Claude
                 _before = len(stock_candidates.get("long_term", []))
                 stock_candidates["long_term"] = [
                     c for c in stock_candidates.get("long_term", [])
