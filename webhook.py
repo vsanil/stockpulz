@@ -1371,18 +1371,21 @@ _CHART_CRYPTO = {
 
 @app.route("/api/miniapp/chart/<ticker>")
 def miniapp_chart(ticker):
-    """Return 3-month daily OHLCV data for the Mini App chart overlay."""
+    """Return daily OHLCV data for the Mini App chart overlay. period: 5d|1mo|3mo|1y"""
     chat_id = _miniapp_auth()
     if not chat_id:
         return jsonify({"error": "unauthorised"}), 403
 
     ticker     = ticker.upper()
     asset_type = request.args.get("asset_type", "")
+    period     = request.args.get("period", "3mo")
+    days_map   = {"5d": 7, "1mo": 35, "3mo": 92, "1y": 370}
+    days       = days_map.get(period, 92)
     is_crypto  = asset_type == "crypto" or ticker in _CHART_CRYPTO
 
     try:
         from market_data import get_ohlcv
-        data = get_ohlcv(ticker)
+        data = get_ohlcv(ticker, days=days)
 
         # No data — try resolving company name (e.g. "AMAZON" → "AMZN")
         if not data and not is_crypto:
@@ -1456,6 +1459,21 @@ def miniapp_close_position():
     if result is None:
         return jsonify({"ok": False, "error": "position not found"}), 404
     return jsonify({"ok": True, "trade": result})
+
+
+@app.route("/api/miniapp/remove_position", methods=["POST"])
+def miniapp_remove_position():
+    """Remove a position without recording a trade (for test entries, mistakes, etc.)."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    body   = request.get_json(silent=True) or {}
+    ticker = str(body.get("ticker", "")).upper().strip()
+    if not ticker:
+        return jsonify({"error": "missing ticker"}), 400
+    from trade_logger import remove_holding
+    ok = remove_holding(ticker, chat_id)
+    return jsonify({"ok": ok})
 
 
 @app.route("/api/miniapp/toggle_paused", methods=["POST"])
@@ -1658,6 +1676,40 @@ def _fast_quote(ticker: str, crypto_set) -> tuple[float | None, float | None]:
     return None, None
 
 
+@app.route("/api/miniapp/names")
+def miniapp_names():
+    """Batch company name lookup. ?tickers=AMZN,COST,FE  → {AMZN: "Amazon.com Inc", ...}"""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    raw     = request.args.get("tickers", "")
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()][:25]
+    if not tickers: return jsonify({}), 200
+
+    result, missing = {}, []
+    for t in tickers:
+        hit = _quote_cache.get(f"__name_{t}")
+        if hit and time.time() - hit["ts"] < 3600:
+            result[t] = hit["v"]
+        else:
+            missing.append(t)
+
+    if missing:
+        import yfinance as _yf_n
+        import concurrent.futures as _cf_n
+        def _fetch_name(sym):
+            try:
+                n = (_yf_n.Ticker(sym).info or {}).get("shortName") or ""
+                _quote_cache[f"__name_{sym}"] = {"v": n, "ts": time.time()}
+                return sym, n
+            except Exception:
+                return sym, ""
+        with _cf_n.ThreadPoolExecutor(max_workers=6) as pool:
+            for sym, name in pool.map(_fetch_name, missing):
+                result[sym] = name
+
+    return jsonify(result)
+
+
 @app.route("/api/miniapp/quote")
 def miniapp_quote():
     """Return current price for a single ticker — used by the New Alert form.
@@ -1671,10 +1723,23 @@ def miniapp_quote():
     if not ticker: return jsonify({"error": "ticker required"}), 400
     try:
         from price_alert_manager import _CRYPTO_SYMBOLS as _ALERT_CRYPTO
+        def _get_name(sym):
+            """Return shortName for a ticker, with a short cache."""
+            hit = _quote_cache.get(f"__name_{sym}")
+            if hit and time.time() - hit["ts"] < 3600:
+                return hit["v"]
+            try:
+                import yfinance as _yf2
+                n = (_yf2.Ticker(sym).info or {}).get("shortName") or ""
+                _quote_cache[f"__name_{sym}"] = {"v": n, "ts": time.time()}
+                return n
+            except Exception:
+                return ""
+
         price, change_pct = _fast_quote(ticker, _ALERT_CRYPTO)
         if price is not None:
             return jsonify({"ticker": ticker, "price": round(price, 6),
-                            "change_pct": change_pct})
+                            "change_pct": change_pct, "name": _get_name(ticker)})
         # No price — try resolving as a company name via Haiku
         try:
             from cmd_helpers import _resolve_ticker_candidates
@@ -1685,7 +1750,7 @@ def miniapp_quote():
                     price, change_pct = _fast_quote(resolved, _ALERT_CRYPTO)
                     if price is not None:
                         return jsonify({"ticker": resolved, "price": round(price, 6),
-                                        "change_pct": change_pct})
+                                        "change_pct": change_pct, "name": _get_name(resolved)})
         except Exception:
             pass
         return jsonify({"error": f"No price found for {ticker}"}), 404
@@ -1953,6 +2018,238 @@ def miniapp_community():
         return jsonify({"ok": False, "error": str(e)})
 
 
+@app.route("/api/miniapp/my_performance")
+def miniapp_my_performance():
+    """Return the user's REAL closed trade performance — no simulated data."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    from config_manager import load_user_trade_log
+    log    = load_user_trade_log(chat_id)
+    closed = [t for t in log.get("closed", []) if t.get("source") != "backtest"]
+
+    if not closed:
+        return jsonify({"ok": True, "trades": [], "summary": {}})
+
+    # ── Per-trade enrichment ────────────────────────────────────────────────
+    trades_out = []
+    total_usd  = 0.0
+    peak_cum   = 0.0
+    max_dd     = 0.0
+    cum        = 0.0
+    wins = losses = 0
+
+    for t in sorted(closed, key=lambda x: x.get("closed_date", "")):
+        ret_pct  = float(t.get("return_pct") or 0)
+        gain_usd = float(t.get("gain_usd") or 0)
+        entry    = float(t.get("entry_price") or 0)
+        exit_p   = float(t.get("exit_price") or t.get("sell_price") or 0)
+        shares   = float(t.get("shares") or 0)
+
+        # Infer gain_usd if not stored but we have entry/exit/shares
+        if gain_usd == 0 and entry > 0 and exit_p > 0 and shares > 0:
+            gain_usd = round((exit_p - entry) * shares, 2)
+
+        if ret_pct > 0:
+            wins += 1
+        else:
+            losses += 1
+
+        total_usd += gain_usd
+        cum       += gain_usd
+        if cum > peak_cum:
+            peak_cum = cum
+        dd = peak_cum - cum
+        if dd > max_dd:
+            max_dd = dd
+
+        trades_out.append({
+            "ticker":      t.get("ticker", ""),
+            "closed_date": t.get("closed_date", t.get("sold_date", "")),
+            "entry_price": round(entry, 2) if entry else None,
+            "exit_price":  round(exit_p, 2) if exit_p else None,
+            "shares":      shares if shares else None,
+            "return_pct":  round(ret_pct, 2),
+            "gain_usd":    round(gain_usd, 2),
+            "outcome":     t.get("outcome", ""),
+        })
+
+    trades_out.reverse()  # most recent first for display
+    total_trades = len(closed)
+    win_rate     = round(wins / total_trades * 100) if total_trades else 0
+    avg_ret      = round(sum(t["return_pct"] for t in trades_out) / total_trades, 2) if total_trades else 0
+    best  = max(trades_out, key=lambda t: t["return_pct"], default=None)
+    worst = min(trades_out, key=lambda t: t["return_pct"], default=None)
+
+    return jsonify({
+        "ok":     True,
+        "trades": trades_out,
+        "summary": {
+            "total_trades":  total_trades,
+            "wins":          wins,
+            "losses":        losses,
+            "win_rate":      win_rate,
+            "avg_return":    avg_ret,
+            "total_pnl_usd": round(total_usd, 2),
+            "max_drawdown":  round(max_dd, 2),
+            "best":  {"ticker": best["ticker"],  "return_pct": best["return_pct"],  "gain_usd": best["gain_usd"]}  if best  else None,
+            "worst": {"ticker": worst["ticker"], "return_pct": worst["return_pct"], "gain_usd": worst["gain_usd"]} if worst else None,
+        },
+    })
+
+
+@app.route("/api/miniapp/economic_calendar")
+def miniapp_economic_calendar():
+    """Upcoming high-impact macro events — Fed, CPI, jobs, GDP, PCE."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    import requests as _req
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
+    from datetime import date, timedelta
+    today   = date.today()
+    end     = today + timedelta(days=60)
+    events  = []
+
+    if finnhub_key:
+        try:
+            r = _req.get(
+                "https://finnhub.io/api/v1/calendar/economic",
+                params={"from": today.isoformat(), "to": end.isoformat(), "token": finnhub_key},
+                timeout=8,
+            )
+            if r.ok:
+                HIGH_IMPACT = {"fomc", "fed", "cpi", "nonfarm", "payroll", "gdp", "pce",
+                               "unemployment", "pmi", "retail", "inflation", "interest rate"}
+                for ev in r.json().get("economicCalendar", []):
+                    name_lc = (ev.get("event") or "").lower()
+                    impact  = (ev.get("impact") or "").lower()
+                    if impact not in ("high", "medium") and not any(k in name_lc for k in HIGH_IMPACT):
+                        continue
+                    ev_date = ev.get("time", ev.get("date", ""))[:10]
+                    if not ev_date:
+                        continue
+                    days_until = (date.fromisoformat(ev_date) - today).days
+                    if days_until < 0:
+                        continue
+                    events.append({
+                        "date":       ev_date,
+                        "days_until": days_until,
+                        "event":      ev.get("event", ""),
+                        "country":    ev.get("country", "US"),
+                        "impact":     impact or "medium",
+                        "actual":     ev.get("actual"),
+                        "estimate":   ev.get("estimate"),
+                        "previous":   ev.get("prev"),
+                    })
+        except Exception as exc:
+            print(f"[econ_cal] {exc}")
+
+    # Fallback: hardcoded major upcoming US events (always shown if Finnhub fails)
+    if not events:
+        hardcoded = [
+            {"event": "FOMC Meeting",              "impact": "high"},
+            {"event": "CPI (Consumer Price Index)","impact": "high"},
+            {"event": "Nonfarm Payrolls",           "impact": "high"},
+            {"event": "GDP (Preliminary)",          "impact": "high"},
+            {"event": "PCE Price Index",            "impact": "high"},
+        ]
+        events = [{"date": "", "days_until": None, "country": "US",
+                   "actual": None, "estimate": None, "previous": None, **e}
+                  for e in hardcoded]
+
+    events.sort(key=lambda e: e.get("days_until") or 999)
+    return jsonify({"ok": True, "events": events[:20]})
+
+
+@app.route("/api/miniapp/analyst_ratings")
+def miniapp_analyst_ratings():
+    """Recent analyst upgrades/downgrades for watchlist tickers."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    raw     = request.args.get("tickers", "")
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()][:20]
+    if not tickers:
+        return jsonify({"ok": True, "ratings": []})
+
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
+    from datetime import date, timedelta
+    import requests as _req
+    since = (date.today() - timedelta(days=90)).isoformat()
+    results = []
+
+    def _fetch_ratings(sym):
+        if not finnhub_key:
+            return []
+        try:
+            r = _req.get(
+                "https://finnhub.io/api/v1/stock/recommendation",
+                params={"symbol": sym, "token": finnhub_key},
+                timeout=6,
+            )
+            if not r.ok:
+                return []
+            recs = r.json() or []
+            # Finnhub returns monthly aggregates; show latest 2
+            return [{"ticker": sym, "period": rec.get("period",""),
+                     "buy": rec.get("buy",0), "hold": rec.get("hold",0),
+                     "sell": rec.get("sell",0), "strongBuy": rec.get("strongBuy",0),
+                     "strongSell": rec.get("strongSell",0)} for rec in recs[:2]]
+        except Exception:
+            return []
+
+    import concurrent.futures as _cf
+    with _cf.ThreadPoolExecutor(max_workers=6) as pool:
+        for sym_results in pool.map(_fetch_ratings, tickers):
+            results.extend(sym_results)
+
+    return jsonify({"ok": True, "ratings": results})
+
+
+@app.route("/api/miniapp/volume_spikes")
+def miniapp_volume_spikes():
+    """Detect unusual volume vs 20-day avg for given tickers."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    raw     = request.args.get("tickers", "")
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()][:20]
+    if not tickers:
+        return jsonify({"ok": True, "spikes": []})
+
+    import yfinance as _yf
+    import concurrent.futures as _cf
+
+    def _check_volume(sym):
+        try:
+            hist = _yf.Ticker(sym).history(period="1mo", interval="1d", auto_adjust=True)
+            if hist.empty or len(hist) < 5:
+                return None
+            avg_vol  = float(hist["Volume"].iloc[:-1].mean())
+            today_vol = float(hist["Volume"].iloc[-1])
+            ratio     = today_vol / avg_vol if avg_vol > 0 else 0
+            if ratio >= 1.5:
+                return {"ticker": sym, "today_volume": int(today_vol),
+                        "avg_volume": int(avg_vol), "ratio": round(ratio, 1)}
+            return None
+        except Exception:
+            return None
+
+    spikes = []
+    with _cf.ThreadPoolExecutor(max_workers=8) as pool:
+        for result in pool.map(_check_volume, tickers):
+            if result:
+                spikes.append(result)
+
+    spikes.sort(key=lambda x: x["ratio"], reverse=True)
+    return jsonify({"ok": True, "spikes": spikes})
+
+
 @app.route("/api/miniapp/performance")
 def miniapp_performance():
     """Return bot track record for the Mini App performance tab."""
@@ -2003,6 +2300,268 @@ def miniapp_dividends():
         return jsonify({"ok": True, "dividends": paying})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/miniapp/tax_lots")
+def miniapp_tax_lots():
+    """Tax lot summary — realized ST vs LT P&L breakdown + FIFO/LIFO guidance for open positions."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    from config_manager import load_user_trade_log
+    from datetime import date
+    from collections import defaultdict
+
+    log    = load_user_trade_log(chat_id)
+    closed = [t for t in log.get("closed", []) if t.get("source") != "backtest"]
+    opens  = log.get("open", [])
+    today  = date.today()
+
+    # ── Realized ST vs LT gains ────────────────────────────────────────────────
+    st_gain = lt_gain = 0.0
+    st_count = lt_count = 0
+    realized_lots = []
+
+    for t in sorted(closed, key=lambda x: x.get("closed_date", ""), reverse=True):
+        opened_s   = t.get("opened_date") or t.get("bought_date", "")
+        closed_s   = t.get("closed_date") or t.get("sold_date", "")
+        days_held  = None
+        is_lt      = False
+        if opened_s and closed_s:
+            try:
+                days_held = (date.fromisoformat(closed_s) - date.fromisoformat(opened_s)).days
+                is_lt = days_held >= 365
+            except Exception:
+                pass
+
+        gain = float(t.get("gain_usd") or 0)
+        entry  = float(t.get("entry_price") or 0)
+        exit_p = float(t.get("exit_price") or t.get("sell_price") or 0)
+        shares = float(t.get("shares") or 0)
+        if gain == 0 and entry > 0 and exit_p > 0 and shares > 0:
+            gain = round((exit_p - entry) * shares, 2)
+
+        if is_lt:
+            lt_gain  += gain
+            lt_count += 1
+        else:
+            st_gain  += gain
+            st_count += 1
+
+        realized_lots.append({
+            "ticker":      t.get("ticker", ""),
+            "closed_date": closed_s,
+            "days_held":   days_held,
+            "is_lt":       is_lt,
+            "gain_usd":    round(gain, 2),
+        })
+
+    # ── Open positions — FIFO / LIFO guidance ─────────────────────────────────
+    open_lots = []
+    for t in sorted(opens, key=lambda x: x.get("opened_date", "")):
+        opened = t.get("opened_date", "")
+        days_held = None
+        is_lt     = False
+        if opened:
+            try:
+                days_held = (today - date.fromisoformat(opened)).days
+                is_lt = days_held >= 365
+            except Exception:
+                pass
+        days_to_lt = (365 - days_held) if (days_held is not None and not is_lt) else None
+        open_lots.append({
+            "ticker":       t.get("ticker", ""),
+            "opened_date":  opened,
+            "shares":       float(t.get("shares") or 0),
+            "entry_price":  float(t.get("entry_price") or 0),
+            "days_held":    days_held,
+            "is_lt":        is_lt,
+            "days_to_lt":   days_to_lt,
+        })
+
+    # Group by ticker for per-ticker FIFO/LIFO tip
+    by_ticker = defaultdict(list)
+    for lot in open_lots:
+        by_ticker[lot["ticker"]].append(lot)
+
+    fifo_lifo = []
+    for ticker, lots in by_ticker.items():
+        lt_lots = [l for l in lots if l["is_lt"]]
+        st_lots = [l for l in lots if not l["is_lt"]]
+        tax_tip = ""
+        if lt_lots:
+            tax_tip = f"{len(lt_lots)} LT lot(s) — sell LT first for lower rate"
+        elif st_lots:
+            nearest = min(st_lots, key=lambda l: l.get("days_to_lt") or 999)
+            d2lt = nearest.get("days_to_lt")
+            if d2lt and d2lt <= 60:
+                tax_tip = f"Turns LT in {d2lt}d — consider waiting"
+        fifo_lifo.append({
+            "ticker":   ticker,
+            "lots":     lots,
+            "lt_count": len(lt_lots),
+            "st_count": len(st_lots),
+            "tax_tip":  tax_tip,
+        })
+
+    # Rough federal tax estimates (guidance only, ~35% ST / ~15% LT)
+    st_tax_est = round(st_gain * 0.35, 2) if st_gain > 0 else 0.0
+    lt_tax_est = round(lt_gain * 0.15, 2) if lt_gain > 0 else 0.0
+
+    return jsonify({
+        "ok": True,
+        "realized": {
+            "st_gain":    round(st_gain, 2),
+            "lt_gain":    round(lt_gain, 2),
+            "st_count":   st_count,
+            "lt_count":   lt_count,
+            "st_tax_est": st_tax_est,
+            "lt_tax_est": lt_tax_est,
+            "total_gain": round(st_gain + lt_gain, 2),
+        },
+        "lots":           realized_lots[:20],
+        "open_fifo_lifo": fifo_lifo,
+    })
+
+
+@app.route("/api/miniapp/screener_data")
+def miniapp_screener_data():
+    """Return current screener candidates (from overnight cache) for Mini App filter UI."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    from config_manager import load_screener_cache
+    cache = load_screener_cache()
+    if not cache:
+        return jsonify({"ok": True, "candidates": [], "sectors": [],
+                        "total": 0, "cached_at": "", "stale": True})
+
+    candidates = []
+    stocks = cache.get("stocks", {})
+    for c in stocks.get("short_term", []):
+        candidates.append({
+            "ticker":     c.get("ticker", ""),
+            "name":       c.get("company", c.get("name", "")),
+            "sector":     c.get("sector", ""),
+            "price":      c.get("current_price"),
+            "score":      c.get("score"),
+            "rs_vs_spy":  c.get("rs_vs_spy"),
+            "pct_below_52w_high": c.get("pct_below_52w_high"),
+            "pattern":    c.get("pattern", ""),
+            "type":       "ST",
+        })
+    for c in stocks.get("long_term", []):
+        candidates.append({
+            "ticker":      c.get("ticker", ""),
+            "name":        c.get("company", c.get("name", "")),
+            "sector":      c.get("sector", ""),
+            "price":       c.get("current_price"),
+            "score":       c.get("score"),
+            "pe_ratio":    c.get("pe_ratio"),
+            "eps_surprise":c.get("eps_surprise_pct"),
+            "rs_vs_spy":   c.get("rs_vs_spy"),
+            "type":        "LT",
+        })
+
+    crypto = cache.get("crypto", {})
+    for c in list(crypto.get("short_term", [])) + list(crypto.get("long_term", [])):
+        candidates.append({
+            "ticker": c.get("ticker", ""),
+            "name":   c.get("company", c.get("name", c.get("ticker", ""))),
+            "sector": "Crypto",
+            "price":  c.get("current_price"),
+            "score":  c.get("score"),
+            "type":   "Crypto",
+        })
+
+    # Deduplicate by ticker — prefer ST entry
+    seen: set = set()
+    deduped = []
+    for c in candidates:
+        if c["ticker"] not in seen:
+            seen.add(c["ticker"])
+            deduped.append(c)
+
+    sectors = sorted({c["sector"] for c in deduped if c.get("sector")})
+
+    return jsonify({
+        "ok":        True,
+        "candidates": deduped,
+        "sectors":   sectors,
+        "total":     len(deduped),
+        "cached_at": cache.get("cached_at", ""),
+    })
+
+
+@app.route("/api/miniapp/earnings_surprise")
+def miniapp_earnings_surprise():
+    """Return recent earnings surprises for the user's watchlist tickers.
+
+    Checks yfinance quarterly earnings data and returns actual vs estimate
+    for the most recent quarter. Designed for display on the Watch tab.
+    """
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    raw     = request.args.get("tickers", "")
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    if not tickers:
+        return jsonify({"ok": True, "surprises": []})
+
+    import yfinance as _yf
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _get_surprise(ticker: str) -> dict | None:
+        try:
+            tk   = _yf.Ticker(ticker)
+            hist = tk.earnings_history
+            if hist is None or (hasattr(hist, "empty") and hist.empty):
+                return None
+            # earnings_history is a DataFrame with columns EPS Estimate, Reported EPS, Surprise(%)
+            # Most recent row first (or last) — sort by index descending
+            if hasattr(hist, "sort_index"):
+                hist = hist.sort_index(ascending=False)
+            row = hist.iloc[0]
+            est  = row.get("EPS Estimate")
+            rep  = row.get("Reported EPS")
+            surp = row.get("Surprise(%)")
+            if est is None and rep is None:
+                return None
+            quarter = str(hist.index[0])[:7] if len(hist) > 0 else ""
+            beat    = None
+            if surp is not None:
+                beat = float(surp) > 0
+            elif rep is not None and est is not None:
+                try:
+                    beat = float(rep) > float(est)
+                except Exception:
+                    pass
+            return {
+                "ticker":   ticker,
+                "quarter":  quarter,
+                "est_eps":  round(float(est), 2) if est is not None else None,
+                "rep_eps":  round(float(rep), 2) if rep is not None else None,
+                "surprise_pct": round(float(surp), 1) if surp is not None else None,
+                "beat":     beat,
+            }
+        except Exception:
+            return None
+
+    stock_tickers = [t for t in tickers if "/" not in t][:12]  # cap at 12
+    with ThreadPoolExecutor(max_workers=min(len(stock_tickers), 6)) as ex:
+        results = list(ex.map(_get_surprise, stock_tickers))
+
+    surprises = [r for r in results if r is not None]
+    # Sort: beats first, then by |surprise_pct| desc
+    surprises.sort(key=lambda r: (
+        0 if r.get("beat") else 1,
+        -abs(r.get("surprise_pct") or 0),
+    ))
+
+    return jsonify({"ok": True, "surprises": surprises})
 
 
 @app.route("/api/miniapp/share_link")
@@ -2141,6 +2700,42 @@ def miniapp_earnings():
             pass
 
     results.sort(key=lambda x: x["days_until"])
+
+    # ── Enrich with analyst consensus (parallel yfinance, small set) ─────────
+    if results:
+        import yfinance as _yf_e
+        import concurrent.futures as _cf_e
+
+        def _fetch_analyst(sym):
+            try:
+                inf = _yf_e.Ticker(sym).info or {}
+                rating = inf.get("recommendationKey") or ""
+                target = inf.get("targetMeanPrice")
+                count  = inf.get("numberOfAnalystOpinions")
+                name   = inf.get("shortName") or ""
+                # cache name while we have it
+                _quote_cache[f"__name_{sym}"] = {"v": name, "ts": time.time()}
+                return sym, {
+                    "analyst_rating": rating,
+                    "analyst_target": round(target, 2) if target else None,
+                    "analyst_count":  int(count) if count else None,
+                    "name":           name,
+                }
+            except Exception:
+                return sym, {}
+
+        analyst_map = {}
+        with _cf_e.ThreadPoolExecutor(max_workers=5) as pool:
+            for sym, ad in pool.map(_fetch_analyst, [r["ticker"] for r in results]):
+                analyst_map[sym] = ad
+
+        for r in results:
+            ad = analyst_map.get(r["ticker"], {})
+            r["analyst_rating"] = ad.get("analyst_rating", "")
+            r["analyst_target"] = ad.get("analyst_target")
+            r["analyst_count"]  = ad.get("analyst_count")
+            r["name"]           = ad.get("name", "")
+
     return jsonify({"ok": True, "earnings": results})
 
 
@@ -2439,6 +3034,65 @@ def miniapp_update_exclusions():
     ucfg["excluded_sectors"] = current
     save_user_config(chat_id, ucfg)
     return jsonify({"ok": True, "excluded_sectors": current})
+
+
+@app.route("/api/miniapp/paper_buy", methods=["POST"])
+def miniapp_paper_buy():
+    """Buy a paper position from the mini app."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    body   = request.get_json(silent=True) or {}
+    ticker = (body.get("ticker") or "").strip().upper()
+    shares = body.get("shares")
+    price  = body.get("price")   # optional override; None = use live price
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    try:
+        shares = float(shares)
+        if shares <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "shares must be a positive number"}), 400
+    if price is not None:
+        try:
+            price = float(price)
+        except (TypeError, ValueError):
+            price = None
+    from paper_trader import paper_buy
+    try:
+        msg = paper_buy(ticker, shares, chat_id, price=price)
+        ok  = not msg.startswith("❌")
+        return jsonify({"ok": ok, "message": msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/miniapp/paper_sell", methods=["POST"])
+def miniapp_paper_sell():
+    """Sell (close) a paper position from the mini app."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    body   = request.get_json(silent=True) or {}
+    ticker = (body.get("ticker") or "").strip().upper()
+    shares = body.get("shares")   # None = sell all
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    if shares is not None:
+        try:
+            shares = float(shares)
+            if shares <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "shares must be a positive number"}), 400
+    from paper_trader import paper_sell
+    try:
+        msg = paper_sell(ticker, chat_id, shares=shares)
+        ok  = not msg.startswith("❌")
+        return jsonify({"ok": ok, "message": msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/miniapp/paper_cancel", methods=["POST"])

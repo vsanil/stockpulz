@@ -617,7 +617,9 @@ ST STOCK CONVICTION RUBRIC — applies to short_term stock picks only:
   WHAT COUNTS AS ONE ST "CONFIRMING SIGNAL":
     • RSI 35-55 AND MACD crossover present (both together = 1 signal)
     • volume_ratio > 1.5 AND obv_positive = True (together = 1 signal)
-    • breakout_today = True OR patterns include "bull_flag" or "bullish_engulfing"
+    • breakout_today = True (price closed above prior 20-day high with volume) — strong standalone signal
+    • pct_from_52w_high <= 3 AND volume_ratio > 1.3 (near 52-week high breakout zone with volume)
+    • patterns include "bull_flag" or "bullish_engulfing" (candlestick confirmation)
     • options_flow: unusual = True OR bullish_flow = True OR put_call_ratio < 0.7
     • insider_activity present AND is_cluster = True
     • analyst_consensus = "buy" AND analyst_upside_pct > 10%
@@ -657,6 +659,18 @@ ST STOCK CONVICTION GATE (ABSOLUTE RULE):
   - If only 1 stock qualifies, return 1. If none qualify, return [].
   - Empty arrays [] are acceptable and often the most honest answer.
 
+SECTOR DIVERSITY RULE (HARD RULE — applies to the full output):
+  - Maximum 2 picks from the same sector across ALL sections (ST stocks + LT stocks combined).
+  - If 3+ candidates from the same sector qualify, keep the 2 highest-conviction and drop the rest.
+  - This prevents an all-tech or all-energy output on sector momentum days.
+  - ETFs and commodities are exempt from this rule (they are already diversified vehicles).
+
+EARNINGS PROXIMITY RULE (ST picks only):
+  - If a candidate has earnings in the next 1–3 days: cap conviction at ★★★ — gap risk is real.
+  - If earnings in 4–7 days: note the risk in the thesis but do not cap conviction.
+  - If earnings > 7 days away: no adjustment needed.
+  - Check days_to_earnings field if provided.
+
 ANALYSIS FRAMEWORK — WORK THROUGH THESE STEPS MENTALLY BEFORE SELECTING ANY PICK:
   Step 1 — REGIME LENS: Anchor your entire analysis to the current market regime.
     bull     → full operation; momentum and breakout setups are valid
@@ -678,7 +692,8 @@ ANALYSIS FRAMEWORK — WORK THROUGH THESE STEPS MENTALLY BEFORE SELECTING ANY PI
     Is it upcoming (adds fuel) or already priced in (no edge)? Is it company-specific or just macro noise?
     An already-priced catalyst weakens the pick — lower conviction accordingly.
   Step 5 — PORTFOLIO COHERENCE: Review all passing picks together.
-    No sector duplicates. No two picks driven by the identical catalyst type.
+    Apply SECTOR DIVERSITY RULE — max 2 picks per sector across ST + LT combined.
+    No two picks driven by the identical catalyst type.
     Prefer picks that complement each other across risk/return profile.
     Then apply the conviction gate and output JSON.
 

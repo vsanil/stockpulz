@@ -252,10 +252,28 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
         current_price = float(close.iloc[-1])
         week_high     = float(close.rolling(252).max().iloc[-1])
         if not pd.isna(ema20_val):
-            ema_val        = float(ema20_val)
+            ema_val          = float(ema20_val)
             metrics["ema20"] = round(ema_val, 2)
-            if ema_val <= current_price <= week_high:
+            if current_price >= ema_val:
                 score += 15
+
+        # Breakout today — price closed above 20-day rolling high (momentum breakout).
+        # This is the William O'Neil breakout definition: new multi-week high with volume.
+        # Separately track near-52w-high as a bonus (within 3% = potential 52w breakout).
+        try:
+            high_20d = float(close.rolling(20).max().shift(1).iloc[-1])   # prior 20d high
+            metrics["breakout_today"] = (not pd.isna(high_20d) and current_price > high_20d)
+            if metrics["breakout_today"] and vol_ratio and vol_ratio > 1.3:
+                score += 15   # breakout + volume confirmation
+
+            # Near 52-week high (within 3%) — approaching breakout zone
+            if not pd.isna(week_high) and week_high > 0:
+                pct_from_high = (week_high - current_price) / week_high * 100
+                metrics["pct_from_52w_high"] = round(pct_from_high, 1)
+                if 0 <= pct_from_high <= 3:
+                    score += 10   # within 3% of 52w high — breakout setup
+        except Exception:
+            pass
 
         # Near Bollinger lower band (potential bounce).
         # Two guards prevent false signals:
@@ -707,10 +725,17 @@ def _long_term_score(
     median_pe = pe_table.get(sector, SECTOR_MEDIAN_PE.get(sector, SECTOR_MEDIAN_PE["Unknown"]))
 
     # ── P/E vs sector median (30 pts) ────────────────────────────────────────
+    # Tiered: full credit at or below median, partial credit for reasonable growth premium.
+    # Avoids unfairly penalising quality compounders (NVDA, AMZN) that trade above median.
     pe = fh.get("peBasicExclExtraTTM") or info.get("trailingPE")
     metrics["pe_ratio"] = round(pe, 1) if pe else None
-    if pe and 0 < pe < median_pe:
-        score += 30
+    if pe and 0 < pe:
+        if pe < median_pe:
+            score += 30          # at or below median — value opportunity
+        elif pe < median_pe * 1.5:
+            score += 15          # moderate growth premium — still reasonable
+        elif pe < median_pe * 2.5:
+            score += 5           # high growth premium — acceptable for top-tier compounders
 
     # ── Revenue growth > 10% YoY (25 pts) ────────────────────────────────────
     rev_growth = fh.get("revenueGrowthTTMYoy") or info.get("revenueGrowth")
@@ -740,13 +765,34 @@ def _long_term_score(
     if dte_ok:
         score += 15
 
-    # ── Market cap > $10B (10 pts) ────────────────────────────────────────────
-    # Finnhub returns in $ millions; yfinance returns full dollars
+    # ── Market cap > $10B — gate only, not scored ────────────────────────────
+    # Large-cap is a quality minimum, not a scoring differentiator.
     fh_mcap = fh.get("marketCapitalization")
     mktcap  = (fh_mcap * 1_000_000) if fh_mcap else info.get("marketCap", 0)
     metrics["market_cap"] = int(mktcap) if mktcap else None
-    if mktcap and mktcap > 10_000_000_000:
-        score += 10
+
+    # ── Price above 200-day MA — trend confirmation (10 pts) ─────────────────
+    # A stock with strong fundamentals but in a long-term downtrend is a value trap.
+    # Requiring price > 200MA ensures we buy quality in an uptrend, not falling knives.
+    try:
+        import yfinance as _yf_lt
+        hist_lt = _yf_lt.Ticker(info.get("symbol", "")).history(period="1y", interval="1d")
+        if not hist_lt.empty and len(hist_lt) >= 200:
+            ma200    = float(hist_lt["Close"].rolling(200).mean().iloc[-1])
+            cur_px   = float(hist_lt["Close"].iloc[-1])
+            above_ma = cur_px > ma200
+            metrics["above_200ma"] = above_ma
+            if above_ma:
+                score += 10
+        elif not hist_lt.empty:
+            # < 200 days data — use what we have (50-day proxy)
+            ma_proxy = float(hist_lt["Close"].rolling(min(50, len(hist_lt))).mean().iloc[-1])
+            cur_px   = float(hist_lt["Close"].iloc[-1])
+            metrics["above_200ma"] = cur_px > ma_proxy
+            if cur_px > ma_proxy:
+                score += 10
+    except Exception:
+        metrics["above_200ma"] = None
 
     return score, metrics
 

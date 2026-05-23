@@ -180,6 +180,23 @@ def remove_alert(chat_id: str, ticker: str, target_price: float | None = None) -
     return f"⚠️ No active alerts found for <b>{ticker}</b>."
 
 
+def get_user_alerts_map(chat_id: str) -> dict:
+    """
+    Return {TICKER: [{"target": float, "direction": str}, ...]} for all active
+    alerts belonging to chat_id. Used by the morning formatter to show proximity
+    in the On Your Radar section.
+    """
+    result: dict = {}
+    for a in _load_alerts().get(str(chat_id), []):
+        t = a.get("ticker", "").upper()
+        if t:
+            result.setdefault(t, []).append({
+                "target":    a["target"],
+                "direction": a.get("direction", "below"),
+            })
+    return result
+
+
 def list_alerts(chat_id: str) -> str:
     """Return formatted Telegram HTML list of active alerts for this chat."""
     chat_alerts = _load_alerts().get(str(chat_id), [])

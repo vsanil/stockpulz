@@ -3666,6 +3666,43 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
     except Exception as _me:
         print(f"[agent] Morning earnings fetch failed (non-critical): {_me}")
 
+    # ── Watchlist prices — batch-fetch across all users once ─────────────────
+    # Collect every unique watchlist ticker across all recipients, fetch price +
+    # 24h change once via yfinance, then distribute per-user in the loop below.
+    all_wl_tickers: set = set()
+    for _uid in recipients:
+        try:
+            _wl = get_user_config(_uid).get("watchlist") or []
+            all_wl_tickers.update(t.upper() for t in _wl if t)
+        except Exception:
+            pass
+
+    watchlist_prices_global: dict = {}
+    if all_wl_tickers:
+        try:
+            import yfinance as _yf
+            import concurrent.futures as _cf
+
+            def _fetch_wl_price(ticker: str):
+                try:
+                    info  = _yf.Ticker(ticker).fast_info
+                    price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
+                    prev  = getattr(info, "previous_close", None)
+                    if price:
+                        chg = round((float(price) - float(prev)) / float(prev) * 100, 2) if prev else None
+                        return ticker, {"price": round(float(price), 2), "change_pct": chg}
+                except Exception:
+                    pass
+                return ticker, None
+
+            with _cf.ThreadPoolExecutor(max_workers=8) as _pool:
+                for _t, _data in _pool.map(_fetch_wl_price, all_wl_tickers):
+                    if _data:
+                        watchlist_prices_global[_t] = _data
+            print(f"[agent] Watchlist prices: {len(watchlist_prices_global)}/{len(all_wl_tickers)} fetched.")
+        except Exception as _wl_exc:
+            print(f"[agent] Watchlist price fetch failed (non-critical): {_wl_exc}")
+
     # ── Build all per-user payloads first (CPU-bound, fast), then broadcast concurrently ──
     outbox: list[dict] = []
     for uid in recipients:
@@ -3687,11 +3724,27 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
                 if t.get("ticker")
             }
 
+            # Per-user watchlist prices — only keys the user actually watches
+            user_wl = set(t.upper() for t in (user_cfg.get("watchlist") or []) if t)
+            user_wl_prices = {t: watchlist_prices_global[t]
+                              for t in user_wl if t in watchlist_prices_global}
+
+            # Per-user active price alerts map: {TICKER: [{target, direction}]}
+            user_alerts_map: dict = {}
+            if user_wl:
+                try:
+                    from price_alert_manager import get_user_alerts_map
+                    user_alerts_map = get_user_alerts_map(uid)
+                except Exception:
+                    pass
+
             message = format_daily_message(picks, user_cfg, personal_notes=personal_notes,
                                            pick_streaks=pick_streaks, buy_counts=buy_counts,
                                            recent_stats=recent_stats,
                                            earnings_this_week=morning_earnings,
-                                           held_tickers=held_tickers)
+                                           held_tickers=held_tickers,
+                                           watchlist_prices=user_wl_prices or None,
+                                           user_alerts_map=user_alerts_map or None)
 
             # Append /bought tip for users who have never logged a trade
             user_log = user_positions_cache.get(uid, None)

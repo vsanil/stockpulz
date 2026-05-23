@@ -1140,6 +1140,34 @@ body.tg-light .sheet-handle { background: rgba(0,0,0,.18); }
 }
 .chart-meta-price { font-size: 22px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; }
 .chart-meta-chg   { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
+#chart-tf-bar { display: flex; }
+.chart-tf-btn {
+  flex: 1; padding: 5px 0; border: 1px solid var(--border); background: transparent;
+  color: var(--hint); font-size: 12px; font-weight: 600; border-radius: 8px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.chart-tf-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ── Screener overlay ────────────────────────────────────────────────────── */
+.sc-filter-bar { display:flex; gap:6px; flex-wrap:nowrap; overflow-x:auto; padding:0 0 4px; margin-bottom:12px; }
+.sc-filter-bar::-webkit-scrollbar { display:none; }
+.sc-chip {
+  flex-shrink:0; padding:5px 12px; border-radius:20px; border:1.5px solid var(--border);
+  background:transparent; color:var(--hint); font-size:12px; font-weight:600; cursor:pointer;
+  transition: background .15s, color .15s;
+}
+.sc-chip.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+.sc-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 0; border-bottom:1px solid var(--border);
+}
+.sc-row:last-child { border-bottom:none; }
+.sc-badge {
+  font-size:10px; font-weight:700; padding:2px 7px; border-radius:6px; margin-left:6px;
+}
+.sc-badge-st  { background:rgba(79,142,247,.18); color:var(--accent); }
+.sc-badge-lt  { background:rgba(167,139,250,.18); color:var(--purple); }
+.sc-badge-cr  { background:rgba(255,184,0,.18);   color:var(--amber); }
 
 /* ── Sell sheet ──────────────────────────────────────────────────────────── */
 .sell-info { margin-bottom: 20px; }
@@ -2044,10 +2072,17 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
     <div class="lw-container" id="lw-container">
       <div class="chart-loading"><div class="spinner" style="margin:0"></div> Loading chart…</div>
     </div>
+    <!-- Timeframe toggle -->
+    <div id="chart-tf-bar" style="display:none;gap:6px;padding:8px 14px 0;justify-content:center">
+      <button onclick="_chartSetPeriod('5d')"  id="ctf-1w" class="chart-tf-btn">1W</button>
+      <button onclick="_chartSetPeriod('1mo')" id="ctf-1m" class="chart-tf-btn">1M</button>
+      <button onclick="_chartSetPeriod('3mo')" id="ctf-3m" class="chart-tf-btn active">3M</button>
+      <button onclick="_chartSetPeriod('1y')"  id="ctf-1y" class="chart-tf-btn">1Y</button>
+    </div>
     <div class="chart-meta" id="chart-meta" style="display:none">
       <div>
         <div class="chart-meta-price" id="chart-meta-price"></div>
-        <div style="font-size:11px;margin-top:3px">3-month price history</div>
+        <div id="chart-meta-label" style="font-size:11px;margin-top:3px">3-month price history</div>
       </div>
       <div class="chart-meta-chg" id="chart-meta-chg"></div>
     </div>
@@ -2110,6 +2145,10 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
       </div>
       <button class="btn-primary" id="posdetail-save-btn" onclick="savePositionDetail()" style="margin-top:14px">Save</button>
       <button class="btn-cancel" onclick="closeOverlay('posdetail-overlay')">Cancel</button>
+      <button id="posdetail-remove-btn" onclick="removePosition()"
+        style="margin-top:6px;width:100%;padding:13px;border:none;border-radius:14px;background:transparent;color:var(--red,#ff453a);font-size:15px;font-weight:500;cursor:pointer;opacity:.8">
+        🗑 Remove position (no trade logged)
+      </button>
     </div>
   </div>
 </div>
@@ -2123,19 +2162,16 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
       <button class="sheet-close" onclick="closeOverlay('watchalert-overlay')">✕</button>
     </div>
     <div class="sheet-body">
-      <div id="watchalert-summary" style="font-size:13px;color:var(--hint);margin-bottom:14px"></div>
+      <div id="watchalert-summary" style="font-size:13px;color:var(--hint);margin-bottom:10px"></div>
       <div class="pos-detail-label">Alert when price reaches $</div>
-      <input type="number" id="watchalert-price" class="pos-detail-input" placeholder="e.g. 185.00" step="0.01">
-      <div style="display:flex;gap:10px;margin-bottom:14px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-          <input type="radio" name="watchalert-dir" value="auto" checked> Auto
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-          <input type="radio" name="watchalert-dir" value="above"> Above
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-          <input type="radio" name="watchalert-dir" value="below"> Below
-        </label>
+      <input type="number" id="watchalert-price" class="pos-detail-input" placeholder="e.g. 185.00" step="0.01" oninput="_updateAlertHint()">
+      <div id="watchalert-hint" style="font-size:12px;margin-bottom:10px;min-height:16px"></div>
+      <!-- Quick % fill buttons -->
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button onclick="_alertSetPct(-0.10)" style="flex:1;padding:9px 0;border:1.5px solid var(--red,#ff453a);border-radius:10px;background:transparent;color:var(--red,#ff453a);font-size:13px;font-weight:600;cursor:pointer">−10%</button>
+        <button onclick="_alertSetPct(-0.05)" style="flex:1;padding:9px 0;border:1.5px solid var(--red,#ff453a);border-radius:10px;background:transparent;color:var(--red,#ff453a);font-size:13px;font-weight:600;cursor:pointer">−5%</button>
+        <button onclick="_alertSetPct(0.05)"  style="flex:1;padding:9px 0;border:1.5px solid var(--green,#30d158);border-radius:10px;background:transparent;color:var(--green,#30d158);font-size:13px;font-weight:600;cursor:pointer">+5%</button>
+        <button onclick="_alertSetPct(0.10)"  style="flex:1;padding:9px 0;border:1.5px solid var(--green,#30d158);border-radius:10px;background:transparent;color:var(--green,#30d158);font-size:13px;font-weight:600;cursor:pointer">+10%</button>
       </div>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:14px">
         <input type="checkbox" id="watchalert-recurring" style="width:15px;height:15px;accent-color:var(--accent)">
@@ -2167,6 +2203,44 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
   </div>
 </div>
 
+<!-- ── Paper Buy overlay ──────────────────────────────────────────────────── -->
+<div id="paper-buy-overlay" class="overlay" onclick="handleOverlayTap(event,'paper-buy-overlay')">
+  <div class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">📄 Paper Buy</div>
+      <button class="sheet-close" onclick="closeOverlay('paper-buy-overlay')">✕</button>
+    </div>
+    <div class="sheet-body">
+      <input type="text" id="pbuy-ticker" class="ticker-input"
+             placeholder="Ticker — e.g. AAPL"
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             oninput="this.value=this.value.toUpperCase();_onPaperBuyTickerInput(this.value)"
+             onkeydown="if(event.key==='Enter')document.getElementById('pbuy-shares').focus()">
+      <div id="pbuy-price-hint" style="font-size:11px;color:var(--hint);margin-top:5px;min-height:15px;line-height:1.3"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+        <div>
+          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Shares</div>
+          <input type="number" id="pbuy-shares" class="ticker-input" placeholder="e.g. 10"
+                 step="any" min="0.0001"
+                 oninput="_updatePaperBuyCost()"
+                 onkeydown="if(event.key==='Enter')document.getElementById('pbuy-price').focus()">
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Price <span style="font-weight:400;opacity:.7">(optional)</span></div>
+          <input type="number" id="pbuy-price" class="ticker-input" placeholder="Live price"
+                 step="0.01" min="0"
+                 oninput="_updatePaperBuyCost()"
+                 onkeydown="if(event.key==='Enter')confirmPaperBuy()">
+        </div>
+      </div>
+      <div id="pbuy-cost-hint" style="font-size:12px;color:var(--hint);margin-top:8px;min-height:16px;text-align:center"></div>
+      <button class="btn-primary" id="pbuy-btn" onclick="confirmPaperBuy()">Buy</button>
+      <button class="btn-cancel" onclick="closeOverlay('paper-buy-overlay')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Feedback overlay ──────────────────────────────────────────────────── -->
 <div id="feedback-overlay" class="overlay" onclick="handleOverlayTap(event,'feedback-overlay')">
   <div class="bottom-sheet">
@@ -2192,13 +2266,16 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
       <input type="text" id="addpos-input" class="ticker-input"
              placeholder="Ticker — e.g. AAPL, BTC, SOXX"
              autocomplete="off" autocorrect="off" spellcheck="false"
-             oninput="this.value=this.value.toUpperCase()"
+             oninput="this.value=this.value.toUpperCase();_onAddposTickerInput(this.value)"
              onkeydown="if(event.key==='Enter')document.getElementById('addpos-entry').focus()">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+      <div id="addpos-price-hint" style="font-size:11px;color:var(--hint);margin-top:5px;min-height:15px;line-height:1.3"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
         <div>
           <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Entry Price <span style="font-weight:400;opacity:.7">(optional)</span></div>
           <input type="number" id="addpos-entry" class="ticker-input" placeholder="e.g. 185.00"
-                 step="0.01" min="0" onkeydown="if(event.key==='Enter')document.getElementById('addpos-shares').focus()">
+                 step="0.01" min="0"
+                 oninput="calcPositionSize()"
+                 onkeydown="if(event.key==='Enter')document.getElementById('addpos-shares').focus()">
         </div>
         <div>
           <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Shares <span style="font-weight:400;opacity:.7">(optional)</span></div>
@@ -2209,7 +2286,9 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
       <div style="margin-top:10px">
         <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Stop Loss <span style="font-weight:400;opacity:.7">(optional)</span></div>
         <input type="number" id="addpos-stop" class="ticker-input" placeholder="e.g. 175.00"
-               step="0.01" min="0" onkeydown="if(event.key==='Enter')confirmAddPosition()">
+               step="0.01" min="0"
+               oninput="calcPositionSize()"
+               onkeydown="if(event.key==='Enter')confirmAddPosition()">
       </div>
       <!-- Position sizer (collapsible) -->
       <div style="margin-top:12px">
@@ -2217,11 +2296,11 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
           <span id="addpos-sizer-arrow">▶</span> 🧮 Position Sizer
         </button>
         <div id="addpos-sizer" style="display:none;margin-top:10px;padding:10px;background:var(--card-bg);border-radius:10px;border:1px solid var(--border)">
-          <div style="font-size:11px;color:var(--hint);margin-bottom:8px">Enter account size and max risk % to calculate how many shares to buy.</div>
+          <div id="sizer-hint" style="font-size:11px;color:var(--hint);margin-bottom:8px">Enter your account size and max risk % to calculate how many shares to buy.</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
             <div>
               <div style="font-size:11px;color:var(--hint);margin-bottom:4px;font-weight:600">Account Size ($)</div>
-              <input type="number" id="sizer-account" class="ticker-input" placeholder="e.g. 10000"
+              <input type="number" id="sizer-account" class="ticker-input" placeholder="e.g. 25000"
                      step="100" min="0" oninput="calcPositionSize()" style="font-size:13px">
             </div>
             <div>
@@ -2327,12 +2406,53 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
   </div>
 </div>
 
+<!-- ── Stock Screener overlay ─────────────────────────────────────────────── -->
+<div id="screener-overlay" class="overlay" onclick="handleOverlayTap(event,'screener-overlay')">
+  <div class="bottom-sheet" style="max-height:92vh">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">🔍 Stock Screener</div>
+      <button class="sheet-close" onclick="closeOverlay('screener-overlay')">✕</button>
+    </div>
+    <div style="padding:0 16px;display:flex;flex-direction:column;gap:0;overflow:hidden;height:calc(92vh - 60px)">
+      <!-- Filter chips -->
+      <div class="sc-filter-bar" id="sc-chips">
+        <button class="sc-chip active" onclick="_scSetType('all')"    id="sct-all">All</button>
+        <button class="sc-chip"       onclick="_scSetType('ST')"     id="sct-ST">📈 ST</button>
+        <button class="sc-chip"       onclick="_scSetType('LT')"     id="sct-LT">🏦 LT</button>
+        <button class="sc-chip"       onclick="_scSetType('Crypto')" id="sct-Crypto">₿ Crypto</button>
+      </div>
+      <!-- Sector dropdown + score filter -->
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <select id="sc-sector-select" onchange="_scFilter()"
+                style="flex:1;padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);
+                       background:var(--card);color:var(--text);font-size:13px">
+          <option value="">All Sectors</option>
+        </select>
+        <select id="sc-sort-select" onchange="_scFilter()"
+                style="flex:1;padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);
+                       background:var(--card);color:var(--text);font-size:13px">
+          <option value="score">By Score ↓</option>
+          <option value="rs">By RS vs SPY ↓</option>
+          <option value="52w">Near 52W High</option>
+        </select>
+      </div>
+      <!-- Status / cache date -->
+      <div id="sc-status" style="font-size:11px;color:var(--hint);margin-bottom:8px;min-height:16px"></div>
+      <!-- Results list -->
+      <div id="sc-list" style="overflow-y:auto;flex:1;padding-bottom:16px">
+        <div style="text-align:center;padding:40px 0;opacity:.5;font-size:14px">Loading screener data…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="alert-overlay" class="overlay" onclick="handleOverlayTap(event,'alert-overlay')">
   <div class="bottom-sheet">
     <div class="sheet-handle"></div>
     <div class="sheet-hdr">
       <div class="sheet-title">🔔 New Alert</div>
-      <button class="sheet-close" onclick="closeOverlay('alert-overlay')">✕</button>
+      <button class="sheet-close" onclick="_resetAlertOverlay();closeOverlay('alert-overlay')">✕</button>
     </div>
     <div class="sheet-body">
       <input type="text" id="alert-ticker-input" class="ticker-input" placeholder="e.g. AAPL"
@@ -2354,7 +2474,7 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
         <button class="dir-btn"        id="dir-below" onclick="setAlertDir('below')">Below ↓</button>
       </div>
       <button class="btn-primary" id="alert-submit-btn" onclick="submitAlert()">Set Alert</button>
-      <button class="btn-cancel" onclick="closeOverlay('alert-overlay')">Cancel</button>
+      <button class="btn-cancel" onclick="_resetAlertOverlay();closeOverlay('alert-overlay')">Cancel</button>
     </div>
   </div>
 </div>
@@ -2681,23 +2801,55 @@ function fmtPct(v, showPlus = true) {
   const sign = showPlus && n >= 0 ? '+' : '';
   return sign + n.toFixed(1) + '%';
 }
+// HTML-escape helper — prevents XSS when injecting user text into innerHTML
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHART OVERLAY
 // ═══════════════════════════════════════════════════════════════════════════════
 
+let _chartState = null; // { sym, assetType, entryPrice, targetPrice, stopPrice, period }
+const _TF_LABELS = { '5d': '1-week', '1mo': '1-month', '3mo': '3-month', '1y': '1-year' };
+
+async function _chartSetPeriod(period) {
+  if (!_chartState) return;
+  _chartState.period = period;
+  // Update active button
+  ['5d','1mo','3mo','1y'].forEach(p => {
+    const id = { '5d':'ctf-1w','1mo':'ctf-1m','3mo':'ctf-3m','1y':'ctf-1y' }[p];
+    document.getElementById(id)?.classList.toggle('active', p === period);
+  });
+  await _renderChart(_chartState);
+}
+
 async function openChart(sym, assetType, entryPrice = 0, targetPrice = 0, stopPrice = 0) {
+  _chartState = { sym, assetType, entryPrice, targetPrice, stopPrice, period: _chartState?.period || '3mo' };
   document.getElementById('chart-sym-label').textContent = sym;
   document.getElementById('chart-meta').style.display = 'none';
+  document.getElementById('chart-tf-bar').style.display = 'none';
   const container = document.getElementById('lw-container');
   container.innerHTML = '<div class="chart-loading"><div class="spinner" style="margin:0"></div> Loading chart…</div>';
 
   if (lwChart) { lwChart.remove(); lwChart = null; lwSeries = null; }
   openOverlay('chart-overlay');
   tg.HapticFeedback?.impactOccurred('light');
+  await _renderChart(_chartState);
+}
+
+async function _renderChart({ sym, assetType, entryPrice, targetPrice, stopPrice, period }) {
+  const container = document.getElementById('lw-container');
+  // Update active TF button
+  const tfMap = { '5d':'ctf-1w','1mo':'ctf-1m','3mo':'ctf-3m','1y':'ctf-1y' };
+  Object.entries(tfMap).forEach(([p, id]) =>
+    document.getElementById(id)?.classList.toggle('active', p === period));
 
   try {
-    const resp = await api(`/api/miniapp/chart/${encodeURIComponent(sym)}?asset_type=${assetType}`);
+    const resp = await api(`/api/miniapp/chart/${encodeURIComponent(sym)}?asset_type=${assetType}&period=${period}`);
     const chartData = resp.data || [];
     if (!chartData.length) throw new Error('no data');
 
@@ -2775,13 +2927,18 @@ async function openChart(sym, assetType, entryPrice = 0, targetPrice = 0, stopPr
 
     lwChart.timeScale().fitContent();
 
+    // Show TF bar
+    document.getElementById('chart-tf-bar').style.display = 'flex';
+
     // Price meta bar
     const chgPct  = ((last - first) / first * 100);
     const chgSign = chgPct >= 0 ? '+' : '';
     const metaChg = document.getElementById('chart-meta-chg');
-    metaChg.textContent = `${chgSign}${chgPct.toFixed(1)}% (3mo)`;
+    const tfLabel = _TF_LABELS[period] || '3-month';
+    metaChg.textContent = `${chgSign}${chgPct.toFixed(1)}% (${tfLabel})`;
     metaChg.style.color = isUp ? 'var(--green)' : 'var(--red)';
     document.getElementById('chart-meta-price').textContent = '$' + fmtPrice(last);
+    document.getElementById('chart-meta-label').textContent = `${tfLabel} price history`;
     document.getElementById('chart-meta').style.display = 'flex';
 
     // ── Legend pill for price levels ─────────────────────────────────────────
@@ -2832,10 +2989,11 @@ function openSellSheet(sym) {
       ${pnlHtml}
     </div>
     <div class="price-label">Exit Price (optional)</div>
-    <input type="number" id="sell-price-input" class="price-input"
+    <input type="text" id="sell-price-input" class="price-input"
            value="${cur ? parseFloat(cur).toFixed(2) : ''}"
-           placeholder="Leave blank to record without P&amp;L"
-           step="0.01" inputmode="decimal">
+           placeholder="Leave blank to use current price"
+           inputmode="decimal" pattern="[0-9]*[.]?[0-9]*"
+           autocomplete="off" autocorrect="off">
     <button class="btn-confirm-sell" id="sell-confirm-btn" onclick="confirmSell()">
       Close ${sym} Position
     </button>
@@ -2945,24 +3103,75 @@ async function confirmSell() {
 // ADD POSITION SHEET
 // ═══════════════════════════════════════════════════════════════════════════════
 
+let _addposCurrentPrice = null;
+let _addposPriceFetchTimer = null;
+
+function _onAddposTickerInput(val) {
+  clearTimeout(_addposPriceFetchTimer);
+  _addposCurrentPrice = null;
+  const hint = document.getElementById('addpos-price-hint');
+  // Reset placeholders
+  document.getElementById('addpos-entry').placeholder = 'e.g. 185.00';
+  document.getElementById('addpos-stop').placeholder  = 'e.g. 175.00';
+  if (!val || val.length < 1) { if (hint) hint.textContent = ''; return; }
+  if (hint) hint.innerHTML = '<span style="opacity:.4">Looking up…</span>';
+  _addposPriceFetchTimer = setTimeout(() => _fetchAddposPrice(val), 600);
+}
+
+async function _fetchAddposPrice(ticker) {
+  const hint    = document.getElementById('addpos-price-hint');
+  const entryInp = document.getElementById('addpos-entry');
+  const stopInp  = document.getElementById('addpos-stop');
+  try {
+    const d = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(ticker)}`);
+    if (!d.price) { if (hint) hint.textContent = ''; return; }
+    _addposCurrentPrice = d.price;
+    const p    = d.price;
+    const name = d.name ? `${d.name}  ·  ` : '';
+    if (hint) hint.innerHTML = `<span style="opacity:.6">${name}</span><span style="font-weight:600;color:var(--fg)">$${fmtPrice(p)}</span>`;
+    // Pre-fill entry if still empty
+    if (entryInp && !entryInp.value) entryInp.value = p.toFixed(2);
+    // Dynamic placeholders
+    if (entryInp) entryInp.placeholder = `Current $${fmtPrice(p)}`;
+    if (stopInp)  stopInp.placeholder  = `e.g. ${(p * 0.95).toFixed(2)}  (−5%)`;
+    // Update sizer hint
+    const sh = document.getElementById('sizer-hint');
+    if (sh) sh.innerHTML = `Current price <b>$${fmtPrice(p)}</b>  ·  Enter your account size and max risk % to calculate shares.`;
+    calcPositionSize();
+  } catch(_) {
+    if (hint) hint.textContent = '';
+  }
+}
+
 function openAddPosition(prefillTicker = '') {
   const input = document.getElementById('addpos-input');
   const btn   = document.getElementById('addpos-btn');
+  _addposCurrentPrice = null;
+  clearTimeout(_addposPriceFetchTimer);
   input.value = prefillTicker.toUpperCase();
-  document.getElementById('addpos-entry').value  = '';
-  document.getElementById('addpos-shares').value = '';
-  document.getElementById('addpos-stop').value  = '';
-  document.getElementById('addpos-sizer').style.display = 'none';
+  document.getElementById('addpos-entry').value     = '';
+  document.getElementById('addpos-shares').value    = '';
+  document.getElementById('addpos-stop').value      = '';
+  document.getElementById('addpos-entry').placeholder = 'e.g. 185.00';
+  document.getElementById('addpos-stop').placeholder  = 'e.g. 175.00';
+  document.getElementById('addpos-price-hint').textContent = '';
+  document.getElementById('addpos-sizer').style.display    = 'none';
   document.getElementById('addpos-sizer-arrow').textContent = '▶';
-  document.getElementById('sizer-account').value = '';
+  document.getElementById('sizer-account').value   = '';
   document.getElementById('sizer-result').textContent = '';
+  const sh = document.getElementById('sizer-hint');
+  if (sh) sh.textContent = 'Enter your account size and max risk % to calculate how many shares to buy.';
   btn.disabled    = false;
   btn.textContent = 'Add to Portfolio';
   openOverlay('addpos-overlay');
   tg.HapticFeedback?.impactOccurred('light');
-  // If ticker pre-filled, focus entry price; otherwise focus ticker input
-  const focusId = prefillTicker ? 'addpos-entry' : 'addpos-input';
-  setTimeout(() => document.getElementById(focusId)?.focus(), 200);
+  if (prefillTicker) {
+    // Fetch live price immediately for pre-filled tickers
+    setTimeout(() => _fetchAddposPrice(prefillTicker.toUpperCase()), 100);
+    setTimeout(() => document.getElementById('addpos-entry')?.focus(), 300);
+  } else {
+    setTimeout(() => document.getElementById('addpos-input')?.focus(), 200);
+  }
 }
 
 function closeAddPos() { closeOverlay('addpos-overlay'); }
@@ -3536,7 +3745,7 @@ function renderPickCard(p, idx = 0) {
         </div>
       </div>
       <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
-      ${p.thesis || p.reason ? `<div class="pick-thesis">${p.thesis || p.reason}</div>` : ''}
+      ${p.thesis || p.reason ? `<div class="pick-thesis">${esc(p.thesis || p.reason)}</div>` : ''}
       ${(p.theme || p.edge) ? `<div class="pick-theme-row">${p.theme ? `<span class="theme-chip">#${p.theme.replace(/[\s\-]+/g,'').replace(/(?:^|\s)\S/g,c=>c.toUpperCase())}</span>` : ''}${p.edge ? `<span class="pick-edge">${p.edge}</span>` : ''}</div>` : ''}
       <div class="pick-actions">
         <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
@@ -3951,9 +4160,7 @@ function _reRenderPositions() {
       if (range > 0) targetProgress = Math.min(100, Math.max(0, (move / range) * 100));
     }
 
-    const stopLoss    = p.stop_loss    != null ? p.stop_loss    : '';
-    const targetPrice = p.target_price != null ? p.target_price : '';
-    const _dA = `'${sym}',${JSON.stringify(p.entry_price)},${JSON.stringify(p.current_price)},${JSON.stringify(stopLoss)},${JSON.stringify(targetPrice)}`;
+    const _dA = `'${sym}',${p.entry_price ?? null},${p.current_price ?? null},${p.stop_loss ?? null},${p.target_price ?? null}`;
     const _stopLine = p.stop_loss
       ? `<span class="pos-level-tap" onclick="openPositionDetail(${_dA},'stop')">stop $${fmtPrice(p.stop_loss)}</span>`
       : '';
@@ -3964,7 +4171,7 @@ function _reRenderPositions() {
       ? `<div class="pos-sub" style="margin-top:2px;opacity:.75">${[_stopLine, _tgtLine].filter(Boolean).join('  ·  ')}</div>`
       : '';
     const _notesLine = p.notes
-      ? `<div class="pos-notes">${p.notes.slice(0, 120)}${p.notes.length > 120 ? '…' : ''}</div>`
+      ? `<div class="pos-notes">${esc(p.notes.slice(0, 120))}${p.notes.length > 120 ? '…' : ''}</div>`
       : '';
 
     // Per-position health badge (🟢/🟡/🔴)
@@ -3993,6 +4200,7 @@ function _reRenderPositions() {
         <div class="pos-avatar" style="background:${_avatarBg(sym,aType)}">${init}</div>
         <div class="pos-body">
           <div class="pos-sym">${sym}${p.timeframe ? ` <span class="pos-tf-badge pos-tf-${p.timeframe === 'short_term' ? 'st' : 'lt'}">${p.timeframe === 'short_term' ? 'ST' : 'LT'}</span>` : ''}${_healthBadge}${!p.stop_loss ? ` <span class="pos-nostop" onclick="openPositionDetail(${_dA},'stop')">⚠️ No stop</span>` : ''}</div>
+          <div data-name-ticker="${sym}" style="font-size:10px;color:var(--hint);margin-top:1px;margin-bottom:1px;font-weight:400;line-height:1.2"></div>
           <div class="pos-sub"><span class="pos-level-tap" onclick="openPositionDetail(${_dA},'entry')">${entry}</span>${cur ? ` → ${cur}` : ''}</div>
           ${_levelsRow}
           ${p.target_price ? `<div class="target-bar"><div class="target-fill" style="width:${targetProgress}%"></div></div><div style="font-size:10px;color:var(--hint);margin-top:3px;opacity:.7">${Math.round(targetProgress)}% to target</div>` : ''}
@@ -4005,11 +4213,11 @@ function _reRenderPositions() {
       </div>
       </div>
       <div class="pos-actions">
-        <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},${parseFloat(targetPrice)||0},${parseFloat(stopLoss)||0})"><svg width="14" height="14" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:5px;vertical-align:-2px"><rect x="2" y="12" width="4" height="8" rx="1"/><rect x="9" y="7" width="4" height="13" rx="1"/><rect x="16" y="3" width="4" height="17" rx="1"/></svg>Chart</button>
+        <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})"><svg width="14" height="14" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:5px;vertical-align:-2px"><rect x="2" y="12" width="4" height="8" rx="1"/><rect x="9" y="7" width="4" height="13" rx="1"/><rect x="16" y="3" width="4" height="17" rx="1"/></svg>Chart</button>
         <button class="pos-btn pos-btn-sell"  onclick="openSellSheet('${sym}')">Sell</button>
         <button class="pos-btn pos-btn-more" onclick="openPositionDetail(${_dA})">✏️ Edit</button>
       </div>
-    </div></div></div>`;
+    </div></div>`;
   });
 
   if (sorted.length === 0) {
@@ -4247,10 +4455,8 @@ async function loadPortfolio(forceRefresh = false) {
         if (range > 0) targetProgress = Math.min(100, Math.max(0, (move / range) * 100));
       }
 
-      const stopLoss    = p.stop_loss    != null ? p.stop_loss    : '';
-      const targetPrice = p.target_price != null ? p.target_price : '';
       // Shared arg string for openPositionDetail calls on this card
-      const _dA = `'${sym}',${JSON.stringify(p.entry_price)},${JSON.stringify(p.current_price)},${JSON.stringify(stopLoss)},${JSON.stringify(targetPrice)}`;
+      const _dA = `'${sym}',${p.entry_price ?? null},${p.current_price ?? null},${p.stop_loss ?? null},${p.target_price ?? null}`;
       const _stopLine = p.stop_loss
         ? `<span class="pos-level-tap" onclick="openPositionDetail(${_dA},'stop')">stop $${fmtPrice(p.stop_loss)}</span>`
         : '';
@@ -4261,7 +4467,7 @@ async function loadPortfolio(forceRefresh = false) {
         ? `<div class="pos-sub" style="margin-top:2px;opacity:.75">${[_stopLine, _tgtLine].filter(Boolean).join('  ·  ')}</div>`
         : '';
       const _notesLine = p.notes
-        ? `<div class="pos-notes">${p.notes.slice(0, 120)}${p.notes.length > 120 ? '…' : ''}</div>`
+        ? `<div class="pos-notes">${esc(p.notes.slice(0, 120))}${p.notes.length > 120 ? '…' : ''}</div>`
         : '';
       html += `<div class="pos-card">
         <div class="pos-card-main-wrap">
@@ -4282,7 +4488,7 @@ async function loadPortfolio(forceRefresh = false) {
         </div>
         </div>
         <div class="pos-actions">
-          <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},${parseFloat(targetPrice)||0},${parseFloat(stopLoss)||0})"><svg width="14" height="14" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:5px;vertical-align:-2px"><rect x="2" y="12" width="4" height="8" rx="1"/><rect x="9" y="7" width="4" height="13" rx="1"/><rect x="16" y="3" width="4" height="17" rx="1"/></svg>Chart</button>
+          <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})"><svg width="14" height="14" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:5px;vertical-align:-2px"><rect x="2" y="12" width="4" height="8" rx="1"/><rect x="9" y="7" width="4" height="13" rx="1"/><rect x="16" y="3" width="4" height="17" rx="1"/></svg>Chart</button>
           <button class="pos-btn pos-btn-sell"  onclick="openSellSheet('${sym}')">Sell</button>
           <button class="pos-btn pos-btn-more" onclick="openPositionDetail(${_dA})">✏️ Edit</button>
         </div>
@@ -4290,6 +4496,21 @@ async function loadPortfolio(forceRefresh = false) {
     });
 
     html += `<button class="btn-add-position" onclick="openAddPosition()">➕ Add Position</button>`;
+
+    // Dividend income card (loads lazily)
+    html += `<div id="port-divs-card" style="background:var(--secondary);border-radius:14px;padding:14px;margin-top:14px">
+      <div style="font-size:12px;font-weight:700;opacity:.5;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💰 Dividend Income</div>
+      <div id="port-divs-body" style="font-size:13px;color:var(--hint)">Loading…</div>
+    </div>`;
+    html += `<div id="port-taxlots-card" style="background:var(--secondary);border-radius:14px;padding:14px;margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;opacity:.5;text-transform:uppercase;letter-spacing:.5px">🧾 Tax Lots</div>
+        <button onclick="_toggleTaxLotsDetail()" id="taxlots-toggle-btn"
+                style="font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;opacity:.7">Details ›</button>
+      </div>
+      <div id="port-taxlots-body" style="font-size:13px;color:var(--hint)">Loading…</div>
+      <div id="port-taxlots-detail" style="display:none;margin-top:10px"></div>
+    </div>`;
 
     html += `<div class="settings-card" style="margin-top:14px">
       <div class="action-row" onclick="openHistorySheet()">
@@ -4310,8 +4531,276 @@ async function loadPortfolio(forceRefresh = false) {
     body.innerHTML = html;
     _portCache.real.html = html;   // store for instant cache-hit re-render
     _renderPnlChart(pnlData);
+    _loadNames(positionsCache.map(p => p.ticker)); // fire-and-forget company names
+    _loadPortfolioDividends(); // fire-and-forget dividend income
+    _loadTaxLots();            // fire-and-forget tax lot summary
   } catch (e) {
     _tabError('port-spinner', loadPortfolio, e);
+  }
+}
+
+async function _loadPortfolioDividends() {
+  const el = document.getElementById('port-divs-body');
+  if (!el) return;
+  try {
+    const d = await api('/api/miniapp/dividends');
+    const divs = d.dividends || [];
+    if (!divs.length) {
+      el.textContent = 'No dividend-paying stocks in your current holdings.';
+      return;
+    }
+    let totalAnnual = 0;
+    const rows = divs.map((dv, i) => {
+      const annual = parseFloat(dv.annual_dividend || 0);
+      const yield_ = parseFloat(dv.dividend_yield || 0);
+      const next   = dv.next_ex_date || '';
+      totalAnnual += annual;
+      const yieldStr = yield_ > 0 ? `<span style="color:var(--green);font-weight:600">${yield_.toFixed(2)}%</span>` : '';
+      const nextStr  = next ? `<span style="opacity:.45;font-size:11px;margin-left:6px">Ex: ${next}</span>` : '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;
+                          padding:7px 0;${i < divs.length-1 ? 'border-bottom:1px solid var(--border)' : ''}">
+        <div>
+          <span style="font-weight:700">${dv.ticker}</span>${nextStr}
+        </div>
+        <div style="text-align:right">
+          ${yieldStr}
+          ${annual > 0 ? `<span style="opacity:.5;font-size:11px;margin-left:4px">$${annual.toFixed(2)}/yr</span>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+    el.innerHTML = rows +
+      (totalAnnual > 0
+        ? `<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;font-size:13px">
+             <span style="opacity:.6">Est. Annual Income</span>
+             <span style="font-weight:700;color:var(--green)">$${totalAnnual.toFixed(2)}</span>
+           </div>`
+        : '');
+  } catch(_) {
+    const el2 = document.getElementById('port-divs-body');
+    if (el2) el2.textContent = 'Dividend data unavailable.';
+  }
+}
+
+// ── Tax Lots card ─────────────────────────────────────────────────────────────
+async function _loadTaxLots() {
+  const el = document.getElementById('port-taxlots-body');
+  if (!el) return;
+  try {
+    const d = await api('/api/miniapp/tax_lots');
+    const r = d.realized || {};
+    if (!r.st_count && !r.lt_count) {
+      el.textContent = 'No closed trades to analyze.';
+      document.getElementById('taxlots-toggle-btn').style.display = 'none';
+      return;
+    }
+    const stColor  = r.st_gain >= 0 ? 'var(--green)' : 'var(--red)';
+    const ltColor  = r.lt_gain >= 0 ? 'var(--green)' : 'var(--red)';
+    const totColor = r.total_gain >= 0 ? 'var(--green)' : 'var(--red)';
+    const fmt = v => (v >= 0 ? '+' : '') + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+        <div style="background:var(--card);border-radius:10px;padding:8px;text-align:center">
+          <div style="font-size:10px;opacity:.5;margin-bottom:3px">Short-Term</div>
+          <div style="font-size:13px;font-weight:700;color:${stColor}">${fmt(r.st_gain)}</div>
+          <div style="font-size:10px;opacity:.45">~35% rate</div>
+        </div>
+        <div style="background:var(--card);border-radius:10px;padding:8px;text-align:center">
+          <div style="font-size:10px;opacity:.5;margin-bottom:3px">Long-Term</div>
+          <div style="font-size:13px;font-weight:700;color:${ltColor}">${fmt(r.lt_gain)}</div>
+          <div style="font-size:10px;opacity:.45">~15% rate</div>
+        </div>
+        <div style="background:var(--card);border-radius:10px;padding:8px;text-align:center">
+          <div style="font-size:10px;opacity:.5;margin-bottom:3px">Total</div>
+          <div style="font-size:13px;font-weight:700;color:${totColor}">${fmt(r.total_gain)}</div>
+          <div style="font-size:10px;opacity:.45">${r.st_count + r.lt_count} trades</div>
+        </div>
+      </div>
+      ${(r.st_tax_est || r.lt_tax_est) ? `<div style="font-size:11px;opacity:.45;text-align:center">
+        Est. tax: ST ~$${r.st_tax_est.toFixed(0)}  ·  LT ~$${r.lt_tax_est.toFixed(0)}
+        <span style="opacity:.6"> (guidance only)</span>
+      </div>` : ''}`;
+
+    // Build detail section (hidden by default)
+    const detail = document.getElementById('port-taxlots-detail');
+    if (!detail) return;
+    const tips = (d.open_fifo_lifo || []).filter(t => t.tax_tip);
+    const lots  = (d.lots || []).slice(0, 8);
+    let detHtml = '';
+    if (tips.length) {
+      detHtml += `<div style="font-size:12px;font-weight:700;opacity:.5;margin-bottom:6px">Open Positions — Tax Tips</div>`;
+      detHtml += tips.map(t => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="font-weight:700">${t.ticker}</span>
+          <span style="font-size:12px;color:var(--amber)">${t.tax_tip}</span>
+        </div>`).join('');
+    }
+    if (lots.length) {
+      detHtml += `<div style="font-size:12px;font-weight:700;opacity:.5;margin:10px 0 6px">Recent Closed Trades</div>`;
+      detHtml += lots.map(l => {
+        const c = l.gain_usd >= 0 ? 'var(--green)' : 'var(--red)';
+        const label = l.is_lt ? '<span style="font-size:10px;color:var(--purple);font-weight:700">LT</span>' : '<span style="font-size:10px;color:var(--hint)">ST</span>';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <div><span style="font-weight:700">${l.ticker}</span> ${label} <span style="font-size:11px;opacity:.45">${l.closed_date}</span></div>
+          <span style="font-weight:700;color:${c}">${fmt(l.gain_usd)}</span>
+        </div>`;
+      }).join('');
+    }
+    detHtml += `<div style="font-size:11px;opacity:.35;margin-top:8px;text-align:center">For guidance only. Consult a tax professional.</div>`;
+    detail.innerHTML = detHtml;
+  } catch(_) {
+    const el2 = document.getElementById('port-taxlots-body');
+    if (el2) el2.textContent = 'Tax data unavailable.';
+  }
+}
+
+function _toggleTaxLotsDetail() {
+  const det = document.getElementById('port-taxlots-detail');
+  const btn = document.getElementById('taxlots-toggle-btn');
+  if (!det) return;
+  const isOpen = det.style.display !== 'none';
+  det.style.display = isOpen ? 'none' : 'block';
+  if (btn) btn.textContent = isOpen ? 'Details ›' : 'Hide ‹';
+}
+
+// ── Stock Screener overlay ────────────────────────────────────────────────────
+let _scData = null;  // cached screener candidates
+let _scType = 'all'; // current type filter
+
+function openScreener() {
+  openOverlay('screener-overlay');
+  if (!_scData) _loadScreenerData();
+  else _scFilter();
+}
+
+async function _loadScreenerData() {
+  const listEl   = document.getElementById('sc-list');
+  const statusEl = document.getElementById('sc-status');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="text-align:center;padding:40px 0;opacity:.5;font-size:14px">Loading…</div>';
+  try {
+    const d = await api('/api/miniapp/screener_data');
+    if (!d.candidates || !d.candidates.length) {
+      listEl.innerHTML = '<div style="text-align:center;padding:40px 0;opacity:.5;font-size:14px">No screener data yet.<br><span style="font-size:12px">Cache refreshes overnight.</span></div>';
+      return;
+    }
+    _scData = d;
+    // Populate sector dropdown
+    const sel = document.getElementById('sc-sector-select');
+    if (sel) {
+      sel.innerHTML = '<option value="">All Sectors</option>';
+      (d.sectors || []).forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s; opt.textContent = s;
+        sel.appendChild(opt);
+      });
+    }
+    // Status line
+    if (statusEl && d.cached_at) {
+      const ts = new Date(d.cached_at).toLocaleDateString('en-US', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+      statusEl.textContent = `${d.total} candidates · updated ${ts}`;
+    }
+    _scFilter();
+  } catch(_) {
+    if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:40px 0;opacity:.5;font-size:14px">Screener unavailable</div>';
+  }
+}
+
+function _scSetType(type) {
+  _scType = type;
+  ['all','ST','LT','Crypto'].forEach(t => {
+    const el = document.getElementById('sct-' + t);
+    if (el) el.classList.toggle('active', t === type);
+  });
+  _scFilter();
+}
+
+function _scFilter() {
+  if (!_scData) return;
+  const listEl   = document.getElementById('sc-list');
+  const sector   = (document.getElementById('sc-sector-select')?.value || '').trim();
+  const sortBy   = document.getElementById('sc-sort-select')?.value || 'score';
+  if (!listEl) return;
+
+  let items = _scData.candidates.slice();
+  if (_scType !== 'all') items = items.filter(c => c.type === _scType);
+  if (sector)            items = items.filter(c => c.sector === sector);
+
+  // Sort
+  if (sortBy === 'rs')      items.sort((a, b) => (b.rs_vs_spy || -99) - (a.rs_vs_spy || -99));
+  else if (sortBy === '52w') items.sort((a, b) => (a.pct_below_52w_high || 99) - (b.pct_below_52w_high || 99));
+  else                       items.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  if (!items.length) {
+    listEl.innerHTML = '<div style="text-align:center;padding:40px 0;opacity:.5;font-size:14px">No results for this filter.</div>';
+    return;
+  }
+
+  listEl.innerHTML = items.slice(0, 30).map(c => {
+    const typeBadge = c.type === 'ST' ? '<span class="sc-badge sc-badge-st">ST</span>'
+                    : c.type === 'LT' ? '<span class="sc-badge sc-badge-lt">LT</span>'
+                    : '<span class="sc-badge sc-badge-cr">₿</span>';
+    const priceStr = c.price ? `$${Number(c.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}` : '';
+    const rsStr    = c.rs_vs_spy != null ? `<span style="font-size:11px;color:${c.rs_vs_spy >= 0 ? 'var(--green)' : 'var(--red)'}">RS ${c.rs_vs_spy >= 0 ? '+' : ''}${c.rs_vs_spy}%</span>` : '';
+    const scoreStr = c.score != null ? `<span style="font-size:11px;opacity:.5">Score ${c.score}</span>` : '';
+    return `<div class="sc-row">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-weight:700;color:var(--accent);cursor:pointer" onclick="openChart('${c.ticker}','${c.type === 'Crypto' ? 'crypto' : 'stock'}')">${c.ticker}</span>
+          ${typeBadge}
+        </div>
+        <div style="font-size:11px;opacity:.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name || ''} ${c.sector ? '· ' + c.sector : ''}</div>
+        <div style="display:flex;gap:8px;margin-top:2px">${rsStr} ${scoreStr}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        <div style="font-weight:600;font-size:14px">${priceStr}</div>
+        <button onclick="openAddPosition('${c.ticker}')"
+                style="padding:4px 10px;border-radius:8px;border:1.5px solid var(--accent);
+                       background:transparent;color:var(--accent);font-size:11px;font-weight:700;cursor:pointer">+ Add</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Earnings Surprises loader (Watch tab) ─────────────────────────────────────
+async function _loadEarningsSurprises(tickers) {
+  const el = document.getElementById('earnings-surprises-list');
+  if (!el || !tickers.length) return;
+  // Only include non-crypto tickers
+  const stocks = tickers.filter(t => !t.includes('/') && t.length <= 5);
+  if (!stocks.length) {
+    el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">No stock tickers to check.</div>';
+    return;
+  }
+  try {
+    const d = await api('/api/miniapp/earnings_surprise?tickers=' + stocks.map(t => encodeURIComponent(t)).join(','));
+    const items = d.surprises || [];
+    if (!items.length) {
+      el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">No recent earnings data found.</div>';
+      return;
+    }
+    el.innerHTML = items.map((e, i) => {
+      const beat    = e.beat === true;
+      const miss    = e.beat === false;
+      const badgeC  = beat ? 'var(--green)' : miss ? 'var(--red)' : 'var(--hint)';
+      const badgeTxt = beat ? '✅ Beat' : miss ? '❌ Miss' : '—';
+      const surpStr  = e.surprise_pct != null
+        ? `<span style="font-size:12px;color:${e.surprise_pct >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:700">
+             ${e.surprise_pct >= 0 ? '+' : ''}${e.surprise_pct}%</span>` : '';
+      const epsLine  = (e.rep_eps != null || e.est_eps != null)
+        ? `<span style="font-size:11px;opacity:.45">Act $${e.rep_eps ?? '—'}  Est $${e.est_eps ?? '—'}</span>` : '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;${i < items.length-1 ? 'border-bottom:1px solid var(--border)' : ''}">
+        <div>
+          <span style="font-weight:700;cursor:pointer;color:var(--accent)" onclick="openChart('${e.ticker}','stock')">${e.ticker}</span>
+          <span style="font-size:11px;opacity:.45;margin-left:6px">${e.quarter || ''}</span>
+          <div style="margin-top:3px">${epsLine}</div>
+        </div>
+        <div style="text-align:right">
+          <div><span style="font-size:12px;font-weight:700;color:${badgeC}">${badgeTxt}</span> ${surpStr}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(_) {
+    if (el) el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">Earnings surprise data unavailable.</div>';
   }
 }
 
@@ -4683,7 +5172,7 @@ function openPositionDetail(ticker, entry, live, stop, target, focusField) {
           const ago = n.published ? _timeAgo(n.published) : '';
           const src = n.source ? `<span style="opacity:.5"> · ${n.source}</span>` : '';
           return `<div style="margin-bottom:8px;line-height:1.4">
-            <a href="${n.url}" target="_blank" style="color:var(--fg);text-decoration:none;font-weight:500">${n.title}</a>
+            <a href="${esc(n.url)}" target="_blank" rel="noopener" style="color:var(--fg);text-decoration:none;font-weight:500">${esc(n.title)}</a>
             <div style="font-size:11px;color:var(--hint);margin-top:2px">${ago}${src}</div>
           </div>`;
         }).join('');
@@ -4724,21 +5213,72 @@ async function savePositionDetail() {
   }
 }
 
+async function removePosition() {
+  if (!_detailTicker) return;
+  if (!confirm(`Remove ${_detailTicker} from your portfolio? This won't be logged as a trade.`)) return;
+  const btn = document.getElementById('posdetail-remove-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Removing…';
+  try {
+    await api('/api/miniapp/remove_position', 'POST', { ticker: _detailTicker });
+    tg.HapticFeedback?.notificationOccurred('success');
+    closeOverlay('posdetail-overlay');
+    showToast(`${_detailTicker} removed`, 'default');
+    _invalidatePortfolioCache();
+    loadedTabs['portfolio'] = false;
+    if (curTab === 'portfolio') loadPortfolio(true);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '🗑 Remove position (no trade logged)';
+    tg.HapticFeedback?.notificationOccurred('error');
+  }
+}
+
 // ── Watchlist alert sheet ────────────────────────────────────────────────────
 let _alertTicker = null;
+let _alertCurrentPrice = null;
+
+function _alertSetPct(pct) {
+  if (!_alertCurrentPrice) return;
+  const target = Math.round(_alertCurrentPrice * (1 + pct) * 100) / 100;
+  const inp = document.getElementById('watchalert-price');
+  if (!inp) return;
+  inp.value = target.toFixed(2);
+  _updateAlertHint();
+}
+
+function _updateAlertHint() {
+  const hintEl = document.getElementById('watchalert-hint');
+  if (!hintEl) return;
+  const val = parseFloat(document.getElementById('watchalert-price')?.value);
+  const cur = _alertCurrentPrice;
+  if (!val || !cur) { hintEl.textContent = ''; return; }
+  const pct = ((val - cur) / cur * 100);
+  const absPct = Math.abs(pct).toFixed(1);
+  if (val < cur) {
+    hintEl.style.color = 'var(--accent)';
+    hintEl.textContent = `📉 ${absPct}% below current — catches a pullback`;
+  } else if (val > cur) {
+    hintEl.style.color = 'var(--green, #30d158)';
+    hintEl.textContent = `📈 ${absPct}% above current — triggers on a breakout`;
+  } else {
+    hintEl.style.color = 'var(--hint)';
+    hintEl.textContent = 'Same as current price — alert fires immediately';
+  }
+}
 
 async function openWatchAlert(ticker) {
   _alertTicker = ticker;
   document.getElementById('watchalert-title').textContent = `🔔 Alert for ${ticker}`;
-  // Pre-fill with current live price as a hint
+  // Pre-fill with current live price
   const priceEl = document.getElementById('wprice-' + ticker);
   const liveText = priceEl ? priceEl.textContent.replace(/[^0-9.]/g, '') : '';
-  document.getElementById('watchalert-price').value = liveText || '';
+  _alertCurrentPrice = liveText ? parseFloat(liveText) : null;
+  document.getElementById('watchalert-price').value = '';   // leave blank so user sets their target
   document.getElementById('watchalert-summary').textContent =
-    liveText ? `Current price: $${parseFloat(liveText).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '';
-  // Reset direction to auto
-  const radios = document.querySelectorAll('input[name="watchalert-dir"]');
-  radios.forEach(r => { r.checked = (r.value === 'auto'); });
+    _alertCurrentPrice ? `Now: $${_alertCurrentPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}  ·  enter your target price below` : '';
+  document.getElementById('watchalert-hint').textContent = '';
+  // direction is always auto — no reset needed
   const recurCb = document.getElementById('watchalert-recurring');
   if (recurCb) recurCb.checked = false;
   const btn = document.getElementById('watchalert-save-btn');
@@ -4751,7 +5291,7 @@ async function saveWatchAlert() {
   if (!_alertTicker) return;
   const priceV = document.getElementById('watchalert-price').value;
   if (!priceV) return;
-  const dir = document.querySelector('input[name="watchalert-dir"]:checked')?.value || 'auto';
+  const dir = 'auto';
   const btn = document.getElementById('watchalert-save-btn');
   btn.disabled = true; btn.textContent = '⏳ Setting…';
   try {
@@ -4864,14 +5404,17 @@ async function loadPaperPortfolio(forceRefresh = false) {
           </div>
           <div class="pos-actions">
             <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},0,0)">📊 Chart</button>
-            <button class="pos-btn" style="color:var(--red)" onclick="cancelPaperPosition('${sym}')">🗑 Cancel</button>
+            <button class="pos-btn" style="color:var(--green)" onclick="openPaperBuySheet('${sym}')">📈 More</button>
+            <button class="pos-btn" style="color:var(--red)" onclick="sellPaperPosition('${sym}')">🔴 Sell</button>
+            <button class="pos-btn" style="color:var(--hint)" onclick="cancelPaperPosition('${sym}')">🗑</button>
           </div>
         </div>`;
       });
     }
 
-    // Add Cash button
-    html += `<div style="text-align:center;padding:10px 0 4px">
+    // Buy + Add Cash buttons
+    html += `<div style="display:flex;gap:10px;justify-content:center;padding:10px 0 4px">
+      <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--green);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="openPaperBuySheet()">📄 Buy</button>
       <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--btn);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="openAddCashSheet()">💵 Add Cash</button>
     </div>`;
 
@@ -4967,8 +5510,14 @@ async function loadAlerts() {
     } else {
       html += '<div class="settings-card" style="padding:0 16px">';
       unique.forEach(a => {
-        const dirCls  = a.direction === 'above' ? 'above' : a.direction === 'below' ? 'below' : 'auto';
-        const dirTxt  = a.direction === 'above' ? '↑ Above' : a.direction === 'below' ? '↓ Below' : 'Auto';
+        // Derive direction from target vs price — never show "Auto"
+        const _refPrice = a.price_at_set || null;
+        const _effDir   = a.direction === 'above' ? 'above'
+                        : a.direction === 'below' ? 'below'
+                        : _refPrice ? (a.target >= _refPrice ? 'above' : 'below')
+                        : 'above'; // fallback
+        const dirCls  = _effDir === 'above' ? 'above' : 'below';
+        const dirTxt  = _effDir === 'above' ? '↑ Above' : '↓ Below';
         // Age label from set_at timestamp
         let ageLbl  = '';
         let ageHtml = '';
@@ -4990,14 +5539,14 @@ async function loadAlerts() {
         const autoBadge = a.auto
           ? `<span class="auto-badge" title="System-generated stop alert">auto</span>`
           : '';
-        html += `<div class="alert-row">
-          <div class="alert-ticker">${a.ticker}${autoBadge}</div>
+        html += `<div class="alert-row" onclick="editAlert('${a.ticker}',${a.target})" style="cursor:pointer">
+          <div class="alert-ticker">${a.ticker}${autoBadge}<div data-name-ticker="${a.ticker}" style="font-size:10px;color:var(--hint);font-weight:400;margin-top:1px;line-height:1.2"></div></div>
           <div class="alert-info">
             <div class="alert-price">$${fmtPrice(a.target)}</div>
             ${awayHtml}
           </div>
           <span class="dir-badge ${dirCls}">${dirTxt}</span>
-          <button class="alert-del" onclick="deleteAlert('${a.ticker}',${a.target})" title="Delete">✕</button>
+          <button class="alert-del" onclick="event.stopPropagation();deleteAlert('${a.ticker}',${a.target})" title="Delete">✕</button>
         </div>`;
       });
       html += '</div>';
@@ -5005,6 +5554,7 @@ async function loadAlerts() {
 
     if (body) body.innerHTML = html;
     updateBellBadge(alerts.length);
+    _loadNames(unique.map(a => a.ticker)); // fire-and-forget company names
   } catch (e) {
     if (spinner) spinner.innerHTML =
       '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load alerts</div></div>';
@@ -5012,6 +5562,25 @@ async function loadAlerts() {
 }
 
 let _alertQuoteTimer = null;
+
+// ── Company name cache + injection ───────────────────────────────────────────
+const _namesCache = {};
+async function _loadNames(tickers) {
+  if (!tickers || !tickers.length) return;
+  const missing = tickers.filter(t => !(t in _namesCache));
+  if (missing.length) {
+    try {
+      const data = await api(`/api/miniapp/names?tickers=${encodeURIComponent(missing.join(','))}`);
+      Object.assign(_namesCache, data);
+    } catch (_) {}
+  }
+  // Inject into all data-name-ticker placeholders in the DOM
+  document.querySelectorAll('[data-name-ticker]').forEach(el => {
+    const t = el.getAttribute('data-name-ticker');
+    const n = _namesCache[t];
+    if (n) el.textContent = n;
+  });
+}
 
 let _alertCurrentPrice = null; // tracks resolved price for % buttons
 
@@ -5048,7 +5617,7 @@ function onAlertTickerInput(val) {
         const input = document.getElementById('alert-ticker-input');
         if (input) input.value = data.ticker;
       }
-      hint.textContent = `Current price: $${fmtPrice(data.price)}`;
+      hint.textContent = (data.name ? `${data.name}  ·  ` : '') + `$${fmtPrice(data.price)}`;
       hint.style.color = 'var(--hint)';
       // Auto-fill price input if still empty
       _alertCurrentPrice = data.price;
@@ -5068,7 +5637,20 @@ function onAlertTickerInput(val) {
   }, 350);
 }
 
+let _editingAlert = null; // {ticker, target} when editing an existing alert
+
+function _resetAlertOverlay() {
+  _editingAlert = null;
+  const ti = document.getElementById('alert-ticker-input');
+  if (ti) ti.readOnly = false;
+  const title = document.querySelector('#alert-overlay .sheet-title');
+  if (title) title.textContent = '🔔 New Alert';
+}
+
 function openAddAlert(prefillTicker = '') {
+  _editingAlert = null;
+  const title = document.querySelector('#alert-overlay .sheet-title');
+  if (title) title.textContent = '🔔 New Alert';
   const ti   = document.getElementById('alert-ticker-input');
   const pi   = document.getElementById('alert-price-input');
   const hint = document.getElementById('alert-price-hint');
@@ -5084,11 +5666,32 @@ function openAddAlert(prefillTicker = '') {
   tg.HapticFeedback?.impactOccurred('light');
   if (prefillTicker && ti) {
     ti.value = prefillTicker.toUpperCase();
-    // Trigger quote lookup immediately (same as user typing the ticker)
     setTimeout(() => onAlertTickerInput(ti.value), 100);
   } else {
     setTimeout(() => { if (ti) ti.focus(); }, 250);
   }
+}
+
+function editAlert(ticker, target) {
+  _editingAlert = { ticker, target };
+  const title = document.querySelector('#alert-overlay .sheet-title');
+  if (title) title.textContent = '✏️ Edit Alert';
+  const ti   = document.getElementById('alert-ticker-input');
+  const pi   = document.getElementById('alert-price-input');
+  const hint = document.getElementById('alert-price-hint');
+  if (hint) hint.textContent = '';
+  _alertCurrentPrice = null;
+  _setPctBtnsEnabled(false);
+  setAlertDir('auto');
+  const btn = document.getElementById('alert-submit-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Update Alert'; }
+  // Pre-fill ticker (readonly) and target price
+  if (ti) { ti.value = ticker.toUpperCase(); ti.readOnly = true; }
+  if (pi) { pi.value = target.toFixed ? target.toFixed(2) : target; pi.classList.remove('input-error'); }
+  openOverlay('alert-overlay');
+  tg.HapticFeedback?.impactOccurred('light');
+  // Fetch live price for % buttons
+  setTimeout(() => onAlertTickerInput(ticker.toUpperCase()), 100);
 }
 
 async function submitAlert() {
@@ -5112,18 +5715,29 @@ async function submitAlert() {
   }
   const btn = document.getElementById('alert-submit-btn');
   btn.disabled    = true;
-  btn.textContent = '⏳ Setting…';
+  btn.textContent = '⏳ Saving…';
   try {
+    // If editing, delete the old alert first
+    if (_editingAlert) {
+      await api('/api/miniapp/remove_alert', 'POST', {
+        ticker: _editingAlert.ticker,
+        target: _editingAlert.target,
+      });
+    }
     await api('/api/miniapp/add_alert', 'POST', { ticker, target, direction: alertDirection });
     tg.HapticFeedback?.notificationOccurred('success');
+    // Reset ticker readonly state
+    const ti = document.getElementById('alert-ticker-input');
+    if (ti) ti.readOnly = false;
+    _editingAlert = null;
     closeOverlay('alert-overlay');
     loadAlerts();
-    showToast(`🔔 Alert set for ${ticker}`);
+    showToast(_editingAlert ? `🔔 Alert updated for ${ticker}` : `🔔 Alert set for ${ticker}`);
   } catch (e) {
     btn.disabled    = false;
-    btn.textContent = 'Set Alert';
+    btn.textContent = _editingAlert ? 'Update Alert' : 'Set Alert';
     tg.HapticFeedback?.notificationOccurred('error');
-    showToast(e.message || 'Could not set alert');
+    showToast(e.message || 'Could not save alert');
   }
 }
 
@@ -5380,10 +5994,74 @@ async function loadPerformance(isRetry = false) {
   if (spinner) { spinner.style.display = 'block'; spinner.innerHTML = ''; }
   if (body)    { body.style.display = 'none'; }
   try {
-    const data  = await api('/api/miniapp/performance');
+    // Fetch bot track record AND real trade performance in parallel
+    const [data, myPerf] = await Promise.all([
+      api('/api/miniapp/performance'),
+      api('/api/miniapp/my_performance').catch(() => ({ trades: [], summary: {} })),
+    ]);
     const stats = data.stats || {};
     spinner.style.display = 'none';
     body.style.display    = 'block';
+
+    // ── My Real Trades section ────────────────────────────────────────────
+    const myTrades  = myPerf.trades  || [];
+    const mySummary = myPerf.summary || {};
+    const sign = n => parseFloat(n) >= 0 ? '+' : '';
+
+    let myTradesHtml = '';
+    if (myTrades.length > 0) {
+      const totalUsd = mySummary.total_pnl_usd || 0;
+      const totalColor = totalUsd >= 0 ? 'var(--green)' : 'var(--red)';
+      const maxDD = mySummary.max_drawdown || 0;
+
+      const tradeRows = myTrades.slice(0, 10).map((t, i) => {
+        const ret   = parseFloat(t.return_pct || 0);
+        const color = ret >= 0 ? 'var(--green)' : 'var(--red)';
+        const usd   = t.gain_usd ? `<span style="opacity:.5;font-size:11px"> ${sign(t.gain_usd)}$${Math.abs(t.gain_usd).toFixed(0)}</span>` : '';
+        const exitStr = t.entry_price && t.exit_price
+          ? `<span style="opacity:.45;font-size:11px"> $${t.entry_price} → $${t.exit_price}</span>` : '';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;
+                            padding:9px 0;${i < Math.min(myTrades.length,10)-1 ? 'border-bottom:1px solid var(--border)' : ''}">
+          <div>
+            <span style="font-weight:700;font-size:14px">${t.ticker}</span>${exitStr}
+            <div style="font-size:11px;opacity:.45;margin-top:1px">${t.closed_date || ''}</div>
+          </div>
+          <div style="text-align:right">
+            <span style="font-weight:700;color:${color}">${sign(ret)}${ret.toFixed(1)}%</span>${usd}
+          </div>
+        </div>`;
+      }).join('');
+
+      const bestRow  = mySummary.best  ? `<div class="stat-row"><span>🏆 Best trade</span><span style="color:var(--green)"><b>${mySummary.best.ticker}</b> ${sign(mySummary.best.return_pct)}${mySummary.best.return_pct.toFixed(1)}%</span></div>` : '';
+      const worstRow = mySummary.worst ? `<div class="stat-row"><span>💔 Worst trade</span><span style="color:var(--red)"><b>${mySummary.worst.ticker}</b> ${sign(mySummary.worst.return_pct)}${mySummary.worst.return_pct.toFixed(1)}%</span></div>` : '';
+      const ddRow    = maxDD > 0       ? `<div class="stat-row"><span>Max drawdown</span><span style="color:var(--red)">−$${maxDD.toFixed(0)}</span></div>` : '';
+
+      myTradesHtml = `
+        <div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;opacity:.5;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">💼 My Portfolio Results</div>
+          <!-- Summary bar -->
+          <div style="background:var(--secondary);border-radius:12px;padding:14px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div>
+                <div style="font-size:12px;opacity:.5;margin-bottom:2px">Total Realized P&L</div>
+                <div style="font-size:28px;font-weight:800;color:${totalColor};letter-spacing:-1px">${sign(totalUsd)}$${Math.abs(totalUsd).toFixed(0)}</div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:22px;font-weight:700;color:${mySummary.win_rate>=50?'var(--green)':'var(--red)'}">${mySummary.win_rate||0}%</div>
+                <div style="font-size:11px;opacity:.5">${mySummary.wins||0}W / ${mySummary.losses||0}L</div>
+              </div>
+            </div>
+            <div class="stat-row"><span>Avg return / trade</span><span style="color:${mySummary.avg_return>=0?'var(--green)':'var(--red)'}"><b>${sign(mySummary.avg_return||0)}${(mySummary.avg_return||0).toFixed(1)}%</b></span></div>
+            ${bestRow}${worstRow}${ddRow}
+          </div>
+          <!-- Trade list -->
+          <div style="background:var(--secondary);border-radius:12px;padding:4px 14px">
+            ${tradeRows}
+            ${myTrades.length > 10 ? `<div style="text-align:center;font-size:12px;opacity:.45;padding:8px 0">+ ${myTrades.length-10} more trades</div>` : ''}
+          </div>
+        </div>
+        <div style="font-size:12px;font-weight:700;opacity:.5;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">🤖 Bot Track Record</div>`;
+    }
 
     // Fetch trade history for calendar (parallel, non-blocking)
     let histTrades = [];
@@ -5450,7 +6128,7 @@ async function loadPerformance(isRetry = false) {
     const bestRow  = best    ? `<div class="stat-row"><span>🏆 Best pick</span><span style="color:var(--green)"><b>${best[0]}</b> ${sign(best[1])}${best[1].toFixed(1)}%</span></div>` : '';
     const worstRow = worst   ? `<div class="stat-row"><span>💔 Worst pick</span><span style="color:var(--red)"><b>${worst[0]}</b> ${sign(worst[1])}${worst[1].toFixed(1)}%</span></div>` : '';
 
-    body.innerHTML = calHtml + simBanner + `
+    body.innerHTML = myTradesHtml + calHtml + simBanner + `
       <div style="padding:6px 0 16px">
         <div style="text-align:center;padding:20px 0 10px">
           <div style="font-size:13px;opacity:.6;margin-bottom:4px">Win Rate</div>
@@ -5556,6 +6234,7 @@ async function loadWatchlist() {
     spinner.style.display = 'none';
     body.style.display    = 'block';
     await renderWatchlist(tickers, alertTickers, assetTypes, triggeredMap);
+    _loadNames(tickers); // fire-and-forget — fills company name subtitles
     // Fetch sparklines for each ticker async (fire-and-forget)
     for (const _st of tickers) {
       api(`/api/miniapp/sparkline/${_st}`).then(sd => {
@@ -5591,9 +6270,15 @@ async function renderWatchlist(tickers, alertTickers = new Set(), assetTypesMap 
   const d = { asset_types: assetTypesMap }; // expose to template literal scope
   const body = document.getElementById('watch-body');
   let html = `
-    <div style="padding:12px 0 4px">
-      <div style="font-size:18px;font-weight:700;margin-bottom:2px">Watchlist</div>
-      <div style="font-size:12px;opacity:.5">Track prices for any ticker</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 4px">
+      <div>
+        <div style="font-size:18px;font-weight:700;margin-bottom:2px">Watchlist</div>
+        <div style="font-size:12px;opacity:.5">Track prices for any ticker</div>
+      </div>
+      <button onclick="openScreener()" style="padding:7px 14px;border-radius:12px;border:1.5px solid var(--border);
+              background:var(--card);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer">
+        🔍 Screener
+      </button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <input id="watch-add-input" type="text" placeholder="Add ticker…"
@@ -5629,6 +6314,7 @@ async function renderWatchlist(tickers, alertTickers = new Set(), assetTypesMap 
           <div>
             <div onclick="openChart('${t}','${_watchAssetType(t, d.asset_types)}')"
                  style="font-size:16px;font-weight:700;cursor:pointer;color:var(--accent)">${t}</div>
+            <div data-name-ticker="${t}" style="font-size:11px;color:var(--hint);margin-top:1px;line-height:1.2"></div>
             ${_wFiredLine}
           </div>
           <div id="wprice-${t}" style="font-size:13px;opacity:.6">…</div>
@@ -5655,16 +6341,47 @@ async function renderWatchlist(tickers, alertTickers = new Set(), assetTypesMap 
     html += `</div>`;
   }
   html += `</div>`;
-  html += `<div style="margin-top:20px">
-  <div style="font-size:13px;font-weight:700;text-transform:uppercase;opacity:.4;letter-spacing:.06em;margin-bottom:10px">Upcoming Earnings</div>
-  <div id="earnings-list" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:12px">
-    <div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">${tickers.length ? 'Loading…' : 'Add tickers to see earnings'}</div>
+  html += `
+  <div style="margin-top:20px">
+    <div style="font-size:13px;font-weight:700;text-transform:uppercase;opacity:.4;letter-spacing:.06em;margin-bottom:10px">Upcoming Earnings</div>
+    <div id="earnings-list" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:12px">
+      <div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">${tickers.length ? 'Loading…' : 'Add tickers to see earnings'}</div>
+    </div>
   </div>
-</div>`;
+  <div style="margin-top:20px">
+    <div style="font-size:13px;font-weight:700;text-transform:uppercase;opacity:.4;letter-spacing:.06em;margin-bottom:10px">📅 Economic Calendar</div>
+    <div id="econ-cal-list" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:12px">
+      <div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">Loading…</div>
+    </div>
+  </div>
+  <div style="margin-top:20px">
+    <div style="font-size:13px;font-weight:700;text-transform:uppercase;opacity:.4;letter-spacing:.06em;margin-bottom:10px">📊 Analyst Ratings</div>
+    <div id="analyst-ratings-list" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:12px">
+      <div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">${tickers.length ? 'Loading…' : 'Add tickers to see ratings'}</div>
+    </div>
+  </div>
+  <div style="margin-top:20px">
+    <div style="font-size:13px;font-weight:700;text-transform:uppercase;opacity:.4;letter-spacing:.06em;margin-bottom:10px">🔥 Volume Spikes</div>
+    <div id="volume-spikes-list" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:12px">
+      <div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">${tickers.length ? 'Loading…' : 'Add tickers to see volume data'}</div>
+    </div>
+  </div>
+  <div style="margin-top:20px;margin-bottom:20px">
+    <div style="font-size:13px;font-weight:700;text-transform:uppercase;opacity:.4;letter-spacing:.06em;margin-bottom:10px">📣 Earnings Surprises</div>
+    <div id="earnings-surprises-list" style="background:var(--card);border-radius:14px;border:1px solid var(--border);padding:12px">
+      <div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">${tickers.length ? 'Loading…' : 'Add tickers to see earnings surprises'}</div>
+    </div>
+  </div>`;
   body.innerHTML = html;
 
   if (tickers.length) {
     _loadEarnings(tickers);
+    _loadEconCalendar();
+    _loadAnalystRatings(tickers);
+    _loadVolumeSpikes(tickers);
+    _loadEarningsSurprises(tickers);
+  } else {
+    _loadEconCalendar(); // economic calendar doesn't need tickers
   }
 
   // Fetch live prices for each ticker concurrently
@@ -5706,29 +6423,168 @@ async function _loadEarnings(tickers) {
         ? '<span style="color:var(--accent)">Tomorrow</span>'
         : `<span style="opacity:.6">in ${e.days_until}d</span>`;
       const timingStr = e.timing
-        ? `<div style="font-size:11px;opacity:.4">${e.timing}</div>` : '';
+        ? `<div style="font-size:11px;opacity:.45;margin-top:2px">${e.timing}</div>` : '';
+
+      // Analyst rating badge
+      const ratingMap = {
+        strongbuy:  { label: 'Strong Buy',  color: '#22c55e' },
+        buy:        { label: 'Buy',          color: '#22c55e' },
+        hold:       { label: 'Hold',         color: '#f59e0b' },
+        sell:       { label: 'Sell',         color: '#ef4444' },
+        strongsell: { label: 'Strong Sell',  color: '#ef4444' },
+      };
+      const rKey = (e.analyst_rating || '').toLowerCase().replace(/\s/g, '');
+      const rInfo = ratingMap[rKey];
+      const ratingBadge = rInfo
+        ? `<span style="display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:20px;background:${rInfo.color}22;color:${rInfo.color};margin-left:6px;vertical-align:middle">${rInfo.label}${e.analyst_count ? ' · ' + e.analyst_count : ''}</span>`
+        : '';
+
+      // Price target
+      const targetStr = e.analyst_target
+        ? `<div style="font-size:11px;opacity:.5;margin-top:2px">Target <span style="font-weight:600;opacity:1">$${e.analyst_target}</span></div>` : '';
+
+      // EPS
       let epsStr = '';
       if (e.eps_actual != null) {
         const color = e.eps_actual >= (e.eps_estimate || 0) ? 'var(--green)' : 'var(--red)';
         epsStr = `<div style="font-size:11px;margin-top:3px;opacity:.8">EPS <span style="color:${color};font-weight:700">${e.eps_actual >= 0 ? '+' : ''}${e.eps_actual}</span> <span style="opacity:.5">vs est ${e.eps_estimate ?? '—'}</span></div>`;
       } else if (e.eps_estimate != null) {
-        epsStr = `<div style="font-size:11px;margin-top:3px;opacity:.5">EPS est <span style="font-weight:600;opacity:1">${e.eps_estimate}</span></div>`;
+        epsStr = `<div style="font-size:11px;margin-top:3px;opacity:.5">EPS est <span style="font-weight:600;opacity:1">$${e.eps_estimate}</span></div>`;
       }
       const revStr = e.rev_estimate
         ? `<div style="font-size:11px;opacity:.4">Rev est $${(e.rev_estimate/1e9).toFixed(1)}B</div>` : '';
-      return `<div style="padding:9px 0${i < items.length-1 ? ';border-bottom:1px solid var(--border)' : ''}">
+
+      return `<div style="padding:10px 0${i < items.length-1 ? ';border-bottom:1px solid var(--border)' : ''}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <span style="font-size:15px;font-weight:700">${e.ticker}</span>
-            <span style="font-size:12px;opacity:.5;margin-left:6px">${e.date}</span>
-            ${epsStr}${revStr}
+          <div style="min-width:0">
+            <div>
+              <span style="font-size:15px;font-weight:700">${e.ticker}</span>${ratingBadge}
+            </div>
+            <div data-name-ticker="${e.ticker}" style="font-size:11px;color:var(--hint);margin-top:1px;line-height:1.2">${e.name || ''}</div>
+            ${epsStr}${revStr}${targetStr}
           </div>
-          <div style="text-align:right;font-size:12px;flex-shrink:0;margin-left:8px">${dayStr}${timingStr}</div>
+          <div style="text-align:right;font-size:12px;flex-shrink:0;margin-left:10px">
+            <div style="font-weight:600">${e.date}</div>
+            ${dayStr}${timingStr}
+          </div>
         </div>
       </div>`;
     }).join('');
+    // Inject any cached names (fills instantly if already loaded this session)
+    _loadNames(items.map(e => e.ticker));
   } catch(e) {
     el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center">Earnings unavailable</div>';
+  }
+}
+
+async function _loadEconCalendar() {
+  const el = document.getElementById('econ-cal-list');
+  if (!el) return;
+  try {
+    const d = await api('/api/miniapp/economic_calendar');
+    const events = d.events || [];
+    if (!events.length) {
+      el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">No upcoming events</div>';
+      return;
+    }
+    const impactColor = i => i === 'high' ? 'var(--red)' : '#f59e0b';
+    const impactLabel = i => i === 'high' ? '🔴 High' : '🟡 Medium';
+    el.innerHTML = events.map((e, i) => {
+      const dayStr = e.days_until === 0 ? '<b style="color:var(--accent)">Today</b>'
+                   : e.days_until === 1 ? '<span style="color:var(--accent)">Tomorrow</span>'
+                   : e.days_until != null ? `<span style="opacity:.5">in ${e.days_until}d</span>` : '';
+      const estStr = e.estimate != null ? `<span style="opacity:.45;margin-left:6px">Est: ${e.estimate}</span>` : '';
+      const prevStr = e.previous != null ? `<span style="opacity:.35;margin-left:6px">Prev: ${e.previous}</span>` : '';
+      const actualStr = e.actual != null
+        ? `<span style="color:var(--green);font-weight:600;margin-left:6px">Actual: ${e.actual}</span>` : '';
+      return `<div style="padding:9px 0;${i < events.length-1 ? 'border-bottom:1px solid var(--border)' : ''}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13px;line-height:1.3">${e.event}</div>
+            <div style="font-size:11px;margin-top:2px">
+              <span style="color:${impactColor(e.impact)};font-size:10px">${impactLabel(e.impact)}</span>
+              ${estStr}${prevStr}${actualStr}
+            </div>
+          </div>
+          <div style="text-align:right;font-size:12px;flex-shrink:0;margin-left:10px">
+            <div style="opacity:.6">${e.date || ''}</div>
+            <div style="margin-top:2px">${dayStr}</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(_) {
+    el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center">Calendar unavailable</div>';
+  }
+}
+
+async function _loadAnalystRatings(tickers) {
+  const el = document.getElementById('analyst-ratings-list');
+  if (!el || !tickers.length) return;
+  try {
+    const d = await api('/api/miniapp/analyst_ratings?tickers=' + tickers.map(t => encodeURIComponent(t)).join(','));
+    const ratings = d.ratings || [];
+    if (!ratings.length) {
+      el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">No analyst data available</div>';
+      return;
+    }
+    // Group by ticker, show latest period
+    const byTicker = {};
+    ratings.forEach(r => { if (!byTicker[r.ticker]) byTicker[r.ticker] = r; });
+    const items = Object.values(byTicker);
+    el.innerHTML = items.map((r, i) => {
+      const total = (r.strongBuy||0) + (r.buy||0) + (r.hold||0) + (r.sell||0) + (r.strongSell||0);
+      const bullish = (r.strongBuy||0) + (r.buy||0);
+      const pctBull = total > 0 ? Math.round(bullish / total * 100) : 0;
+      const consensus = pctBull >= 70 ? 'Buy' : pctBull >= 50 ? 'Hold' : 'Sell';
+      const consColor = consensus === 'Buy' ? 'var(--green)' : consensus === 'Hold' ? '#f59e0b' : 'var(--red)';
+      return `<div style="display:flex;align-items:center;justify-content:space-between;
+                          padding:9px 0;${i < items.length-1 ? 'border-bottom:1px solid var(--border)' : ''}">
+        <div>
+          <span style="font-weight:700;font-size:14px">${r.ticker}</span>
+          <span style="font-size:11px;opacity:.5;margin-left:6px">${r.period || ''}</span>
+          <div style="font-size:11px;opacity:.45;margin-top:2px">
+            ${r.strongBuy||0} Strong Buy · ${r.buy||0} Buy · ${r.hold||0} Hold · ${r.sell||0} Sell
+          </div>
+        </div>
+        <div style="text-align:right">
+          <span style="font-weight:700;color:${consColor}">${consensus}</span>
+          <div style="font-size:11px;opacity:.5">${total} analysts</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(_) {
+    el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center">Ratings unavailable</div>';
+  }
+}
+
+async function _loadVolumeSpikes(tickers) {
+  const el = document.getElementById('volume-spikes-list');
+  if (!el || !tickers.length) return;
+  try {
+    const d = await api('/api/miniapp/volume_spikes?tickers=' + tickers.map(t => encodeURIComponent(t)).join(','));
+    const spikes = d.spikes || [];
+    if (!spikes.length) {
+      el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center;padding:8px 0">No unusual volume today</div>';
+      return;
+    }
+    const fmtVol = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v;
+    el.innerHTML = spikes.map((s, i) => {
+      const ratio = s.ratio;
+      const color = ratio >= 3 ? 'var(--red)' : ratio >= 2 ? '#f59e0b' : 'var(--green)';
+      return `<div style="display:flex;align-items:center;justify-content:space-between;
+                          padding:9px 0;${i < spikes.length-1 ? 'border-bottom:1px solid var(--border)' : ''}">
+        <div>
+          <span style="font-weight:700;font-size:14px">${s.ticker}</span>
+          <div style="font-size:11px;opacity:.45;margin-top:2px">
+            Vol: ${fmtVol(s.today_volume)} vs avg ${fmtVol(s.avg_volume)}
+          </div>
+        </div>
+        <span style="font-weight:700;color:${color}">${ratio}× avg</span>
+      </div>`;
+    }).join('');
+  } catch(_) {
+    el.innerHTML = '<div style="opacity:.4;font-size:13px;text-align:center">Volume data unavailable</div>';
   }
 }
 
@@ -5756,6 +6612,7 @@ async function addToWatchlist() {
 }
 
 async function removeFromWatchlist(ticker) {
+  if (!confirm(`Remove ${ticker} from your watchlist?`)) return;
   tg.HapticFeedback?.impactOccurred('light');
   try {
     await api('/api/miniapp/watchlist/remove', 'POST', { ticker });
@@ -6554,6 +7411,139 @@ async function confirmAddCash() {
     btn.textContent = 'Add Cash';
     tg.HapticFeedback?.notificationOccurred('error');
     tg.showPopup?.({ message: 'Could not add cash — try again.' });
+  }
+}
+
+// ── Paper: buy / sell ─────────────────────────────────────────────────────────
+
+let _pbuyCurrentPrice = null;
+let _pbuyPriceFetchTimer = null;
+
+function openPaperBuySheet(prefillTicker = '') {
+  tg.HapticFeedback?.impactOccurred('light');
+  _pbuyCurrentPrice = null;
+  clearTimeout(_pbuyPriceFetchTimer);
+  const tickerInp = document.getElementById('pbuy-ticker');
+  const sharesInp = document.getElementById('pbuy-shares');
+  const priceInp  = document.getElementById('pbuy-price');
+  const hint      = document.getElementById('pbuy-price-hint');
+  const costHint  = document.getElementById('pbuy-cost-hint');
+  const btn       = document.getElementById('pbuy-btn');
+  if (tickerInp) tickerInp.value = prefillTicker.toUpperCase();
+  if (sharesInp) sharesInp.value = '';
+  if (priceInp)  { priceInp.value = ''; priceInp.placeholder = 'Live price'; }
+  if (hint)      hint.textContent = '';
+  if (costHint)  costHint.textContent = '';
+  if (btn)       { btn.disabled = false; btn.textContent = 'Buy'; }
+  openOverlay('paper-buy-overlay');
+  setTimeout(() => {
+    if (prefillTicker) {
+      _onPaperBuyTickerInput(prefillTicker);
+      if (sharesInp) sharesInp.focus();
+    } else if (tickerInp) {
+      tickerInp.focus();
+    }
+  }, 300);
+}
+
+function _onPaperBuyTickerInput(val) {
+  clearTimeout(_pbuyPriceFetchTimer);
+  _pbuyCurrentPrice = null;
+  const hint = document.getElementById('pbuy-price-hint');
+  const priceInp = document.getElementById('pbuy-price');
+  if (priceInp) priceInp.placeholder = 'Live price';
+  if (!val || val.length < 1) { if (hint) hint.textContent = ''; _updatePaperBuyCost(); return; }
+  if (hint) hint.innerHTML = '<span style="opacity:.4">Looking up…</span>';
+  _pbuyPriceFetchTimer = setTimeout(() => _fetchPaperBuyPrice(val), 600);
+}
+
+async function _fetchPaperBuyPrice(ticker) {
+  const hint     = document.getElementById('pbuy-price-hint');
+  const priceInp = document.getElementById('pbuy-price');
+  try {
+    const d = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(ticker)}`);
+    if (!d.price) { if (hint) hint.textContent = ''; return; }
+    _pbuyCurrentPrice = d.price;
+    const p    = d.price;
+    const name = d.name ? `${d.name}  ·  ` : '';
+    if (hint) hint.innerHTML = `<span style="opacity:.6">${name}</span><span style="font-weight:600;color:var(--fg)">$${fmtPrice(p)}</span>`;
+    if (priceInp) priceInp.placeholder = `$${fmtPrice(p)}`;
+    _updatePaperBuyCost();
+  } catch (_) {
+    if (hint) hint.textContent = '';
+  }
+}
+
+function _updatePaperBuyCost() {
+  const sharesInp = document.getElementById('pbuy-shares');
+  const priceInp  = document.getElementById('pbuy-price');
+  const costHint  = document.getElementById('pbuy-cost-hint');
+  if (!costHint) return;
+  const shares = parseFloat(sharesInp?.value);
+  const price  = parseFloat(priceInp?.value) || _pbuyCurrentPrice;
+  if (shares > 0 && price > 0) {
+    const cost = (shares * price).toFixed(2);
+    costHint.textContent = `Est. cost: $${parseFloat(cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  } else {
+    costHint.textContent = '';
+  }
+}
+
+async function confirmPaperBuy() {
+  const tickerInp = document.getElementById('pbuy-ticker');
+  const sharesInp = document.getElementById('pbuy-shares');
+  const priceInp  = document.getElementById('pbuy-price');
+  const btn       = document.getElementById('pbuy-btn');
+  const ticker    = (tickerInp?.value || '').trim().toUpperCase();
+  const shares    = parseFloat(sharesInp?.value);
+  const priceVal  = parseFloat(priceInp?.value) || null;
+  if (!ticker)       { tickerInp?.focus(); return; }
+  if (!(shares > 0)) { sharesInp?.focus(); return; }
+  btn.disabled = true; btn.textContent = 'Buying…';
+  try {
+    const body = { ticker, shares };
+    if (priceVal) body.price = priceVal;
+    const res = await api('/api/miniapp/paper_buy', 'POST', body);
+    if (!res.ok) {
+      btn.disabled = false; btn.textContent = 'Buy';
+      tg.HapticFeedback?.notificationOccurred('error');
+      // Strip HTML tags from message for popup
+      const plainMsg = (res.message || 'Could not buy — check ticker and cash.').replace(/<[^>]+>/g, '');
+      tg.showPopup?.({ message: plainMsg });
+      return;
+    }
+    tg.HapticFeedback?.notificationOccurred('success');
+    closeOverlay('paper-buy-overlay');
+    _invalidatePortfolioCache();
+    loadPortfolio(true);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Buy';
+    tg.HapticFeedback?.notificationOccurred('error');
+    tg.showPopup?.({ message: 'Could not buy — try again.' });
+  }
+}
+
+async function sellPaperPosition(ticker) {
+  tg.HapticFeedback?.impactOccurred('medium');
+  const confirmed = await new Promise(resolve => {
+    tg.showPopup({
+      title:   `Sell ${ticker}?`,
+      message: 'Sell entire paper position at live price?',
+      buttons: [
+        { id: 'yes', type: 'destructive', text: 'Sell All' },
+        { id: 'no',  type: 'cancel' },
+      ],
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
+  try {
+    await api('/api/miniapp/paper_sell', 'POST', { ticker });
+    tg.HapticFeedback?.notificationOccurred('success');
+    _invalidatePortfolioCache();
+    loadPortfolio(true);
+  } catch (e) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    tg.showPopup?.({ message: 'Could not sell — try again.' });
   }
 }
 
