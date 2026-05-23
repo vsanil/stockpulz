@@ -1482,7 +1482,9 @@ def get_swap_pick(candidate: dict, category: str = "short_term", config: dict | 
     )
 
     risk_profile = config.get("risk_profile", "moderate")
-    min_stars = 4 if risk_profile in ("conservative", "moderate") else 3
+    # Conservative: require ★★★★ (3 signals). Moderate/aggressive: allow ★★★ (2 signals).
+    # The post-Claude conviction gate in agent.py does final filtering per user preference.
+    min_stars = 4 if risk_profile == "conservative" else 3
 
     prompt = f"""You are a financial analyst. Evaluate this single stock candidate and decide if it is worth recommending as a {category.replace('_', '-')} pick.
 

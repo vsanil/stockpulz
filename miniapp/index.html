@@ -5714,7 +5714,9 @@ async function addToWatchlist() {
     const d = await api('/api/miniapp/watchlist/add', 'POST', { ticker });
     if (d.ok) {
       input.value = '';
-      showToast('✅ ' + ticker + ' added to watchlist');
+      const savedAs = d.ticker || ticker;
+      const resolvedNote = savedAs !== ticker ? ` (saved as ${savedAs})` : '';
+      showToast('✅ ' + savedAs + ' added to watchlist' + resolvedNote);
       // Reload watchlist pane
       loadedTabs['watchlist'] = false;
       loadWatchlist();
