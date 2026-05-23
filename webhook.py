@@ -428,7 +428,7 @@ function pendingSection(list){
 
 function broadcastBar(){
   return'<div class="broadcast-bar">'
-    +'<input id="bcmsg" placeholder="Broadcast to all users…" onkeydown="if(event.key===\'Enter\')broadcast()">'
+    +'<input id="bcmsg" placeholder="Broadcast to all users…" onkeydown="if(event.key===\\'Enter\\')broadcast()">'
     +'<button class="btn-sm" onclick="broadcast()">Send all</button>'
     +'</div>';
 }
@@ -674,7 +674,7 @@ async function load(){
       +'<div class="card"><div class="card-title">Cron health</div>'+cron(d.cron,d.last_morning_run)+'</div>'
     +'</div>'
     +'<div class="grid2">'
-      +'<div class="card"><div class="card-title">Today\'s picks</div>'+picksPanel(d.picks)+'</div>'
+      +'<div class="card"><div class="card-title">Today&rsquo;s picks</div>'+picksPanel(d.picks)+'</div>'
       +'<div class="card"><div class="card-title">Feedback</div>'+feedback(d.feedback)+'</div>'
     +'</div>';
   document.getElementById('ts').textContent='Updated '+new Date().toLocaleTimeString();
