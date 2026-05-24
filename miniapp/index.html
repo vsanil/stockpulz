@@ -6110,7 +6110,6 @@ async function loadPerformance(isRetry = false) {
 
     const wrColor  = wr >= 60 ? 'var(--green)' : wr >= 50 ? 'var(--text)' : 'var(--red)';
     const retColor = avgRet >= 0 ? 'var(--green)' : 'var(--red)';
-    const sign     = n => parseFloat(n) >= 0 ? '+' : '';
 
     const simBanner = hasSimulated
       ? `<div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);
@@ -6121,10 +6120,10 @@ async function loadPerformance(isRetry = false) {
          </div>`
       : '';
 
-    const spyRow   = spy30   != null ? `<div class="stat-row"><span>S&P 500 (30d)</span><span>${sign(spy30)}${spy30}%</span></div>` : '';
-    const alphaRow = alpha   != null ? `<div class="stat-row"><span>Alpha vs S&P</span><span style="color:${parseFloat(alpha)>=0?'var(--green)':'var(--red)'}"><b>${sign(alpha)}${alpha}%</b></span></div>` : '';
-    const bestRow  = best    ? `<div class="stat-row"><span>🏆 Best pick</span><span style="color:var(--green)"><b>${best[0]}</b> ${sign(best[1])}${best[1].toFixed(1)}%</span></div>` : '';
-    const worstRow = worst   ? `<div class="stat-row"><span>💔 Worst pick</span><span style="color:var(--red)"><b>${worst[0]}</b> ${sign(worst[1])}${worst[1].toFixed(1)}%</span></div>` : '';
+    const spyRow      = spy30  != null ? `<div class="stat-row"><span>S&P 500 (30d)</span><span>${sign(spy30)}${spy30}%</span></div>` : '';
+    const alphaRow    = alpha  != null ? `<div class="stat-row"><span>Alpha vs S&P</span><span style="color:${parseFloat(alpha)>=0?'var(--green)':'var(--red)'}"><b>${sign(alpha)}${alpha}%</b></span></div>` : '';
+    const botBestRow  = best   ? `<div class="stat-row"><span>🏆 Best pick</span><span style="color:var(--green)"><b>${best[0]}</b> ${sign(best[1])}${best[1].toFixed(1)}%</span></div>` : '';
+    const botWorstRow = worst  ? `<div class="stat-row"><span>💔 Worst pick</span><span style="color:var(--red)"><b>${worst[0]}</b> ${sign(worst[1])}${worst[1].toFixed(1)}%</span></div>` : '';
 
     body.innerHTML = myTradesHtml + calHtml + simBanner + `
       <div style="padding:6px 0 16px">
@@ -6138,8 +6137,8 @@ async function loadPerformance(isRetry = false) {
           <div class="stat-row"><span>Avg return / trade</span><span style="color:${retColor}"><b>${sign(avgRet)}${avgRet}%</b></span></div>
           ${spyRow}
           ${alphaRow}
-          ${bestRow}
-          ${worstRow}
+          ${botBestRow}
+          ${botWorstRow}
         </div>
 
         <div style="background:var(--secondary);border-radius:12px;padding:14px;margin:0 0 14px">
