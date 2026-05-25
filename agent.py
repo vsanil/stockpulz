@@ -20,6 +20,16 @@ from datetime import datetime, date, timedelta
 
 import pytz
 
+# ── Mini App deep-link button helper ─────────────────────────────────────────
+# Tab names mirror the Mini App nav: picks | portfolio | performance | watchlist | settings
+def _miniapp_btn(label: str, tab: str, fallback_cmd: str) -> dict:
+    """Return a web_app button that opens the Mini App at the given tab.
+    Falls back to callback_data if APP_URL env var is not configured."""
+    _app_url = os.environ.get("APP_URL", "").rstrip("/")
+    if _app_url:
+        return {"text": label, "web_app": {"url": f"{_app_url}/miniapp?tab={tab}"}}
+    return {"text": label, "callback_data": f"cmd|{fallback_cmd}"}
+
 from config_manager import (
     get_config, update_config, save_picks, load_picks, save_weekly_pick,
     get_dynamic_pick_counts, get_user_config,
@@ -2365,11 +2375,11 @@ def run_weekly_recap(config: dict, now_et: datetime):
                         send_inline_keyboard(
                             message,
                             [[
-                                {"text": "📈 My Stats",       "callback_data": "cmd|STATS"},
-                                {"text": "📊 My Positions",   "callback_data": "cmd|POSITIONS"},
+                                _miniapp_btn("📈 My Stats",     "performance", "STATS"),
+                                _miniapp_btn("📊 My Positions", "portfolio",   "POSITIONS"),
                             ], [
-                                {"text": "🏆 Community",      "callback_data": "cmd|COMMUNITY"},
-                                {"text": "📋 Full History",   "callback_data": "cmd|HISTORY"},
+                                _miniapp_btn("🏆 Community",    "performance", "COMMUNITY"),
+                                _miniapp_btn("📋 Full History", "portfolio",   "HISTORY"),
                             ]],
                             chat_id=uid,
                         )
@@ -3204,8 +3214,8 @@ def run_price_alerts():
                         f"<i>Position auto-closed and logged to your history.</i>"
                     )
                     kb = [[
-                        {"text": "📊 View Portfolio",  "callback_data": "cmd|POSITIONS"},
-                        {"text": "📈 My Stats",         "callback_data": "cmd|STATS"},
+                        _miniapp_btn("📊 View Portfolio", "portfolio",   "POSITIONS"),
+                        _miniapp_btn("📈 My Stats",       "performance", "STATS"),
                     ]]
                 elif trade["outcome"] == "stop":
                     msg = (
@@ -3214,15 +3224,15 @@ def run_price_alerts():
                         f"<i>Position auto-closed. Risk managed ✓</i>"
                     )
                     kb = [[
-                        {"text": "📊 View Portfolio",  "callback_data": "cmd|POSITIONS"},
-                        {"text": "📈 Today's Picks",   "callback_data": "cmd|TODAY"},
+                        _miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS"),
+                        _miniapp_btn("📈 Today's Picks",  "picks",     "TODAY"),
                     ]]
                 else:  # expired
                     msg = (
                         f"⏱ <b>{ticker} position expired</b> (28 days)\n"
                         f"Closed @ <code>{price}</code>  ·  <b>{pct}</b>  ({usd})"
                     )
-                    kb = [[{"text": "📊 View Portfolio", "callback_data": "cmd|POSITIONS"}]]
+                    kb = [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]]
 
                 send_inline_keyboard(msg, kb, chat_id=uid)
 

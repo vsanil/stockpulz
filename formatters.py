@@ -1138,7 +1138,7 @@ def format_week_ahead(earnings_this_week: dict, regime: dict | None = None) -> s
             lines.append(f"  📢 <b>{ticker}</b> — {date_str}")
         lines.append("<i>Earnings can cause sharp moves — size positions accordingly.</i>")
     else:
-        lines.append("<i>No major earnings this week for today's picks.</i>")
+        lines.append("<i>None of today's picks have earnings this week.</i>")
 
     if regime:
         r = regime.get("regime", "neutral")

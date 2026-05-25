@@ -1094,6 +1094,21 @@ def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
     else:
         print(f"[ai_analyzer] Ticker validation: all {total_after} picks passed.")
 
+    # ── Stop-loss fallback: any short-term pick missing stop_loss gets 5% below entry ──
+    _ST_SECTIONS = [
+        ("stocks",      "short_term"),
+        ("crypto",      "short_term"),
+        ("etfs",        "short_term"),
+        ("commodities", "short_term"),
+    ]
+    for asset_key, timeframe in _ST_SECTIONS:
+        for p in result.get(asset_key, {}).get(timeframe, []):
+            if not p.get("stop_loss") and p.get("entry_price"):
+                fallback = round(float(p["entry_price"]) * 0.95, 2)
+                p["stop_loss"] = fallback
+                sym = p.get("ticker") or p.get("symbol") or "?"
+                print(f"[ai_analyzer] stop_loss missing for {sym} — applied 5% fallback: {fallback}")
+
     return result
 
 

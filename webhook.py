@@ -2564,6 +2564,53 @@ def miniapp_earnings_surprise():
     return jsonify({"ok": True, "surprises": surprises})
 
 
+@app.route("/api/miniapp/run_command", methods=["POST"])
+def miniapp_run_command():
+    """Execute a bot command from the Mini App and return the reply inline.
+
+    Runs the command in a thread and waits up to 22 seconds for it to
+    finish so the result can be shown directly in the Mini App UI.
+    If the command takes longer (e.g. /today on a cold start) it falls
+    back to Telegram delivery and returns async=True.
+    """
+    import threading
+
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    body    = request.get_json(silent=True) or {}
+    command = (body.get("command") or "").strip()
+    if not command:
+        return jsonify({"error": "missing command"}), 400
+
+    if not command.startswith("/"):
+        command = "/" + command
+
+    result_box = {"reply": None, "error": None}
+
+    def _run():
+        try:
+            result_box["reply"] = handle_incoming_command(command, chat_id=chat_id) or ""
+        except Exception as exc:
+            result_box["error"] = str(exc)
+            print(f"[run_command] error running {command}: {exc}")
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=22)
+
+    if t.is_alive():
+        # Still running — result will arrive via Telegram
+        return jsonify({"ok": True, "async": True,
+                        "message": "This one takes a moment — result sent to your Telegram chat."})
+
+    if result_box["error"]:
+        return jsonify({"error": result_box["error"]}), 500
+
+    return jsonify({"ok": True, "reply": result_box["reply"]})
+
+
 @app.route("/api/miniapp/share_link")
 def miniapp_share_link():
     """Return a shareable invite link for the current user."""
