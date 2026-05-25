@@ -622,7 +622,7 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
 
     _add_section(st_picks,  lambda s: s["ticker"], "stock",  "── 📈 Short Term ──",  "📈")
     _add_section(lt_picks,  lambda s: s["ticker"], "stock",  "── 🏛 Long Term ──",   "🏛")
-    _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──",      "🪙")
+    _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──",      "✅")
     _add_section(etf_picks, lambda e: e["ticker"], "stock",  "── 📦 ETFs ──",        "📦")
     _add_section(comm_picks, lambda c: c["ticker"], "stock", "── 🛢 Commodities ──", "🛢")
 
@@ -742,8 +742,9 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
             spy_display = 0.0 if spy == 0 else spy   # collapse -0.0 → 0.0
             spy_sign    = "+" if spy_display >= 0 else ""
             bench = f" vs S&P {spy_sign}{spy_display}% ({vs_sign}{vs}%)"
+        pick_word = "pick" if stats['count'] == 1 else "picks"
         return [
-            f"<b>{label}</b> — {stats['count']} picks, {win_pct}% wins",
+            f"<b>{label}</b> — {stats['count']} {pick_word}, {win_pct}% wins",
             f"Best: <b>{best_sym}</b> {best_sign}{best_r}%  Worst: <b>{worst_sym}</b> {worst_sign}{worst_r}%",
             f"Avg: {sign}{avg}%{bench} {emoji}",
         ]
@@ -765,9 +766,9 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
     lines += [""]
 
     if show_crypto and crypto_stats:
-        lines += _section("🪙 Crypto", crypto_stats)
+        lines += _section("💎 Crypto", crypto_stats)
     elif show_crypto:
-        lines += ["🪙 Crypto: no data this week"]
+        lines += ["💎 Crypto: no data this week"]
 
     # ── Individual pick outcomes ───────────────────────────────────────────────
     pick_outcomes = recap.get("pick_outcomes", [])
