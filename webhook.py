@@ -1954,6 +1954,67 @@ def miniapp_live_prices():
     return jsonify({"ok": True, "prices": result})
 
 
+@app.route("/api/miniapp/markets")
+def miniapp_markets():
+    """Markets overview: indices + crypto + commodities prices with daily %,
+    plus Fear & Greed, rates, and sector rotation from the cached regime."""
+    chat_id = _miniapp_auth()
+    if not chat_id: return jsonify({"error": "unauthorised"}), 403
+
+    import yfinance as yf
+    from market_regime import get_market_regime
+
+    try:
+        regime = get_market_regime()
+    except Exception:
+        regime = {}
+
+    _INSTRUMENTS = [
+        ("SPY",     "indices"),
+        ("QQQ",     "indices"),
+        ("IWM",     "indices"),
+        ("DIA",     "indices"),
+        ("BTC-USD", "crypto"),
+        ("ETH-USD", "crypto"),
+        ("GLD",     "commodities"),
+        ("USO",     "commodities"),
+        ("TLT",     "commodities"),
+    ]
+    tickers = [t for t, _ in _INSTRUMENTS]
+    prices  = {}
+    try:
+        raw    = yf.download(tickers, period="5d", interval="1d",
+                             auto_adjust=True, progress=False)
+        closes = raw["Close"] if "Close" in raw.columns else raw
+        for sym in tickers:
+            try:
+                col  = closes[sym] if hasattr(closes, "columns") and sym in closes.columns else closes
+                vals = col.dropna()
+                if len(vals) >= 2:
+                    p    = float(vals.iloc[-1])
+                    prev = float(vals.iloc[-2])
+                    prices[sym] = {"price": round(p, 2),
+                                   "chg_pct": round((p - prev) / prev * 100, 2)}
+                elif len(vals) == 1:
+                    prices[sym] = {"price": round(float(vals.iloc[-1]), 2), "chg_pct": None}
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    def _row(sym, label=None):
+        d = prices.get(sym, {})
+        return {"ticker": label or sym, "price": d.get("price"), "chg_pct": d.get("chg_pct")}
+
+    return jsonify({
+        "ok":         True,
+        "regime":     regime,
+        "indices":    [_row("SPY"), _row("QQQ"), _row("IWM"), _row("DIA")],
+        "crypto":     [_row("BTC-USD", "BTC"), _row("ETH-USD", "ETH")],
+        "commodities":[_row("GLD"), _row("USO"), _row("TLT")],
+    })
+
+
 @app.route("/api/miniapp/regime")
 def miniapp_regime():
     chat_id = _miniapp_auth()

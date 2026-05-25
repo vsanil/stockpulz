@@ -428,6 +428,51 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
                 f"These tickers will always be evaluated in tomorrow's screener.\n"
                 f"<i>To clear: /watch none</i>")
 
+    # ── /watchlist — show current watchlist with live prices ────────────────
+    if text == "WATCHLIST":
+        from config_manager import get_user_config, load_user_trade_log
+        ucfg   = get_user_config(chat_id)
+        log    = load_user_trade_log(chat_id)
+        wl_cfg = ucfg.get("watchlist") or []
+        wl_log = log.get("watchlist") or []
+        # Trade log is canonical; merge config-only extras after
+        tickers = list(dict.fromkeys(wl_log + [t for t in wl_cfg if t not in wl_log]))
+        if not tickers:
+            return (
+                "👁 <b>Your watchlist is empty.</b>\n\n"
+                "Add tickers:\n"
+                "  <code>/track NVDA</code> — add one\n"
+                "  <code>/watch NVDA TSLA AAPL</code> — set multiple\n\n"
+                "<i>Watchlist tickers show live prices in the dashboard.</i>"
+            )
+        lines = [f"👁 <b>Watchlist</b> ({len(tickers)} ticker{'s' if len(tickers) != 1 else ''})\n"]
+        try:
+            import yfinance as _yf
+            _raw = _yf.download(tickers, period="2d", interval="1d",
+                                auto_adjust=True, progress=False)
+            _closes = _raw["Close"] if "Close" in _raw.columns else _raw
+            for sym in tickers:
+                try:
+                    col  = _closes[sym] if hasattr(_closes, "columns") and sym in _closes.columns else _closes
+                    vals = col.dropna()
+                    if len(vals) >= 2:
+                        price = float(vals.iloc[-1])
+                        prev  = float(vals.iloc[-2])
+                        chg   = (price - prev) / prev * 100
+                        arrow = "🟢" if chg >= 0 else "🔴"
+                        lines.append(f"{arrow} <b>{sym}</b>  <code>${price:,.2f}</code>  <i>{chg:+.1f}%</i>")
+                    elif len(vals) == 1:
+                        lines.append(f"⬜ <b>{sym}</b>  <code>${float(vals.iloc[-1]):,.2f}</code>")
+                    else:
+                        lines.append(f"⬜ <b>{sym}</b>  —")
+                except Exception:
+                    lines.append(f"⬜ <b>{sym}</b>  —")
+        except Exception:
+            for sym in tickers:
+                lines.append(f"• <b>{sym}</b>")
+        lines.append("\n<i>/track TICKER — add  ·  /untrack TICKER — remove</i>")
+        return "\n".join(lines)
+
     # ── /track and /untrack — add/remove a single ticker from watchlist ─────
     if text == "TRACK":
         return (
