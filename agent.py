@@ -186,6 +186,56 @@ def is_market_holiday(d: date) -> bool:
     return d in holidays
 
 
+def get_holiday_name(d: date) -> str:
+    """Return the holiday name for d if it is a US market holiday, else empty string."""
+    y = d.year
+
+    def _observed(fixed: date) -> date:
+        if fixed.weekday() == 5: return fixed - timedelta(days=1)
+        if fixed.weekday() == 6: return fixed + timedelta(days=1)
+        return fixed
+
+    def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+        first = date(year, month, 1)
+        offset = (weekday - first.weekday()) % 7
+        return first + timedelta(days=offset + 7 * (n - 1))
+
+    def _last_weekday(year: int, month: int, weekday: int) -> date:
+        import calendar
+        last = date(year, month, calendar.monthrange(year, month)[1])
+        return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+    def _easter(year: int) -> date:
+        a = year % 19; b, c = divmod(year, 100); d2, e = divmod(b, 4)
+        f = (b + 8) // 25; g = (b - f + 1) // 3
+        h = (19 * a + b - d2 - g + 15) % 30; i, k = divmod(c, 4)
+        l = (32 + 2 * e + 2 * i - h - k) % 7; m = (a + 11 * h + 22 * l) // 451
+        mo, day = divmod(h + l - 7 * m + 114, 31)
+        return date(year, mo, day + 1)
+
+    named = {
+        _observed(date(y, 1, 1)):         "New Year's Day",
+        _nth_weekday(y, 1, 0, 3):         "MLK Day",
+        _nth_weekday(y, 2, 0, 3):         "Presidents' Day",
+        _easter(y) - timedelta(days=2):   "Good Friday",
+        _last_weekday(y, 5, 0):           "Memorial Day",
+        _observed(date(y, 6, 19)):        "Juneteenth",
+        _observed(date(y, 7, 4)):         "Independence Day",
+        _nth_weekday(y, 9, 0, 1):         "Labor Day",
+        _nth_weekday(y, 11, 3, 4):        "Thanksgiving",
+        _observed(date(y, 12, 25)):       "Christmas",
+    }
+    return named.get(d, "")
+
+
+def next_trading_day(d: date) -> date:
+    """Return the next US market trading day after d (skip weekends + holidays)."""
+    nxt = d + timedelta(days=1)
+    while nxt.weekday() >= 5 or is_market_holiday(nxt):
+        nxt += timedelta(days=1)
+    return nxt
+
+
 # ── Mock data for fast testing ────────────────────────────────────────────────
 
 MOCK_STOCK_CANDIDATES = {
@@ -393,6 +443,21 @@ def run_morning(config: dict, now_et: datetime):
     _log_cron_run("morning")
     is_weekend = now_et.weekday() >= 5
     is_holiday = (not is_weekend) and is_market_holiday(now_et.date())
+
+    # Human-readable reason + next open day used in the morning picks message
+    if is_weekend:
+        _day_name = now_et.strftime("%A")   # "Saturday" or "Sunday"
+        market_closed_reason = _day_name
+    elif is_holiday:
+        market_closed_reason = get_holiday_name(now_et.date()) or "US holiday"
+    else:
+        market_closed_reason = ""
+
+    if is_weekend or is_holiday:
+        _next_open = next_trading_day(now_et.date())
+        next_open_label = _next_open.strftime("%A, %b %-d")   # e.g. "Tuesday, May 27"
+    else:
+        next_open_label = ""
 
     if is_weekend and not config.get("crypto_enabled", True):
         print("[agent] Weekend + crypto disabled. Nothing to run.")
@@ -911,40 +976,53 @@ def _check_picks_stop_loss(current_prices: dict, picks: dict, uid: str) -> None:
     if cfg.get("paused"):
         return
 
-    for cat in ("short_term", "long_term", "etf", "commodities"):
-        for pick in picks.get(cat, []):
-            ticker = (pick.get("ticker") or "").upper()
-            if not ticker:
-                continue
+    # picks is nested: picks["stocks"]["short_term"], picks["etfs"]["short_term"], etc.
+    _st  = picks.get("stocks",      {}) if isinstance(picks.get("stocks"),      dict) else {}
+    _et  = picks.get("etfs",        {}) if isinstance(picks.get("etfs"),        dict) else {}
+    _co  = picks.get("commodities", {}) if isinstance(picks.get("commodities"), dict) else {}
+    _all_equity = (
+        (_st.get("short_term", []) or []) +
+        (_st.get("long_term",  []) or []) +
+        (_et.get("short_term", []) or []) +
+        (_et.get("long_term",  []) or []) +
+        (_co.get("short_term", []) or []) +
+        (_co.get("long_term",  []) or [])
+    )
+    for pick in _all_equity:
+        if not isinstance(pick, dict):
+            continue
+        ticker = (pick.get("ticker") or "").upper()
+        if not ticker:
+            continue
 
-            # Determine stop price
-            sizing     = pick.get("sizing") or {}
-            stop_price = sizing.get("stop_price") or pick.get("stop_loss")
-            if not stop_price or stop_price <= 0:
-                continue
+        # Determine stop price
+        sizing     = pick.get("sizing") or {}
+        stop_price = sizing.get("stop_price") or pick.get("stop_loss")
+        if not stop_price or stop_price <= 0:
+            continue
 
-            current = current_prices.get(ticker)
-            if not current or current <= 0:
-                continue
+        current = current_prices.get(ticker)
+        if not current or current <= 0:
+            continue
 
-            alert_key = f"{uid}:{ticker}:{today_str}"
-            if _is_alerted(alert_key):
-                continue
+        alert_key = f"{uid}:{ticker}:{today_str}"
+        if _is_alerted(alert_key):
+            continue
 
-            if current < stop_price:
-                _mark_alerted(alert_key)
-                drop_pct = round((stop_price - current) / stop_price * 100, 1)
-                try:
-                    send_message(
-                        f"🔴 <b>Stop Alert — {ticker}</b>\n"
-                        f"Current price <code>${current:,.2f}</code> has breached today's "
-                        f"suggested stop of <code>${stop_price:,.2f}</code> (↓{drop_pct}%).\n"
-                        f"<i>Review your position — stop levels exist to protect capital.</i>",
-                        chat_id=uid,
-                    )
-                    print(f"[agent] Stop alert fired: {ticker} @ ${current:.2f} < stop ${stop_price:.2f} for {uid}")
-                except Exception as exc:
-                    print(f"[agent] Stop alert send failed for {uid}/{ticker} (non-critical): {exc}")
+        if current < stop_price:
+            _mark_alerted(alert_key)
+            drop_pct = round((stop_price - current) / stop_price * 100, 1)
+            try:
+                send_message(
+                    f"🔴 <b>Stop Alert — {ticker}</b>\n"
+                    f"Current price <code>${current:,.2f}</code> has breached today's "
+                    f"suggested stop of <code>${stop_price:,.2f}</code> (↓{drop_pct}%).\n"
+                    f"<i>Review your position — stop levels exist to protect capital.</i>",
+                    chat_id=uid,
+                )
+                print(f"[agent] Stop alert fired: {ticker} @ ${current:.2f} < stop ${stop_price:.2f} for {uid}")
+            except Exception as exc:
+                print(f"[agent] Stop alert send failed for {uid}/{ticker} (non-critical): {exc}")
 
 
 # ── Persistent stop-alert deduplication ──────────────────────────────────────
@@ -3193,11 +3271,18 @@ def run_price_alerts():
             tickers = list({t["ticker"] for t in open_trades})
             raw = yf.download(" ".join(tickers), period="1d", interval="1m",
                               progress=False, auto_adjust=True)
-            if hasattr(raw["Close"], "iloc"):
-                current_prices = {t: float(raw["Close"][t].dropna().iloc[-1])
-                                  for t in tickers if t in raw["Close"].columns}
+            current_prices = {}
+            if hasattr(raw["Close"], "columns"):
+                for t in tickers:
+                    if t in raw["Close"].columns:
+                        s = raw["Close"][t].dropna()
+                        if not s.empty:
+                            current_prices[t] = float(s.iloc[-1])
             else:
-                current_prices = {tickers[0]: float(raw["Close"].dropna().iloc[-1])} if tickers else {}
+                if tickers:
+                    s = raw["Close"].dropna()
+                    if not s.empty:
+                        current_prices[tickers[0]] = float(s.iloc[-1])
 
             newly_closed = check_and_close_trades(current_prices, uid)
             for trade in newly_closed:
@@ -3247,9 +3332,9 @@ def run_price_alerts():
                 gap_pct = (float(target) - float(current)) / float(current) * 100
                 if 0 < gap_pct <= 5:
                     alert_key = f"target_approach_{uid}_{ticker}_{date.today().isoformat()}"
-                    from cache_layer import get_cache, set_cache
-                    if not get_cache(alert_key):
-                        set_cache(alert_key, "1", ttl=86400)
+                    from cache_layer import cache_get, cache_set
+                    if not cache_get(alert_key):
+                        cache_set(alert_key, "1", ttl_seconds=86400)
                         send_inline_keyboard(
                             f"⚡ <b>{ticker}</b> is <b>{gap_pct:.1f}%</b> from your target <code>${float(target):.2f}</code>\n"
                             f"Current: <code>${float(current):.2f}</code>  ·  Consider taking partial profit.",
@@ -3264,7 +3349,7 @@ def run_price_alerts():
 
     # ── Watchlist big-move alerts (>3% intraday) ─────────────────────────────
     try:
-        from cache_layer import get_cache, set_cache
+        from cache_layer import cache_get, cache_set
         from datetime import date as _date
         for uid in _all_recipients():
             try:
@@ -3290,9 +3375,9 @@ def run_price_alerts():
                         if abs(pct_chg) < 3:
                             continue
                         key = f"watch_move_{uid}_{t}_{_date.today().isoformat()}"
-                        if get_cache(key):
+                        if cache_get(key):
                             continue
-                        set_cache(key, "1", ttl=86400)
+                        cache_set(key, "1", ttl_seconds=86400)
                         emoji = "🚀" if pct_chg > 0 else "🔻"
                         sign  = "+" if pct_chg > 0 else ""
                         send_inline_keyboard(
@@ -3754,7 +3839,10 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
                                            earnings_this_week=morning_earnings,
                                            held_tickers=held_tickers,
                                            watchlist_prices=user_wl_prices or None,
-                                           user_alerts_map=user_alerts_map or None)
+                                           user_alerts_map=user_alerts_map or None,
+                                           market_closed=bool(is_weekend or is_holiday),
+                                           closed_reason=market_closed_reason,
+                                           next_open_label=next_open_label)
 
             # Append /bought tip for users who have never logged a trade
             user_log = user_positions_cache.get(uid, None)
