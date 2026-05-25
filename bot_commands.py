@@ -129,10 +129,6 @@ def handle_incoming_command(message_text: str, chat_id: str | None = None) -> st
 
     reply = _parse_and_execute(text.upper(), original=text, chat_id=chat_id)
     if reply:
-        # Append /help hint to every command response except /help itself and daily picks
-        cmd = text.lstrip("/").split()[0].lower() if text else ""
-        if cmd not in ("help", "start", "today", "prices", "share", "feedback") and not reply.startswith("📋") and "/help" not in reply:
-            reply = reply + "\n\n<i>📋 /help  ·  📲 /share  ·  💬 /feedback</i>"
         send_message(reply, chat_id=chat_id)
     return reply
 
@@ -881,8 +877,7 @@ def handle_callback_query(callback_query: dict) -> None:
                 + f"💰 Entry: <code>${_p(entry)}</code>\n"
                 + f"📦 Shares: {shares} (based on your budget)\n"
                 + f"🛡 Stop-loss: <code>${_p(stop_price)}</code> ({sp}% below entry)\n"
-                + f"🎯 Target: <code>${_p(target_price)}</code> ({tp}% above entry)\n\n"
-                + "Tap Confirm to log this position."
+                + f"🎯 Target: <code>${_p(target_price)}</code> ({tp}% above entry)"
             )
             confirm_cb     = f"confirm_buy|{ticker}|{entry_raw}|{shares}|{asset_type}|{stop_price}|{target_price}"
             skip_cb        = f"skip_buy|{ticker}"
@@ -1621,7 +1616,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             + f"🛡 Stop-loss: <code>${_p(stop_price)}</code> ({sp}% below entry)\n"
             + f"🎯 Target: <code>${_p(target_price)}</code> ({tp}% above entry)"
             + warning_line + "\n\n"
-            + "Tap Confirm to log this position."
+            + ""
         )
         confirm_cb    = f"confirm_buy|{ticker}|{new_entry_raw}||{asset_type}|{stop_price}|{target_price}"
         skip_cb       = f"skip_buy|{ticker}"
@@ -1664,6 +1659,14 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return None
 
     if command == "feedback":
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard(
+                "💬 <b>Send feedback</b>\n<i>Open the dashboard → Settings tab to leave feedback.</i>",
+                [[{"text": "📲 Open Dashboard", "web_app": {"url": f"{_app_url}/miniapp"}}]],
+                chat_id=chat_id,
+            )
+            return ""
         feedback_text = text.strip()
         if not feedback_text:
             return "⚠️ Please include some feedback text."
@@ -1812,6 +1815,52 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     if command == "define":
         return _parse_and_execute(f"DEFINE {text}".strip(), original=f"/define {text}".strip(), chat_id=chat_id)
+
+    if command == "watchlist":
+        # Show current watchlist with live prices
+        from config_manager import get_user_config, load_user_trade_log
+        ucfg = get_user_config(chat_id)
+        log  = load_user_trade_log(chat_id)
+        # Merge both storages (trade log is the canonical source for Mini App)
+        wl_cfg = ucfg.get("watchlist") or []
+        wl_log = log.get("watchlist") or []
+        tickers = list(dict.fromkeys(wl_log + [t for t in wl_cfg if t not in wl_log]))
+        if not tickers:
+            return (
+                "👁 <b>Your watchlist is empty.</b>\n\n"
+                "Add tickers with:\n"
+                "  <code>/track NVDA</code> — add one ticker\n"
+                "  <code>/watch NVDA TSLA AAPL</code> — set multiple\n\n"
+                "<i>Watchlist tickers show live prices in the dashboard.</i>"
+            )
+        lines = [f"👁 <b>Watchlist</b> ({len(tickers)} tickers)\n"]
+        try:
+            import yfinance as _yf
+            _data = _yf.download(tickers, period="2d", interval="1d",
+                                 auto_adjust=True, progress=False)
+            _closes = _data["Close"] if "Close" in _data.columns else _data
+            for sym in tickers:
+                try:
+                    col = _closes[sym] if sym in _closes else _closes
+                    vals = col.dropna()
+                    if len(vals) >= 2:
+                        price = float(vals.iloc[-1])
+                        prev  = float(vals.iloc[-2])
+                        chg   = (price - prev) / prev * 100
+                        arrow = "🟢" if chg >= 0 else "🔴"
+                        lines.append(f"{arrow} <b>{sym}</b>  ${price:,.2f}  <code>{chg:+.1f}%</code>")
+                    elif len(vals) == 1:
+                        price = float(vals.iloc[-1])
+                        lines.append(f"⬜ <b>{sym}</b>  ${price:,.2f}")
+                    else:
+                        lines.append(f"⬜ <b>{sym}</b>  —")
+                except Exception:
+                    lines.append(f"⬜ <b>{sym}</b>  —")
+        except Exception:
+            for sym in tickers:
+                lines.append(f"• <b>{sym}</b>")
+        lines.append("\n<i>/track TICKER — add  ·  /untrack TICKER — remove</i>")
+        return "\n".join(lines)
 
     if command == "watch":
         return _parse_and_execute(f"WATCH {text}", original=f"/watch {text}", chat_id=chat_id)
@@ -2171,6 +2220,15 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return _parse_and_execute("SHARE", original="/invite", chat_id=chat_id)
 
     if command in ("tradeshare", "share"):
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url and not text.strip():
+            # Plain /share → open Mini App Settings tab to find invite link
+            send_inline_keyboard(
+                "📲 <b>Share StockPulz</b>\n<i>Your invite link is in the dashboard → Settings tab.</i>",
+                [[{"text": "📲 Open Dashboard", "web_app": {"url": f"{_app_url}/miniapp"}}]],
+                chat_id=chat_id,
+            )
+            return ""
         arg      = text.strip().upper() if text.strip() else ""
         cmd_text = f"TRADESHARE {arg}" if arg else "TRADESHARE"
         return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)

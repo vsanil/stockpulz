@@ -614,10 +614,16 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                 f"<i>Based on actual closed trades by StockPulz users.</i>\n\n"
                 f"📊 Curious how <b>you</b> compare? Tap below:"
             )
+            import os as _os
+            _app_url = _os.environ.get("APP_URL", "").rstrip("/")
+            def _cm_btn(label, tab, fb):
+                if _app_url:
+                    return {"text": label, "web_app": {"url": f"{_app_url}/miniapp?tab={tab}"}}
+                return {"text": label, "callback_data": f"cmd|{fb}"}
             send_inline_keyboard(
                 community_msg,
-                [[{"text": "📊 My Accuracy", "callback_data": "cmd|ACCURACY"},
-                  {"text": "📋 My History",  "callback_data": "cmd|HISTORY"}]],
+                [[_cm_btn("📊 My Accuracy", "performance", "ACCURACY"),
+                  _cm_btn("📋 My History",  "portfolio",   "HISTORY")]],
                 chat_id=chat_id,
             )
             return None
@@ -1223,7 +1229,6 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
 
     # ── /nextearnings — earnings dates for open positions ────────────────────
     if text == "NEXTEARNINGS":
-        from config_manager import load_user_trade_log
         from earnings_checker import get_upcoming_earnings
         log = load_user_trade_log(chat_id)
         open_pos = log.get("open", [])
@@ -1267,7 +1272,6 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
 
     # ── /digest — personalized morning check-in for open positions ───────────
     if text == "DIGEST":
-        from config_manager import load_user_trade_log, get_user_config
         from cmd_helpers import _fetch_live_price
         from earnings_checker import get_upcoming_earnings
 
