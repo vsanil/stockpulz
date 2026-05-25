@@ -3195,15 +3195,15 @@ async function _fetchAddposPrice(ticker) {
   }
 }
 
-function openAddPosition(prefillTicker = '') {
+function openAddPosition(prefillTicker = '', prefillData = {}) {
   const input = document.getElementById('addpos-input');
   const btn   = document.getElementById('addpos-btn');
   _addposCurrentPrice = null;
   clearTimeout(_addposPriceFetchTimer);
   input.value = prefillTicker.toUpperCase();
-  document.getElementById('addpos-entry').value     = '';
+  document.getElementById('addpos-entry').value     = prefillData.entry  || '';
   document.getElementById('addpos-shares').value    = '';
-  document.getElementById('addpos-stop').value      = '';
+  document.getElementById('addpos-stop').value      = prefillData.stop   || '';
   document.getElementById('addpos-entry').placeholder = 'e.g. 185.00';
   document.getElementById('addpos-stop').placeholder  = 'e.g. 175.00';
   document.getElementById('addpos-price-hint').textContent = '';
@@ -3213,14 +3213,21 @@ function openAddPosition(prefillTicker = '') {
   document.getElementById('sizer-result').textContent = '';
   const sh = document.getElementById('sizer-hint');
   if (sh) sh.textContent = 'Enter your account size and max risk % to calculate how many shares to buy.';
+  // Store target for reference (shown as hint)
+  if (prefillData.target) {
+    const hint = document.getElementById('addpos-price-hint');
+    if (hint) hint.textContent = `🎯 Target: $${parseFloat(prefillData.target).toFixed(2)}`;
+  }
   btn.disabled    = false;
   btn.textContent = 'Add to Portfolio';
   openOverlay('addpos-overlay');
   tg.HapticFeedback?.impactOccurred('light');
   if (prefillTicker) {
-    // Fetch live price immediately for pre-filled tickers
-    setTimeout(() => _fetchAddposPrice(prefillTicker.toUpperCase()), 100);
-    setTimeout(() => document.getElementById('addpos-entry')?.focus(), 300);
+    // Only fetch live price if entry not pre-filled from pick data
+    if (!prefillData.entry) {
+      setTimeout(() => _fetchAddposPrice(prefillTicker.toUpperCase()), 100);
+    }
+    setTimeout(() => document.getElementById('addpos-shares')?.focus(), 300);
   } else {
     setTimeout(() => document.getElementById('addpos-input')?.focus(), 200);
   }
@@ -8083,6 +8090,24 @@ window.dispatchEvent(new Event('_appReady'));
     };
     setTimeout(_waitAndOpen, 600);
   }
+})();
+
+// ── Deep-link: ?action=add&ticker=BNB&entry=600&stop=560&target=660 ──────────
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  if ((params.get('action') || '') !== 'add') return;
+  const ticker = (params.get('ticker') || '').toUpperCase();
+  if (!ticker) return;
+  const prefill = {
+    entry:  params.get('entry')  || '',
+    stop:   params.get('stop')   || '',
+    target: params.get('target') || '',
+  };
+  // Navigate to portfolio tab first, then open Add Position with pre-filled data
+  window.addEventListener('_appReady', function() {
+    gotoTab('portfolio');
+    setTimeout(() => openAddPosition(ticker, prefill), 400);
+  }, { once: true });
 })();
 
 // ── Back-navigation: hardware back / Telegram BackButton ─────────────────────

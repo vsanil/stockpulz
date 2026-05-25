@@ -194,7 +194,10 @@ def format_daily_message(picks: dict, config: dict,
                          earnings_this_week: dict | None = None,
                          held_tickers: set | None = None,
                          watchlist_prices: dict | None = None,
-                         user_alerts_map: dict | None = None) -> str:
+                         user_alerts_map: dict | None = None,
+                         market_closed: bool = False,
+                         closed_reason: str = "",
+                         next_open_label: str = "") -> str:
     """
     Concise daily Telegram message — scannable in under 10 seconds.
     Each pick is 2 lines: prices + thesis. Full detail lives in the mini app.
@@ -401,20 +404,29 @@ def format_daily_message(picks: dict, config: dict,
         if o.get("note"): row += f"\n  <i>{_esc(o['note'])}</i>"
         return row
 
+    # ── Market closed label (shown once, shared by all equity sections) ─────────
+    if market_closed:
+        _closed_base = f"🏖️ US markets closed — {closed_reason}" if closed_reason else "🏖️ US markets closed"
+        _closed_lbl  = f"{_closed_base} · fresh picks at 8AM ET on {next_open_label}" if next_open_label else _closed_base
+    else:
+        _closed_lbl = ""
+
     # ── Sections — each pick is its own expandable blockquote ─────────────────
     if st_picks:
         lines += ["", "📈 <b>STOCKS — SHORT TERM</b>"]
         for s in st_picks:
             lines += [f"<blockquote expandable>{_row_st(s)}</blockquote>"]
     elif show_st:
-        lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· skipped — candidates didn't show enough confirming signals (RSI, volume, momentum) for a {risk_lbl} entry today</i>"]
+        _st_skip = _closed_lbl if market_closed else f"skipped — candidates didn't show enough confirming signals (RSI, volume, momentum) for a {risk_lbl} entry today"
+        lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· {_st_skip}</i>"]
 
     if lt_picks:
         lines += ["", "🏦 <b>STOCKS — LONG TERM</b>"]
         for s in lt_picks:
             lines += [f"<blockquote expandable>{_row_lt(s)}</blockquote>"]
     elif show_lt:
-        lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· skipped — no stock cleared the fundamental quality bar your {risk_lbl} profile requires (2+ of: analyst buy, EPS beats, PE below median, high institutional ownership)</i>"]
+        _lt_skip = _closed_lbl if market_closed else f"skipped — no stock cleared the fundamental quality bar your {risk_lbl} profile requires (2+ of: analyst buy, EPS beats, PE below median, high institutional ownership)"
+        lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
 
     if cst_picks:
         lines += ["", "🪙 <b>CRYPTO</b>  <i>· high risk</i>"]
@@ -428,14 +440,16 @@ def format_daily_message(picks: dict, config: dict,
         for e in etf_picks:
             lines += [f"<blockquote expandable>{_row_etf(e)}</blockquote>"]
     else:
-        lines += ["", "📦 <b>ETFs</b>  <i>· skipped — no sector ETF aligned with the current market regime and volume trend</i>"]
+        _etf_skip = _closed_lbl if market_closed else "skipped — no sector ETF aligned with the current market regime and volume trend"
+        lines += ["", f"📦 <b>ETFs</b>  <i>· {_etf_skip}</i>"]
 
     if comm_picks:
         lines += ["", "🛢 <b>COMMODITIES</b>"]
         for c in comm_picks:
             lines += [f"<blockquote expandable>{_row_commodity(c)}</blockquote>"]
     else:
-        lines += ["", "🛢 <b>COMMODITIES</b>  <i>· skipped — no commodity showed 1-month momentum + healthy RSI + macro catalyst together</i>"]
+        _comm_skip = _closed_lbl if market_closed else "skipped — no commodity showed 1-month momentum + healthy RSI + macro catalyst together"
+        lines += ["", f"🛢 <b>COMMODITIES</b>  <i>· {_comm_skip}</i>"]
 
     if options_plays:
         lines += ["", "🎯 <b>OPTIONS</b>  <i>· illustrative only</i>"]
@@ -566,15 +580,26 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     def _pair(pick: dict, asset_type: str) -> list[dict]:
         """Return [Buy, 👁 Watch, 📊 Chart] for one pick."""
         ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
-        chart_btn = (
-            {"text": "📊 Chart",
-             "web_app": {"url": f"{render_url}/miniapp?chart={ticker}&asset_type={asset_type}"}}
-            if render_url else
-            {"text": "📊 Chart", "callback_data": f"chart|{ticker}|{asset_type}"}
-        )
+        entry  = pick.get("entry_price")  or ""
+        stop   = pick.get("stop_loss")    or ""
+        target = pick.get("target_price") or ""
+
+        if render_url:
+            buy_btn = {"text": f"✅ Buy {ticker}", "web_app": {
+                "url": (f"{render_url}/miniapp?tab=portfolio&action=add"
+                        f"&ticker={ticker}&asset_type={asset_type}"
+                        f"&entry={entry}&stop={stop}&target={target}")
+            }}
+            chart_btn = {"text": "📊 Chart", "web_app": {
+                "url": f"{render_url}/miniapp?chart={ticker}&asset_type={asset_type}"
+            }}
+        else:
+            buy_btn   = {"text": f"✅ Buy {ticker}", "callback_data": _buy_callback(pick, asset_type)}
+            chart_btn = {"text": "📊 Chart",         "callback_data": f"chart|{ticker}|{asset_type}"}
+
         return [
-            {"text": f"✅ Buy {ticker}",  "callback_data": _buy_callback(pick, asset_type)},
-            {"text": f"👁 Watch",         "callback_data": f"watch_pick|{ticker}"},
+            buy_btn,
+            {"text": f"👁 Watch", "callback_data": f"watch_pick|{ticker}"},
             chart_btn,
         ]
 
