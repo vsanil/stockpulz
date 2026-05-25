@@ -30,6 +30,18 @@ def _miniapp_btn(label: str, tab: str, fallback_cmd: str) -> dict:
         return {"text": label, "web_app": {"url": f"{_app_url}/miniapp?tab={tab}"}}
     return {"text": label, "callback_data": f"cmd|{fallback_cmd}"}
 
+
+def _miniapp_url_btn(label: str, path: str, fallback_cb: str) -> dict:
+    """web_app button with an arbitrary miniapp path/query string.
+    Falls back to callback_data if APP_URL is not set.
+    path should start with '?' or '/' e.g. '?chart=AAPL' or '?tab=watchlist&alert=AAPL'
+    """
+    _app_url = os.environ.get("APP_URL", "").rstrip("/")
+    if _app_url:
+        sep = "" if path.startswith("?") else "/"
+        return {"text": label, "web_app": {"url": f"{_app_url}/miniapp{sep}{path}"}}
+    return {"text": label, "callback_data": fallback_cb}
+
 from config_manager import (
     get_config, update_config, save_picks, load_picks, save_weekly_pick,
     get_dynamic_pick_counts, get_user_config,
@@ -919,10 +931,14 @@ def run_confirmation():
                         if crossed_up:
                             alerts.append("MACD bullish crossover")
                         if alerts:
-                            send_message(
+                            send_inline_keyboard(
                                 f"👀 <b>Watchlist Signal — {ticker}</b>  <code>${current_price:,.2f}</code>\n"
                                 f"<i>{' · '.join(alerts)}</i>\n"
                                 f"Not in today's picks — but worth a look.",
+                                [[
+                                    _miniapp_url_btn(f"📊 {ticker} Chart", f"?chart={ticker}", f"cmd|CHART {ticker}"),
+                                    _miniapp_btn("👁 Watchlist", "watchlist", f"watch|{ticker}"),
+                                ]],
                                 chat_id=uid,
                             )
                     except Exception:
@@ -943,7 +959,8 @@ def run_confirmation():
                 if ucfg.get("paused") or ucfg.get("skip_confirmation"):
                     print(f"[agent] Skipping confirmation for {uid} (paused or opted out).")
                     continue
-                send_message(message, chat_id=uid)
+                _conf_kb = [[_miniapp_btn("📊 Open Dashboard  ↗", "picks", "TODAY")]]
+                send_inline_keyboard(message, _conf_kb, chat_id=uid)
             except Exception as exc:
                 print(f"[agent] WARNING: Confirmation send failed for {uid}: {exc}")
 
@@ -1199,7 +1216,12 @@ def run_eod_summary():
                 if DRY_RUN:
                     print(f"\nDRY RUN — EOD Summary + Insights for {uid}:\n{msg}")
                 else:
-                    send_message(msg, chat_id=uid, parse_mode="HTML")
+                    _eod_kb = [[
+                        _miniapp_btn("📊 Portfolio",      "portfolio",   "POSITIONS"),
+                        _miniapp_btn("📈 Today's Picks",  "picks",       "TODAY"),
+                        _miniapp_btn("📉 Performance",    "performance", "STATS"),
+                    ]]
+                    send_inline_keyboard(msg, _eod_kb, chat_id=uid)
         except Exception as exc:
             print(f"[agent] EOD summary failed for {uid} (non-critical): {exc}")
 
@@ -3339,8 +3361,8 @@ def run_price_alerts():
                             f"⚡ <b>{ticker}</b> is <b>{gap_pct:.1f}%</b> from your target <code>${float(target):.2f}</code>\n"
                             f"Current: <code>${float(current):.2f}</code>  ·  Consider taking partial profit.",
                             [[
-                                {"text": f"✅ Close {ticker}", "callback_data": f"sold_pick|{ticker}"},
-                                {"text": "Hold 💎",           "callback_data": "noop"},
+                                _miniapp_btn(f"✅ Close {ticker}", "portfolio", f"sold_pick|{ticker}"),
+                                {"text": "Hold 💎", "callback_data": "noop"},
                             ]],
                             chat_id=uid,
                         )
@@ -3384,8 +3406,8 @@ def run_price_alerts():
                             f"{emoji} <b>{t}</b> is moving <b>{sign}{pct_chg:.1f}%</b> today\n"
                             f"Price: <code>${curr:.2f}</code>  (was <code>${prev:.2f}</code>)",
                             [[
-                                {"text": f"📊 View {t} Chart",  "callback_data": f"cmd|CHART {t}"},
-                                {"text": "🔔 Set Alert",         "callback_data": f"alert|{t}"},
+                                _miniapp_url_btn(f"📊 {t} Chart", f"?chart={t}", f"cmd|CHART {t}"),
+                                _miniapp_btn("🔔 Set Alert", "watchlist", f"alert|{t}"),
                             ]],
                             chat_id=uid,
                         )
