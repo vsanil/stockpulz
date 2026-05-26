@@ -31,6 +31,7 @@ on:
     - cron: "0 20 * * 1-5"      #  4:00 PM ET weekdays — pre-earnings guidance
     - cron: "0 13 1 * *"        #  9:00 AM ET 1st of month — monthly market commentary
     - cron: "0 14 1,15 11,12 *" #  9:00 AM ET 1st + 15th of Nov/Dec — tax-loss harvest check
+    - cron: "0 13 * * 1-5"     #  9:00 AM ET weekdays — watchdog (alerts if morning run was missed)
 
   # Manual trigger — useful for testing individual modes without waiting for schedule
   workflow_dispatch:
@@ -117,6 +118,8 @@ jobs:
             MODE="monthly_commentary"
           elif [[ "$SCHEDULE" == "0 14 1,15 11,12 *" ]]; then
             MODE="tax_harvest"
+          elif [[ "$SCHEDULE" == "0 13 * * 1-5" ]]; then
+            MODE="watchdog"
           else
             echo "Unknown schedule '$SCHEDULE' — defaulting to morning"
             MODE="morning"

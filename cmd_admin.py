@@ -625,7 +625,7 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
         return (
             "📖 <b>StockPulz — Quick Reference</b>\n\n"
             "<b>📅 What you receive each day:</b>\n"
-            "📬 <b>8:00 AM ET</b> — Morning picks: entry, target &amp; stop for each\n"
+            "📬 <b>7:00 AM ET</b> — Morning picks: entry, target &amp; stop for each\n"
             "🕙 <b>10:30 AM ET</b> — Confirmation: enter, wait, or exit signal\n"
             "🔔 <b>Every 30 min</b> — Alert if a stop or target is hit\n"
             "📊 <b>4:15 PM ET</b> — EOD wrap: how today's picks moved\n"
@@ -725,7 +725,7 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
 
         # Weekend note
         if wd >= 4 and h >= 15:   # Friday afternoon or weekend
-            lines.append("\n<i>Weekend: crypto picks arrive Saturday ~8 AM ET.</i>")
+            lines.append("\n<i>Weekend: crypto picks arrive Saturday ~7 AM ET.</i>")
 
         return "\n".join(lines)
 

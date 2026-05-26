@@ -1126,12 +1126,21 @@ def miniapp_picks():
         except Exception:
             pass
 
+        # Include bought tickers so the frontend can restore boughtSet across sessions
+        try:
+            from config_manager import load_user_trade_log
+            _log = load_user_trade_log(chat_id)
+            bought_tickers = [t["ticker"] for t in _log.get("open", []) if t.get("ticker")]
+        except Exception:
+            bought_tickers = []
+
         picks["_meta"] = {
-            "weekend":    is_weekend,
-            "has_picks":  has_picks,
-            "day":        now_et.strftime("%A"),
-            "picks_date": picks_date,       # ISO date string or None
-            "today":      now_et.strftime("%Y-%m-%d"),
+            "weekend":        is_weekend,
+            "has_picks":      has_picks,
+            "day":            now_et.strftime("%A"),
+            "picks_date":     picks_date,       # ISO date string or None
+            "today":          now_et.strftime("%Y-%m-%d"),
+            "bought_tickers": bought_tickers,   # open positions — restores boughtSet on reload
         }
 
         return jsonify(picks)
@@ -1405,7 +1414,17 @@ def miniapp_chart(ticker):
 
         if not data:
             return jsonify({"error": "no data", "ticker": ticker}), 404
-        return jsonify({"ticker": ticker, "data": data})
+
+        # Fetch live intraday price separately so the chart footer shows today's
+        # real price, not yesterday's close (daily bars lag by one session).
+        live_price = None
+        try:
+            from market_data import get_live_price as _glp
+            live_price = _glp(ticker)
+        except Exception:
+            pass
+
+        return jsonify({"ticker": ticker, "data": data, "live_price": live_price})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

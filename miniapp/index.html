@@ -2220,16 +2220,16 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
         <canvas id="posdetail-sparkline" width="320" height="64" style="width:100%;height:64px;border-radius:8px;display:block"></canvas>
       </div>
       <div class="pos-detail-label">Entry Price $</div>
-      <input type="number" id="posdetail-entry" class="pos-detail-input" placeholder="e.g. 185.00" step="0.01">
+      <input type="number" id="posdetail-entry" class="pos-detail-input" placeholder="e.g. 185.00" step="0.01" onblur="_silentSavePositionDetail()">
       <div class="pos-detail-label">Stop Loss $</div>
-      <input type="number" id="posdetail-stop" class="pos-detail-input" placeholder="e.g. 170.00" step="0.01">
+      <input type="number" id="posdetail-stop" class="pos-detail-input" placeholder="e.g. 170.00" step="0.01" onblur="_silentSavePositionDetail()">
       <div class="pos-detail-label">Target Price $</div>
-      <input type="number" id="posdetail-target" class="pos-detail-input" placeholder="e.g. 210.00" step="0.01">
+      <input type="number" id="posdetail-target" class="pos-detail-input" placeholder="e.g. 210.00" step="0.01" onblur="_silentSavePositionDetail()">
       <div class="pos-detail-label">Shares Held <span style="font-weight:400;opacity:.7">(optional)</span></div>
-      <input type="number" id="posdetail-shares" class="pos-detail-input" placeholder="e.g. 10" step="any" min="0">
+      <input type="number" id="posdetail-shares" class="pos-detail-input" placeholder="e.g. 10" step="any" min="0" onblur="_silentSavePositionDetail()">
       <div class="pos-detail-label" style="margin-top:4px">Notes / Thesis</div>
       <textarea id="posdetail-notes" class="pos-detail-input" placeholder="Why did you enter? Any catalysts, levels to watch…"
-        rows="3" style="resize:none;line-height:1.45;font-family:inherit"></textarea>
+        rows="3" style="resize:none;line-height:1.45;font-family:inherit" onblur="_silentSavePositionDetail()"></textarea>
       <!-- News headlines -->
       <div id="posdetail-news-section" style="margin-top:14px">
         <div style="font-size:12px;color:var(--hint);font-weight:600;margin-bottom:6px">📰 Recent News</div>
@@ -2625,8 +2625,9 @@ tg.ready();
 tg.expand();
 // Prevent vertical swipe-to-close gesture from firing during normal scroll (Bot API 7.7+)
 if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
-// Fallback: require explicit confirmation before closing (older clients)
-if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
+// Never show "Changes may not be saved" dialog — all data is saved in real-time
+if (typeof tg.disableClosingConfirmation === 'function') tg.disableClosingConfirmation();
+window.onbeforeunload = null;
 tg.setHeaderColor?.('bg_color');
 tg.setBackgroundColor?.('bg_color');
 
@@ -3036,7 +3037,9 @@ async function _renderChart({ sym, assetType, entryPrice, targetPrice, stopPrice
     });
 
     const first = chartData[0].close;
-    const last  = chartData[chartData.length - 1].close;
+    // Prefer the live intraday price over the last daily close so the footer
+    // shows today's real price (e.g. $14.85) rather than yesterday's close ($13.85).
+    const last  = (resp.live_price && resp.live_price > 0) ? resp.live_price : chartData[chartData.length - 1].close;
     const isUp  = last >= first;
     const color = isUp ? '#30d158' : '#ff453a';
 
@@ -3054,6 +3057,17 @@ async function _renderChart({ sym, assetType, entryPrice, targetPrice, stopPrice
 
     // ── Price level lines ─────────────────────────────────────────────────────
     const LineStyle = LightweightCharts.LineStyle;
+
+    // Live price marker — show current intraday price when it differs from last bar
+    if (resp.live_price && resp.live_price > 0 &&
+        Math.abs(resp.live_price - chartData[chartData.length - 1].close) > 0.005) {
+      lwSeries.createPriceLine({
+        price: resp.live_price, color: 'rgba(255,255,255,0.55)',
+        lineWidth: 1, lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true, title: 'Now',
+      });
+    }
+
     if (entryPrice > 0) {
       lwSeries.createPriceLine({
         price: entryPrice, color: '#60a5fa',
@@ -3430,32 +3444,36 @@ async function openBuySheet(sym, assetType, tf) {
   btn.disabled    = false;
   btn.textContent = 'Log Position';
 
-  if (pick.entry_price) {
-    entryEl.value = String(pick.entry_price);
-    stopEl.value  = pick.stop_loss ? String(pick.stop_loss) : '';
-    targetEl.textContent = pick.target_price ? `🎯 Target: $${pick.target_price}` : '';
-    hintEl.textContent = `AI pick levels pre-filled — edit if your actual entry differs.`;
-    hintEl.style.color = '';
-  } else {
-    entryEl.value = '';
-    stopEl.value  = '';
-    targetEl.textContent = '';
-    hintEl.textContent = `Fetching live price for ${sym}…`;
-    hintEl.style.color = 'var(--hint)';
-    // Fetch live price and pre-fill entry
-    try {
-      const data = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(sym)}`);
-      if (data && data.price) {
-        entryEl.value = fmtPriceInput(data.price);
-        hintEl.textContent = `Live price $${fmtPrice(data.price)} pre-filled — adjust if your fill was different.`;
-        hintEl.style.color = 'var(--green)';
-      } else {
-        hintEl.textContent = `No pick data for ${sym} — enter your entry and stop for alerts.`;
-        hintEl.style.color = '';
-      }
-    } catch (_) {
-      hintEl.textContent = `No pick data for ${sym} — enter your entry and stop for alerts.`;
-      hintEl.style.color = '';
+  // Always pre-fill stop/target from AI pick levels immediately
+  stopEl.value  = pick.stop_loss   ? String(pick.stop_loss)   : '';
+  targetEl.textContent = pick.target_price ? `🎯 Target: $${pick.target_price}` : '';
+
+  // Always fetch live price for entry (never use stale AI pick level)
+  entryEl.value = '';
+  hintEl.textContent = `Fetching live price for ${sym}…`;
+  hintEl.style.color = 'var(--hint)';
+  try {
+    const data = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(sym)}`);
+    if (data && data.price) {
+      entryEl.value = fmtPriceInput(data.price);
+      hintEl.textContent = `Live price $${fmtPrice(data.price)} pre-filled — adjust if needed.`;
+      hintEl.style.color = 'var(--green)';
+    } else if (pick.entry_price) {
+      entryEl.value = String(pick.entry_price);
+      hintEl.textContent = `AI pick level pre-filled — edit if your actual entry differs.`;
+      hintEl.style.color = 'var(--hint)';
+    } else {
+      hintEl.textContent = `Enter the price you paid.`;
+      hintEl.style.color = 'var(--hint)';
+    }
+  } catch (_) {
+    if (pick.entry_price) {
+      entryEl.value = String(pick.entry_price);
+      hintEl.textContent = `AI pick level pre-filled — edit if your actual entry differs.`;
+      hintEl.style.color = 'var(--hint)';
+    } else {
+      hintEl.textContent = `Enter the price you paid.`;
+      hintEl.style.color = 'var(--hint)';
     }
   }
 
@@ -3553,6 +3571,10 @@ async function loadPicks(isRetry = false) {
   if (cached && !picksCache) {
     picksCache    = cached;
     picksLoadedAt = Date.now();
+    // Seed boughtSet from cached server data so cards render correctly before fresh fetch
+    if (cached._meta && Array.isArray(cached._meta.bought_tickers)) {
+      cached._meta.bought_tickers.forEach(t => boughtSet.add(t));
+    }
     try {
       renderPicksView();        // instant render from cache
       // Kick off background prefetch of other tabs now that picks are on screen
@@ -3596,6 +3618,11 @@ async function loadPicks(isRetry = false) {
     _savePicks(data);             // update cache
     picksCache    = data;
     picksLoadedAt = Date.now();
+    // Restore boughtSet from server — survives app close/reopen
+    if (data._meta && Array.isArray(data._meta.bought_tickers)) {
+      data._meta.bought_tickers.forEach(t => boughtSet.add(t));
+      sessionStorage.setItem('sp_bought', JSON.stringify([...boughtSet]));
+    }
   } catch (e) {
     clearTimeout(_skelTimer);
     if (hadCache) return;         // already showing stale data — don't show error
@@ -5521,26 +5548,44 @@ function openPositionDetail(ticker, entry, live, stop, target, focusField) {
   }
 }
 
+function _posDetailPayload() {
+  const entryV    = document.getElementById('posdetail-entry').value;
+  const stopV     = document.getElementById('posdetail-stop').value;
+  const targV     = document.getElementById('posdetail-target').value;
+  const notesV    = (document.getElementById('posdetail-notes')?.value || '').trim();
+  const sharesRaw = document.getElementById('posdetail-shares')?.value;
+  const sharesV   = (sharesRaw !== '' && sharesRaw != null) ? parseFloat(sharesRaw) : null;
+  return {
+    ticker:       _detailTicker,
+    entry_price:  entryV !== '' ? parseFloat(entryV) : null,
+    stop_loss:    stopV  !== '' ? parseFloat(stopV)  : null,
+    target_price: targV  !== '' ? parseFloat(targV)  : null,
+    shares:       sharesV,
+    notes:        notesV,
+  };
+}
+
+// Silent auto-save on blur — no button feedback, no overlay close
+let _autoSaveTimer = null;
+async function _silentSavePositionDetail() {
+  if (!_detailTicker) return;
+  clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(async () => {
+    try {
+      await api('/api/miniapp/update_position', 'POST', _posDetailPayload());
+      _invalidatePortfolioCache();
+      loadedTabs['portfolio'] = false;
+    } catch (_) { /* silent — user can still hit Save if needed */ }
+  }, 300);
+}
+
 async function savePositionDetail() {
   if (!_detailTicker) return;
-  const btn    = document.getElementById('posdetail-save-btn');
-  const entryV = document.getElementById('posdetail-entry').value;
-  const stopV  = document.getElementById('posdetail-stop').value;
-  const targV  = document.getElementById('posdetail-target').value;
-  const notesV  = (document.getElementById('posdetail-notes')?.value || '').trim();
-  const sharesRaw = document.getElementById('posdetail-shares')?.value;
-  const sharesV = sharesRaw !== '' && sharesRaw != null ? parseFloat(sharesRaw) : null;
+  const btn = document.getElementById('posdetail-save-btn');
   btn.disabled    = true;
   btn.textContent = '⏳ Saving…';
   try {
-    await api('/api/miniapp/update_position', 'POST', {
-      ticker:       _detailTicker,
-      entry_price:  entryV !== '' ? parseFloat(entryV) : null,
-      stop_loss:    stopV  !== '' ? parseFloat(stopV)  : null,
-      target_price: targV  !== '' ? parseFloat(targV)  : null,
-      shares:       sharesV,
-      notes:        notesV,
-    });
+    await api('/api/miniapp/update_position', 'POST', _posDetailPayload());
     tg.HapticFeedback?.notificationOccurred('success');
     closeOverlay('posdetail-overlay');
     _invalidatePortfolioCache();
@@ -7102,10 +7147,8 @@ function renderSettings() {
           style="flex:1;background:var(--input-bg,rgba(255,255,255,0.07));border:1px solid var(--border);
                  border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none"
           placeholder="Your display name"
-          onkeydown="if(event.key==='Enter')saveDisplayName()">
-        <button onclick="saveDisplayName()"
-          style="background:var(--accent);color:#fff;border:none;border-radius:10px;
-                 padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">Save</button>
+          onkeydown="if(event.key==='Enter')saveDisplayName()"
+          onblur="saveDisplayName()">
       </div>
     </div>
     <div style="border-top:1px solid var(--border)"></div>
@@ -7293,12 +7336,14 @@ async function saveDisplayName() {
   if (!inp) return;
   const name = inp.value.trim();
   if (!name) return;
+  // Skip if unchanged (prevents toast spam on blur with no edit)
+  if (name === (_settCfg.display_name || '').trim()) return;
   try {
     await api('/api/miniapp/settings/update', 'POST', { key: 'display_name', value: name });
     _settCfg.display_name = name;
     _updateProfileBadge();
     tg.HapticFeedback?.notificationOccurred('success');
-    showToast('✅ Display name saved');
+    showToast('✅ Name saved');
   } catch(e) {
     showToast('⚠️ Could not save name');
   }
