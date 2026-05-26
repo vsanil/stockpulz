@@ -1361,26 +1361,6 @@ def handle_callback_query(callback_query: dict) -> None:
         update_user_config(chat_id, "paused", True)
         send_message("⏸ <b>Your picks paused.</b> You won't receive daily briefings until you send /resume.\n<i>Other users are unaffected.</i>", chat_id=chat_id)
 
-    elif action == "reset_confirm":
-        try:
-            reset_user_config(chat_id)
-            global_cfg = get_config()
-            sl = global_cfg.get("stop_loss_pct", 7)
-            tg = global_cfg.get("target_gain_pct", 15)
-            send_message(
-                f"🔄 Your settings reset to defaults.\n"
-                f"Risk: moderate  ·  Pick mode: both\n"
-                f"Budgets: unset  ·  Watchlist: cleared\n"
-                f"Stop loss: {sl}%  ·  Target gain: {tg}%  (global defaults)",
-                chat_id=chat_id,
-            )
-        except Exception as exc:
-            print(f"[bot] reset_confirm failed: {exc}")
-            send_message("⚠️ Reset failed — try again.", chat_id=chat_id)
-
-    elif action == "cancel_abort":
-        send_message("👍 Cancelled.", chat_id=chat_id)
-
     elif action == "unalert_confirm":
         # Execute alert removal after user confirmed
         ticker    = parts[1].upper() if len(parts) > 1 else ""
@@ -1954,14 +1934,14 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "settings_portfolio_size":
         raw = text.strip().lower().replace(",", "")
         if raw in ("off", "0", "none", "clear", ""):
-            existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+            existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
             existing.pop("portfolio_size", None)
             update_user_config(chat_id, "portfolio", existing)
             send_message("✅ Portfolio capital cleared — position sizing disabled.", chat_id=chat_id)
         else:
             try:
                 val = float(raw.rstrip("k")) * (1000 if raw.endswith("k") else 1)
-                existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+                existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
                 update_user_config(chat_id, "portfolio", {**existing, "portfolio_size": val})
                 send_message(
                     f"✅ Portfolio capital → <b>${int(val):,}</b>\n"
@@ -1979,7 +1959,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             val = float(raw)
             if not (0.1 <= val <= 5.0):
                 raise ValueError("out of range")
-            existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+            existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
             update_user_config(chat_id, "portfolio", {**existing, "risk_per_trade_pct": val})
             send_message(f"✅ Risk per trade → <b>{val}%</b> of portfolio capital per pick.", chat_id=chat_id)
         except ValueError:
@@ -1993,7 +1973,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             val = float(raw)
             if not (1.0 <= val <= 50.0):
                 raise ValueError("out of range")
-            existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+            existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
             update_user_config(chat_id, "portfolio", {**existing, "max_position_pct": val})
             send_message(f"✅ Max position size → <b>{val}%</b> of portfolio per pick.", chat_id=chat_id)
         except ValueError:
@@ -2007,7 +1987,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             val = float(raw)
             if not (5.0 <= val <= 100.0):
                 raise ValueError("out of range")
-            existing = cfg.get("portfolio", {}) if isinstance(cfg.get("portfolio"), dict) else {}
+            existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
             update_user_config(chat_id, "portfolio", {**existing, "max_sector_pct": val})
             send_message(f"✅ Max sector concentration → <b>{val}%</b>.", chat_id=chat_id)
         except ValueError:
@@ -2231,56 +2211,56 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             return ""
         arg      = text.strip().upper() if text.strip() else ""
         cmd_text = f"TRADESHARE {arg}" if arg else "TRADESHARE"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "trim":
         arg      = text.strip() if text.strip() else ""
         cmd_text = f"TRIM {arg.upper()}" if arg else "TRIM"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "size":
         arg      = text.strip().upper() if text.strip() else ""
         cmd_text = f"SIZE {arg}" if arg else "SIZE"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "pause":
         arg      = text.strip().upper() if text.strip() else ""
         cmd_text = f"PAUSE {arg}" if arg else "PAUSE"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "import":
         # text may be empty (shows help) or contain CSV lines
         body     = text.strip()
         cmd_text = f"IMPORT\n{body}" if body else "IMPORT"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command in ("bestsetup", "best_setup", "setup"):
-        return _parse_and_execute("BESTSETUP", original=original, chat_id=chat_id)
+        return _parse_and_execute("BESTSETUP", original=text, chat_id=chat_id)
 
     if command == "playbook":
         body     = text.strip()
         cmd_text = f"PLAYBOOK {body}" if body else "PLAYBOOK"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "remind":
         body     = text.strip()
         cmd_text = f"REMIND {body}" if body else "REMIND"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command in ("quiethours", "quiet", "dnd"):
         body     = text.strip()
         cmd_text = f"QUIETHOURS {body}" if body else "QUIETHOURS"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "add":
         arg      = text.strip() if text.strip() else ""
         cmd_text = f"ADD {arg.upper()}" if arg else "ADD"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "goal":
         arg      = text.strip() if text.strip() else ""
         cmd_text = f"GOAL {arg}" if arg else "GOAL"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "missed":
         return _parse_and_execute("MISSED", original="/missed", chat_id=chat_id)
@@ -2290,7 +2270,7 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     if command == "since":
         arg = text.strip() if text.strip() else ""
-        return _parse_and_execute(f"SINCE {arg}" if arg else "SINCE", original=original, chat_id=chat_id)
+        return _parse_and_execute(f"SINCE {arg}" if arg else "SINCE", original=text, chat_id=chat_id)
 
     if command == "adduser":
         return _parse_and_execute(f"ADDUSER {text}", original=f"/adduser {text}", chat_id=chat_id)
@@ -2304,13 +2284,13 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     if command == "size":
         arg = text.strip().upper() if text.strip() else ""
         cmd_text = f"SIZE {arg}" if arg else "SIZE"
-        return _parse_and_execute(cmd_text, original=original, chat_id=chat_id)
+        return _parse_and_execute(cmd_text, original=text, chat_id=chat_id)
 
     if command == "performance":
         return _parse_and_execute("PERFORMANCE", original="/performance", chat_id=chat_id)
 
     if command == "feedback":
-        return _parse_and_execute(f"FEEDBACK {text}" if text else "FEEDBACK", original=original, chat_id=chat_id)
+        return _parse_and_execute(f"FEEDBACK {text}" if text else "FEEDBACK", original=text, chat_id=chat_id)
 
     if command == "test":
         if not _is_admin(chat_id):
