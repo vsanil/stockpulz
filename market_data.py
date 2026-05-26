@@ -181,6 +181,75 @@ def get_live_prices(tickers: list) -> dict:
     return prices
 
 
+# ── Company name lookup ───────────────────────────────────────────────────────
+_NAME_CACHE: dict[str, str] = {}   # process-level cache; survives across requests
+
+_CRYPTO_NAMES: dict[str, str] = {
+    "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "Binance Coin",
+    "XRP": "XRP", "ADA": "Cardano", "DOGE": "Dogecoin", "AVAX": "Avalanche",
+    "DOT": "Polkadot", "MATIC": "Polygon", "LINK": "Chainlink", "UNI": "Uniswap",
+    "ATOM": "Cosmos", "LTC": "Litecoin", "BCH": "Bitcoin Cash", "ALGO": "Algorand",
+    "XLM": "Stellar", "TRX": "TRON", "NEAR": "NEAR Protocol", "OP": "Optimism",
+    "ARB": "Arbitrum", "SUI": "Sui", "APT": "Aptos", "INJ": "Injective",
+    "FIL": "Filecoin", "VET": "VeChain", "ICP": "Internet Computer", "HYPE": "Hyperliquid",
+}
+
+def _short_name(name: str, max_len: int = 22) -> str:
+    """Trim long company names at a word boundary."""
+    if not name:
+        return ""
+    for suffix in (", Inc.", " Inc.", " Corp.", " Corporation", " & Co.", " Co.", " Ltd.", " plc", " LLC"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return name if len(name) <= max_len else name[:max_len].rsplit(" ", 1)[0] + "…"
+
+
+def _fetch_one_name(ticker: str) -> tuple[str, str]:
+    """yfinance shortName lookup for a single ticker. Returns (ticker, name)."""
+    try:
+        import yfinance as _yf
+        is_crypto = ticker in _CRYPTO_SYMBOLS
+        yf_sym    = f"{ticker}-USD" if is_crypto else ticker
+        info      = _yf.Ticker(yf_sym).info
+        name      = info.get("shortName") or info.get("longName") or ""
+        return ticker, _short_name(name)
+    except Exception:
+        return ticker, ""
+
+
+def get_company_names(tickers: list[str]) -> dict[str, str]:
+    """Return {ticker: short_company_name} for all tickers, using a process-level cache.
+
+    Results are cached indefinitely within the process lifetime (company names
+    change rarely). Missing or erroring tickers map to "".
+    """
+    if not tickers:
+        return {}
+
+    result: dict[str, str] = {}
+    to_fetch: list[str]    = []
+
+    for t in tickers:
+        t = t.upper()
+        if t in _NAME_CACHE:
+            result[t] = _NAME_CACHE[t]
+        elif t in _CRYPTO_NAMES:
+            result[t] = _NAME_CACHE.setdefault(t, _CRYPTO_NAMES[t])
+        else:
+            to_fetch.append(t)
+
+    if to_fetch:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(to_fetch), 6)) as ex:
+            pairs = list(ex.map(_fetch_one_name, to_fetch))
+        for tk, name in pairs:
+            _NAME_CACHE[tk] = name
+            result[tk]      = name
+
+    return result
+
+
 def get_ohlcv(ticker: str, days: int = 92) -> list | None:
     """Fetch daily OHLCV bars for the past `days` days.
 

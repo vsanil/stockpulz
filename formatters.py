@@ -25,14 +25,25 @@ def _stars(conviction: int) -> str:
 
 
 def _p(price) -> str:
-    """Format a price cleanly: strip .00 only, commas for thousands."""
+    """Format a price with magnitude-appropriate decimal precision.
+
+    Stocks / large crypto : 2 decimals  ($610.26, $104,231.50)
+    Mid crypto (≥$0.01)  : 4 decimals  ($0.5821)
+    Small crypto (≥$0.0001): 6 decimals ($0.001234)
+    Sub-penny (SHIB etc) : 8 decimals  ($0.00001234)
+    """
     if price is None:
         return "—"
     f = float(price)
-    if f >= 1000:
+    if f >= 10000:
         return f"{f:,.0f}" if f == int(f) else f"{f:,.2f}"
-    s = f"{f:.2f}"
-    return s[:-3] if s.endswith(".00") else s
+    if f >= 1:
+        return f"{f:.2f}"
+    if f >= 0.01:
+        return f"{f:.4f}"
+    if f >= 0.0001:
+        return f"{f:.6f}"
+    return f"{f:.8f}"
 
 
 def _upside(entry, target) -> str:
@@ -197,7 +208,8 @@ def format_daily_message(picks: dict, config: dict,
                          user_alerts_map: dict | None = None,
                          market_closed: bool = False,
                          closed_reason: str = "",
-                         next_open_label: str = "") -> str:
+                         next_open_label: str = "",
+                         company_names: dict | None = None) -> str:
     """
     Concise daily Telegram message — scannable in under 10 seconds.
     Each pick is 2 lines: prices + thesis. Full detail lives in the mini app.
@@ -323,11 +335,21 @@ def format_daily_message(picks: dict, config: dict,
         tag = "#" + "".join(w.capitalize() for w in _re.split(r'[\s\-]+', theme.strip()) if w)
         return f"  <code>{_esc(tag)}</code>"
 
+    def _name_tag(ticker: str) -> str:
+        """Return italic company name suffix if available, e.g. '  <i>· Apple</i>'"""
+        if not company_names:
+            return ""
+        n = company_names.get(ticker.upper(), "")
+        # Skip if name is same as ticker (e.g. XRP → XRP is redundant)
+        if not n or n.upper() == ticker.upper():
+            return ""
+        return f"  <i>· {_esc(n)}</i>"
+
     def _row_st(s):
         t, e, tgt, stop = s.get("ticker",""), s.get("entry_price"), s.get("target_price"), s.get("stop_loss")
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop else ""
         held_badge = "  📌 <i>holding</i>" if held_tickers and t.upper() in held_tickers else ""
-        row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}{held_badge}  "
+        row = (f"<b>{_esc(t)}</b>{_name_tag(t)}{_conv_tag(s.get('conviction',3))}{held_badge}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(e,tgt)}</i>{stop_str}{_theme_tag(s)}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
@@ -344,7 +366,7 @@ def format_daily_message(picks: dict, config: dict,
         t, e, tgt = s.get("ticker",""), s.get("entry_price"), s.get("target_price")
         hz = f"  ·  <i>{_esc(s.get('horizon',''))}</i>" if s.get("horizon") else ""
         held_badge = "  📌 <i>holding</i>" if held_tickers and t.upper() in held_tickers else ""
-        row = (f"<b>{_esc(t)}</b>{_conv_tag(s.get('conviction',3))}{held_badge}  "
+        row = (f"<b>{_esc(t)}</b>{_name_tag(t)}{_conv_tag(s.get('conviction',3))}{held_badge}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(e,tgt)}</i>{hz}{_theme_tag(s)}")
         tl = _tline(s.get("thesis"), s.get("catalyst"))
@@ -359,7 +381,7 @@ def format_daily_message(picks: dict, config: dict,
     def _row_crypto(c):
         sym, e, tgt, stop = c.get("symbol",""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop else ""
-        row = (f"<b>{_esc(sym)}</b>{_conv_tag(c.get('conviction',3))}  "
+        row = (f"<b>{_esc(sym)}</b>{_name_tag(sym)}{_conv_tag(c.get('conviction',3))}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(e,tgt)}</i>{stop_str}")
         tl = _tline(c.get("thesis"), c.get("catalyst"))
@@ -374,7 +396,7 @@ def format_daily_message(picks: dict, config: dict,
         is_lt = e.get("_lt", False)
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop and not is_lt else ""
         hz = f"  ·  <i>{_esc(e.get('horizon',''))}</i>" if is_lt and e.get("horizon") else ""
-        row = (f"<b>{_esc(t)}</b>  "
+        row = (f"<b>{_esc(t)}</b>{_name_tag(t)}  "
                f"<code>${_p(ep)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(ep,tgt)}</i>{stop_str}{hz}")
         tl = _tline(e.get("thesis"), e.get("catalyst"))
@@ -385,7 +407,7 @@ def format_daily_message(picks: dict, config: dict,
         t, ep, tgt, stop = c.get("ticker",""), c.get("entry_price"), c.get("target_price"), c.get("stop_loss")
         is_lt = c.get("_lt", False)
         stop_str = f"  ·  stop <code>${_p(stop)}</code>" if stop and not is_lt else ""
-        row = (f"<b>{_esc(t)}</b>  "
+        row = (f"<b>{_esc(t)}</b>{_name_tag(t)}  "
                f"<code>${_p(ep)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(ep,tgt)}</i>{stop_str}")
         tl = _tline(c.get("thesis"), c.get("catalyst"))
@@ -657,7 +679,8 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
 # ── Confirmation message ──────────────────────────────────────────────────────
 
 def format_confirmation_message(picks: dict, current_prices: dict,
-                                buy_counts: dict | None = None) -> str:
+                                buy_counts: dict | None = None,
+                                company_names: dict | None = None) -> str:
     """
     Build the live prices check message.
     Compares entry prices from morning picks to current live prices.
@@ -672,8 +695,13 @@ def format_confirmation_message(picks: dict, current_prices: dict,
 
     def price_line(symbol: str, entry, target, stop) -> str:
         current = current_prices.get(symbol)
+        name_sfx = ""
+        if company_names:
+            n = company_names.get(symbol.upper(), "")
+            if n:
+                name_sfx = f" <i>· {_esc(n)}</i>"
         if current is None or entry is None:
-            return f"   <b>{symbol}</b>  price unavailable"
+            return f"   <b>{symbol}</b>{name_sfx}  price unavailable"
         pct   = (current - float(entry)) / float(entry) * 100
         if abs(pct) < 0.05:
             change_str = "≈0%"
@@ -692,7 +720,7 @@ def format_confirmation_message(picks: dict, current_prices: dict,
             badge = "🟡 Flat — hold"
         n = bc.get(symbol, 0)
         social = f"  <i>👥 {n}</i>" if n >= 2 else ""
-        return (f"   <b>{symbol}</b>  <code>${_p(entry)}</code> → <code>${_p(current)}</code> "
+        return (f"   <b>{symbol}</b>{name_sfx}  <code>${_p(entry)}</code> → <code>${_p(current)}</code> "
                 f"{change_str}  {badge}{social}")
 
     st  = stocks.get("short_term", [])

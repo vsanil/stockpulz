@@ -2101,7 +2101,7 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
 <!-- ── Cold-start banner ──────────────────────────────────────────────────── -->
 <div id="cold-banner">
   <div class="cb-spinner"></div>
-  Server waking up, please wait…
+  Loading…
 </div>
 
 <!-- ── Bottom nav ──────────────────────────────────────────────────────────── -->
@@ -2581,11 +2581,7 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
         <button class="pct-btn pos" disabled onclick="applyAlertPct(0.05)">+5%</button>
         <button class="pct-btn pos" disabled onclick="applyAlertPct(0.10)">+10%</button>
       </div>
-      <div id="alert-dir-row" style="display:flex;gap:8px;margin-bottom:14px">
-        <button class="dir-btn active" id="dir-auto"  onclick="setAlertDir('auto')">Auto</button>
-        <button class="dir-btn"        id="dir-above" onclick="setAlertDir('above')">Above ↑</button>
-        <button class="dir-btn"        id="dir-below" onclick="setAlertDir('below')">Below ↓</button>
-      </div>
+      <div id="alert-dir-row" style="display:none"></div>
       <button class="btn-primary" id="alert-submit-btn" onclick="submitAlert()">Set Alert</button>
       <button class="btn-cancel" onclick="_resetAlertOverlay();closeOverlay('alert-overlay')">Cancel</button>
     </div>
@@ -2916,9 +2912,20 @@ function fmtPrice(v) {
   if (isNaN(n)) return '—';
   if (n >= 100000) return (n / 1000).toFixed(1) + 'K';   // e.g. $104.4K for BTC
   if (n >= 10000)  return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
-  if (n >= 100)    return n.toFixed(2);
   if (n >= 1)      return n.toFixed(2);
-  return n.toFixed(4);
+  if (n >= 0.01)   return n.toFixed(4);
+  if (n >= 0.0001) return n.toFixed(6);
+  return n.toFixed(8);                                    // SHIB etc.
+}
+// Input-field variant — no K/comma, plain decimal string for <input> values
+function fmtPriceInput(v) {
+  if (v == null || v === '') return '';
+  const n = parseFloat(v);
+  if (isNaN(n)) return '';
+  if (n >= 1)      return n.toFixed(2);
+  if (n >= 0.01)   return n.toFixed(4);
+  if (n >= 0.0001) return n.toFixed(6);
+  return n.toFixed(8);
 }
 function fmtPct(v, showPlus = true) {
   if (v == null) return '—';
@@ -3115,7 +3122,7 @@ function openSellSheet(sym) {
     </div>
     <div class="price-label">Exit Price (optional)</div>
     <input type="text" id="sell-price-input" class="price-input"
-           value="${cur ? parseFloat(cur).toFixed(2) : ''}"
+           value="${cur ? fmtPriceInput(cur) : ''}"
            placeholder="Leave blank to use current price"
            inputmode="decimal" pattern="[0-9]*[.]?[0-9]*"
            autocomplete="off" autocorrect="off">
@@ -3255,10 +3262,10 @@ async function _fetchAddposPrice(ticker) {
     const name = d.name ? `${d.name}  ·  ` : '';
     if (hint) hint.innerHTML = `<span style="opacity:.6">${name}</span><span style="font-weight:600;color:var(--fg)">$${fmtPrice(p)}</span>`;
     // Pre-fill entry if still empty
-    if (entryInp && !entryInp.value) entryInp.value = p.toFixed(2);
+    if (entryInp && !entryInp.value) entryInp.value = fmtPriceInput(p);
     // Dynamic placeholders
     if (entryInp) entryInp.placeholder = `Current $${fmtPrice(p)}`;
-    if (stopInp)  stopInp.placeholder  = `e.g. ${(p * 0.95).toFixed(2)}  (−5%)`;
+    if (stopInp)  stopInp.placeholder  = `e.g. ${fmtPriceInput(p * 0.95)}  (−5%)`;
     // Update sizer hint
     const sh = document.getElementById('sizer-hint');
     if (sh) sh.innerHTML = `Current price <b>$${fmtPrice(p)}</b>  ·  Enter your account size and max risk % to calculate shares.`;
@@ -3289,7 +3296,7 @@ function openAddPosition(prefillTicker = '', prefillData = {}) {
   // Store target for reference (shown as hint)
   if (prefillData.target) {
     const hint = document.getElementById('addpos-price-hint');
-    if (hint) hint.textContent = `🎯 Target: $${parseFloat(prefillData.target).toFixed(2)}`;
+    if (hint) hint.textContent = `🎯 Target: $${fmtPriceInput(prefillData.target)}`;
   }
   btn.disabled    = false;
   btn.textContent = 'Add to Portfolio';
@@ -3419,7 +3426,7 @@ async function openBuySheet(sym, assetType, tf) {
     try {
       const data = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(sym)}`);
       if (data && data.price) {
-        entryEl.value = String(data.price);
+        entryEl.value = fmtPriceInput(data.price);
         hintEl.textContent = `Live price $${fmtPrice(data.price)} pre-filled — adjust if your fill was different.`;
         hintEl.style.color = 'var(--green)';
       } else {
@@ -3449,8 +3456,10 @@ async function confirmBuyWithLevels() {
   btn.textContent = '⏳ Logging…';
 
   try {
+    const _tf2full = { 'LT': 'long_term', 'ST': 'short_term' };
     await api('/api/miniapp/log_bought', 'POST',
-      { ticker: sym, asset_type: _buyposType, entry_price: entry, stop_loss: stop });
+      { ticker: sym, asset_type: _buyposType, entry_price: entry, stop_loss: stop,
+        timeframe: _tf2full[_buyposTf] || null });
     boughtSet.add(sym);
     sessionStorage.setItem('sp_bought', JSON.stringify([...boughtSet]));
 
@@ -3707,14 +3716,24 @@ async function renderMarketsView() {
   const d      = marketsCache;
   const regime = d.regime || {};
 
+  const _MKT_NAMES = {
+    'SPY':'S&P 500', 'QQQ':'Nasdaq 100', 'IWM':'Russell 2000', 'DIA':'Dow Jones',
+    'BTC':'Bitcoin', 'ETH':'Ethereum', 'BNB':'BNB', 'SOL':'Solana', 'XRP':'XRP',
+    'GLD':'Gold', 'SLV':'Silver', 'USO':'Crude Oil', 'TLT':'20yr Treasury',
+    'UNG':'Natural Gas', 'WEAT':'Wheat', 'CORN':'Corn', 'DXY':'US Dollar',
+    'VIX':'Volatility Idx',
+  };
+
   function mktCard(item) {
-    const price  = item.price  != null ? '$' + fmtPrice(item.price) : '—';
-    const chg    = item.chg_pct;
-    const cls    = chg == null ? 'flat' : chg >= 0.05 ? 'up' : chg <= -0.05 ? 'down' : 'flat';
-    const arrow  = chg == null ? '' : chg >= 0.05 ? '▲ ' : chg <= -0.05 ? '▼ ' : '';
-    const chgTxt = chg == null ? '—' : arrow + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    const price   = item.price  != null ? '$' + fmtPrice(item.price) : '—';
+    const chg     = item.chg_pct;
+    const cls     = chg == null ? 'flat' : chg >= 0.05 ? 'up' : chg <= -0.05 ? 'down' : 'flat';
+    const arrow   = chg == null ? '' : chg >= 0.05 ? '▲ ' : chg <= -0.05 ? '▼ ' : '';
+    const chgTxt  = chg == null ? '—' : arrow + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    const fullName= _MKT_NAMES[item.ticker] || item.name || '';
     return `<div class="mkt-card">
       <div class="mkt-ticker">${item.ticker}</div>
+      ${fullName ? `<div style="font-size:9.5px;color:var(--hint);font-weight:500;margin-bottom:2px;line-height:1.2">${fullName}</div>` : ''}
       <div class="mkt-price">${price}</div>
       <div class="mkt-chg ${cls}">${chgTxt}</div>
     </div>`;
@@ -3746,6 +3765,15 @@ async function renderMarketsView() {
       <div class="mkt-section-title">Commodities & Bonds</div>
       <div class="mkt-grid">`;
     d.commodities.forEach(item => html += mktCard(item));
+    html += `</div></div>`;
+  }
+
+  // ── Macro (DXY + VIX) ──────────────────────────────────────────────────────
+  if ((d.macro || []).length) {
+    html += `<div class="mkt-section">
+      <div class="mkt-section-title">Macro</div>
+      <div class="mkt-grid">`;
+    d.macro.forEach(item => html += mktCard(item));
     html += `</div></div>`;
   }
 
@@ -3939,6 +3967,7 @@ function renderPickCard(p, idx = 0) {
         <div class="pick-ticker-wrap">
           <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}
         </div>
+        <div style="font-size:9.5px;color:var(--hint);font-weight:500;margin-top:1px;line-height:1.2" data-name-ticker="${sym}"></div>
         <span class="type-tag ${tagCls}">${tagTxt}</span>
       </div>
       <div class="price-grid">
@@ -4182,6 +4211,11 @@ function renderPicks(filter) {
 
   // Wire swipe-left-to-watch on each pick card
   _attachPickSwipeHandlers();
+
+  // Inject company names for all pick tickers
+  const _pickTickers = [...document.querySelectorAll('#picks-body [data-name-ticker]')]
+    .map(el => el.getAttribute('data-name-ticker'));
+  if (_pickTickers.length) _loadNames(_pickTickers);
 }
 
 function _attachPickSwipeHandlers() {
@@ -4321,8 +4355,10 @@ function _tabError(spinnerId, retryFn, err) {
 function _applyPortSortFilter(positions) {
   let list = [...positions];
   // Filter
-  if (portFilter === 'st') list = list.filter(p => p.timeframe === 'short_term');
-  else if (portFilter === 'lt') list = list.filter(p => p.timeframe === 'long_term');
+  // Normalise legacy 'ST'/'LT' values stored by older app versions
+  const _normTf = tf => tf === 'ST' ? 'short_term' : tf === 'LT' ? 'long_term' : tf;
+  if (portFilter === 'st') list = list.filter(p => _normTf(p.timeframe) === 'short_term');
+  else if (portFilter === 'lt') list = list.filter(p => _normTf(p.timeframe) === 'long_term');
   // Sort
   if (portSort === 'pnl')    list.sort((a, b) => (b.pnl_pct || 0) - (a.pnl_pct || 0));
   else if (portSort === 'ticker') list.sort((a, b) => (a.ticker || a.symbol || '').localeCompare(b.ticker || b.symbol || ''));
@@ -5734,46 +5770,68 @@ async function loadAlerts() {
         <div class="empty-sub">Tap "+ Add Alert" to get notified when a stock or crypto hits your target price.</div>
       </div>`;
     } else {
-      html += '<div class="settings-card" style="padding:0 16px">';
+      // Group alerts by ticker
+      const grouped = {};
       unique.forEach(a => {
-        // Derive direction from target vs price — never show "Auto"
-        const _refPrice = a.price_at_set || null;
-        const _effDir   = a.direction === 'above' ? 'above'
-                        : a.direction === 'below' ? 'below'
-                        : _refPrice ? (a.target >= _refPrice ? 'above' : 'below')
-                        : 'above'; // fallback
-        const dirCls  = _effDir === 'above' ? 'above' : 'below';
-        const dirTxt  = _effDir === 'above' ? '↑ Above' : '↓ Below';
-        // Age label from set_at timestamp
-        let ageLbl  = '';
-        let ageHtml = '';
-        if (a.set_at) {
-          const diffMs   = Date.now() - new Date(a.set_at.includes('Z') ? a.set_at : a.set_at + 'Z').getTime();
-          const diffDays = Math.floor(diffMs / 86400000);
-          const diffHrs  = Math.floor(diffMs / 3600000);
-          ageLbl  = diffDays >= 1 ? `${diffDays}d ago` : diffHrs >= 1 ? `${diffHrs}h ago` : 'just now';
-          ageHtml = ` · <span style="color:var(--hint)">${ageLbl}</span>`;
-        }
-        let awayHtml = '';
-        if (a.price_at_set) {
-          const pct   = ((a.target - a.price_at_set) / a.price_at_set * 100).toFixed(1);
-          const arrow = pct >= 0 ? '+' : '';
-          awayHtml = `<div class="alert-away">Was $${fmtPrice(a.price_at_set)} when set · ${arrow}${pct}%${ageHtml}</div>`;
-        } else if (ageLbl) {
-          awayHtml = `<div class="alert-away">${ageLbl}</div>`;
-        }
-        const autoBadge = a.auto
-          ? `<span class="auto-badge" title="System-generated stop alert">auto</span>`
-          : '';
-        html += `<div class="alert-row" onclick="editAlert('${a.ticker}',${a.target})" style="cursor:pointer">
-          <div class="alert-ticker">${a.ticker}${autoBadge}<div data-name-ticker="${a.ticker}" style="font-size:10px;color:var(--hint);font-weight:400;margin-top:1px;line-height:1.2"></div></div>
-          <div class="alert-info">
-            <div class="alert-price">$${fmtPrice(a.target)}</div>
-            ${awayHtml}
+        if (!grouped[a.ticker]) grouped[a.ticker] = [];
+        grouped[a.ticker].push(a);
+      });
+
+      html += '<div class="settings-card" style="padding:0 16px">';
+      const tickers = Object.keys(grouped);
+      tickers.forEach((ticker, ti) => {
+        const group = grouped[ticker];
+        const hasAuto = group.some(a => a.auto);
+        const autoBadge = hasAuto ? `<span class="auto-badge" title="System-generated stop alert">auto</span>` : '';
+        const isLast = ti === tickers.length - 1;
+
+        // Group header: ticker + company name + live price
+        html += `<div style="padding:12px 0 6px;${ti > 0 ? 'border-top:1px solid var(--border);' : ''}">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+            <span style="font-size:14px;font-weight:800;color:var(--text)">${ticker}</span>${autoBadge}
+            <span data-live-price-ticker="${ticker}" style="font-size:12px;font-weight:700;color:var(--hint);margin-left:2px"></span>
           </div>
-          <span class="dir-badge ${dirCls}">${dirTxt}</span>
-          <button class="alert-del" onclick="event.stopPropagation();deleteAlert('${a.ticker}',${a.target})" title="Delete">✕</button>
+          <div data-name-ticker="${ticker}" style="font-size:11px;color:var(--hint);font-weight:400;line-height:1.2;margin-bottom:6px"></div>
         </div>`;
+
+        // Individual alert rows within the group
+        group.forEach((a, ai) => {
+          const _refPrice = a.price_at_set || null;
+          const _effDir   = a.direction === 'above' ? 'above'
+                          : a.direction === 'below' ? 'below'
+                          : _refPrice ? (a.target >= _refPrice ? 'above' : 'below')
+                          : 'above';
+          const dirCls = _effDir === 'above' ? 'above' : 'below';
+          const dirTxt = _effDir === 'above' ? '↑ Above' : '↓ Below';
+
+          // Set date label
+          let dateLbl = '';
+          if (a.set_at) {
+            const d = new Date(a.set_at.includes('Z') ? a.set_at : a.set_at + 'Z');
+            const diffMs   = Date.now() - d.getTime();
+            const diffDays = Math.floor(diffMs / 86400000);
+            const diffHrs  = Math.floor(diffMs / 3600000);
+            if (diffDays >= 1) {
+              dateLbl = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            } else if (diffHrs >= 1) {
+              dateLbl = `${diffHrs}h ago`;
+            } else {
+              dateLbl = 'just now';
+            }
+          }
+
+          const isLastRow = ai === group.length - 1;
+          html += `<div class="alert-row" onclick="editAlert('${a.ticker}',${a.target})" style="cursor:pointer;padding-left:0;${!isLastRow || !isLast ? 'margin-bottom:6px;' : ''}border-top:none">
+            <div style="flex:1;min-width:0">
+              <span style="font-size:16px;font-weight:700;color:var(--text)">$${fmtPrice(a.target)}</span>
+              ${dateLbl ? `<span style="font-size:11px;color:var(--hint);margin-left:6px">${dateLbl}</span>` : ''}
+            </div>
+            <span class="dir-badge ${dirCls}">${dirTxt}</span>
+            <button class="alert-del" onclick="event.stopPropagation();deleteAlert('${a.ticker}',${a.target})" title="Delete">✕</button>
+          </div>`;
+        });
+
+        if (!isLast) html += ''; // separator handled by border-top on next header
       });
       html += '</div>';
     }
@@ -5781,6 +5839,7 @@ async function loadAlerts() {
     if (body) body.innerHTML = html;
     updateBellBadge(alerts.length);
     _loadNames(unique.map(a => a.ticker)); // fire-and-forget company names
+    _loadAlertPrices(unique.map(a => a.ticker)); // fire-and-forget live prices
   } catch (e) {
     if (spinner) spinner.innerHTML =
       '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn\'t load alerts</div></div>';
@@ -5801,10 +5860,26 @@ async function _loadNames(tickers) {
     } catch (_) {}
   }
   // Inject into all data-name-ticker placeholders in the DOM
+  // Skip if the name is the same as the ticker (e.g. XRP → XRP is pointless)
   document.querySelectorAll('[data-name-ticker]').forEach(el => {
     const t = el.getAttribute('data-name-ticker');
     const n = _namesCache[t];
-    if (n) el.textContent = n;
+    if (n && n.toUpperCase() !== t.toUpperCase()) el.textContent = n;
+  });
+}
+
+const _alertPriceCache = {};
+async function _loadAlertPrices(tickers) {
+  if (!tickers || !tickers.length) return;
+  const unique = [...new Set(tickers)];
+  try {
+    const data = await api(`/api/miniapp/live_prices?tickers=${encodeURIComponent(unique.join(','))}`);
+    if (data && data.prices) Object.assign(_alertPriceCache, data.prices);
+  } catch (_) {}
+  document.querySelectorAll('[data-live-price-ticker]').forEach(el => {
+    const t = el.getAttribute('data-live-price-ticker');
+    const p = _alertPriceCache[t];
+    if (p) el.textContent = `$${fmtPrice(p)}`;
   });
 }
 
@@ -6880,8 +6955,60 @@ function renderSettings() {
   const cfg    = _settCfg;
   const paused = !!cfg.paused;
 
-  // ── Status card ────────────────────────────────────────────────────────────
+  // ── Profile card ───────────────────────────────────────────────────────────
   let html = '';
+  const tgUser     = tg.initDataUnsafe?.user || {};
+  const firstName  = tgUser.first_name || '';
+  const lastName   = tgUser.last_name  || '';
+  const username   = tgUser.username   ? '@' + tgUser.username : '';
+  const fullName   = [firstName, lastName].filter(Boolean).join(' ');
+  const displayName= cfg.display_name || fullName || 'Trader';
+  const initials   = displayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
+  const photoUrl   = tgUser.photo_url  || '';
+  const memberSince= cfg.member_since  ? new Date(cfg.member_since).toLocaleDateString('en-US', {month:'long', year:'numeric'}) : '';
+
+  html += `<div class="settings-card" style="padding:0">
+    <!-- Avatar + name row -->
+    <div style="display:flex;align-items:center;gap:14px;padding:16px 16px 12px">
+      <div style="width:56px;height:56px;border-radius:50%;background:var(--avatar-bg,#5b4fcf);border:2px solid var(--border);
+                  overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+                  font-size:20px;font-weight:800;color:#fff">
+        ${photoUrl ? `<img src="${photoUrl}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'">` : initials}
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:17px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${displayName}</div>
+        ${username ? `<div style="font-size:12px;color:var(--hint);margin-top:2px">${username}</div>` : ''}
+        ${memberSince ? `<div style="font-size:11px;color:var(--hint);margin-top:1px">Member since ${memberSince}</div>` : ''}
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:0 16px"></div>
+    <!-- Edit display name -->
+    <div style="padding:12px 16px">
+      <div style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Display Name</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="profile-name-input" type="text" value="${displayName}"
+          style="flex:1;background:var(--input-bg,rgba(255,255,255,0.07));border:1px solid var(--border);
+                 border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none"
+          placeholder="Your display name"
+          onkeydown="if(event.key==='Enter')saveDisplayName()">
+        <button onclick="saveDisplayName()"
+          style="background:var(--accent);color:#fff;border:none;border-radius:10px;
+                 padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">Save</button>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--border)"></div>
+    <!-- Account actions -->
+    <div class="action-row" onclick="copyReferralLink()">
+      <div class="action-row-left">
+        <span class="action-icon">🔗</span>
+        <div>
+          <div class="action-label">Referral Link</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:1px" id="referral-link-sub">Tap to copy</div>
+        </div>
+      </div>
+      <span class="action-chevron">›</span>
+    </div>
+  </div>`;
   html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--card);border-radius:14px;margin-bottom:12px;border:1px solid var(--border)">
   <div><div style="font-size:14px;font-weight:600">Theme</div><div style="font-size:12px;opacity:.5" id="theme-label">Dark</div></div>
   <button id="theme-toggle-btn" onclick="toggleTheme()" style="padding:8px 16px;border-radius:10px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:14px;cursor:pointer">🌙 Dark</button>
@@ -7047,6 +7174,35 @@ function renderSettings() {
   if (_themeBtn) _themeBtn.textContent = _isLight ? '☀️ Light' : '🌙 Dark';
   if (_themeLabel) _themeLabel.textContent = _isLight ? 'Light' : 'Dark';
 }
+
+// ── Profile management ────────────────────────────────────────────────────────
+async function saveDisplayName() {
+  const inp = document.getElementById('profile-name-input');
+  if (!inp) return;
+  const name = inp.value.trim();
+  if (!name) return;
+  try {
+    await api('/api/miniapp/settings/update', 'POST', { key: 'display_name', value: name });
+    _settCfg.display_name = name;
+    _updateProfileBadge();
+    tg.HapticFeedback?.notificationOccurred('success');
+    showToast('✅ Display name saved');
+  } catch(e) {
+    showToast('⚠️ Could not save name');
+  }
+}
+
+function copyReferralLink() {
+  const chatId = tg.initDataUnsafe?.user?.id || '';
+  const link   = `https://t.me/StockPulzBot?start=ref_${chatId}`;
+  navigator.clipboard?.writeText(link).then(() => {
+    tg.HapticFeedback?.notificationOccurred('success');
+    const sub = document.getElementById('referral-link-sub');
+    if (sub) { sub.textContent = 'Copied!'; setTimeout(() => { sub.textContent = 'Tap to copy'; }, 2000); }
+  }).catch(() => showToast(link));
+}
+
+
 
 async function saveNotifPref(key, value) {
   tg.HapticFeedback?.selectionChanged();
