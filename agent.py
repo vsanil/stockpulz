@@ -3820,6 +3820,29 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
         except Exception as _wl_exc:
             print(f"[agent] Watchlist price fetch failed (non-critical): {_wl_exc}")
 
+    # ── Pre-fetch company names for all pick tickers (shared across all users) ──
+    _picks_company_names: dict = {}
+    try:
+        from market_data import get_company_names as _gcn_agent
+        def _picks_tickers_agent(p: dict) -> list[str]:
+            tks = []
+            stocks = p.get("stocks", p)
+            for _p in stocks.get("short_term", []) + stocks.get("long_term", []):
+                t = _p.get("ticker", "")
+                if t: tks.append(t)
+            for _p in p.get("crypto", {}).get("short_term", []) + p.get("crypto", {}).get("long_term", []):
+                t = _p.get("symbol", "") or _p.get("ticker", "")
+                if t: tks.append(t)
+            for _sec in (p.get("etfs", {}), p.get("commodities", {})):
+                for _p in _sec.get("short_term", []) + _sec.get("long_term", []):
+                    t = _p.get("ticker", "") or _p.get("symbol", "")
+                    if t: tks.append(t)
+            return list(dict.fromkeys(t.upper() for t in tks if t))
+        _picks_company_names = _gcn_agent(_picks_tickers_agent(picks))
+        print(f"[agent] Company names fetched for {len(_picks_company_names)} tickers.")
+    except Exception as _cn_exc:
+        print(f"[agent] Company name fetch failed (non-critical): {_cn_exc}")
+
     # ── Build all per-user payloads first (CPU-bound, fast), then broadcast concurrently ──
     outbox: list[dict] = []
     for uid in recipients:
@@ -3864,7 +3887,8 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
                                            user_alerts_map=user_alerts_map or None,
                                            market_closed=bool(is_weekend or is_holiday),
                                            closed_reason=market_closed_reason,
-                                           next_open_label=next_open_label)
+                                           next_open_label=next_open_label,
+                                           company_names=_picks_company_names or None)
 
             # Append /bought tip for users who have never logged a trade
             user_log = user_positions_cache.get(uid, None)

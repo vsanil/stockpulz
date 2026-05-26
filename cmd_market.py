@@ -13,6 +13,23 @@ from cmd_settings import _prompt_for_param
 from cmd_nlp import _explain_pick
 
 
+def _picks_tickers(picks: dict) -> list[str]:
+    """Return all unique tickers/symbols from a picks dict."""
+    tickers = []
+    stocks = picks.get("stocks", picks)
+    for p in stocks.get("short_term", []) + stocks.get("long_term", []):
+        t = p.get("ticker", "")
+        if t: tickers.append(t)
+    for p in picks.get("crypto", {}).get("short_term", []) + picks.get("crypto", {}).get("long_term", []):
+        t = p.get("symbol", "") or p.get("ticker", "")
+        if t: tickers.append(t)
+    for section in (picks.get("etfs", {}), picks.get("commodities", {})):
+        for p in section.get("short_term", []) + section.get("long_term", []):
+            t = p.get("ticker", "") or p.get("symbol", "")
+            if t: tickers.append(t)
+    return list(dict.fromkeys(t.upper() for t in tickers if t))   # deduplicated, order-preserved
+
+
 def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
     """Market data & portfolio commands."""
     if text == "TODAY":
@@ -38,8 +55,14 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                 buy_counts = load_buy_counts()
             except Exception:
                 pass
+        company_names: dict = {}
+        try:
+            from market_data import get_company_names as _gcn
+            company_names = _gcn(_picks_tickers(picks))
+        except Exception:
+            pass
         return format_daily_message(picks, config, personal_notes=personal_notes,
-                                    buy_counts=buy_counts)
+                                    buy_counts=buy_counts, company_names=company_names)
 
     if text == "EXPLAIN":
         _prompt_for_param("explain", chat_id)
@@ -92,7 +115,14 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                     buy_counts = load_buy_counts()
                 except Exception:
                     pass
-            return format_confirmation_message(picks, current_prices, buy_counts=buy_counts)
+            company_names: dict = {}
+            try:
+                from market_data import get_company_names as _gcn
+                company_names = _gcn(_picks_tickers(picks))
+            except Exception:
+                pass
+            return format_confirmation_message(picks, current_prices, buy_counts=buy_counts,
+                                               company_names=company_names)
         except Exception as exc:
             return f"⚠️ Could not fetch prices: {exc}"
 

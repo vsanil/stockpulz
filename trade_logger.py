@@ -227,7 +227,7 @@ def get_performance_stats(chat_id: str, asset_type: str | None = None) -> dict |
 
 def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
                 entry_override=None, stop_override=None,
-                shares_override=None) -> tuple[dict, bool]:
+                shares_override=None, timeframe_override=None) -> tuple[dict, bool]:
     """
     Add a ticker to a user's portfolio (no price/qty needed).
     Uses today's pick levels for target/stop alerts if available.
@@ -257,23 +257,25 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
     # Look up pick levels from today's picks
     entry = target = stop = None
     asset_type = "stock"
+    timeframe  = None
     if picks:
-        all_picks = (
-            picks.get("stocks", {}).get("short_term", []) +
-            picks.get("stocks", {}).get("long_term",  []) +
-            picks.get("crypto", {}).get("short_term", []) +
-            picks.get("crypto", {}).get("long_term",  []) +
-            picks.get("etfs",   {}).get("short_term", []) +
-            picks.get("etfs",   {}).get("long_term",  [])
-        )
-        for p in all_picks:
-            sym = (p.get("ticker") or p.get("symbol", "")).upper()
-            if sym == ticker:
-                entry  = p.get("entry_price")
-                target = p.get("target_price")
-                stop   = p.get("stop_loss")
-                if p.get("symbol"):   # crypto picks use "symbol" key
-                    asset_type = "crypto"
+        for section_name, section in [("stocks", picks.get("stocks", {})),
+                                       ("crypto", picks.get("crypto", {})),
+                                       ("etfs",   picks.get("etfs",   {}))]:
+            for tf in ("short_term", "long_term"):
+                for p in section.get(tf, []):
+                    sym = (p.get("ticker") or p.get("symbol", "")).upper()
+                    if sym == ticker:
+                        entry     = p.get("entry_price")
+                        target    = p.get("target_price")
+                        stop      = p.get("stop_loss")
+                        timeframe = tf
+                        if p.get("symbol"):   # crypto picks use "symbol" key
+                            asset_type = "crypto"
+                        break
+                if timeframe:
+                    break
+            if timeframe:
                 break
 
     # User-supplied overrides take priority over (or supplement) AI pick levels
@@ -281,10 +283,13 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
         entry = float(entry_override)
     if stop_override is not None:
         stop = float(stop_override)
+    if timeframe_override is not None:
+        timeframe = timeframe_override  # caller-supplied beats pick lookup
 
     trade = {
         "ticker":       ticker,
         "asset_type":   asset_type,
+        "timeframe":    timeframe,      # 'short_term' | 'long_term' | None
         "entry_price":  entry,
         "target_price": target,
         "stop_loss":    stop,

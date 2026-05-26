@@ -1109,10 +1109,19 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
         from earnings_checker import get_upcoming_earnings as _get_earnings
         prices: dict          = {}
         sector_by_ticker: dict[str, str] = {}
+        names_by_ticker:  dict[str, str] = {}
 
         stock_trades  = [t for t in unique_trades if t.get("asset_type") == "stock"]
         crypto_trades = [t for t in unique_trades if t.get("asset_type") != "stock"]
         stock_tickers = [t["ticker"] for t in stock_trades]
+
+        # Pre-fill crypto names from static map
+        try:
+            from market_data import get_company_names as _gcn
+            _cn = _gcn([t["ticker"] for t in crypto_trades])
+            names_by_ticker.update(_cn)
+        except Exception:
+            pass
 
         send_typing_action(chat_id)   # fires while yfinance .info calls run
         for t in stock_trades:
@@ -1124,6 +1133,13 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 if price:
                     prices[ticker] = round(float(price), 2)
                 sector_by_ticker[ticker] = info.get("sector", "Unknown")
+                raw_name = info.get("shortName") or info.get("longName") or ""
+                if raw_name:
+                    for suffix in (", Inc.", " Inc.", " Corp.", " Corporation", " & Co.", " Co.", " Ltd.", " plc"):
+                        if raw_name.endswith(suffix):
+                            raw_name = raw_name[:-len(suffix)]
+                            break
+                    names_by_ticker[ticker] = raw_name[:22]
             except Exception:
                 sector_by_ticker[ticker] = "Unknown"
 
@@ -1259,7 +1275,9 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 else:
                     badge = ""
 
-                lines.append(f"<b>{ticker}</b>  <code>${_p(current)}</code>{badge}")
+                cname = names_by_ticker.get(ticker, "")
+                name_sfx = f"  <i>· {cname}</i>" if cname else ""
+                lines.append(f"<b>{ticker}</b>{name_sfx}  <code>${_p(current)}</code>{badge}")
 
                 # Pick levels line (only if we have them)
                 if entry or target or stop:

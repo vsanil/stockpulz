@@ -1261,9 +1261,10 @@ def miniapp_log_bought():
     if not ticker:
         return jsonify({"error": "missing ticker"}), 400
 
-    entry_override  = body.get("entry_price")
-    stop_override   = body.get("stop_loss")
-    shares_override = body.get("shares")
+    entry_override     = body.get("entry_price")
+    stop_override      = body.get("stop_loss")
+    shares_override    = body.get("shares")
+    timeframe_override = body.get("timeframe")  # 'short_term' | 'long_term' | None
 
     from trade_logger import add_holding
     from config_manager import load_picks
@@ -1271,7 +1272,8 @@ def miniapp_log_bought():
     trade, existed = add_holding(ticker, chat_id, picks=picks,
                                  entry_override=entry_override,
                                  stop_override=stop_override,
-                                 shares_override=shares_override)
+                                 shares_override=shares_override,
+                                 timeframe_override=timeframe_override)
 
     # Auto-create a stop-loss alert if a stop is set on the new position
     if not existed:
@@ -1954,65 +1956,109 @@ def miniapp_live_prices():
     return jsonify({"ok": True, "prices": result})
 
 
+_MARKETS_CACHE: dict = {}          # {"data": {...}, "ts": float}
+_MARKETS_TTL  = 5 * 60            # 5-minute server-side cache
+
+# All instruments the front-end knows about, grouped by section.
+# yf_sym  = symbol passed to yfinance;  label = what the UI sees
+_MARKETS_INSTRUMENTS = [
+    # ── Indices ────────────────────────────────────────────────────
+    ("SPY",   "indices",     "SPY"),
+    ("QQQ",   "indices",     "QQQ"),
+    ("IWM",   "indices",     "IWM"),
+    ("DIA",   "indices",     "DIA"),
+    # ── Crypto ────────────────────────────────────────────────────
+    ("BTC-USD", "crypto",   "BTC"),
+    ("ETH-USD", "crypto",   "ETH"),
+    ("BNB-USD", "crypto",   "BNB"),
+    ("SOL-USD", "crypto",   "SOL"),
+    ("XRP-USD", "crypto",   "XRP"),
+    # ── Commodities & Bonds ────────────────────────────────────────
+    ("GLD",   "commodities", "GLD"),
+    ("SLV",   "commodities", "SLV"),
+    ("USO",   "commodities", "USO"),
+    ("UNG",   "commodities", "UNG"),
+    ("WEAT",  "commodities", "WEAT"),
+    ("CORN",  "commodities", "CORN"),
+    ("TLT",   "commodities", "TLT"),
+    # ── Macro indicators ──────────────────────────────────────────
+    ("^DXY",  "macro",       "DXY"),
+    ("^VIX",  "macro",       "VIX"),
+]
+
+
 @app.route("/api/miniapp/markets")
 def miniapp_markets():
     """Markets overview: indices + crypto + commodities prices with daily %,
-    plus Fear & Greed, rates, and sector rotation from the cached regime."""
+    plus Fear & Greed, rates, and sector rotation from the cached regime.
+    Results are cached server-side for 5 minutes to avoid hammering yfinance."""
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
 
+    import time as _time
     import yfinance as yf
     from market_regime import get_market_regime
 
+    # ── Serve from cache if fresh ────────────────────────────────────────────
+    cached = _MARKETS_CACHE.get("data")
+    if cached and (_time.time() - _MARKETS_CACHE.get("ts", 0)) < _MARKETS_TTL:
+        return jsonify(cached)
+
+    # ── Regime (fast — reads from existing Gist cache) ───────────────────────
     try:
         regime = get_market_regime()
     except Exception:
         regime = {}
 
-    _INSTRUMENTS = [
-        ("SPY",     "indices"),
-        ("QQQ",     "indices"),
-        ("IWM",     "indices"),
-        ("DIA",     "indices"),
-        ("BTC-USD", "crypto"),
-        ("ETH-USD", "crypto"),
-        ("GLD",     "commodities"),
-        ("USO",     "commodities"),
-        ("TLT",     "commodities"),
-    ]
-    tickers = [t for t, _ in _INSTRUMENTS]
-    prices  = {}
+    # ── Fetch all prices in one yf.download() call ───────────────────────────
+    yf_syms = [yf_sym for yf_sym, _, _ in _MARKETS_INSTRUMENTS]
+    prices: dict = {}
     try:
-        raw    = yf.download(tickers, period="5d", interval="1d",
-                             auto_adjust=True, progress=False)
+        raw    = yf.download(yf_syms, period="5d", interval="1d",
+                             auto_adjust=True, progress=False, threads=True)
         closes = raw["Close"] if "Close" in raw.columns else raw
-        for sym in tickers:
+        for sym in yf_syms:
             try:
                 col  = closes[sym] if hasattr(closes, "columns") and sym in closes.columns else closes
                 vals = col.dropna()
                 if len(vals) >= 2:
                     p    = float(vals.iloc[-1])
                     prev = float(vals.iloc[-2])
-                    prices[sym] = {"price": round(p, 2),
+                    prices[sym] = {"price": round(p, 4),
                                    "chg_pct": round((p - prev) / prev * 100, 2)}
                 elif len(vals) == 1:
-                    prices[sym] = {"price": round(float(vals.iloc[-1]), 2), "chg_pct": None}
+                    prices[sym] = {"price": round(float(vals.iloc[-1]), 4), "chg_pct": None}
             except Exception:
                 pass
     except Exception:
         pass
 
-    def _row(sym, label=None):
-        d = prices.get(sym, {})
-        return {"ticker": label or sym, "price": d.get("price"), "chg_pct": d.get("chg_pct")}
+    def _row(yf_sym: str, label: str) -> dict:
+        d = prices.get(yf_sym, {})
+        p = d.get("price")
+        # Round prices appropriately: crypto can be very small or very large
+        if p is not None:
+            p = round(p, 2) if p >= 1 else round(p, 6)
+        return {"ticker": label, "price": p, "chg_pct": d.get("chg_pct")}
 
-    return jsonify({
-        "ok":         True,
-        "regime":     regime,
-        "indices":    [_row("SPY"), _row("QQQ"), _row("IWM"), _row("DIA")],
-        "crypto":     [_row("BTC-USD", "BTC"), _row("ETH-USD", "ETH")],
-        "commodities":[_row("GLD"), _row("USO"), _row("TLT")],
-    })
+    # Group rows by section
+    sections: dict = {"indices": [], "crypto": [], "commodities": [], "macro": []}
+    for yf_sym, section, label in _MARKETS_INSTRUMENTS:
+        sections.setdefault(section, []).append(_row(yf_sym, label))
+
+    result = {
+        "ok":          True,
+        "regime":      regime,
+        "indices":     sections["indices"],
+        "crypto":      sections["crypto"],
+        "commodities": sections["commodities"],
+        "macro":       sections["macro"],
+    }
+
+    _MARKETS_CACHE["data"] = result
+    _MARKETS_CACHE["ts"]   = _time.time()
+
+    return jsonify(result)
 
 
 @app.route("/api/miniapp/regime")
@@ -3243,6 +3289,8 @@ def miniapp_paper_add_cash():
         return jsonify({"ok": True, "message": msg})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
 
 
 # ── CLI webhook registration ──────────────────────────────────────────────────
