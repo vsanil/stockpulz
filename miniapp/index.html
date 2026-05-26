@@ -457,9 +457,29 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.04); }
   border-radius: inherit;
 }
 
+/* Collapsible thesis toggle button */
+.pick-thesis-toggle {
+  width: 100%; background: none; border: none; border-top: 1px solid var(--border);
+  color: var(--hint); font-size: 11px; font-weight: 500; letter-spacing: .02em;
+  padding: 7px 2px 4px; margin-top: 6px; cursor: pointer;
+  display: flex; justify-content: space-between; align-items: center;
+  position: relative; z-index: 1; text-align: left;
+}
+.pick-thesis-toggle:active { opacity: .6; }
+.pick-thesis-chevron { font-size: 10px; transition: transform .2s; }
+.pick-thesis-chevron.open { transform: rotate(180deg); }
+/* Collapsible body — hidden by default */
+.pick-thesis-body {
+  overflow: hidden; max-height: 0;
+  transition: max-height .25s ease, opacity .2s ease;
+  opacity: 0;
+}
+.pick-thesis-body.open {
+  max-height: 400px; opacity: 1;
+}
 .pick-thesis {
   font-size: 12.5px; color: var(--hint);
-  line-height: 1.5; margin-bottom: 8px;
+  line-height: 1.5; margin: 6px 0 8px;
   position: relative; z-index: 1;
 }
 .pick-theme-row {
@@ -3927,6 +3947,14 @@ async function renderHistoryPicks() {
   });
 
   body.innerHTML = html;
+
+  // Inject company names + live prices for all history pick tickers
+  const _histTickers = [...document.querySelectorAll('#picks-body [data-name-ticker]')]
+    .map(el => el.getAttribute('data-name-ticker')).filter(Boolean);
+  if (_histTickers.length) {
+    _loadNames(_histTickers);
+    _loadAlertPrices(_histTickers);
+  }
 }
 
 function renderPickCard(p, idx = 0) {
@@ -3965,7 +3993,7 @@ function renderPickCard(p, idx = 0) {
     <div class="pick-card${cardCls}" style="animation-delay:${idx * 55}ms">
       <div class="pick-top">
         <div class="pick-ticker-wrap">
-          <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}
+          <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}<span data-live-price-ticker="${sym}" style="font-size:11px;color:var(--hint);font-weight:600;margin-left:4px"></span>
         </div>
         <div style="font-size:9.5px;color:var(--hint);font-weight:500;margin-top:1px;line-height:1.2" data-name-ticker="${sym}"></div>
         <span class="type-tag ${tagCls}">${tagTxt}</span>
@@ -3986,8 +4014,15 @@ function renderPickCard(p, idx = 0) {
       </div>
       <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
       ${conv ? `<div style="margin:6px 0 4px;position:relative;z-index:1"><span class="conv-tag ${convCls}">${convIcon} ${p.conviction}</span></div>` : ''}
-      ${p.thesis || p.reason ? `<div class="pick-thesis">${esc(p.thesis || p.reason)}</div>` : ''}
-      ${(p.theme || p.edge) ? `<div class="pick-theme-row">${p.theme ? `<span class="theme-chip">#${p.theme.replace(/[\s\-]+/g,'').replace(/(?:^|\s)\S/g,c=>c.toUpperCase())}</span>` : ''}${p.edge ? `<span class="pick-edge">${p.edge}</span>` : ''}</div>` : ''}
+      ${(p.thesis || p.reason || p.theme || p.edge) ? `
+        <button class="pick-thesis-toggle" onclick="togglePickThesis(this)" aria-label="Toggle analysis">
+          <span>Analysis</span>
+          <span class="pick-thesis-chevron">▾</span>
+        </button>
+        <div class="pick-thesis-body">
+          ${p.thesis || p.reason ? `<div class="pick-thesis">${esc(p.thesis || p.reason)}</div>` : ''}
+          ${(p.theme || p.edge) ? `<div class="pick-theme-row">${p.theme ? `<span class="theme-chip">#${p.theme.replace(/[\s\-]+/g,'').replace(/(?:^|\s)\S/g,c=>c.toUpperCase())}</span>` : ''}${p.edge ? `<span class="pick-edge">${p.edge}</span>` : ''}</div>` : ''}
+        </div>` : ''}
       <div class="pick-actions">
         <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
         <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
@@ -3997,6 +4032,15 @@ function renderPickCard(p, idx = 0) {
       </div>
     </div>
   </div>`;
+}
+
+function togglePickThesis(btn) {
+  const body    = btn.nextElementSibling;
+  const chevron = btn.querySelector('.pick-thesis-chevron');
+  const isOpen  = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  chevron.classList.toggle('open', !isOpen);
+  tg.HapticFeedback?.selectionChanged();
 }
 
 function toggleSection(id) {
@@ -4212,10 +4256,13 @@ function renderPicks(filter) {
   // Wire swipe-left-to-watch on each pick card
   _attachPickSwipeHandlers();
 
-  // Inject company names for all pick tickers
+  // Inject company names and live prices for all pick tickers
   const _pickTickers = [...document.querySelectorAll('#picks-body [data-name-ticker]')]
     .map(el => el.getAttribute('data-name-ticker'));
-  if (_pickTickers.length) _loadNames(_pickTickers);
+  if (_pickTickers.length) {
+    _loadNames(_pickTickers);
+    _loadAlertPrices(_pickTickers);
+  }
 }
 
 function _attachPickSwipeHandlers() {
@@ -7774,6 +7821,7 @@ function _tgHtmlToDisplay(html) {
   // Telegram supports <b>,<i>,<u>,<s>,<code>,<pre>,<a href>,<tg-spoiler>
   // Pass through safe tags, neutralise anything else
   return html
+    .replace(/\n/g, '<br>')
     .replace(/<tg-spoiler>([\s\S]*?)<\/tg-spoiler>/g, '<span style="background:var(--border);border-radius:4px;padding:0 4px;color:transparent;filter:blur(4px);cursor:pointer" onclick="this.style.filter=\'none\';this.style.color=\'var(--text)\';this.style.background=\'transparent\'">$1</span>')
     .replace(/<pre>([\s\S]*?)<\/pre>/g, '<pre style="background:rgba(0,0,0,.3);border-radius:10px;padding:12px 14px;font-size:12px;overflow-x:auto;white-space:pre-wrap;margin:8px 0;border:1px solid var(--border)">$1</pre>')
     .replace(/<code>([\s\S]*?)<\/code>/g, '<code style="background:rgba(79,142,247,.12);border-radius:5px;padding:2px 6px;font-size:12.5px;color:var(--accent);font-family:ui-monospace,monospace">$1</code>');
@@ -7803,15 +7851,172 @@ function helpShowResult(cmd, resultHtml) {
   rp.scrollTop = 0;
 }
 
+// ── /prices command — structured card view ────────────────────────────────────
+function _renderPricesCards(prices) {
+  if (!prices || !prices.length) {
+    return `<div style="text-align:center;padding:40px 0;color:var(--hint)">
+      <div style="font-size:32px;margin-bottom:10px">📊</div>
+      <div style="font-size:14px">No picks available — run /today first</div>
+    </div>`;
+  }
+
+  const SECTIONS = {
+    st_picks:    { label: '⚡ Short-Term Stocks', items: [] },
+    lt_picks:    { label: '🏛 Long-Term Stocks',  items: [] },
+    crypto:      { label: '🪙 Crypto',            items: [] },
+    etf_picks:   { label: '🗂 ETFs',              items: [] },
+    commodities: { label: '🛢 Commodities',        items: [] },
+  };
+
+  for (const p of prices) {
+    const key = p.type || 'st_picks';
+    if (SECTIONS[key]) SECTIONS[key].items.push(p);
+    else SECTIONS.st_picks.items.push(p);
+  }
+
+  let html = '';
+  for (const sec of Object.values(SECTIONS)) {
+    if (!sec.items.length) continue;
+    html += `<div style="font-size:10px;font-weight:700;color:var(--hint);letter-spacing:.08em;text-transform:uppercase;margin:14px 0 6px">${sec.label}</div>`;
+    html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:4px">`;
+    for (const p of sec.items) {
+      const pct      = p.pct;
+      const hasLive  = p.live != null;
+      const pctColor = pct == null ? 'var(--hint)' : pct >= 0 ? 'var(--green)' : 'var(--red)';
+      const pctSign  = pct != null && pct >= 0 ? '+' : '';
+      const pctTxt   = pct != null ? `${pctSign}${pct.toFixed(1)}%` : '—';
+      const liveColor= pct == null ? 'var(--text)' : pct >= 0 ? 'var(--green)' : 'var(--red)';
+      const statusBadge = pct == null ? '' :
+        pct >= 5   ? `<span style="font-size:10px;font-weight:700;color:var(--green);background:rgba(0,212,170,.12);padding:2px 7px;border-radius:6px;white-space:nowrap">🎯 Running</span>` :
+        pct <= -3  ? `<span style="font-size:10px;font-weight:700;color:var(--red);background:rgba(255,90,90,.12);padding:2px 7px;border-radius:6px;white-space:nowrap">⚠️ Weak</span>` :
+                     `<span style="font-size:10px;font-weight:700;color:var(--hint);background:rgba(255,255,255,.06);padding:2px 7px;border-radius:6px;white-space:nowrap">Tracking</span>`;
+      html += `<div class="prices-row" onclick="openChart('${esc(p.ticker)}','','','','')">
+        <div>
+          <div class="prices-ticker">${esc(p.ticker)}</div>
+          ${p.entry ? `<div class="prices-entry">Entry $${fmtPrice(p.entry)}</div>` : ''}
+        </div>
+        <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+          <div class="prices-live" style="color:${liveColor}">${hasLive ? '$' + fmtPrice(p.live) : '—'}</div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <div class="prices-pct" style="color:${pctColor}">${pctTxt}</div>
+            ${statusBadge}
+          </div>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `<div style="font-size:11px;color:var(--hint);text-align:center;padding:12px 0 4px">Live vs entry · tap a row to view chart</div>`;
+  return html;
+}
+
+// ── Commands that need a user-typed parameter before running ─────────────────
+const _HELP_INPUT_CMDS = {
+  '/ask':          { ph: 'Ask anything — market questions, portfolio advice…',     btn: '💬 Ask' },
+  '/explain':      { ph: 'Ticker or concept (e.g. NVDA, momentum, RSI)…',         btn: '🔍 Explain' },
+  '/define':       { ph: 'Financial term (e.g. MACD, P/E ratio, stop loss)…',     btn: '📖 Define' },
+  '/chart':        { ph: 'Ticker (e.g. AAPL, BTC)…',                              btn: '📊 Chart' },
+  '/compare':      { ph: 'Two tickers separated by space (e.g. AAPL NVDA)…',      btn: '⚖️ Compare' },
+  '/alert':        { ph: 'TICKER PRICE  e.g. NVDA 150  or  BTC above 70000…',     btn: '🔔 Set Alert' },
+  '/track':        { ph: 'Ticker to add to watchlist (e.g. NVDA)…',               btn: '📌 Track' },
+  '/untrack':      { ph: 'Ticker to remove from watchlist (e.g. NVDA)…',          btn: '🗑 Untrack' },
+  '/note':         { ph: 'TICKER your note  e.g. AAPL watching $185 support…',    btn: '📝 Save Note' },
+  '/updatestop':   { ph: 'TICKER PRICE  e.g. NVDA 138.50  or  NVDA breakeven…',   btn: '🛡 Update Stop' },
+  '/updatetarget': { ph: 'TICKER PRICE  e.g. NVDA 200…',                          btn: '🎯 Update Target' },
+  '/size':         { ph: 'Ticker (e.g. NVDA)…',                                   btn: '💰 Calculate' },
+  '/trim':         { ph: 'TICKER [SHARES]  e.g. NVDA  or  NVDA 10…',              btn: '✂️ Trim' },
+  '/add':          { ph: 'TICKER PRICE SHARES  e.g. NVDA 138.50 10…',             btn: '➕ Add Shares' },
+  '/pause':        { ph: 'Ticker to mute nudges for (e.g. NVDA)…',               btn: '🔇 Pause' },
+  '/since':        { ph: 'Date or period  e.g. Jan 1  or  30d…',                  btn: '📅 Show P&L' },
+  '/import':       { ph: 'Paste CSV row: TICKER,BUY,DATE,PRICE,SHARES…',          btn: '📥 Import' },
+};
+
 async function runHelpCmd(cmd, desc) {
   tg.HapticFeedback?.impactOccurred('medium');
 
-  // Show loading state inline
+  // ── Commands that navigate to a native miniapp tab (no bot round-trip) ──────
+  if (cmd === '/bought') {
+    closeOverlay('help-overlay');
+    setTimeout(() => openAddPosition(), 250);
+    return;
+  }
+  if (cmd === '/sold' || cmd === '/positions' || cmd === '/portfolio') {
+    closeOverlay('help-overlay');
+    setTimeout(() => gotoTab('portfolio'), 250);
+    return;
+  }
+  if (cmd === '/history') {
+    closeOverlay('help-overlay');
+    setTimeout(() => openHistorySheet(), 250);
+    return;
+  }
+  if (cmd === '/watchlist' || cmd === '/alerts') {
+    closeOverlay('help-overlay');
+    setTimeout(() => gotoTab('watchlist'), 250);
+    return;
+  }
+  if (cmd === '/settings' || cmd === '/set_risk' || cmd === '/set_budget' || cmd === '/set_thresholds') {
+    closeOverlay('help-overlay');
+    setTimeout(() => gotoTab('settings'), 250);
+    return;
+  }
+
+  // ── /prices: render structured card view instead of raw bot text ───────────
+  if (cmd === '/prices') {
+    helpShowResult(cmd,
+      `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                   padding:48px 0;gap:14px;color:var(--hint)">
+         <div class="spinner"></div>
+         <div style="font-size:13px">Loading live prices…</div>
+       </div>`
+    );
+    try {
+      const res = await api('/api/miniapp/live_prices');
+      livePricesCache = res.prices || [];
+      helpShowResult(cmd, _renderPricesCards(livePricesCache));
+    } catch(e) {
+      helpShowResult(cmd,
+        `<div style="text-align:center;padding:40px 0;color:var(--red)">
+           <div style="font-size:32px;margin-bottom:10px">⚠️</div>
+           <div style="font-size:14px">${e.message || 'Could not load prices'}</div>
+         </div>`
+      );
+    }
+    return;
+  }
+
+  // ── Commands that need a typed param — show inline input form ──────────────
+  if (_HELP_INPUT_CMDS[cmd]) {
+    const cfg = _HELP_INPUT_CMDS[cmd];
+    helpShowResult(cmd,
+      `<div style="padding:4px 0 16px">
+         <div style="font-size:13px;color:var(--hint);margin-bottom:14px;line-height:1.55">${esc(desc)}</div>
+         <textarea id="help-input-field" rows="2"
+           style="width:100%;box-sizing:border-box;padding:12px 14px;
+                  background:var(--input-bg,rgba(255,255,255,.06));border:1px solid var(--border);
+                  border-radius:12px;color:var(--text);font-size:14px;resize:none;
+                  outline:none;font-family:inherit;line-height:1.4"
+           placeholder="${cfg.ph}"
+           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();_submitHelpInput('${cmd}');}"></textarea>
+         <button onclick="_submitHelpInput('${cmd}')"
+           style="margin-top:10px;width:100%;padding:14px;background:var(--accent);
+                  color:#fff;border:none;border-radius:12px;font-size:15px;
+                  font-weight:700;cursor:pointer;letter-spacing:-.2px">
+           ${cfg.btn}
+         </button>
+       </div>`
+    );
+    setTimeout(() => document.getElementById('help-input-field')?.focus(), 300);
+    return;
+  }
+
+  // ── Generic: send to bot and show reply inline ─────────────────────────────
   helpShowResult(cmd,
     `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
                  padding:48px 0;gap:14px;color:var(--hint)">
        <div class="spinner"></div>
-       <div style="font-size:13px">Running ${cmd}…</div>
+       <div style="font-size:13px">Running ${esc(cmd)}…</div>
      </div>`
   );
 
@@ -7824,6 +8029,59 @@ async function runHelpCmd(cmd, desc) {
            <div style="font-size:36px;margin-bottom:12px">📨</div>
            <div style="font-size:15px;font-weight:700;margin-bottom:8px">Sent to Telegram</div>
            <div style="font-size:13px;color:var(--hint);line-height:1.5">${res.message || 'This command takes a moment — result delivered to your chat.'}</div>
+         </div>`
+      );
+    } else if (res.reply) {
+      helpShowResult(cmd, _tgHtmlToDisplay(res.reply));
+    } else {
+      helpShowResult(cmd,
+        `<div style="text-align:center;padding:40px 0;color:var(--hint)">
+           <div style="font-size:32px;margin-bottom:10px">✅</div>
+           <div style="font-size:14px">Done</div>
+         </div>`
+      );
+    }
+  } catch(e) {
+    helpShowResult(cmd,
+      `<div style="text-align:center;padding:40px 0;color:var(--red)">
+         <div style="font-size:32px;margin-bottom:10px">⚠️</div>
+         <div style="font-size:14px">${e.message || 'Something went wrong'}</div>
+       </div>`
+    );
+  }
+}
+
+async function _submitHelpInput(cmd) {
+  const field = document.getElementById('help-input-field');
+  const val   = (field?.value || '').trim();
+  if (!val) { field?.focus(); return; }
+  tg.HapticFeedback?.impactOccurred('light');
+
+  // /chart → open native chart overlay instead of bot round-trip
+  if (cmd === '/chart') {
+    const ticker = val.toUpperCase().split(/\s+/)[0];
+    closeOverlay('help-overlay');
+    setTimeout(() => openChart(ticker, '', '', '', ''), 200);
+    return;
+  }
+
+  // All others: append value and run via bot
+  const fullCmd = `${cmd} ${val}`;
+  helpShowResult(cmd,
+    `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                 padding:48px 0;gap:14px;color:var(--hint)">
+       <div class="spinner"></div>
+       <div style="font-size:13px">Running ${esc(cmd)}…</div>
+     </div>`
+  );
+  try {
+    const res = await api('/api/miniapp/run_command', 'POST', { command: fullCmd });
+    if (res.async) {
+      helpShowResult(cmd,
+        `<div style="text-align:center;padding:40px 0">
+           <div style="font-size:36px;margin-bottom:12px">📨</div>
+           <div style="font-size:15px;font-weight:700;margin-bottom:8px">Sent to Telegram</div>
+           <div style="font-size:13px;color:var(--hint);line-height:1.5">Result delivered to your chat.</div>
          </div>`
       );
     } else if (res.reply) {

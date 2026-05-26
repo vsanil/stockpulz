@@ -324,7 +324,9 @@ def format_daily_message(picks: dict, config: dict,
         parts = [_esc(_clean_thesis(thesis))] if thesis else []
         if catalyst:
             parts.append(f"🎯 {_esc(catalyst)}")
-        return "  <i>" + "  ·  ".join(parts) + "</i>" if parts else ""
+        combined = "  ·  ".join(parts)
+        # Wrap in spoiler so the long analysis is hidden by default — tap to reveal
+        return f"  <tg-spoiler>{combined}</tg-spoiler>" if combined else ""
 
     def _theme_tag(s):
         """Return a styled inline theme hashtag, e.g. #AIInfrastructure"""
@@ -356,7 +358,7 @@ def format_daily_message(picks: dict, config: dict,
         if tl: row += f"\n{tl}"
         edge = s.get("edge", "")
         if edge:
-            row += f"\n  <i>Edge: {_esc(edge)}</i>"
+            row += f"\n  <tg-spoiler>Edge: {_esc(edge)}</tg-spoiler>"
         row += _iv_warn(s)
         ew = _entry_window(e, stop, budget=config.get("stock_budget"), is_long_term=False, is_crypto=False)
         if ew: row += f"\n{ew}"
@@ -373,7 +375,7 @@ def format_daily_message(picks: dict, config: dict,
         if tl: row += f"\n{tl}"
         edge = s.get("edge", "")
         if edge:
-            row += f"\n  <i>Edge: {_esc(edge)}</i>"
+            row += f"\n  <tg-spoiler>Edge: {_esc(edge)}</tg-spoiler>"
         ew = _entry_window(e, None, budget=config.get("stock_budget"), is_long_term=True, is_crypto=False)
         if ew: row += f"\n{ew}"
         return row
@@ -439,7 +441,7 @@ def format_daily_message(picks: dict, config: dict,
         for s in st_picks:
             lines += [f"<blockquote expandable>{_row_st(s)}</blockquote>"]
     elif show_st:
-        _st_skip = _closed_lbl if market_closed else f"skipped — candidates didn't show enough confirming signals (RSI, volume, momentum) for a {risk_lbl} entry today"
+        _st_skip = _closed_lbl if market_closed else "no qualifying setup today"
         lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· {_st_skip}</i>"]
 
     if lt_picks:
@@ -447,7 +449,7 @@ def format_daily_message(picks: dict, config: dict,
         for s in lt_picks:
             lines += [f"<blockquote expandable>{_row_lt(s)}</blockquote>"]
     elif show_lt:
-        _lt_skip = _closed_lbl if market_closed else f"skipped — no stock cleared the fundamental quality bar your {risk_lbl} profile requires (2+ of: analyst buy, EPS beats, PE below median, high institutional ownership)"
+        _lt_skip = _closed_lbl if market_closed else "no stock cleared the quality bar today"
         lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
 
     if cst_picks:
@@ -455,14 +457,14 @@ def format_daily_message(picks: dict, config: dict,
         for c in cst_picks:
             lines += [f"<blockquote expandable>{_row_crypto(c)}</blockquote>"]
     elif show_crypto:
-        lines += ["", "🪙 <b>CRYPTO</b>  <i>· skipped — no coin showed strong 24h momentum with healthy RSI and volume confirmation</i>"]
+        lines += ["", "🪙 <b>CRYPTO</b>  <i>· no setup today</i>"]
 
     if etf_picks:
         lines += ["", "📦 <b>ETFs</b>"]
         for e in etf_picks:
             lines += [f"<blockquote expandable>{_row_etf(e)}</blockquote>"]
     else:
-        _etf_skip = _closed_lbl if market_closed else "skipped — no sector ETF aligned with the current market regime and volume trend"
+        _etf_skip = _closed_lbl if market_closed else "no alignment with current regime"
         lines += ["", f"📦 <b>ETFs</b>  <i>· {_etf_skip}</i>"]
 
     if comm_picks:
@@ -470,7 +472,7 @@ def format_daily_message(picks: dict, config: dict,
         for c in comm_picks:
             lines += [f"<blockquote expandable>{_row_commodity(c)}</blockquote>"]
     else:
-        _comm_skip = _closed_lbl if market_closed else "skipped — no commodity showed 1-month momentum + healthy RSI + macro catalyst together"
+        _comm_skip = _closed_lbl if market_closed else "no setup today"
         lines += ["", f"🛢 <b>COMMODITIES</b>  <i>· {_comm_skip}</i>"]
 
     if options_plays:
@@ -478,8 +480,7 @@ def format_daily_message(picks: dict, config: dict,
         for o in options_plays:
             lines += [f"<blockquote expandable>{_row_options(o)}</blockquote>"]
     elif st_picks:
-        # Only show when ST stocks exist but none hit conviction 4+
-        lines += ["", "🎯 <b>OPTIONS</b>  <i>· skipped — options plays need a stock pick with conviction ★★★★+; today's picks didn't reach that bar</i>"]
+        lines += ["", "🎯 <b>OPTIONS</b>  <i>· no qualifying conviction today</i>"]
 
     # ── Watchlist: hit callout + "On Your Radar" section ─────────────────────
     if watchlist:
