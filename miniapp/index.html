@@ -4546,6 +4546,13 @@ function _reRenderPositions() {
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   while (tmp.firstChild) parent.insertBefore(tmp.firstChild, addBtn);
+
+  // Refresh live prices and company names on the newly rendered cards
+  const tickers = sorted.map(p => p.ticker || p.symbol).filter(Boolean);
+  if (tickers.length) {
+    _loadNames(tickers);
+    _loadAlertPrices(tickers);
+  }
 }
 
 async function loadPortfolio(forceRefresh = false) {
@@ -4563,9 +4570,14 @@ async function loadPortfolio(forceRefresh = false) {
     _body.style.display = 'block';
     _body.innerHTML = _rc.html;
     _renderPnlChart(_rc.pnlData);   // canvas must be re-drawn after innerHTML swap
+    _loadNames(positionsCache.map(p => p.ticker)); // re-inject names after innerHTML swap
     return;
   }
 
+  if (forceRefresh) {
+    historySheetLoaded = false;
+    dividendsSheetLoaded = false;
+  }
   document.getElementById('port-spinner').style.display = 'block';
   const body = document.getElementById('port-body');
   body.style.display = 'none';
@@ -4764,6 +4776,23 @@ async function loadPortfolio(forceRefresh = false) {
         if (range > 0) targetProgress = Math.min(100, Math.max(0, (move / range) * 100));
       }
 
+      // Per-position health badge (matches _reRenderPositions logic)
+      let _hScore = 100;
+      if (!p.stop_loss)  _hScore -= 30;
+      if (p.stop_loss && p.current_price) {
+        const _sd = (parseFloat(p.current_price) - parseFloat(p.stop_loss)) / parseFloat(p.current_price);
+        if (_sd < 0)         _hScore -= 40;
+        else if (_sd < 0.02) _hScore -= 25;
+        else if (_sd < 0.05) _hScore -= 10;
+      }
+      if ((p.days_held || 0) > (p.timeframe === 'long_term' ? 547 : 30) && targetProgress < 40) _hScore -= 20;
+      if (pct < -8) _hScore -= 15;
+      _hScore = Math.max(0, Math.min(100, _hScore));
+      const _hDot   = _hScore >= 70 ? '🟢' : _hScore >= 40 ? '🟡' : '🔴';
+      const _hTip   = _hScore >= 70 ? 'Healthy' : _hScore >= 40 ? 'Watch' : 'At Risk';
+      const _hColor = _hScore >= 70 ? 'var(--green)' : _hScore >= 40 ? '#f5a623' : 'var(--red)';
+      const _hBadge = `<span style="font-size:10px;font-weight:700;color:${_hColor};background:rgba(0,0,0,0.18);padding:2px 6px;border-radius:8px;margin-left:4px;white-space:nowrap">${_hDot} ${_hTip}</span>`;
+
       // Shared arg string for openPositionDetail calls on this card
       const _dA = `'${sym}',${p.entry_price ?? null},${p.current_price ?? null},${p.stop_loss ?? null},${p.target_price ?? null}`;
       const _stopLine = p.stop_loss
@@ -4783,7 +4812,8 @@ async function loadPortfolio(forceRefresh = false) {
         <div class="pos-main">
           <div class="pos-avatar" style="background:${_avatarBg(sym,aType)}">${init}</div>
           <div class="pos-body">
-            <div class="pos-sym">${sym}${p.timeframe ? ` <span class="pos-tf-badge pos-tf-${p.timeframe === 'short_term' ? 'st' : 'lt'}">${p.timeframe === 'short_term' ? 'ST' : 'LT'}</span>` : ''}${!p.stop_loss ? ` <span class="pos-nostop" onclick="openPositionDetail(${_dA},'stop')">⚠️ No stop</span>` : ''}</div>
+            <div class="pos-sym">${sym}${p.timeframe ? ` <span class="pos-tf-badge pos-tf-${p.timeframe === 'short_term' ? 'st' : 'lt'}">${p.timeframe === 'short_term' ? 'ST' : 'LT'}</span>` : ''}${_hBadge}${!p.stop_loss ? ` <span class="pos-nostop" onclick="openPositionDetail(${_dA},'stop')">⚠️ No stop</span>` : ''}</div>
+            <div data-name-ticker="${sym}" style="font-size:10px;color:var(--hint);margin-top:1px;margin-bottom:1px;font-weight:400;line-height:1.2"></div>
             <div class="pos-sub"><span class="pos-level-tap" onclick="openPositionDetail(${_dA},'entry')">${entry}</span>${cur ? ` → ${cur}` : ''}</div>
             ${_levelsRow}
             ${p.target_price ? `<div class="target-bar"><div class="target-fill" style="width:${targetProgress}%"></div></div><div style="font-size:10px;color:var(--hint);margin-top:3px;opacity:.7">${Math.round(targetProgress)}% to target</div>` : ''}
@@ -4840,7 +4870,8 @@ async function loadPortfolio(forceRefresh = false) {
     body.innerHTML = html;
     _portCache.real.html = html;   // store for instant cache-hit re-render
     _renderPnlChart(pnlData);
-    _loadNames(positionsCache.map(p => p.ticker)); // fire-and-forget company names
+    _loadNames(positionsCache.map(p => p.ticker));      // fire-and-forget company names
+    _loadAlertPrices(positionsCache.map(p => p.ticker)); // prime live-price cache
     _loadPortfolioDividends(); // fire-and-forget dividend income
     _loadTaxLots();            // fire-and-forget tax lot summary
   } catch (e) {
@@ -5524,7 +5555,18 @@ async function savePositionDetail() {
 
 async function removePosition() {
   if (!_detailTicker) return;
-  if (!confirm(`Remove ${_detailTicker} from your portfolio? This won't be logged as a trade.`)) return;
+  // window.confirm is blocked in Telegram WebView — use tg.showPopup
+  const confirmed = await new Promise(resolve => {
+    tg.showPopup({
+      title:   `Remove ${_detailTicker}?`,
+      message: "This won't be logged as a trade.",
+      buttons: [
+        { id: 'yes', type: 'destructive', text: 'Remove' },
+        { id: 'no',  type: 'cancel' },
+      ],
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
   const btn = document.getElementById('posdetail-remove-btn');
   btn.disabled = true;
   btn.textContent = '⏳ Removing…';
@@ -5546,6 +5588,7 @@ async function removePosition() {
 // ── Watchlist alert sheet ────────────────────────────────────────────────────
 let _alertTicker = null;
 let _alertCurrentPrice = null;
+let _watchAlertsData = [];   // kept in sync by loadWatchlist(); used to pre-fill openWatchAlert()
 
 function _alertSetPct(pct) {
   if (!_alertCurrentPrice) return;
@@ -5583,15 +5626,18 @@ async function openWatchAlert(ticker) {
   const priceEl = document.getElementById('wprice-' + ticker);
   const liveText = priceEl ? priceEl.textContent.replace(/[^0-9.]/g, '') : '';
   _alertCurrentPrice = liveText ? parseFloat(liveText) : null;
-  document.getElementById('watchalert-price').value = '';   // leave blank so user sets their target
+  // Pre-fill with existing alert price if one is already set for this ticker
+  const _existingAlert = _watchAlertsData.find(a => a.ticker === ticker);
+  const _priceInput = document.getElementById('watchalert-price');
+  _priceInput.value = _existingAlert ? String(_existingAlert.target) : '';
   document.getElementById('watchalert-summary').textContent =
-    _alertCurrentPrice ? `Now: $${_alertCurrentPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}  ·  enter your target price below` : '';
+    _alertCurrentPrice ? `Now: $${_alertCurrentPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}  ·  ${_existingAlert ? 'current alert shown — update below' : 'enter your target price below'}` : '';
   document.getElementById('watchalert-hint').textContent = '';
   // direction is always auto — no reset needed
   const recurCb = document.getElementById('watchalert-recurring');
-  if (recurCb) recurCb.checked = false;
+  if (recurCb) recurCb.checked = _existingAlert?.recurring || false;
   const btn = document.getElementById('watchalert-save-btn');
-  btn.disabled = false; btn.textContent = 'Set Alert';
+  btn.disabled = false; btn.textContent = _existingAlert ? 'Update Alert' : 'Set Alert';
   openOverlay('watchalert-overlay');
   setTimeout(() => document.getElementById('watchalert-price')?.focus(), 220);
 }
@@ -5613,6 +5659,7 @@ async function saveWatchAlert() {
       recurring,
     });
     tg.HapticFeedback?.notificationOccurred('success');
+    showToast(`🔔 Alert set for ${_alertTicker}`, 'success');
     closeOverlay('watchalert-overlay');
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Set Alert';
@@ -6075,10 +6122,11 @@ async function submitAlert() {
     // Reset ticker readonly state
     const ti = document.getElementById('alert-ticker-input');
     if (ti) ti.readOnly = false;
+    const _wasEditing = !!_editingAlert;
     _editingAlert = null;
     closeOverlay('alert-overlay');
     loadAlerts();
-    showToast(_editingAlert ? `🔔 Alert updated for ${ticker}` : `🔔 Alert set for ${ticker}`);
+    showToast(_wasEditing ? `🔔 Alert updated for ${ticker}` : `🔔 Alert set for ${ticker}`);
   } catch (e) {
     btn.disabled    = false;
     btn.textContent = _editingAlert ? 'Update Alert' : 'Set Alert';
@@ -6569,7 +6617,8 @@ async function loadWatchlist() {
     ]);
     const tickers         = d.tickers     || [];
     const assetTypes      = d.asset_types || {};
-    const alertTickers    = new Set((alertsD.alerts || []).map(a => a.ticker));
+    _watchAlertsData      = alertsD.alerts || [];   // cache for openWatchAlert() pre-fill
+    const alertTickers    = new Set(_watchAlertsData.map(a => a.ticker));
     // Build a map of ticker → most-recent triggered entry
     const triggeredMap = {};
     for (const h of (alertsD.triggered_history || [])) {
@@ -6641,10 +6690,15 @@ async function renderWatchlist(tickers, alertTickers = new Set(), assetTypesMap 
     <div id="watch-list">`;
 
   if (!tickers.length) {
-    html += `<div style="text-align:center;padding:40px 0;opacity:.5">
-      <div style="font-size:32px;margin-bottom:8px">👁</div>
-      <div style="font-size:14px">No tickers yet</div>
-      <div style="font-size:12px;margin-top:4px">Add any stock or crypto to watch</div>
+    html += `<div style="text-align:center;padding:48px 20px 40px;display:flex;flex-direction:column;align-items:center;gap:8px">
+      <div style="font-size:40px;margin-bottom:4px">📋</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Your watchlist is empty</div>
+      <div style="font-size:13px;color:var(--hint);max-width:220px;line-height:1.5">Type any stock or crypto ticker above and tap <strong>Add</strong> to start tracking prices</div>
+      <button onclick="document.getElementById('watch-add-input')?.focus()"
+              style="margin-top:8px;padding:10px 24px;border-radius:12px;border:none;
+                     background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer">
+        + Add your first ticker
+      </button>
     </div>`;
   } else {
     html += `<div id="watch-rows">`;
@@ -6957,7 +7011,18 @@ async function addToWatchlist() {
 }
 
 async function removeFromWatchlist(ticker) {
-  if (!confirm(`Remove ${ticker} from your watchlist?`)) return;
+  // window.confirm is blocked in Telegram WebView — use tg.showPopup
+  const confirmed = await new Promise(resolve => {
+    tg.showPopup({
+      title:   `Remove ${ticker}?`,
+      message: 'Remove from your watchlist?',
+      buttons: [
+        { id: 'yes', type: 'destructive', text: 'Remove' },
+        { id: 'no',  type: 'cancel' },
+      ],
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
   tg.HapticFeedback?.impactOccurred('light');
   try {
     await api('/api/miniapp/watchlist/remove', 'POST', { ticker });
@@ -8146,7 +8211,7 @@ async function submitFeedback() {
     btn.disabled    = false;
     btn.textContent = 'Send';
     tg.HapticFeedback?.notificationOccurred('error');
-    alert('Could not send feedback — try again.');
+    showToast('Could not send feedback — try again.', 'error');
   }
 }
 
@@ -8164,12 +8229,14 @@ async function shareApp() {
       await navigator.clipboard.writeText(shareText);
       showToast('🔗 Invite link copied!');
     } else {
-      // Last resort
-      prompt('Copy your invite link:', shareUrl);
+      // Last resort — copy to clipboard silently
+      navigator.clipboard?.writeText(shareUrl)
+        .then(() => showToast('🔗 Invite link copied!'))
+        .catch(() => showToast(shareUrl));
     }
   } catch (e) {
     if (e.name !== 'AbortError') {
-      tg.showPopup?.({ message: 'Could not generate share link — try again.' });
+      showToast('Could not generate share link — try again.', 'error');
     }
   }
 }
@@ -8515,10 +8582,11 @@ async function sellPaperPosition(ticker) {
   // Map tab name → reload function
   function _ptrReload() {
     switch (curTab) {
-      case 'picks':       picksCache = null; picksLoadedAt = null;
+      case 'picks':       picksCache = null; picksLoadedAt = null; marketsCache = null;
                           document.getElementById('picks-spinner').style.display = 'block';
                           document.getElementById('picks-body').style.display    = 'none';
                           return loadPicks();
+      case 'watchlist':   loadedTabs['watchlist'] = false; return loadWatchlist();
       case 'portfolio':   return loadPortfolio();
       case 'performance': return loadPerformance();
       case 'settings':    return loadSettings();

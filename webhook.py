@@ -1681,35 +1681,18 @@ def _fast_quote(ticker: str, crypto_set) -> tuple[float | None, float | None]:
 
 @app.route("/api/miniapp/names")
 def miniapp_names():
-    """Batch company name lookup. ?tickers=AMZN,COST,FE  → {AMZN: "Amazon.com Inc", ...}"""
+    """Batch company name lookup. ?tickers=AMZN,BNB,FE  → {AMZN: "Amazon.com", BNB: "Binance Coin", ...}
+    Uses market_data.get_company_names which handles crypto via static dict (instant)
+    and stocks via yfinance with a process-level cache (no repeated HTTP calls).
+    """
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     raw     = request.args.get("tickers", "")
     tickers = [t.strip().upper() for t in raw.split(",") if t.strip()][:25]
     if not tickers: return jsonify({}), 200
 
-    result, missing = {}, []
-    for t in tickers:
-        hit = _quote_cache.get(f"__name_{t}")
-        if hit and time.time() - hit["ts"] < 3600:
-            result[t] = hit["v"]
-        else:
-            missing.append(t)
-
-    if missing:
-        import yfinance as _yf_n
-        import concurrent.futures as _cf_n
-        def _fetch_name(sym):
-            try:
-                n = (_yf_n.Ticker(sym).info or {}).get("shortName") or ""
-                _quote_cache[f"__name_{sym}"] = {"v": n, "ts": time.time()}
-                return sym, n
-            except Exception:
-                return sym, ""
-        with _cf_n.ThreadPoolExecutor(max_workers=6) as pool:
-            for sym, name in pool.map(_fetch_name, missing):
-                result[sym] = name
-
+    from market_data import get_company_names
+    result = get_company_names(tickers)
     return jsonify(result)
 
 
@@ -1738,6 +1721,32 @@ def miniapp_quote():
                 return n
             except Exception:
                 return ""
+
+        # Static name→ticker fast path — works offline, covers most common inputs
+        _COMMON_NAMES: dict[str, str] = {
+            "TESLA": "TSLA", "APPLE": "AAPL", "AMAZON": "AMZN", "GOOGLE": "GOOGL",
+            "ALPHABET": "GOOGL", "MICROSOFT": "MSFT", "META": "META", "FACEBOOK": "META",
+            "NVIDIA": "NVDA", "NETFLIX": "NFLX", "DISNEY": "DIS", "UBER": "UBER",
+            "LYFT": "LYFT", "COINBASE": "COIN", "PALANTIR": "PLTR", "SNOWFLAKE": "SNOW",
+            "SALESFORCE": "CRM", "SHOPIFY": "SHOP", "SQUARE": "SQ", "BLOCK": "SQ",
+            "TWITTER": "X", "PAYPAL": "PYPL", "ROBINHOOD": "HOOD", "ROBLOX": "RBLX",
+            "AMD": "AMD", "INTEL": "INTC", "QUALCOMM": "QCOM", "BROADCOM": "AVGO",
+            "TSMC": "TSM", "SAMSUNG": "005930.KS", "SONY": "SONY", "TOYOTA": "TM",
+            "ALIBABA": "BABA", "BAIDU": "BIDU", "TENCENT": "TCEHY",
+            "BITCOIN": "BTC", "ETHEREUM": "ETH", "SOLANA": "SOL", "CARDANO": "ADA",
+            "DOGECOIN": "DOGE", "RIPPLE": "XRP", "POLKADOT": "DOT", "AVALANCHE": "AVAX",
+            "CHAINLINK": "LINK", "LITECOIN": "LTC", "BINANCE": "BNB", "UNISWAP": "UNI",
+            "SHIBA": "SHIB", "SHIBAINUTOKEN": "SHIB",
+            "GOLD": "GLD", "SILVER": "SLV", "OIL": "USO", "SPY": "SPY", "QQQ": "QQQ",
+            "JPMORGAN": "JPM", "BANKOFAMERICA": "BAC", "WELLSFARGO": "WFC",
+            "GOLDMAN": "GS", "MORGAN": "MS", "VISA": "V", "MASTERCARD": "MA",
+            "JOHNSON": "JNJ", "PFIZER": "PFE", "MODERNA": "MRNA", "ABBVIE": "ABBV",
+            "EXXON": "XOM", "CHEVRON": "CVX", "BOEING": "BA", "CATERPILLAR": "CAT",
+        }
+        # Normalise: strip spaces so "BANK OF AMERICA" → "BANKOFAMERICA"
+        _normalised = ticker.replace(" ", "").replace(".", "").replace("&", "")
+        if _normalised in _COMMON_NAMES:
+            ticker = _COMMON_NAMES[_normalised]
 
         price, change_pct = _fast_quote(ticker, _ALERT_CRYPTO)
         if price is not None:
