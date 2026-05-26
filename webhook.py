@@ -1357,6 +1357,7 @@ def miniapp_settings_update():
         "risk_profile", "stock_budget", "crypto_budget",
         "stop_loss_pct", "target_gain_pct",
         "quiet_hours_enabled", "quiet_from", "quiet_to",
+        "display_name",
     }
     if not key or key not in _allowed:
         return jsonify({"error": f"key '{key}' not allowed"}), 400
