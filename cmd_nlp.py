@@ -18,7 +18,7 @@ def _explain_pick(query: str) -> str:
     """
     picks = load_picks()
     if not picks:
-        return "📭 No picks for today yet. Check back after 8 AM ET."
+        return "📭 No picks for today yet. Check back after 7 AM ET."
 
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})

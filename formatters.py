@@ -431,7 +431,7 @@ def format_daily_message(picks: dict, config: dict,
     # ── Market closed label (shown once, shared by all equity sections) ─────────
     if market_closed:
         _closed_base = f"🏖️ US markets closed — {closed_reason}" if closed_reason else "🏖️ US markets closed"
-        _closed_lbl  = f"{_closed_base} · fresh picks at 8AM ET on {next_open_label}" if next_open_label else _closed_base
+        _closed_lbl  = f"{_closed_base} · fresh picks at 7AM ET on {next_open_label}" if next_open_label else _closed_base
     else:
         _closed_lbl = ""
 

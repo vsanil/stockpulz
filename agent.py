@@ -348,7 +348,7 @@ MOCK_PICKS = {
 def detect_run_mode(now_et: datetime) -> str:
     """Auto-detect run mode by ET hour/weekday. Override with RUN_MODE env var."""
     forced = os.environ.get("RUN_MODE", "").lower()
-    if forced in ("morning", "confirmation", "weekly", "close_check", "eod_summary", "prescreener", "price_alerts", "week_ahead", "premarket", "digest", "friday_wrap", "macro_alert", "midday_check", "vix_check", "news_check", "pre_earnings", "monthly_commentary", "recap"):
+    if forced in ("morning", "confirmation", "weekly", "close_check", "eod_summary", "prescreener", "price_alerts", "week_ahead", "premarket", "digest", "friday_wrap", "macro_alert", "midday_check", "vix_check", "news_check", "pre_earnings", "monthly_commentary", "recap", "watchdog"):
         return forced
     if now_et.weekday() == 6 and now_et.hour < 14:   # Sunday morning → week ahead briefing
         return "week_ahead"
@@ -3434,6 +3434,45 @@ def run_price_alerts():
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def run_watchdog():
+    """
+    Watchdog — runs at 9:00 AM ET on weekdays.
+    Checks whether the morning run was logged today. If it wasn't, and today is
+    a trading day, sends an admin-only alert so the owner knows picks were missed.
+    """
+    now_et = datetime.now(ET)
+    today  = now_et.date()
+
+    # No alert needed on non-trading days
+    if today.weekday() >= 5 or is_market_holiday(today):
+        print(f"[watchdog] Non-trading day ({today}) — nothing to check.")
+        return
+
+    try:
+        last_run_str = get_config().get("cron_last_morning", "")
+        if last_run_str:
+            last_run_utc = datetime.fromisoformat(last_run_str).replace(tzinfo=pytz.utc)
+            last_run_et  = last_run_utc.astimezone(ET).date()
+            if last_run_et >= today:
+                print(f"[watchdog] Morning run already logged today ({last_run_et}). All good.")
+                return
+        else:
+            last_run_et = None
+
+        # Morning run was not logged for today → alert admin
+        since = f"Last logged run: {last_run_et}" if last_run_et else "No run ever logged"
+        print(f"[watchdog] ⚠️ Morning run NOT detected for {today}. {since}.")
+        _alert(
+            f"⚠️ <b>Missed morning run</b> — picks may not have been sent today ({today.strftime('%b %-d')}).\n"
+            f"{since}\n\n"
+            f"<i>Trigger manually: GitHub Actions → StockPulz Scheduled Runs → "
+            f"Run workflow → run_mode: morning</i>",
+            admin_only=True,
+        )
+    except Exception as exc:
+        print(f"[watchdog] Error during watchdog check: {exc}")
+
+
 def main():
     now_et = datetime.now(ET)
     mode   = detect_run_mode(now_et)
@@ -3483,6 +3522,8 @@ def main():
         run_monthly_pnl_digest()
     elif mode == "recap":
         run_recap()
+    elif mode == "watchdog":
+        run_watchdog()
     else:
         run_confirmation()
 
