@@ -125,3 +125,13 @@ Rules:
 - Does it handle the empty state (no data)?
 - Does it handle the error state (API failure)?
 - Does it work if the user does it twice (idempotency)?
+
+### Loyal users first — every change must be zero-impact on UX
+- This app has active users who trust it for real trading decisions. Any change that degrades their experience — slower loads, spinners where there were none, stale data, layout shifts — is unacceptable regardless of how clean the code is.
+- Before any backend change: verify the API response shape is identical. Never rename, remove, or reorder fields that the frontend consumes.
+- Before any frontend change: ask "does this cause a flash, a re-render, or a spinner that didn't exist before?" If yes, find a way to make it silent (in-place DOM update, background fetch, stale-while-revalidate).
+- Performance improvements must not compromise data freshness. Users watching live positions expect prices to be real-time. A cache that makes the tab feel faster but shows a stale price is worse than a slow load with a correct price.
+- Decouple structure from data: load stored data (positions, picks, watchlist) instantly, then overlay live prices asynchronously. Never block the render on a live API call.
+- Auto-refresh timers must be silent: no spinners, no full re-renders, no innerHTML swaps that reset scroll position. Use targeted DOM updates (getElementById, textContent, style.width).
+- If a background job (refresh, sync, price update) fails, swallow the error silently. Never surface a background failure to the user as an error state.
+- When in doubt: do less. A conservative change that improves load time by 20% with zero UX risk beats an aggressive change that saves 60% but has a 5% chance of a visible flash.

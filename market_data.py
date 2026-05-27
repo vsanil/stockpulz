@@ -12,6 +12,7 @@ Required env vars:
 """
 
 import os
+import time
 import requests
 from datetime import date, timedelta, datetime, timezone
 
@@ -32,6 +33,12 @@ _CRYPTO_SYMBOLS = {
 }
 
 _TIMEOUT = 6  # seconds for all external HTTP calls
+
+# ── Process-level price dedup cache ──────────────────────────────────────────
+# 15-second TTL only — prevents duplicate in-flight requests hitting Alpaca/yfinance
+# at the same moment (e.g. two rapid tab switches). NOT a staleness compromise.
+_PRICE_CACHE: dict = {}   # ticker → {"price": float | None, "ts": float}
+_PRICE_CACHE_TTL = 15     # seconds
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -82,9 +89,16 @@ def get_live_price(ticker: str) -> float | None:
     """Fetch the latest trade price for one ticker (stock or crypto).
 
     Tries Alpaca first; falls back to yfinance.
+    Results are dedup-cached for 15 s to avoid hammering the API on rapid tab switches.
     """
-    ticker    = ticker.upper()
+    ticker = ticker.upper()
+    now    = time.time()
+    hit    = _PRICE_CACHE.get(ticker)
+    if hit and now - hit["ts"] < _PRICE_CACHE_TTL:
+        return hit["price"]
+
     is_crypto = ticker in _CRYPTO_SYMBOLS
+    price: float | None = None
 
     if ALPACA_KEY:
         try:
@@ -99,7 +113,7 @@ def get_live_price(ticker: str) -> float | None:
                     trades = r.json().get("trades", {})
                     t = trades.get(f"{ticker}/USD", {})
                     if t.get("p"):
-                        return round(float(t["p"]), 6)
+                        price = round(float(t["p"]), 6)
             else:
                 r = requests.get(
                     "https://data.alpaca.markets/v2/stocks/trades/latest",
@@ -111,11 +125,15 @@ def get_live_price(ticker: str) -> float | None:
                     trades = r.json().get("trades", {})
                     t = trades.get(ticker, {})
                     if t.get("p"):
-                        return round(float(t["p"]), 4)
+                        price = round(float(t["p"]), 4)
         except Exception:
             pass
 
-    return _yf_price(ticker)
+    if price is None:
+        price = _yf_price(ticker)
+
+    _PRICE_CACHE[ticker] = {"price": price, "ts": now}
+    return price
 
 
 def get_live_prices(tickers: list) -> dict:
@@ -123,14 +141,30 @@ def get_live_prices(tickers: list) -> dict:
 
     Returns {ticker: price} dict — missing tickers are omitted.
     Tries Alpaca batch first; falls back per-ticker via yfinance for any misses.
+    Results are dedup-cached for 15 s; already-cached tickers skip the network call.
     """
     if not tickers:
         return {}
 
     tickers   = [t.upper() for t in tickers]
-    stocks    = [t for t in tickers if t not in _CRYPTO_SYMBOLS]
-    cryptos   = [t for t in tickers if t in _CRYPTO_SYMBOLS]
+    now       = time.time()
+
+    # Serve from dedup cache; only fetch tickers whose cache has expired
     prices: dict = {}
+    to_fetch: list = []
+    for t in tickers:
+        hit = _PRICE_CACHE.get(t)
+        if hit and now - hit["ts"] < _PRICE_CACHE_TTL and hit["price"] is not None:
+            prices[t] = hit["price"]
+        else:
+            to_fetch.append(t)
+
+    if not to_fetch:
+        return prices
+
+    stocks    = [t for t in to_fetch if t not in _CRYPTO_SYMBOLS]
+    cryptos   = [t for t in to_fetch if t in _CRYPTO_SYMBOLS]
+    new_prices: dict = {}
 
     # ── Alpaca batch: stocks ──
     if stocks and ALPACA_KEY:
@@ -145,7 +179,7 @@ def get_live_prices(tickers: list) -> dict:
                 for tk, snap in r.json().items():
                     p = (snap.get("latestTrade") or {}).get("p")
                     if p:
-                        prices[tk] = round(float(p), 4)
+                        new_prices[tk] = round(float(p), 4)
         except Exception:
             pass
 
@@ -164,20 +198,25 @@ def get_live_prices(tickers: list) -> dict:
                     tk = sym.split("/")[0]
                     p  = (snap.get("latestTrade") or {}).get("p")
                     if p:
-                        prices[tk] = round(float(p), 6)
+                        new_prices[tk] = round(float(p), 6)
         except Exception:
             pass
 
     # ── yfinance fallback for any misses ──
-    missing = [t for t in tickers if t not in prices]
+    missing = [t for t in to_fetch if t not in new_prices]
     if missing:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=min(len(missing), 8)) as ex:
             results = ex.map(_yf_price, missing)
         for tk, p in zip(missing, results):
             if p is not None:
-                prices[tk] = p
+                new_prices[tk] = p
 
+    # Populate dedup cache for everything we just fetched
+    for tk in to_fetch:
+        _PRICE_CACHE[tk] = {"price": new_prices.get(tk), "ts": now}
+
+    prices.update(new_prices)
     return prices
 
 
