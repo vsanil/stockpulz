@@ -683,7 +683,10 @@ def run_morning(config: dict, now_et: datetime):
     # /positions and /perf only reflect trades the user explicitly logs via /bought.
     # Auto-logging bot picks caused /positions to show positions the user never placed.
 
-    _send_morning_personalised(picks, config, label="8:00 AM Morning Briefing")
+    n_sent = _send_morning_personalised(picks, config, label="8:00 AM Morning Briefing",
+                                        market_closed=bool(is_weekend or is_holiday),
+                                        closed_reason=market_closed_reason,
+                                        next_open_label=next_open_label)
 
     # ── Monday "Week Ahead" block ─────────────────────────────────────────────
     if now_et.weekday() == 0:   # Monday only
@@ -731,10 +734,9 @@ def run_morning(config: dict, now_et: datetime):
         n_etf    = len(etfs.get("short_term", [])) + len(etfs.get("long_term", []))
         n_comm   = len(comms.get("short_term", [])) + len(comms.get("long_term", []))
         n_opts   = len(picks.get("options_plays", []))
-        n_users  = len(_all_recipients())
         _alert(
             f"✅ <b>Morning run complete</b>\n"
-            f"Sent to {n_users} user(s)  ·  "
+            f"Sent to {n_sent} user(s)  ·  "
             f"📈 {n_st} ST + {n_lt} LT stocks  ·  "
             f"🪙 {n_crypto} crypto  ·  "
             f"📦 {n_etf} ETFs  ·  "
@@ -3733,7 +3735,10 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
         print(f"[agent] _auto_set_pick_alerts failed (non-critical): {exc}")
 
 
-def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""):
+def _send_morning_personalised(picks: dict, global_config: dict, label: str = "",
+                               market_closed: bool = False,
+                               closed_reason: str = "",
+                               next_open_label: str = ""):
     """
     Send the morning briefing to all users, personalised per user's config.
     Each user gets their own budget/pick_mode applied, the same underlying picks,
@@ -3926,8 +3931,8 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
                                            held_tickers=held_tickers,
                                            watchlist_prices=user_wl_prices or None,
                                            user_alerts_map=user_alerts_map or None,
-                                           market_closed=bool(is_weekend or is_holiday),
-                                           closed_reason=market_closed_reason,
+                                           market_closed=market_closed,
+                                           closed_reason=closed_reason,
                                            next_open_label=next_open_label,
                                            company_names=_picks_company_names or None)
 
@@ -3962,6 +3967,7 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
     # Fire all messages concurrently — 1000 users in ~3-5 s instead of ~500 s
     if outbox:
         broadcast_all(outbox)
+    return len(outbox)
 
 
 def _alert(text: str, admin_only: bool = False):

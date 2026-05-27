@@ -1,3 +1,10 @@
+## Self-evolving rules
+
+- After every session, if a new bug pattern, recurring mistake, or important constraint was discovered, add it to this file
+- If a rule was repeatedly violated despite being listed, rewrite it more explicitly
+- If a new API, library, or architectural decision was made, document it here so future sessions start with full context
+- This file is the source of truth for how this project should be built — keep it current
+
 ## graphify
 
 This project has a graphify knowledge graph at graphify-out/.
@@ -64,6 +71,23 @@ Rules:
 - After editing any Python file, run `python -m py_compile <file>` mentally or literally — never skip this
 - After editing index.html JS, check for unclosed braces, missing `async`, and undefined variable references
 - A change is NOT done until syntax is verified
+
+### Test suite — mandatory before every commit
+- Run `python -m pytest tests/ -q` before every commit, no exceptions
+- A commit is NOT done until all tests pass
+- When fixing a bug in a critical path (agent delivery, picks sending, etc.), write a regression test FIRST that reproduces the failure, then fix it
+- When adding a function that handles user-facing delivery or state, add a test that asserts the output lands in the right place
+- Scope isolation bugs (function referencing caller-scope variables) are NOT caught by py_compile — only tests catch them
+
+### Tests must travel with every code change
+- Every code change must be accompanied by a test update in the same commit — no exceptions
+- Adding a new function → add tests for the happy path, error path, and at least one edge case
+- Changing a function signature or behaviour → update every test that calls it
+- Fixing a bug → add a regression test that would have caught it BEFORE applying the fix
+- Deleting a function → delete its tests in the same commit
+- If a change touches config_manager, formatters, trade_logger, telegram_api, or position_sizer,
+  open the corresponding test file and verify coverage still reflects the updated behaviour
+- Never commit "I'll add tests later" — later never comes
 
 ### Proactive bug hunting
 - After fixing any bug, grep for the same pattern across the whole codebase and fix all occurrences
