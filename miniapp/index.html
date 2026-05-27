@@ -4021,10 +4021,12 @@ function renderPickCard(p, idx = 0) {
     <div class="pick-swipe-action"><span>👁</span><span>Watch</span></div>
     <div class="pick-card${cardCls}" style="animation-delay:${idx * 55}ms">
       <div class="pick-top">
-        <div class="pick-ticker-wrap">
-          <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}<span data-live-price-ticker="${sym}" style="font-size:11px;color:var(--hint);font-weight:600;margin-left:4px"></span>
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <div class="pick-ticker-wrap">
+            <span class="pick-ticker" onclick="copyTicker('${sym}')" style="cursor:pointer">${sym}</span>${liveChip}<span data-live-price-ticker="${sym}" style="font-size:11px;color:var(--hint);font-weight:600;margin-left:4px"></span>
+          </div>
+          <div style="font-size:9.5px;color:var(--hint);font-weight:500;line-height:1.2" data-name-ticker="${sym}"></div>
         </div>
-        <div style="font-size:9.5px;color:var(--hint);font-weight:500;margin-top:1px;line-height:1.2" data-name-ticker="${sym}"></div>
         <span class="type-tag ${tagCls}">${tagTxt}</span>
       </div>
       <div class="price-grid">
