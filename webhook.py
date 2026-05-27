@@ -1175,24 +1175,33 @@ def miniapp_picks_history():
 
 @app.route("/api/miniapp/positions")
 def miniapp_positions():
-    """Return open positions with live P&L for the Mini App."""
+    """Return open positions with live P&L for the Mini App.
+
+    Prices are fetched in a single batch call (one HTTP round-trip to Alpaca
+    regardless of position count) instead of a sequential per-ticker loop.
+    Response shape is identical to the previous implementation.
+    """
     chat_id = _miniapp_auth()
     if not chat_id:
         return jsonify({"error": "unauthorised"}), 403
 
     from config_manager import load_user_trade_log
     from datetime import date as _date
-    from market_data import get_live_price as _price
+    from market_data import get_live_prices as _prices_batch
 
     log      = load_user_trade_log(chat_id)
     open_pos = log.get("open", [])
+
+    # One batch call for all tickers — O(1) network round-trips regardless of count
+    all_syms = [t["ticker"] for t in open_pos]
+    live     = _prices_batch(all_syms) if all_syms else {}
 
     result = []
     today  = _date.today()
     for t in open_pos:
         sym   = t["ticker"]
         entry = t.get("entry_price")
-        cur   = _price(sym)
+        cur   = live.get(sym)
         pnl   = None
         if entry and cur:
             pnl = round((cur - float(entry)) / float(entry) * 100, 2)
@@ -2386,11 +2395,28 @@ def miniapp_volume_spikes():
     return jsonify({"ok": True, "spikes": spikes})
 
 
+# Performance endpoint cache — closed trade stats are historical and can't change
+# mid-session, so recomputing them (+ a live SPY yfinance call) on every tab visit
+# is pure waste. 5-minute TTL; cache is per-user so everyone gets their own data.
+_PERF_CACHE: dict = {}         # chat_id → {"payload": dict, "ts": float}
+_PERF_CACHE_TTL = 5 * 60       # 5 minutes
+
+
 @app.route("/api/miniapp/performance")
 def miniapp_performance():
-    """Return bot track record for the Mini App performance tab."""
+    """Return bot track record for the Mini App performance tab.
+
+    Cached per-user for 5 minutes — closed trade P&L is historical and can't
+    change while the user is in-session. Response shape is unchanged.
+    """
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
+
+    now = time.time()
+    cached = _PERF_CACHE.get(chat_id)
+    if cached and now - cached["ts"] < _PERF_CACHE_TTL:
+        return jsonify(cached["payload"])
+
     from config_manager import get_allowed_users, load_user_trade_log
     from performance_tracker import build_community_stats
     from performance_context import get_performance_context, get_performance_stats
@@ -2407,12 +2433,14 @@ def miniapp_performance():
             "60d": get_performance_stats(60),
             "90d": get_performance_stats(90),
         }
-        return jsonify({
+        payload = {
             "ok":           True,
             "stats":        stats,
             "context_30d":  ctx30,
             "period_stats": period_stats,
-        })
+        }
+        _PERF_CACHE[chat_id] = {"payload": payload, "ts": now}
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 

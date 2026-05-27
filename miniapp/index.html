@@ -1056,6 +1056,8 @@ body.tg-light .fb-textarea { background: rgba(0,0,0,0.03); }
   padding: 3px 9px; border-radius: 20px; pointer-events: none;
   letter-spacing: 0.02em;
 }
+/* Hide the type tag when the card is bought — the ::after badge occupies that corner */
+.pick-card.bought .type-tag { display: none; }
 
 /* ── Overlay backdrop ────────────────────────────────────────────────────── */
 .overlay {
@@ -4537,13 +4539,13 @@ function _reRenderPositions() {
         <div class="pos-body">
           <div class="pos-sym">${sym}${p.timeframe ? ` <span class="pos-tf-badge pos-tf-${p.timeframe === 'short_term' ? 'st' : 'lt'}">${p.timeframe === 'short_term' ? 'ST' : 'LT'}</span>` : ''}${_healthBadge}${!p.stop_loss ? ` <span class="pos-nostop" onclick="openPositionDetail(${_dA},'stop')">⚠️ No stop</span>` : ''}</div>
           <div data-name-ticker="${sym}" style="font-size:10px;color:var(--hint);margin-top:1px;margin-bottom:1px;font-weight:400;line-height:1.2"></div>
-          <div class="pos-sub"><span class="pos-level-tap" onclick="openPositionDetail(${_dA},'entry')">${entry}</span>${cur ? ` → ${cur}` : ''}</div>
+          <div class="pos-sub"><span class="pos-level-tap" onclick="openPositionDetail(${_dA},'entry')">${entry}</span><span id="pos-cur-${sym}">${cur ? ` → ${cur}` : ''}</span></div>
           ${_levelsRow}
-          ${p.target_price ? `<div class="target-bar"><div class="target-fill" style="width:${targetProgress}%"></div></div><div style="font-size:10px;color:var(--hint);margin-top:3px;opacity:.7">${Math.round(targetProgress)}% to target</div>` : ''}
+          ${p.target_price ? `<div class="target-bar"><div class="target-fill" id="pos-bar-${sym}" style="width:${targetProgress}%"></div></div><div style="font-size:10px;color:var(--hint);margin-top:3px;opacity:.7" id="pos-prog-${sym}">${Math.round(targetProgress)}% to target</div>` : ''}
           ${_notesLine}
         </div>
         <div class="pos-right">
-          <div class="pos-pct ${cls}">${fmtPct(pct)}</div>
+          <div class="pos-pct ${cls}" id="pos-pct-${sym}">${fmtPct(pct)}</div>
           ${p.days_held != null ? `<span class="pos-age-badge">Day ${p.days_held}</span>` : ''}
         </div>
       </div>
@@ -8732,27 +8734,68 @@ renderMarketsView = async function() {
   }, { passive: true });
 })();
 
-// ── Portfolio live-price auto-refresh (90 s, only while portfolio tab active) ─
+// ── Portfolio live-price silent refresh (30 s, only while portfolio tab active) ─
+// Updates P&L %, current price, and target-bar in-place — NO spinner, NO re-render,
+// NO flash. Uses the same batch /api/miniapp/live_prices?tickers= endpoint.
+// Falls back silently on any error so users are never interrupted.
 (function() {
   let _portRefreshTimer = null;
-  const _PORT_INTERVAL  = 90_000;
+  const _PORT_INTERVAL  = 30_000;   // 30 s — real-time feel
+
+  async function _silentPriceRefresh() {
+    if (curTab !== 'portfolio' || !positionsCache || !positionsCache.length) return;
+    const tickers = positionsCache.map(p => p.ticker || p.symbol).filter(Boolean);
+    if (!tickers.length) return;
+    try {
+      const d = await api('/api/miniapp/live_prices?tickers=' + tickers.join(','));
+      const priceMap = d.prices || {};   // {TICKER: price}
+      positionsCache.forEach(p => {
+        const sym  = p.ticker || p.symbol;
+        const live = priceMap[sym];
+        if (live == null) return;
+
+        const entry = parseFloat(p.entry_price);
+        p.current_price = live;
+        const newPct = entry ? Math.round(((live - entry) / entry) * 10000) / 100 : null;
+        p.pnl_pct = newPct;
+        if (p.shares != null && newPct != null && entry) {
+          p.pnl_usd = Math.round(parseFloat(p.shares) * entry * newPct / 100 * 100) / 100;
+        }
+
+        // ── P&L % badge ──────────────────────────────────────────────────────
+        const pctEl = document.getElementById(`pos-pct-${sym}`);
+        if (pctEl) {
+          const cls = newPct > 0 ? 'val-pos' : newPct < 0 ? 'val-neg' : 'val-neu';
+          pctEl.className = `pos-pct ${cls}`;
+          pctEl.textContent = fmtPct(newPct || 0);
+        }
+
+        // ── Current price text ────────────────────────────────────────────────
+        const curEl = document.getElementById(`pos-cur-${sym}`);
+        if (curEl) curEl.textContent = ` → $${fmtPrice(live)}`;
+
+        // ── Target progress bar ───────────────────────────────────────────────
+        const barEl  = document.getElementById(`pos-bar-${sym}`);
+        const progEl = document.getElementById(`pos-prog-${sym}`);
+        if (barEl && p.target_price && entry) {
+          const range    = parseFloat(p.target_price) - entry;
+          const move     = live - entry;
+          const progress = range > 0 ? Math.min(100, Math.max(0, (move / range) * 100)) : 0;
+          barEl.style.width = `${progress}%`;
+          if (progEl) progEl.textContent = `${Math.round(progress)}% to target`;
+        }
+      });
+      // Invalidate HTML cache so a tab-return re-render picks up fresh positions
+      if (_portCache.real) _portCache.real.html = null;
+    } catch (_e) { /* silent — never interrupt user */ }
+  }
 
   function _schedulePortRefresh() {
     clearInterval(_portRefreshTimer);
-    _portRefreshTimer = setInterval(() => {
-      if (curTab !== 'portfolio') return;
-      // Silently re-fetch positions (will update live P&L numbers)
-      _invalidatePortfolioCache();
-      loadedTabs['portfolio'] = false;
-      loadPortfolio(true);
-    }, _PORT_INTERVAL);
+    _portRefreshTimer = setInterval(_silentPriceRefresh, _PORT_INTERVAL);
   }
 
-  // Start once portfolio is first visited; restart on each tab switch to it
-  const _origGotoTab = gotoTab;
-  // Patch gotoTab to start/stop the timer
-  window.addEventListener('load', () => { /* timer starts on first portfolio load */ });
-  // Hook into loadPortfolio completion to arm the timer
+  // Arm the timer after each loadPortfolio completes
   const _origLoadPortfolio = loadPortfolio;
   loadPortfolio = async function() {
     await _origLoadPortfolio.apply(this, arguments);
