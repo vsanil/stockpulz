@@ -866,6 +866,8 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                         badge = "  🔴 STOP HIT"
                     elif stop and current <= float(stop) * 1.03:
                         badge = "  ⚠️ NEAR STOP"
+                    elif target and current > float(target):
+                        badge = "  ✅ TARGET EXCEEDED"
                     elif target and current >= float(target) * 0.97:
                         badge = "  🎯 NEAR TARGET"
                     lines.append(
@@ -1263,13 +1265,16 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
 
             if current:
                 # Alert badges
-                stop_hit   = stop   and current <= float(stop)
-                near_stop  = stop   and not stop_hit and current <= float(stop) * 1.03
-                near_tgt   = target and current >= float(target) * 0.97
+                stop_hit     = stop   and current <= float(stop)
+                near_stop    = stop   and not stop_hit and current <= float(stop) * 1.03
+                tgt_exceeded = target and current > float(target)
+                near_tgt     = target and not tgt_exceeded and current >= float(target) * 0.97
                 if stop_hit:
                     badge = "  🔴 <b>STOP HIT</b>"
                 elif near_stop:
                     badge = "  ⚠️ <b>NEAR STOP</b>"
+                elif tgt_exceeded:
+                    badge = "  ✅ <b>TARGET EXCEEDED</b>"
                 elif near_tgt:
                     badge = "  🎯 <b>NEAR TARGET</b>"
                 else:
@@ -1287,8 +1292,11 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                         sign     = "+" if to_entry >= 0 else ""
                         level_parts.append(f"entry <code>${_p(entry)}</code> ({sign}{to_entry:.1f}%)")
                     if target:
-                        to_tgt = (float(target) / current - 1) * 100
-                        level_parts.append(f"target <code>${_p(target)}</code> ({to_tgt:+.1f}%)")
+                        if current >= float(target):
+                            level_parts.append(f"target <code>${_p(target)}</code> (✅ exceeded)")
+                        else:
+                            to_tgt = (float(target) / current - 1) * 100
+                            level_parts.append(f"target <code>${_p(target)}</code> ({to_tgt:+.1f}%)")
                     if stop:
                         to_stp = (float(stop) / current - 1) * 100
                         level_parts.append(f"stop <code>${_p(stop)}</code> ({to_stp:+.1f}%)")
