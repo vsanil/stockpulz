@@ -6,6 +6,7 @@ Handles: BOUGHT, SOLD, PAPER CANCEL, PAPER HISTORY, HISTORY, SUMMARY,
 """
 
 import json
+import os
 import threading
 
 from telegram_api import send_message, send_inline_keyboard, typing_until_done, send_typing_action
@@ -725,13 +726,18 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                     "callback_data": f"cancel_auto|{ticker}",
                 }])
 
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        _perf_btn = [{"text": "📈 View Performance", "web_app": {"url": f"{_app_url}/miniapp?tab=performance"}}] if _app_url else None
         if buttons:
+            all_buttons = buttons + ([_perf_btn] if _perf_btn else [])
             send_inline_keyboard(
                 "🗑 <b>Remove a trade entry?</b>\n"
                 "<i>Confirmation required before any change is made.</i>",
-                buttons,
+                all_buttons,
                 chat_id=chat_id,
             )
+        elif _perf_btn:
+            send_inline_keyboard("", [[_perf_btn]], chat_id=chat_id)
         return ""
 
     # ── /summary — one-shot portfolio health view ────────────────────────────
@@ -1086,6 +1092,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
 
         lines_r.append("")
         lines_r.append("<i>/sold TICKER to close  ·  /updatestop to adjust levels</i>")
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard("\n".join(lines_r), [[{"text": "📊 View Portfolio", "web_app": {"url": f"{_app_url}/miniapp?tab=portfolio"}}]], chat_id=chat_id)
+            return ""
         return "\n".join(lines_r)
 
     # ── /positions / /portfolio ───────────────────────────────────────────────
@@ -1318,27 +1328,12 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
         lines.append("<i>Use the buttons below to act on any position.</i>")
         send_message("\n".join(lines), chat_id=chat_id)
 
-        # ── Per-position quick-action buttons ────────────────────────────────
-        # Each position gets a row: [✏️ Edit levels] [💸 Close] [📝 Note]
-        buttons = []
-        for t in unique_trades:
-            ticker = t["ticker"]
-            entry  = t.get("entry_price", "")
-            live   = prices.get(ticker, "")
-            stop   = t.get("stop_loss", "")
-            target = t.get("target_price", "")
-            buttons.append([
-                {"text": f"✏️ {ticker}",
-                 "callback_data": f"posdetail|{ticker}|{entry}|{live}|{stop}|{target}"},
-                {"text": f"💸 Close",
-                 "callback_data": f"sold_pick|{ticker}"},
-                {"text": f"📝 Note",
-                 "callback_data": f"note_prompt|{ticker}"},
-            ])
-        if buttons:
+        # ── Single "Open Dashboard" button — all actions live in the Mini App ──
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
             send_inline_keyboard(
-                "⚡ <b>Quick actions</b>",
-                buttons,
+                "Tap to edit levels, close positions, add notes, and more.",
+                [[{"text": "📊 Open Dashboard", "web_app": {"url": f"{_app_url}/miniapp"}}]],
                 chat_id=chat_id,
             )
         return ""
@@ -1443,6 +1438,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 f"·  Worst: <b>{worst['ticker']}</b> {'+' if float(worst.get('return_pct',0))>0 else ''}{float(worst.get('return_pct',0)):.1f}%"
             )
 
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard("\n".join(lines), [[{"text": "📈 View Performance", "web_app": {"url": f"{_app_url}/miniapp?tab=performance"}}]], chat_id=chat_id)
+            return ""
         return "\n".join(lines)
 
     # ── /journal — trade journal: closed trades with lesson notes ────────────
@@ -1551,6 +1550,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 f"·  <b>Worst:</b> {worst[0]} ({'+' if worst[3]>=0 else ''}{worst[3]:.1f}%)"
             )
 
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard("\n".join(lines), [[{"text": "📊 View Portfolio", "web_app": {"url": f"{_app_url}/miniapp?tab=portfolio"}}]], chat_id=chat_id)
+            return ""
         return "\n".join(lines)
 
     # ── /card — shareable performance card PNG ───────────────────────────────
@@ -1669,6 +1672,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             f"avg win {avg_win:+.1f}%  ·  avg loss {avg_loss:+.1f}%</i>"
         )
 
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard("\n".join(lines), [[{"text": "📈 View Performance", "web_app": {"url": f"{_app_url}/miniapp?tab=performance"}}]], chat_id=chat_id)
+            return ""
         return "\n".join(lines)
 
     # ── /goal — annual return goal progress bar ──────────────────────────────
@@ -1758,6 +1765,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             lines.append(f"\n<i>Need ${goal_usd - year_pnl:,.0f} more to hit goal.</i>")
 
         lines.append("<i>Update goal: <code>/goal 30</code></i>")
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard("\n".join(lines), [[{"text": "📈 View Performance", "web_app": {"url": f"{_app_url}/miniapp?tab=performance"}}]], chat_id=chat_id)
+            return ""
         return "\n".join(lines)
 
     # ── /missed — picks user skipped and their outcome ───────────────────────
@@ -1846,6 +1857,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             "\n<i>These are picks from this week you didn't log a /bought on.\n"
             "Use /bought TICKER to add any you still want to track.</i>"
         )
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard("\n".join(lines), [[{"text": "📋 Today's Picks", "web_app": {"url": f"{_app_url}/miniapp?tab=picks"}}]], chat_id=chat_id)
+            return ""
         return "\n".join(lines)
 
     # ── /best-setup — win rate analysis by sector / asset type / timeframe ──────
@@ -2245,7 +2260,11 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                     f"<i>Use /journal to add notes to individual trades, "
                     f"or /stats for full stats.</i>"
                 )
-                send_message(msg, chat_id=chat_id)
+                _app_url = os.environ.get("APP_URL", "").rstrip("/")
+                if _app_url:
+                    send_inline_keyboard(msg, [[{"text": "📈 View Performance", "web_app": {"url": f"{_app_url}/miniapp?tab=performance"}}]], chat_id=chat_id)
+                else:
+                    send_message(msg, chat_id=chat_id)
             except Exception as exc:
                 send_message(f"⚠️ Review failed: {exc}", chat_id=chat_id)
 
@@ -2345,6 +2364,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
         if len(filtered) > 15:
             lines.append(f"<i>…and {len(filtered)-15} more</i>")
 
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard("\n".join(lines), [[{"text": "📈 View Performance", "web_app": {"url": f"{_app_url}/miniapp?tab=performance"}}]], chat_id=chat_id)
+            return ""
         return "\n".join(lines)
 
     # ── /share [TICKER] — single trade brag card ─────────────────────────────

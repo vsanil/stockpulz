@@ -967,7 +967,15 @@ def handle_callback_query(callback_query: dict) -> None:
                 + f"Stop: {stop_str}  |  Target: {target_str}\n"
                 + "Track it anytime with /positions"
             )
-            send_message(success_msg, chat_id=chat_id, parse_mode="HTML")
+            _app_url = os.environ.get("APP_URL", "").rstrip("/")
+            if _app_url:
+                send_inline_keyboard(
+                    success_msg,
+                    [[{"text": "📊 View Portfolio", "web_app": {"url": f"{_app_url}/miniapp?tab=portfolio"}}]],
+                    chat_id=chat_id,
+                )
+            else:
+                send_message(success_msg, chat_id=chat_id, parse_mode="HTML")
             try:
                 from config_manager import increment_buy_count
                 cfg2 = get_config()
@@ -1035,14 +1043,18 @@ def handle_callback_query(callback_query: dict) -> None:
                 except Exception as _de:
                     print(f"[bot] debrief setup failed (non-critical): {_de}")
 
-            # Journal prompt — ask what the user learned (non-blocking)
+            # Journal prompt + View Performance — ask what the user learned (non-blocking)
             if result.startswith("✅"):
                 try:
+                    _app_url = os.environ.get("APP_URL", "").rstrip("/")
+                    _perf_btn = [{"text": "📈 View Performance", "web_app": {"url": f"{_app_url}/miniapp?tab=performance"}}] if _app_url else []
+                    _journal_row = [{"text": "✍️ Add a note", "callback_data": f"journal_prompt|{ticker.upper()}"},
+                                    {"text": "Skip",           "callback_data": f"journal_skip|{ticker.upper()}"}]
+                    _kb = [_journal_row] + ([_perf_btn] if _perf_btn else [])
                     send_inline_keyboard(
                         f"📓 <b>Trade Journal</b>\nWhat did you learn from this <b>{ticker}</b> trade? "
                         f"(Optional — helps you improve over time)",
-                        [[{"text": "✍️ Add a note", "callback_data": f"journal_prompt|{ticker.upper()}"},
-                          {"text": "Skip",           "callback_data": f"journal_skip|{ticker.upper()}"}]],
+                        _kb,
                         chat_id=chat_id,
                     )
                 except Exception:
