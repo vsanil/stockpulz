@@ -3962,11 +3962,37 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
                 except Exception:
                     pass
         except Exception as exc:
-            print(f"[agent] WARNING: Could not prepare morning message for {uid}: {exc}")
+            import traceback
+            err_detail = traceback.format_exc()
+            print(f"[agent] WARNING: Could not prepare morning message for {uid}: {exc}\n{err_detail}")
+            # Surface the error to admin Telegram so it's visible without checking GH Actions logs
+            try:
+                owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+                if owner and not DRY_RUN:
+                    send_message(
+                        f"⚠️ <b>Morning run: failed to prepare message for user {uid}</b>\n"
+                        f"<code>{type(exc).__name__}: {exc}</code>",
+                        chat_id=owner,
+                    )
+            except Exception:
+                pass
 
     # Fire all messages concurrently — 1000 users in ~3-5 s instead of ~500 s
     if outbox:
         broadcast_all(outbox)
+    else:
+        # Warn admin if we had recipients but nobody ended up in the outbox
+        if recipients and not DRY_RUN:
+            try:
+                owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+                if owner:
+                    send_message(
+                        f"⚠️ <b>Morning run: picks generated but 0 users received them</b>\n"
+                        f"<i>{len(recipients)} recipient(s) in list — all skipped due to errors above.</i>",
+                        chat_id=owner,
+                    )
+            except Exception:
+                pass
     return len(outbox)
 
 
