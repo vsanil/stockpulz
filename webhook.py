@@ -1738,13 +1738,16 @@ def miniapp_quote():
     try:
         from price_alert_manager import _CRYPTO_SYMBOLS as _ALERT_CRYPTO
         def _get_name(sym):
-            """Return shortName for a ticker, with a short cache."""
+            """Return shortName for a ticker, with a short cache.
+            Uses fast_info (no .info call — avoids 401s on cloud IPs)."""
             hit = _quote_cache.get(f"__name_{sym}")
             if hit and time.time() - hit["ts"] < 3600:
                 return hit["v"]
             try:
                 import yfinance as _yf2
-                n = (_yf2.Ticker(sym).info or {}).get("shortName") or ""
+                fi = _yf2.Ticker(sym).fast_info
+                # fast_info doesn't have shortName; use display_name or fall back to sym
+                n = getattr(fi, "display_name", None) or ""
                 _quote_cache[f"__name_{sym}"] = {"v": n, "ts": time.time()}
                 return n
             except Exception:

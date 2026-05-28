@@ -3174,29 +3174,28 @@ def run_premarket(config: dict):
                         position_lines.append(f"  <b>{ticker}</b>  <i>live price unavailable</i>")
                     continue
 
-                # ── Stock: try yfinance pre-market first ───────────────────────
+                # ── Stock: fast_info + prepost history (no .info — 401s on cloud IPs) ──
                 try:
-                    tkr_obj     = yf.Ticker(ticker)
-                    info        = tkr_obj.info
-                    pre_price   = info.get("preMarketPrice") or info.get("currentPrice")
-                    prev_close  = info.get("regularMarketPreviousClose") or info.get("previousClose")
+                    tkr_obj    = yf.Ticker(ticker)
+                    fi         = tkr_obj.fast_info          # never 401s
+                    prev_close = getattr(fi, "previous_close", None)
+                    pre_price  = None
 
-                    # Fallback: use prepost history if info didn't give us pre-market data
-                    if not pre_price:
-                        try:
-                            hist = tkr_obj.history(period="1d", interval="1m", prepost=True)
-                            if not hist.empty:
-                                pre_price  = float(hist["Close"].iloc[-1])
-                                if not prev_close and len(hist) > 1:
-                                    # last regular-hours close = last row before 16:00
-                                    rh = hist.between_time("09:30", "16:00")
-                                    if not rh.empty:
-                                        prev_close = float(rh["Close"].iloc[-1])
-                        except Exception:
-                            pass
+                    # Primary: prepost history for actual pre-market price
+                    try:
+                        hist = tkr_obj.history(period="1d", interval="1m", prepost=True)
+                        if not hist.empty:
+                            pre_price = float(hist["Close"].iloc[-1])
+                            if not prev_close and len(hist) > 1:
+                                # last regular-hours close = last row before 16:00
+                                rh = hist.between_time("09:30", "16:00")
+                                if not rh.empty:
+                                    prev_close = float(rh["Close"].iloc[-1])
+                    except Exception:
+                        pass
 
-                    # Capture sector for concentration check
-                    sector_by_ticker[ticker] = info.get("sector", "Unknown")
+                    # Sector: leave as Unknown (fast_info has no sector field)
+                    sector_by_ticker[ticker] = "Unknown"
 
                     # Last-resort fallback: Alpaca/yfinance live price
                     price_label = "pre-market"
@@ -3938,11 +3937,13 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
 
     # ── Build all per-user payloads first (CPU-bound, fast), then broadcast concurrently ──
     outbox: list[dict] = []
+    n_paused = 0
     for uid in recipients:
         try:
             user_cfg = {**global_config, **get_user_config(uid)}
             if user_cfg.get("paused"):
                 print(f"[agent] Skipping {uid} — picks paused by user.")
+                n_paused += 1
                 continue
 
             # Look up pre-computed notes — no Haiku call here
@@ -4033,9 +4034,16 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
             try:
                 owner = os.environ.get("TELEGRAM_CHAT_ID", "")
                 if owner:
+                    n_errors = len(recipients) - n_paused
+                    reason_parts = []
+                    if n_paused:
+                        reason_parts.append(f"{n_paused} paused picks (send /resume to fix)")
+                    if n_errors:
+                        reason_parts.append(f"{n_errors} skipped due to errors (see Actions log)")
+                    reason_str = "  ·  ".join(reason_parts) or "unknown reason"
                     send_message(
                         f"⚠️ <b>Morning run: picks generated but 0 users received them</b>\n"
-                        f"<i>{len(recipients)} recipient(s) in list — all skipped due to errors above.</i>",
+                        f"<i>{len(recipients)} recipient(s) in list — {reason_str}.</i>",
                         chat_id=owner,
                     )
             except Exception:
