@@ -737,7 +737,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 chat_id=chat_id,
             )
         elif _perf_btn:
-            send_inline_keyboard("", [[_perf_btn]], chat_id=chat_id)
+            send_inline_keyboard("📈 View your trade history:", [_perf_btn], chat_id=chat_id)
         return ""
 
     # ── /summary — one-shot portfolio health view ────────────────────────────
