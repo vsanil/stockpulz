@@ -472,6 +472,59 @@ def _get_alpaca_snapshots(tickers: list[str]) -> dict[str, float]:
     return prices
 
 
+# ── Finnhub company profile (replaces yfinance .info for name/sector) ────────
+
+# Map Finnhub industry labels → SECTOR_MEDIAN_PE keys (GICS-style)
+_FINNHUB_INDUSTRY_MAP = {
+    "Technology":              "Technology",
+    "Software":                "Technology",
+    "Semiconductors":          "Technology",
+    "Hardware":                "Technology",
+    "Healthcare":              "Health Care",
+    "Health Care":             "Health Care",
+    "Biotechnology":           "Health Care",
+    "Pharmaceuticals":         "Health Care",
+    "Financial Services":      "Financials",
+    "Financials":              "Financials",
+    "Banks":                   "Financials",
+    "Insurance":               "Financials",
+    "Consumer Cyclical":       "Consumer Discretionary",
+    "Consumer Defensive":      "Consumer Staples",
+    "Communication Services":  "Communication Services",
+    "Industrials":             "Industrials",
+    "Energy":                  "Energy",
+    "Utilities":               "Utilities",
+    "Real Estate":             "Real Estate",
+    "Basic Materials":         "Materials",
+}
+
+
+def _get_finnhub_profile(ticker: str) -> dict:
+    """
+    Fetch company name and sector from Finnhub /stock/profile2.
+    Returns {"company": str, "sector": str} — falls back to ticker/Unknown on failure.
+    Much more reliable than yfinance .info on cloud IPs (no crumb/cookie needed).
+    """
+    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not api_key:
+        return {"company": ticker, "sector": "Unknown"}
+    try:
+        resp = requests.get(
+            f"{FINNHUB_BASE}/stock/profile2",
+            params={"symbol": ticker, "token": api_key},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        name     = data.get("name") or ticker
+        industry = data.get("finnhubIndustry") or "Unknown"
+        sector   = _FINNHUB_INDUSTRY_MAP.get(industry, "Unknown")
+        return {"company": name, "sector": sector}
+    except Exception as exc:
+        print(f"[screener] Finnhub profile error for {ticker}: {exc}")
+        return {"company": ticker, "sector": "Unknown"}
+
+
 # ── Finnhub fundamental metrics ───────────────────────────────────────────────
 
 def _get_finnhub_metrics(ticker: str) -> dict:
@@ -706,6 +759,7 @@ def _long_term_score(
     info: dict,
     fh: dict,
     dynamic_sector_pe: dict | None = None,
+    ticker: str = "",
 ) -> tuple[int, dict]:
     """
     Score a ticker for long-term investing (out of 100).
@@ -776,7 +830,7 @@ def _long_term_score(
     # Requiring price > 200MA ensures we buy quality in an uptrend, not falling knives.
     try:
         import yfinance as _yf_lt
-        hist_lt = _yf_lt.Ticker(info.get("symbol", "")).history(period="1y", interval="1d")
+        hist_lt = _yf_lt.Ticker(ticker or info.get("symbol", "")).history(period="1y", interval="1d")
         if not hist_lt.empty and len(hist_lt) >= 200:
             ma200    = float(hist_lt["Close"].rolling(200).mean().iloc[-1])
             cur_px   = float(hist_lt["Close"].iloc[-1])
@@ -1006,33 +1060,40 @@ def run_screener(
     def _enrich_one(candidate: dict) -> tuple[str, dict | None]:
         """Enrich a single candidate. Returns (ticker, entry_dict | None)."""
         ticker = candidate["ticker"]
+
+        # ── Company name + sector from Finnhub profile (avoids yfinance .info 401s) ──
+        with _finnhub_lock:
+            profile = _get_finnhub_profile(ticker)
+        company = profile["company"]
+        sector  = profile["sector"]
+
+        # ── 52-week range from fast_info (lightweight endpoint, not blocked) ──────
+        week52_high = None
+        week52_low  = None
         try:
-            info    = yf.Ticker(ticker).info or {}
-            company = info.get("longName", ticker)
-            sector  = info.get("sector", "Unknown")
-        except Exception as exc:
-            print(f"[screener] yfinance info failed for {ticker}: {exc}")
-            info, company, sector = {}, ticker, "Unknown"
+            fi = yf.Ticker(ticker).fast_info
+            week52_high = getattr(fi, "year_high", None)
+            week52_low  = getattr(fi, "year_low",  None)
+        except Exception:
+            pass
 
         # Override current price with Alpaca real-time if available
         if ticker in alpaca_prices:
             candidate = {**candidate, "current_price": round(alpaca_prices[ticker], 2)}
 
-        week52_high = info.get("fiftyTwoWeekHigh")
-        week52_low  = info.get("fiftyTwoWeekLow")
         pct_below_52w_high = None
         if week52_high and candidate["current_price"] > 0 and week52_high > 0:
             pct_below_52w_high = round(
                 (week52_high - candidate["current_price"]) / week52_high * 100, 1
             )
 
-        short_float_raw = info.get("shortPercentOfFloat")
-        short_float_pct = round(float(short_float_raw) * 100, 1) if short_float_raw is not None else None
-        short_ratio_raw = info.get("shortRatio")
-        days_to_cover   = round(float(short_ratio_raw), 1) if short_ratio_raw is not None else None
+        # short_float_pct, days_to_cover, inst_own_pct removed — Yahoo paywalled these
+        short_float_pct = None
+        days_to_cover   = None
+        inst_own_pct    = None
 
-        inst_own_raw = info.get("institutionPercentHeld")
-        inst_own_pct = round(float(inst_own_raw) * 100, 1) if inst_own_raw is not None else None
+        # Minimal info dict for _long_term_score (sector only — rest comes from Finnhub)
+        info = {"sector": sector}
 
         with _finnhub_lock:
             try:
@@ -1062,7 +1123,7 @@ def run_screener(
         congress = get_congressional_signal(ticker, congressional_trades)
 
         try:
-            lt_score, lt_metrics = _long_term_score(info, fh_metrics, _dynamic_sector_pe)
+            lt_score, lt_metrics = _long_term_score(info, fh_metrics, _dynamic_sector_pe, ticker=ticker)
         except Exception as exc:
             print(f"[screener] LT score failed for {ticker}: {exc}")
             lt_score, lt_metrics = 0, {}
