@@ -888,7 +888,9 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
             badges.append("🔴 STOP HIT")
         elif stop and current <= float(stop) * 1.03:
             badges.append("⚠️ near stop")
-        if target and current >= float(target) * 0.97:
+        if target and current > float(target):
+            badges.append("✅ target exceeded")
+        elif target and current >= float(target) * 0.97:
             badges.append("🎯 near target")
         badge_str = f"  <i>{' · '.join(badges)}</i>" if badges else ""
         lbl = f"  <i>{label}</i>" if label else ""
@@ -999,6 +1001,8 @@ def format_eod_full_summary(
         badges = []
         if stop and price <= float(stop):
             badges.append("stop hit")
+        if target and price > float(target):
+            badges.append("target exceeded ✅")
         elif target and price >= float(target) * 0.97:
             badges.append("near target 🎯")
         badge_str = f"  <i>({', '.join(badges)})</i>" if badges else ""
