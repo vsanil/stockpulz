@@ -1317,12 +1317,14 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
 
         send_message("🌅 <i>Building your morning digest…</i>", chat_id=chat_id)
 
-        tickers = [t["ticker"] for t in open_t]
+        tickers = [t["ticker"] for t in open_t if t.get("ticker")]
         lines   = ["🌅 <b>Morning Digest</b>  ·  your positions\n"]
 
         # Live prices + vs entry
         for t in open_t:
-            tk    = t["ticker"]
+            tk    = t.get("ticker")
+            if not tk:
+                continue
             entry = t.get("entry_price")
             stop  = t.get("stop_loss")
             tgt   = t.get("target_price")
