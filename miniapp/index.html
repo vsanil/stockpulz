@@ -3404,12 +3404,13 @@ async function confirmAddPosition() {
       _invalidatePortfolioCache();
       loadedTabs['portfolio'] = false;
       if (curTab === 'portfolio') { loadPortfolio(true); }
-      if (entry || stop) showToast(`✅ ${ticker} added with levels`, 'success');
+      showToast(entry || stop ? `✅ ${ticker} added with levels` : `✅ ${ticker} added`, 'success');
     }
   } catch (e) {
     btn.disabled    = false;
     btn.textContent = 'Add to Portfolio';
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast(`Couldn't add ${ticker} — try again`, 'error');
   }
 }
 
@@ -5599,6 +5600,7 @@ async function savePositionDetail() {
     btn.disabled    = false;
     btn.textContent = 'Save';
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Couldn\'t save — try again', 'error');
   }
 }
 
@@ -6192,6 +6194,7 @@ async function deleteAlert(ticker, target) {
     loadAlerts();
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Couldn\'t delete alert — try again', 'error');
   }
 }
 

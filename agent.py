@@ -754,7 +754,7 @@ def run_morning(config: dict, now_et: datetime):
 
 def _broadcast_trade_closes(current_prices: dict) -> None:
     """Check and close trades for all recipients, sending close alerts + debriefs."""
-    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    _app_url = (os.environ.get("APP_URL") or "").rstrip("/")
     for uid in _all_recipients():
         try:
             closed = check_and_close_trades(current_prices, uid)
@@ -798,8 +798,8 @@ def _broadcast_trade_closes(current_prices: dict) -> None:
 
                 # Build keyboard — always include Log as Sold, Dashboard only if URL set
                 kb_row = [{"text": "✅ Log as Sold", "callback_data": f"sold_pick|{ticker}"}]
-                if render_url:
-                    kb_row.append({"text": "📊 Dashboard", "web_app": {"url": f"{render_url}/miniapp"}})
+                if _app_url:
+                    kb_row.append({"text": "📊 Dashboard", "web_app": {"url": f"{_app_url}/miniapp"}})
                 send_inline_keyboard(close_msg, [kb_row], chat_id=uid)
         except Exception as exc:
             print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
@@ -2814,6 +2814,8 @@ def _check_trailing_stops(current_prices: dict, uid: str,
                 buttons=[[
                     {"text": f"✅ Set stop to ${entry_str}", "callback_data": f"be_stop|{ticker}|{entry_str}"},
                     {"text": "❌ Not yet", "callback_data": "be_stop_dismiss"},
+                ], [
+                    _miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS"),
                 ]],
                 chat_id=uid,
             )
@@ -2830,12 +2832,20 @@ def _check_trailing_stops(current_prices: dict, uid: str,
                     f"  Your current stop (<code>${_p(stop_f)}</code>) is still below "
                     f"entry — you're exposed to a full reversal."
                 )
-            _emit(
+            _trail_msg = (
                 f"🚀 <b>{ticker}</b> is up <b>+{gain_pct:.1f}%</b> — a strong move.{stop_note}\n\n"
                 f"💡 <b>Trail your stop</b> to <code>${_p(trail_price)}</code> "
                 f"(-8% from current) to protect most of your gain if the stock reverses.\n"
                 f"Use <code>/updatestop {ticker} {trail_price}</code> to set it now."
             )
+            if msg_buffer is not None:
+                msg_buffer.append(_trail_msg)
+            else:
+                send_inline_keyboard(
+                    _trail_msg,
+                    [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
+                    chat_id=uid,
+                )
 
         # ── Threshold 3: 90% of the way to target — trail at -5% from now ────
         if target:
@@ -2963,7 +2973,7 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
             if _is_alerted(key):
                 continue
             _mark_alerted(key)
-            send_message(
+            send_inline_keyboard(
                 f"🤔 <b>Hold or fold? — {ticker}</b>\n"
                 f"Down <b>{pct_from_entry:.1f}%</b> from your entry. "
                 f"Stop is at <code>${_p(stop_f)}</code> "
@@ -2971,6 +2981,7 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
                 f"<i>If the thesis still holds, stay in. "
                 f"If something has changed, it's okay to cut early and protect capital.</i>\n\n"
                 f"<code>/sold {ticker}</code> to close  ·  <code>/updatestop {ticker}</code> to adjust",
+                [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
                 chat_id=uid,
             )
 
@@ -3092,17 +3103,18 @@ def run_week_ahead(config: dict):
 def run_premarket(config: dict):
     """
     8:45 AM run — fires 45 min before market open.
-    For each user with open stock positions: fetch pre-market prices via yfinance
-    and send a brief 'heading into the open' message.
+    For each user with open positions: fetch pre-market prices via yfinance (stocks)
+    or live prices via get_live_price (crypto, and as stock fallback).
 
     Two signals:
       - Big pre-market move (>= 3% either direction) → urgent alert
       - Quiet open (<3% on all positions) → one compact digest message
 
-    Skipped entirely if a user has no open stock positions.
+    Skipped entirely if a user has no open positions.
     """
     _log_cron_run("premarket")
     import yfinance as yf
+    from market_data import get_live_price, _CRYPTO_SYMBOLS
     print("[agent] Running pre-market pulse...")
 
     for uid in _all_recipients():
@@ -3113,15 +3125,13 @@ def run_premarket(config: dict):
 
             log         = load_user_trade_log(uid)
             open_trades = log.get("open", [])
-            # Only stocks — crypto is 24/7 and doesn't have a "pre-market"
-            stock_trades = [t for t in open_trades if t.get("asset_type") == "stock"]
-            if not stock_trades:
+            if not open_trades:
                 continue
 
-            # Deduplicate tickers
+            # Deduplicate tickers (all asset types)
             seen: set = set()
             unique = []
-            for t in stock_trades:
+            for t in open_trades:
                 if t["ticker"] not in seen:
                     seen.add(t["ticker"])
                     unique.append(t)
@@ -3132,7 +3142,39 @@ def run_premarket(config: dict):
             sector_by_ticker: dict[str, str] = {}   # for concentration check
 
             for trade in unique:
-                ticker = trade["ticker"]
+                ticker    = trade["ticker"]
+                entry     = trade.get("entry_price")
+                stop      = trade.get("stop_loss")
+                is_crypto = (
+                    trade.get("asset_type") == "crypto"
+                    or ticker.upper() in _CRYPTO_SYMBOLS
+                )
+
+                # ── Crypto: 24/7 market — use live price ──────────────────────
+                if is_crypto:
+                    try:
+                        price = get_live_price(ticker)
+                        if price:
+                            price = round(float(price), 6)
+                            vs_entry_str = ""
+                            if entry:
+                                ve = (price - float(entry)) / float(entry) * 100
+                                vs_entry_str = f"  ·  {'+' if ve >= 0 else ''}{ve:.1f}% vs entry"
+                            stop_badge = ""
+                            if stop and price <= float(stop) * 1.02:
+                                stop_badge = "  ⚠️ <b>NEAR STOP</b>"
+                            position_lines.append(
+                                f"  ⚪ <b>{ticker}</b>  <code>${_p(price)}</code>"
+                                f"  <i>24/7 · live{vs_entry_str}</i>{stop_badge}"
+                            )
+                        else:
+                            position_lines.append(f"  <b>{ticker}</b>  <i>live price unavailable</i>")
+                    except Exception as exc:
+                        print(f"[agent] Pre-market crypto fetch failed for {ticker}: {exc}")
+                        position_lines.append(f"  <b>{ticker}</b>  <i>live price unavailable</i>")
+                    continue
+
+                # ── Stock: try yfinance pre-market first ───────────────────────
                 try:
                     tkr_obj     = yf.Ticker(ticker)
                     info        = tkr_obj.info
@@ -3153,10 +3195,14 @@ def run_premarket(config: dict):
                         except Exception:
                             pass
 
-                    entry       = trade.get("entry_price")
-                    # Capture sector for concentration check (stocks only)
-                    if trade.get("asset_type") == "stock":
-                        sector_by_ticker[ticker] = info.get("sector", "Unknown")
+                    # Capture sector for concentration check
+                    sector_by_ticker[ticker] = info.get("sector", "Unknown")
+
+                    # Last-resort fallback: Alpaca/yfinance live price
+                    price_label = "pre-market"
+                    if not pre_price:
+                        pre_price = get_live_price(ticker)
+                        price_label = "last price"
 
                     if not pre_price:
                         position_lines.append(f"  <b>{ticker}</b>  <i>pre-market data unavailable</i>")
@@ -3165,12 +3211,14 @@ def run_premarket(config: dict):
                     pre_price  = round(float(pre_price), 2)
                     prev_close = round(float(prev_close), 2) if prev_close else None
 
-                    # % vs previous close
-                    if prev_close:
+                    # % vs previous close (only meaningful when we have real pre-market data)
+                    vs_prev = 0
+                    if prev_close and price_label == "pre-market":
                         vs_prev = (pre_price - prev_close) / prev_close * 100
                         vs_prev_str = f"{'+' if vs_prev >= 0 else ''}{vs_prev:.1f}% vs close"
+                    elif price_label != "pre-market":
+                        vs_prev_str = price_label   # "last price"
                     else:
-                        vs_prev     = 0
                         vs_prev_str = ""
 
                     # % vs entry
@@ -3180,7 +3228,6 @@ def run_premarket(config: dict):
                         vs_entry_str = f"  ·  {'+' if vs_entry >= 0 else ''}{vs_entry:.1f}% vs entry"
 
                     # Stop proximity
-                    stop = trade.get("stop_loss")
                     stop_badge = ""
                     if stop and pre_price <= float(stop) * 1.02:
                         stop_badge = "  ⚠️ <b>NEAR STOP</b>"
@@ -3192,7 +3239,7 @@ def run_premarket(config: dict):
                     )
                     position_lines.append(line)
 
-                    if abs(vs_prev) >= 3:
+                    if price_label == "pre-market" and abs(vs_prev) >= 3:
                         big_movers.append((ticker, pre_price, vs_prev, stop))
 
                 except Exception as exc:

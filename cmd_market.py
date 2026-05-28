@@ -4,7 +4,9 @@ cmd_market.py — Market data + portfolio commands extracted from bot_commands.p
 
 import threading
 
-from telegram_api import send_message, typing_until_done, send_typing_action
+import os
+
+from telegram_api import send_message, typing_until_done, send_typing_action, send_inline_keyboard
 from config_manager import get_config, get_user_config, load_picks, load_user_trade_log, get_allowed_users
 from formatters import format_daily_message, format_confirmation_message
 from cmd_helpers import _fetch_live_price, _resolve_ticker_candidates
@@ -1369,6 +1371,10 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         lines.append(
             "\n<i>Use /mymovers for a full ranked view  ·  /positions for P&amp;L details</i>"
         )
+        _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        if _app_url:
+            send_inline_keyboard("\n".join(lines), [[{"text": "📊 Open Dashboard", "web_app": {"url": f"{_app_url}/miniapp?tab=portfolio"}}]], chat_id=chat_id)
+            return ""
         return "\n".join(lines)
 
     return None
