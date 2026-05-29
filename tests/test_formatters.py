@@ -254,3 +254,26 @@ class TestFormatDailyMessage:
         msft_pos = result_wl.find("MSFT")
         if aapl_pos != -1 and msft_pos != -1:
             assert aapl_pos < msft_pos
+
+    def test_pick_with_theme_does_not_raise(self):
+        """Regression: _theme_tag used _re from _clean_thesis scope → NameError.
+        Any pick with a 'theme' field must not crash format_daily_message."""
+        def _stock_with_theme(ticker):
+            return {"ticker": ticker, "entry_price": 100.0, "target_price": 115.0,
+                    "stop_loss": 90.0, "conviction": 3, "thesis": "AI growth story.",
+                    "catalyst": "Earnings beat.", "timeframe": "ST",
+                    "sector": "Technology", "theme": "AI Infrastructure"}
+        picks = {
+            "stocks": {
+                "short_term": [_stock_with_theme("NVDA")],
+                "long_term":  [_stock_with_theme("MSFT")],
+            },
+            "crypto":      {"short_term": [], "long_term": []},
+            "etfs":        {"short_term": [], "long_term": []},
+            "commodities": {"short_term": [], "long_term": []},
+            "options_plays": [],
+        }
+        # Must not raise NameError: name '_re' is not defined
+        result = format_daily_message(picks, _cfg())
+        assert isinstance(result, str)
+        assert "NVDA" in result

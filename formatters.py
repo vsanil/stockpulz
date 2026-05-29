@@ -330,6 +330,7 @@ def format_daily_message(picks: dict, config: dict,
 
     def _theme_tag(s):
         """Return a styled inline theme hashtag, e.g. #AIInfrastructure"""
+        import re as _re
         theme = s.get("theme", "")
         if not theme:
             return ""
