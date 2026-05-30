@@ -2492,6 +2492,27 @@ def run_weekly_recap(config: dict, now_et: datetime):
     except Exception as exc:
         print(f"[agent] Weekly recap failed (non-critical): {exc}")
 
+    # Step 3: Auto-push missed picks digest — "picks you skipped and their outcome"
+    print("[agent] Building auto missed-picks digest...")
+    try:
+        from cmd_trades import get_missed_picks_message
+        recipients = _all_recipients()
+        for uid in recipients:
+            try:
+                user_cfg = {**config, **get_user_config(uid)}
+                if user_cfg.get("paused"):
+                    continue
+                msg = get_missed_picks_message(uid)
+                if msg:
+                    if DRY_RUN:
+                        print(f"\n[DRY RUN] Missed picks for {uid}:\n{msg}")
+                    else:
+                        send_message(msg, chat_id=uid)
+            except Exception as exc:
+                print(f"[agent] Missed picks digest failed for {uid} (non-critical): {exc}")
+    except Exception as exc:
+        print(f"[agent] Missed picks auto-push failed (non-critical): {exc}")
+
 
 # ── Portfolio health nudge helper ────────────────────────────────────────────
 
@@ -2894,13 +2915,30 @@ def _check_trailing_stops(current_prices: dict, uid: str,
                     trade["_notified_partial_profit"] = True
                     dirty = True
                     gained_r = (current_f - entry_f) / risk
+                    # Calculate specific share/dollar amounts if shares known
+                    shares_held = trade.get("shares") or trade.get("quantity")
+                    if shares_held:
+                        sh = float(shares_held)
+                        half = max(1, int(sh / 2))
+                        profit_on_half = round(half * (current_f - entry_f), 2)
+                        specific = (
+                            f"Sell <b>{half} of your {int(sh)} shares</b> at "
+                            f"<code>${_p(current_f)}</code> → locks in "
+                            f"<b>${profit_on_half:,.2f}</b> profit. "
+                            f"The remaining {int(sh - half)} ride to target "
+                            f"(<code>${_p(target_f)}</code>) risk-free."
+                        )
+                    else:
+                        specific = (
+                            f"Consider selling half your position at "
+                            f"<code>${_p(current_f)}</code> to lock in profit — "
+                            f"the rest rides to target (<code>${_p(target_f)}</code>) risk-free."
+                        )
                     _emit(
                         f"💰 <b>{ticker}</b> is up <b>{gained_r:.1f}R</b> "
                         f"(<code>${_p(current_f)}</code>, +{gain_pct:.1f}% from entry).\n\n"
-                        f"💡 <b>Partial profit opportunity:</b> you've hit 2× your original risk. "
-                        f"Consider selling half to cover your cost — the remaining position "
-                        f"rides to target (<code>${_p(target_f)}</code>) risk-free.\n"
-                        f"<i>Use <code>/sold {ticker}</code> to close or log a partial exit.</i>"
+                        f"💡 <b>Partial profit opportunity:</b> {specific}\n"
+                        f"<i>Use <code>/trim {ticker} {half if shares_held else ''}</code> to log a partial exit.</i>"
                     )
 
     if dirty:
