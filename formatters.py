@@ -325,8 +325,7 @@ def format_daily_message(picks: dict, config: dict,
         if catalyst:
             parts.append(f"🎯 {_esc(catalyst)}")
         combined = "  ·  ".join(parts)
-        # Wrap in spoiler so the long analysis is hidden by default — tap to reveal
-        return f"  <tg-spoiler>{combined}</tg-spoiler>" if combined else ""
+        return f"  {combined}" if combined else ""
 
     def _theme_tag(s):
         """Return a styled inline theme hashtag, e.g. #AIInfrastructure"""
@@ -359,7 +358,7 @@ def format_daily_message(picks: dict, config: dict,
         if tl: row += f"\n{tl}"
         edge = s.get("edge", "")
         if edge:
-            row += f"\n  <tg-spoiler>Edge: {_esc(edge)}</tg-spoiler>"
+            row += f"\n  Edge: {_esc(edge)}"
         row += _iv_warn(s)
         ew = _entry_window(e, stop, budget=config.get("stock_budget"), is_long_term=False, is_crypto=False)
         if ew: row += f"\n{ew}"
@@ -376,7 +375,7 @@ def format_daily_message(picks: dict, config: dict,
         if tl: row += f"\n{tl}"
         edge = s.get("edge", "")
         if edge:
-            row += f"\n  <tg-spoiler>Edge: {_esc(edge)}</tg-spoiler>"
+            row += f"\n  Edge: {_esc(edge)}"
         ew = _entry_window(e, None, budget=config.get("stock_budget"), is_long_term=True, is_crypto=False)
         if ew: row += f"\n{ew}"
         return row
@@ -552,7 +551,9 @@ def format_daily_message(picks: dict, config: dict,
     # ── Footer ────────────────────────────────────────────────────────────────
     lines += [
         "",
-        "⚠️ <i>Not financial advice. Open the dashboard for full analysis & charts.</i>",
+        "💡 <i>Bought one of these? Tap to log it — you'll get stop-loss &amp; target alerts, pre-market gap warnings, earnings heads-ups, and P&amp;L tracking vs SPY. All automated.</i>",
+        "",
+        "⚠️ <i>Not financial advice. Open the dashboard for full analysis &amp; charts.</i>",
     ]
 
     return "\n".join(lines)
@@ -563,8 +564,8 @@ def format_daily_message(picks: dict, config: dict,
 def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[dict]]:
     """
     Build an inline keyboard for the morning picks message.
-    Returns one '✅ Buy TICKER' button per pick (ST stocks, LT stocks, crypto).
-    Tapping a button fires the buy_pick callback with encoded price/shares/pct data.
+    Returns one '📌 Log TICKER' button per pick — tapping opens the mini app
+    pre-filled to log the position and auto-create stop-loss / target alerts.
     """
     cfg         = config or {}
     show_crypto = cfg.get("show_crypto", True)
@@ -601,51 +602,37 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         entry_str = f"{float(entry):.2f}" if entry else "0"
         return f"buy_pick|{ticker}|{entry_str}|{shares}|{asset_type}|{stop_pct}|{target_pct}"
 
-    def _pair(pick: dict, asset_type: str) -> list[dict]:
-        """Return [Buy, 👁 Watch, 📊 Chart] for one pick."""
+    def _log_btn(pick: dict, asset_type: str) -> list[dict]:
+        """Return a single full-width '📌 Log TICKER' button for one pick."""
         ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
         entry  = pick.get("entry_price")  or ""
         stop   = pick.get("stop_loss")    or ""
         target = pick.get("target_price") or ""
 
         if render_url:
-            buy_btn = {"text": f"✅ Buy {ticker}", "web_app": {
+            btn = {"text": f"📌 Log {ticker}", "web_app": {
                 "url": (f"{render_url}/miniapp?tab=portfolio&action=add"
                         f"&ticker={ticker}&asset_type={asset_type}"
                         f"&entry={entry}&stop={stop}&target={target}")
             }}
-            chart_btn = {"text": "📊 Chart", "web_app": {
-                "url": f"{render_url}/miniapp?chart={ticker}&asset_type={asset_type}"
-            }}
         else:
-            buy_btn   = {"text": f"✅ Buy {ticker}", "callback_data": _buy_callback(pick, asset_type)}
-            chart_btn = {"text": "📊 Chart",         "callback_data": f"chart|{ticker}|{asset_type}"}
+            btn = {"text": f"📌 Log {ticker}", "callback_data": _buy_callback(pick, asset_type)}
 
-        return [
-            buy_btn,
-            {"text": f"👁 Watch", "callback_data": f"watch_pick|{ticker}"},
-            chart_btn,
-        ]
+        return [btn]
 
     def _add_section(picks_list: list, get_sym, asset_type: str, header: str, icon: str = ""):
         """
-        Append a section header + one pick per row (3 buttons: Buy, Watch, Chart).
-        Single pick: skip the header row, fold the icon into the button text.
+        Append a section header + one '📌 Log TICKER' button per pick.
+        Single pick: skip the header row.
         """
         if not picks_list:
             return
         if len(picks_list) == 1:
-            # Only 1 pick — no header row, embed icon in button to save vertical space
-            pick   = picks_list[0]
-            ticker = get_sym(pick)
-            pair   = _pair(pick, asset_type)
-            if icon:
-                pair[0] = {**pair[0], "text": f"{icon} Buy {ticker}"}
-            buttons.append(pair)
+            buttons.append(_log_btn(picks_list[0], asset_type))
             return
         buttons.append(_header(header))
         for p in picks_list:
-            buttons.append(_pair(p, asset_type))
+            buttons.append(_log_btn(p, asset_type))
 
     buttons = []
 
