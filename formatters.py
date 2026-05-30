@@ -550,18 +550,17 @@ def format_daily_message(picks: dict, config: dict,
 
     # ── Footer ────────────────────────────────────────────────────────────────
     _app_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
-    _paper_url = f"{_app_url}/miniapp?tab=portfolio&mode=paper" if _app_url else ""
-    _paper_link = (
-        f'<a href="{_paper_url}">simulate the trade in the app</a>'
-        if _paper_url
-        else "use <code>/paper_buy TICKER SHARES</code> to simulate the trade"
+    _paper_cta = (
+        "tap <b>📄 Paper Trade</b> below"
+        if _app_url
+        else "use <code>/paper_buy TICKER SHARES</code>"
     )
 
     footer_lines = [
         "",
         "💡 <i>Bought one of these? Tap to log it — you'll get stop-loss &amp; target alerts, pre-market gap warnings, earnings heads-ups, and P&amp;L tracking vs SPY. All automated.</i>",
         "",
-        f"📄 <i>Not ready to commit real money? {_paper_link} risk-free — switch the toggle to Paper on the Portfolio tab. Check performance with</i> /paper_portfolio",
+        f"📄 <i>Not ready to commit real money? {_paper_cta} to simulate risk-free. Check performance with</i> /paper_portfolio",
     ]
 
     # Show /missed only on weekends (when market is closed or it's Sat/Sun)
@@ -656,12 +655,12 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
 
     buttons = []
 
-    # ── Mini App launch button — top, full-width, prominent ───────────────────
+    # ── Mini App launch buttons — top row ────────────────────────────────────
     if render_url:
-        buttons.append([{
-            "text":    "🚀 Open Dashboard  ↗",
-            "web_app": {"url": f"{render_url}/miniapp"},
-        }])
+        buttons.append([
+            {"text": "🚀 Open Dashboard  ↗", "web_app": {"url": f"{render_url}/miniapp"}},
+            {"text": "📄 Paper Trade  ↗",    "web_app": {"url": f"{render_url}/miniapp?tab=portfolio&mode=paper"}},
+        ])
 
     st_picks  = [s for s in stocks.get("short_term", []) if s.get("ticker")]
     lt_picks  = [s for s in stocks.get("long_term",  []) if s.get("ticker")]
