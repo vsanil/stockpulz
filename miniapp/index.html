@@ -2734,13 +2734,16 @@ const _TAB_VALID = new Set(_TAB_ORDER);
   const reqMode   = (params.get('mode')   || '').toLowerCase();
   const reqAction = (params.get('action') || '').toLowerCase();
 
-  // Set paper mode BEFORE tab loads so loadPortfolio uses it immediately
-  if (reqMode === 'paper') portfolioMode = 'paper';
+  // NOTE: cannot touch portfolioMode here — it is declared with 'let' later in
+  // the script (TDZ would throw ReferenceError and blank the page).
+  // Apply it inside _appReady, which fires after the full script has run.
 
   if (reqTab && _TAB_VALID.has(reqTab) && reqTab !== 'picks') {
     window.addEventListener('_appReady', function() {
+      // Set paper mode BEFORE gotoTab so loadPortfolio() picks it up immediately
+      if (reqMode === 'paper') portfolioMode = 'paper';
       gotoTab(reqTab);
-      // After switching to paper portfolio, optionally open the paper buy sheet
+      // Optionally open the paper buy sheet pre-filled from URL params
       if (reqMode === 'paper' && reqAction === 'buy') {
         const ticker = (params.get('ticker') || '').toUpperCase();
         const entry  = params.get('entry')  || '';

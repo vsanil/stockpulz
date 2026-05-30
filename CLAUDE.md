@@ -69,7 +69,10 @@ Rules:
 
 ### Syntax check before declaring done
 - After editing any Python file, run `python -m py_compile <file>` mentally or literally — never skip this
-- After editing index.html JS, check for unclosed braces, missing `async`, and undefined variable references
+- After editing index.html JS, run `python scripts/check_js.py` (or `pytest tests/test_frontend_js.py`) — no exceptions
+  - This catches: Node.js syntax errors, TDZ bugs (let/const used in IIFEs before declaration), blocked Telegram APIs
+  - The TDZ bug class is SILENT at parse time — `node --check` does not catch it, only this checker does
+  - Root cause: a `let`/`const` variable assigned inside a top-level IIFE before its declaration line crashes the entire script at runtime (ReferenceError = blank page). Always move such assignments inside the `_appReady` listener
 - A change is NOT done until syntax is verified
 
 ### Test suite — mandatory before every commit
