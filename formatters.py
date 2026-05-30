@@ -549,15 +549,32 @@ def format_daily_message(picks: dict, config: dict,
         lines += e_lines
 
     # ── Footer ────────────────────────────────────────────────────────────────
-    lines += [
+    _app_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    _paper_url = f"{_app_url}/miniapp?tab=portfolio&mode=paper" if _app_url else ""
+    _paper_link = (
+        f'<a href="{_paper_url}">simulate the trade in the app</a>'
+        if _paper_url
+        else "use <code>/paper_buy TICKER SHARES</code> to simulate the trade"
+    )
+
+    footer_lines = [
         "",
         "💡 <i>Bought one of these? Tap to log it — you'll get stop-loss &amp; target alerts, pre-market gap warnings, earnings heads-ups, and P&amp;L tracking vs SPY. All automated.</i>",
         "",
-        "📄 <i>Not ready to commit real money? Use <code>/paper_buy TICKER SHARES</code> to simulate the trade risk-free. Check results with <code>/paper_portfolio</code>.</i>",
-        "<i>📊 See what you skipped: <code>/missed</code></i>",
+        f"📄 <i>Not ready to commit real money? {_paper_link} risk-free — switch the toggle to Paper on the Portfolio tab. Check performance with <code>/paper_portfolio</code>.</i>",
+    ]
+
+    # Show /missed only on weekends (when market is closed or it's Sat/Sun)
+    _is_weekend = market_closed or datetime.now(pytz.timezone("America/New_York")).weekday() >= 5
+    if _is_weekend:
+        footer_lines.append("<i>📊 Curious what you skipped this week? <code>/missed</code></i>")
+
+    footer_lines += [
         "",
         "⚠️ <i>Not financial advice. Open the dashboard for full analysis &amp; charts.</i>",
     ]
+
+    lines += footer_lines
 
     return "\n".join(lines)
 
