@@ -428,12 +428,12 @@ def format_daily_message(picks: dict, config: dict,
         if o.get("note"): row += f"\n  <i>{_esc(o['note'])}</i>"
         return row
 
-    # ── Market closed label (shown once, shared by all equity sections) ─────────
+    # ── Market closed banner — shown once before sections ────────────────────
     if market_closed:
         _closed_base = f"🏖️ US markets closed — {closed_reason}" if closed_reason else "🏖️ US markets closed"
-        _closed_lbl  = f"{_closed_base} · fresh picks at 7AM ET on {next_open_label}" if next_open_label else _closed_base
-    else:
-        _closed_lbl = ""
+        _closed_banner = f"{_closed_base} · fresh picks at 7AM ET on {next_open_label}" if next_open_label else _closed_base
+        lines += ["", f"<i>{_closed_banner}</i>"]
+    _closed_short = "closed" if market_closed else ""
 
     # ── Sections — each pick is its own expandable blockquote ─────────────────
     if st_picks:
@@ -441,7 +441,7 @@ def format_daily_message(picks: dict, config: dict,
         for s in st_picks:
             lines += [f"<blockquote expandable>{_row_st(s)}</blockquote>"]
     elif show_st:
-        _st_skip = _closed_lbl if market_closed else "no qualifying setup today"
+        _st_skip = _closed_short or "no qualifying setup today"
         lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· {_st_skip}</i>"]
 
     if lt_picks:
@@ -449,7 +449,7 @@ def format_daily_message(picks: dict, config: dict,
         for s in lt_picks:
             lines += [f"<blockquote expandable>{_row_lt(s)}</blockquote>"]
     elif show_lt:
-        _lt_skip = _closed_lbl if market_closed else "no stock cleared the quality bar today"
+        _lt_skip = _closed_short or "no stock cleared the quality bar today"
         lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
 
     if cst_picks:
@@ -464,7 +464,7 @@ def format_daily_message(picks: dict, config: dict,
         for e in etf_picks:
             lines += [f"<blockquote expandable>{_row_etf(e)}</blockquote>"]
     else:
-        _etf_skip = _closed_lbl if market_closed else "no alignment with current regime"
+        _etf_skip = _closed_short or "no alignment with current regime"
         lines += ["", f"📦 <b>ETFs</b>  <i>· {_etf_skip}</i>"]
 
     if comm_picks:
@@ -472,7 +472,7 @@ def format_daily_message(picks: dict, config: dict,
         for c in comm_picks:
             lines += [f"<blockquote expandable>{_row_commodity(c)}</blockquote>"]
     else:
-        _comm_skip = _closed_lbl if market_closed else "no setup today"
+        _comm_skip = _closed_short or "no setup today"
         lines += ["", f"🛢 <b>COMMODITIES</b>  <i>· {_comm_skip}</i>"]
 
     if options_plays:
@@ -561,13 +561,13 @@ def format_daily_message(picks: dict, config: dict,
         "",
         "💡 <i>Bought one of these? Tap to log it — you'll get stop-loss &amp; target alerts, pre-market gap warnings, earnings heads-ups, and P&amp;L tracking vs SPY. All automated.</i>",
         "",
-        f"📄 <i>Not ready to commit real money? {_paper_link} risk-free — switch the toggle to Paper on the Portfolio tab. Check performance with <code>/paper_portfolio</code>.</i>",
+        f"📄 <i>Not ready to commit real money? {_paper_link} risk-free — switch the toggle to Paper on the Portfolio tab. Check performance with</i> /paper_portfolio",
     ]
 
     # Show /missed only on weekends (when market is closed or it's Sat/Sun)
     _is_weekend = market_closed or datetime.now(pytz.timezone("America/New_York")).weekday() >= 5
     if _is_weekend:
-        footer_lines.append("<i>📊 Curious what you skipped this week? <code>/missed</code></i>")
+        footer_lines.append("📊 <i>Curious what you skipped this week?</i> /missed")
 
     footer_lines += [
         "",

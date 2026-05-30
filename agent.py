@@ -3932,7 +3932,9 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
 
             def _fetch_wl_price(ticker: str):
                 try:
-                    info  = _yf.Ticker(ticker).fast_info
+                    from price_checker import _SYMBOL_TO_CG_ID as _CG_IDS
+                    yf_sym = f"{ticker}-USD" if ticker in _CG_IDS else ticker
+                    info  = _yf.Ticker(yf_sym).fast_info
                     price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
                     prev  = getattr(info, "previous_close", None)
                     if price:

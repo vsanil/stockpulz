@@ -2302,7 +2302,7 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
   <div class="bottom-sheet">
     <div class="sheet-handle"></div>
     <div class="sheet-hdr">
-      <div class="sheet-title">📄 Paper Buy</div>
+      <div class="sheet-title">📄 Paper Trade</div>
       <button class="sheet-close" onclick="closeOverlay('paper-buy-overlay')">✕</button>
     </div>
     <div class="sheet-body">
@@ -2321,15 +2321,29 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
                  onkeydown="if(event.key==='Enter')document.getElementById('pbuy-price').focus()">
         </div>
         <div>
-          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Price <span style="font-weight:400;opacity:.7">(optional)</span></div>
+          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Entry price <span style="font-weight:400;opacity:.7">(opt)</span></div>
           <input type="number" id="pbuy-price" class="ticker-input" placeholder="Live price"
                  step="0.01" min="0"
                  oninput="_updatePaperBuyCost()"
+                 onkeydown="if(event.key==='Enter')document.getElementById('pbuy-stop').focus()">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+        <div>
+          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Stop loss <span style="font-weight:400;opacity:.7">(opt)</span></div>
+          <input type="number" id="pbuy-stop" class="ticker-input" placeholder="e.g. 64.00"
+                 step="0.01" min="0"
+                 onkeydown="if(event.key==='Enter')document.getElementById('pbuy-target').focus()">
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Target <span style="font-weight:400;opacity:.7">(opt)</span></div>
+          <input type="number" id="pbuy-target" class="ticker-input" placeholder="e.g. 82.00"
+                 step="0.01" min="0"
                  onkeydown="if(event.key==='Enter')confirmPaperBuy()">
         </div>
       </div>
       <div id="pbuy-cost-hint" style="font-size:12px;color:var(--hint);margin-top:8px;min-height:16px;text-align:center"></div>
-      <button class="btn-primary" id="pbuy-btn" onclick="confirmPaperBuy()">Buy</button>
+      <button class="btn-primary" id="pbuy-btn" onclick="confirmPaperBuy()">Paper Buy</button>
       <button class="btn-cancel" onclick="closeOverlay('paper-buy-overlay')">Cancel</button>
     </div>
   </div>
@@ -2712,14 +2726,29 @@ let _detailTicker     = null;
 const _scrollPos  = {};
 const _TAB_ORDER  = ['picks', 'portfolio', 'performance', 'watchlist', 'settings'];
 
-// Deep-link: ?tab=portfolio opens straight to that tab on load
+// Deep-link: ?tab=portfolio&mode=paper&action=buy&ticker=HYPE&entry=68&stop=64&target=82
 const _TAB_VALID = new Set(_TAB_ORDER);
 (function _handleDeepLinkTab() {
-  const params  = new URLSearchParams(window.location.search);
-  const reqTab  = (params.get('tab') || '').toLowerCase();
+  const params    = new URLSearchParams(window.location.search);
+  const reqTab    = (params.get('tab')    || '').toLowerCase();
+  const reqMode   = (params.get('mode')   || '').toLowerCase();
+  const reqAction = (params.get('action') || '').toLowerCase();
+
+  // Set paper mode BEFORE tab loads so loadPortfolio uses it immediately
+  if (reqMode === 'paper') portfolioMode = 'paper';
+
   if (reqTab && _TAB_VALID.has(reqTab) && reqTab !== 'picks') {
-    // Defer until after gotoTab is fully set up (end of script)
-    window.addEventListener('_appReady', function() { gotoTab(reqTab); }, { once: true });
+    window.addEventListener('_appReady', function() {
+      gotoTab(reqTab);
+      // After switching to paper portfolio, optionally open the paper buy sheet
+      if (reqMode === 'paper' && reqAction === 'buy') {
+        const ticker = (params.get('ticker') || '').toUpperCase();
+        const entry  = params.get('entry')  || '';
+        const stop   = params.get('stop')   || '';
+        const target = params.get('target') || '';
+        setTimeout(() => openPaperBuySheet(ticker, entry, stop, target), 900);
+      }
+    }, { once: true });
   }
 })();
 
@@ -5769,6 +5798,8 @@ async function loadPaperPortfolio(forceRefresh = false) {
       <button class="rp-btn active" id="rp-paper" onclick="switchPortfolioMode('paper')">Paper</button>
     </div>`;
 
+    const returnPct = startCash > 0 ? ((totalVal - startCash) / startCash * 100) : 0;
+    const retCls    = returnPct > 0 ? 'val-pos' : returnPct < 0 ? 'val-neg' : 'val-neu';
     html += `<div class="summary-row">
       <div class="summary-box">
         <div class="summary-lbl">Cash</div>
@@ -5781,6 +5812,10 @@ async function loadPaperPortfolio(forceRefresh = false) {
       <div class="summary-box">
         <div class="summary-lbl">Total Value</div>
         <div class="summary-val val-neu">$${Math.round(totalVal).toLocaleString()}</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-lbl">Return</div>
+        <div class="summary-val ${retCls}">${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%</div>
       </div>
     </div>`;
 
@@ -5798,19 +5833,25 @@ async function loadPaperPortfolio(forceRefresh = false) {
         const entry = p.entry_price ? `$${fmtPrice(p.entry_price)}` : '—';
         const cur   = p.live_price  ? `$${fmtPrice(p.live_price)}`  : '';
         const aType = p.asset_type  || 'stock';
+        const _stopLine   = p.stop_loss    ? `<span style="color:var(--red);font-size:11px">stop $${fmtPrice(p.stop_loss)}</span>`   : '';
+        const _targetLine = p.target_price ? `<span style="color:var(--green);font-size:11px">tgt $${fmtPrice(p.target_price)}</span>` : '';
+        const _levelsRow  = (_stopLine || _targetLine)
+          ? `<div class="pos-sub" style="margin-top:2px;opacity:.8">${[_stopLine, _targetLine].filter(Boolean).join('  ·  ')}</div>`
+          : '';
         html += `<div class="pos-card">
           <div class="pos-main">
             <div class="pos-avatar" style="background:${_avatarBg(sym,aType)}">${init}</div>
             <div class="pos-body">
               <div class="pos-sym">${sym}</div>
               <div class="pos-sub">${entry}${cur ? ` → ${cur}` : ''}</div>
+              ${_levelsRow}
             </div>
             <div class="pos-right">
               <div class="pos-pct ${cls}">${fmtPct(pct)}</div>
             </div>
           </div>
           <div class="pos-actions">
-            <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},0,0)">📊 Chart</button>
+            <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
             <button class="pos-btn" style="color:var(--green)" onclick="openPaperBuySheet('${sym}')">📈 More</button>
             <button class="pos-btn" style="color:var(--red)" onclick="sellPaperPosition('${sym}')">🔴 Sell</button>
             <button class="pos-btn" style="color:var(--hint)" onclick="cancelPaperPosition('${sym}')">🗑</button>
@@ -5828,7 +5869,7 @@ async function loadPaperPortfolio(forceRefresh = false) {
     if (history.length) {
       html += '<div class="section-hdr" style="padding-top:18px">Paper History</div>';
       html += history.slice(0, 15).map(t => {
-        const pct = parseFloat(t.return_pct || 0);
+        const pct = parseFloat(t.gain_pct ?? t.return_pct ?? 0);
         const sym = t.ticker || t.symbol || '?';
         return `<div class="trade-row">
           <div>
@@ -8496,22 +8537,26 @@ async function confirmAddCash() {
 let _pbuyCurrentPrice = null;
 let _pbuyPriceFetchTimer = null;
 
-function openPaperBuySheet(prefillTicker = '') {
+function openPaperBuySheet(prefillTicker = '', prefillEntry = '', prefillStop = '', prefillTarget = '') {
   tg.HapticFeedback?.impactOccurred('light');
   _pbuyCurrentPrice = null;
   clearTimeout(_pbuyPriceFetchTimer);
   const tickerInp = document.getElementById('pbuy-ticker');
   const sharesInp = document.getElementById('pbuy-shares');
   const priceInp  = document.getElementById('pbuy-price');
+  const stopInp   = document.getElementById('pbuy-stop');
+  const targetInp = document.getElementById('pbuy-target');
   const hint      = document.getElementById('pbuy-price-hint');
   const costHint  = document.getElementById('pbuy-cost-hint');
   const btn       = document.getElementById('pbuy-btn');
   if (tickerInp) tickerInp.value = prefillTicker.toUpperCase();
   if (sharesInp) sharesInp.value = '';
-  if (priceInp)  { priceInp.value = ''; priceInp.placeholder = 'Live price'; }
+  if (priceInp)  { priceInp.value = prefillEntry || ''; priceInp.placeholder = 'Live price'; }
+  if (stopInp)   stopInp.value   = prefillStop   || '';
+  if (targetInp) targetInp.value = prefillTarget || '';
   if (hint)      hint.textContent = '';
   if (costHint)  costHint.textContent = '';
-  if (btn)       { btn.disabled = false; btn.textContent = 'Buy'; }
+  if (btn)       { btn.disabled = false; btn.textContent = 'Paper Buy'; }
   openOverlay('paper-buy-overlay');
   setTimeout(() => {
     if (prefillTicker) {
@@ -8570,16 +8615,22 @@ async function confirmPaperBuy() {
   const tickerInp = document.getElementById('pbuy-ticker');
   const sharesInp = document.getElementById('pbuy-shares');
   const priceInp  = document.getElementById('pbuy-price');
+  const stopInp   = document.getElementById('pbuy-stop');
+  const targetInp = document.getElementById('pbuy-target');
   const btn       = document.getElementById('pbuy-btn');
   const ticker    = (tickerInp?.value || '').trim().toUpperCase();
   const shares    = parseFloat(sharesInp?.value);
-  const priceVal  = parseFloat(priceInp?.value) || null;
+  const priceVal  = parseFloat(priceInp?.value)  || null;
+  const stopVal   = parseFloat(stopInp?.value)   || null;
+  const targetVal = parseFloat(targetInp?.value) || null;
   if (!ticker)       { tickerInp?.focus(); return; }
   if (!(shares > 0)) { sharesInp?.focus(); return; }
   btn.disabled = true; btn.textContent = 'Buying…';
   try {
     const body = { ticker, shares };
-    if (priceVal) body.price = priceVal;
+    if (priceVal)  body.price        = priceVal;
+    if (stopVal)   body.stop_loss    = stopVal;
+    if (targetVal) body.target_price = targetVal;
     const res = await api('/api/miniapp/paper_buy', 'POST', body);
     if (!res.ok) {
       btn.disabled = false; btn.textContent = 'Buy';

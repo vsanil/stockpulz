@@ -30,7 +30,8 @@ def _live_price(ticker: str) -> float | None:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = None) -> str:
+def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = None,
+              stop_loss: float | None = None, target_price: float | None = None) -> str:
     """Simulate buying shares for a user. Returns Telegram-formatted confirmation."""
     ticker = ticker.upper()
     live   = _live_price(ticker)
@@ -51,17 +52,25 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
         # Average down/up
         total_shares = existing["shares"] + shares
         avg_price    = (existing["avg_price"] * existing["shares"] + buy_price * shares) / total_shares
-        existing["shares"]    = round(total_shares, 4)
-        existing["avg_price"] = round(avg_price, 2)
+        existing["shares"]     = round(total_shares, 4)
+        existing["avg_price"]  = round(avg_price, 2)
+        existing["entry_price"] = round(avg_price, 2)
         existing["cost_basis"] = round(avg_price * total_shares, 2)
+        # Update stop/target if provided on scale-in
+        if stop_loss   is not None: existing["stop_loss"]    = round(stop_loss, 4)
+        if target_price is not None: existing["target_price"] = round(target_price, 4)
     else:
-        data["positions"].append({
+        pos = {
             "ticker":      ticker,
             "shares":      round(shares, 4),
             "avg_price":   round(buy_price, 2),
+            "entry_price": round(buy_price, 2),
             "cost_basis":  cost,
             "bought_date": date.today().isoformat(),
-        })
+        }
+        if stop_loss   is not None: pos["stop_loss"]    = round(stop_loss, 4)
+        if target_price is not None: pos["target_price"] = round(target_price, 4)
+        data["positions"].append(pos)
 
     data["cash"] = round(data["cash"] - cost, 2)
     save_user_paper(chat_id, data)

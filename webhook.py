@@ -3259,7 +3259,9 @@ def miniapp_paper_buy():
     body   = request.get_json(silent=True) or {}
     ticker = (body.get("ticker") or "").strip().upper()
     shares = body.get("shares")
-    price  = body.get("price")   # optional override; None = use live price
+    price  = body.get("price")        # optional override; None = use live price
+    stop_loss    = body.get("stop_loss")
+    target_price = body.get("target_price")
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
     try:
@@ -3269,13 +3271,18 @@ def miniapp_paper_buy():
     except (TypeError, ValueError):
         return jsonify({"error": "shares must be a positive number"}), 400
     if price is not None:
-        try:
-            price = float(price)
-        except (TypeError, ValueError):
-            price = None
+        try:   price = float(price)
+        except (TypeError, ValueError): price = None
+    if stop_loss is not None:
+        try:   stop_loss = float(stop_loss)
+        except (TypeError, ValueError): stop_loss = None
+    if target_price is not None:
+        try:   target_price = float(target_price)
+        except (TypeError, ValueError): target_price = None
     from paper_trader import paper_buy
     try:
-        msg = paper_buy(ticker, shares, chat_id, price=price)
+        msg = paper_buy(ticker, shares, chat_id, price=price,
+                        stop_loss=stop_loss, target_price=target_price)
         ok  = not msg.startswith("❌")
         return jsonify({"ok": ok, "message": msg})
     except Exception as e:
