@@ -553,6 +553,9 @@ def format_daily_message(picks: dict, config: dict,
         "",
         "💡 <i>Bought one of these? Tap to log it — you'll get stop-loss &amp; target alerts, pre-market gap warnings, earnings heads-ups, and P&amp;L tracking vs SPY. All automated.</i>",
         "",
+        "📄 <i>Not ready to commit real money? Use <code>/paper_buy TICKER SHARES</code> to simulate the trade risk-free. Check results with <code>/paper_portfolio</code>.</i>",
+        "<i>📊 See what you skipped: <code>/missed</code></i>",
+        "",
         "⚠️ <i>Not financial advice. Open the dashboard for full analysis &amp; charts.</i>",
     ]
 

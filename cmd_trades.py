@@ -30,6 +30,93 @@ from cmd_settings import _prompt_for_param, _send_settings_panel
 from cmd_nlp import _nl_parse_trade, _nl_extract_tickers_list
 
 
+def get_missed_picks_message(chat_id: str) -> str:
+    """
+    Return a formatted 'picks you skipped this week' message for chat_id.
+    Used both by /missed command and the Saturday auto-push in agent.py.
+    Returns "" if nothing to report (user caught all picks or no data).
+    """
+    try:
+        from config_manager import load_weekly_picks
+        weekly = load_weekly_picks()
+    except Exception:
+        return ""
+
+    if not weekly:
+        return ""
+
+    log    = load_user_trade_log(chat_id)
+    bought = {t["ticker"].upper() for t in log.get("open", []) + log.get("closed", [])}
+
+    all_picks: list[dict] = []
+    for day_picks in weekly.values():
+        stocks = day_picks.get("stocks", day_picks)
+        for bucket in ("short_term", "long_term"):
+            for p in stocks.get(bucket, []):
+                tk = p.get("ticker", "").upper()
+                if tk and tk not in bought:
+                    all_picks.append({"ticker": tk, "entry": p.get("entry_price"),
+                                      "target": p.get("target_price"), "thesis": p.get("thesis", "")})
+
+    seen: set = set()
+    unique_picks = []
+    for p in all_picks:
+        if p["ticker"] not in seen:
+            seen.add(p["ticker"])
+            unique_picks.append(p)
+
+    if not unique_picks:
+        return ""
+
+    missed_tickers = [p["ticker"] for p in unique_picks]
+    prices: dict = {}
+    try:
+        import yfinance as _yf
+        raw = _yf.download(" ".join(missed_tickers), period="1d",
+                            interval="1d", progress=False, auto_adjust=True)
+        if not raw.empty:
+            close = raw["Close"]
+            if hasattr(close, "columns"):
+                for tk in missed_tickers:
+                    if tk in close.columns:
+                        try:
+                            prices[tk] = float(close[tk].dropna().iloc[-1])
+                        except Exception:
+                            pass
+            else:
+                if missed_tickers:
+                    try:
+                        prices[missed_tickers[0]] = float(close.dropna().iloc[-1])
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    lines = [f"👀 <b>Picks you skipped this week</b>  ({len(unique_picks)} missed)\n"]
+    for p in unique_picks[:10]:
+        tk    = p["ticker"]
+        entry = p["entry"]
+        curr  = prices.get(tk)
+        if entry and curr:
+            move  = (curr - float(entry)) / float(entry) * 100
+            emoji = "🟢" if move > 0 else "🔴"
+            move_s = f"{move:+.1f}%"
+        elif entry:
+            emoji  = "⬜"
+            move_s = "—"
+        else:
+            emoji  = "⬜"
+            move_s = "—"
+        entry_s = f"  <i>entry ${_p(float(entry))}</i>" if entry else ""
+        lines.append(f"{emoji} <b>{tk}</b>  {move_s}{entry_s}")
+
+    lines.append(
+        "\n<i>These are picks from this week you didn't log.\n"
+        "Use /bought TICKER to add any you still want to track.</i>"
+    )
+    return "\n".join(lines)
+
+
 def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
     """Real-money trade commands."""
     # ── /bought [TICKER|name [price] [shares]] ───────────────────────────────
