@@ -12,6 +12,7 @@ Chart includes:
   - Stop   — dashed red horizontal line   (price panel only)
   - Right-side price labels for each level
 """
+from __future__ import annotations
 
 import io
 import matplotlib

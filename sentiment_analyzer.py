@@ -8,6 +8,7 @@ Sources:
 
 Score range: -10 (very bearish) to +10 (very bullish)
 """
+from __future__ import annotations
 
 import time
 import requests

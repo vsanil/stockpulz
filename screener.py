@@ -12,6 +12,7 @@ API key is available — more reliable than yfinance.info which has ~30% null
 rates on P/E, revenue growth, and free cash flow. Falls back to yfinance
 gracefully if the key is absent or a call fails.
 """
+from __future__ import annotations
 
 import os
 import time

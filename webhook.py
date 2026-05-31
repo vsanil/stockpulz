@@ -6,6 +6,7 @@ Deploy to Render.com free tier. After deploying, register the webhook URL once:
 
 Or call the /register endpoint manually.
 """
+from __future__ import annotations
 
 import os
 import sys
@@ -1281,6 +1282,7 @@ def miniapp_log_bought():
 
     entry_override     = body.get("entry_price")
     stop_override      = body.get("stop_loss")
+    target_override    = body.get("target_price")
     shares_override    = body.get("shares")
     timeframe_override = body.get("timeframe")  # 'short_term' | 'long_term' | None
 
@@ -1290,6 +1292,7 @@ def miniapp_log_bought():
     trade, existed = add_holding(ticker, chat_id, picks=picks,
                                  entry_override=entry_override,
                                  stop_override=stop_override,
+                                 target_override=target_override,
                                  shares_override=shares_override,
                                  timeframe_override=timeframe_override)
 

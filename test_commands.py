@@ -11,6 +11,7 @@ Run:
     python3 test_commands.py commands   # command-flow tests only
     python3 test_commands.py fast       # skip slow Haiku calls (unit tests only)
 """
+from __future__ import annotations
 
 import os
 import sys

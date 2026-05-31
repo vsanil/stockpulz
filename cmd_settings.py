@@ -1,6 +1,7 @@
 """
 cmd_settings.py — Settings panel + settings commands extracted from bot_commands.py.
 """
+from __future__ import annotations
 
 import os
 

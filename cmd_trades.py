@@ -4,6 +4,7 @@ cmd_trades.py — Real-money trade commands.
 Handles: BOUGHT, SOLD, PAPER CANCEL, PAPER HISTORY, HISTORY, SUMMARY,
          UPDATESTOP, UPDATETARGET, POSITIONS, PORTFOLIO
 """
+from __future__ import annotations
 
 import json
 import os

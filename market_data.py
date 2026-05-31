@@ -10,6 +10,7 @@ Required env vars:
   ALPACA_SECRET_KEY    — Alpaca secret key
   POLYGON_API_KEY      — Polygon.io API key
 """
+from __future__ import annotations
 
 import os
 import time

@@ -16,6 +16,7 @@ Command handlers live in cmd_*.py modules:
   cmd_admin.py     — admin commands
   cmd_trades.py    — real-money trade commands
 """
+from __future__ import annotations
 
 import os
 import time

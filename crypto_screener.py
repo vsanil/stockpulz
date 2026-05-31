@@ -9,6 +9,7 @@ Sparkline is explicitly disabled — it's a premium CoinGecko feature that cause
 rate-limit (429) errors on the free tier. Phase 2 individual calls (with 1.5s delay)
 are slow but reliable within free-tier limits (~10-30 req/min).
 """
+from __future__ import annotations
 
 import time
 import statistics

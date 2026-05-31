@@ -24,6 +24,7 @@ Signals returned:
   - iv_pct:          float — estimated ATM implied volatility % (annualised)
   - iv_label:        str   — "LOW" / "NORMAL" / "ELEVATED" / "EXTREME"
 """
+from __future__ import annotations
 
 import os
 import math

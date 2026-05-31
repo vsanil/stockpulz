@@ -3,6 +3,7 @@ price_checker.py — Fetch current prices for the 10:30 AM confirmation run.
 Uses yfinance for stocks and CoinGecko for crypto (single bulk call each),
 with a yfinance fallback for crypto in case CoinGecko fails or ids are missing.
 """
+from __future__ import annotations
 
 import concurrent.futures
 import requests

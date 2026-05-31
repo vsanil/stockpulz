@@ -1,6 +1,7 @@
 """
 cmd_nlp.py — NLP handlers extracted from bot_commands.py.
 """
+from __future__ import annotations
 
 import json
 import threading

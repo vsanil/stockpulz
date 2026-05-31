@@ -15,6 +15,7 @@ Telegram commands:
   /paper_add_cash 5000      → add cash to paper portfolio
   /paper_reset              → wipe paper portfolio (start over)
 """
+from __future__ import annotations
 
 from datetime import date
 import yfinance as yf
