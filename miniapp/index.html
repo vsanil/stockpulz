@@ -4480,7 +4480,7 @@ function renderPickCard(p, idx = 0) {
         </div>
       </div>
       <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
-      ${conv ? `<div style="margin:6px 0 4px;position:relative;z-index:1"><span class="conv-tag ${convCls}">${convIcon} ${p.conviction}</span></div>` : ''}
+      ${conv ? `<div style="margin:6px 0 4px;position:relative;z-index:1"><span class="conv-tag ${convCls}">${convIcon} Conviction ${p.conviction}/5</span></div>` : ''}
       ${(p.thesis || p.reason || p.theme || p.edge) ? `
         <button class="pick-thesis-toggle" onclick="togglePickThesis(this)" aria-label="Toggle analysis">
           <span>Analysis</span>
