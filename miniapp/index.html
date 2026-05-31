@@ -441,7 +441,7 @@ body.tg-light .price-grid { background: rgba(0,0,0,0.025); }
   margin-bottom: 12px; overflow: hidden;
   position: relative; z-index: 1;
 }
-body.tg-light .upside-bar { background: rgba(0,0,0,0.04); }
+body.tg-light .upside-bar { background: rgba(0,0,0,0.08); border-color: rgba(0,0,0,0.12); }
 .upside-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--accent) 0%, var(--green) 100%);
@@ -715,7 +715,7 @@ body.tg-light .pos-avatar { color: var(--text); }
   border: 1px solid var(--border);
   border-radius: 4px; overflow: hidden;
 }
-body.tg-light .target-bar { background: rgba(0,0,0,0.04); }
+body.tg-light .target-bar { background: rgba(0,0,0,0.08); border-color: rgba(0,0,0,0.12); }
 .target-fill {
   height: 100%; border-radius: 4px;
   background: linear-gradient(90deg, var(--accent), var(--green));
@@ -1884,6 +1884,59 @@ body.tg-light .chip-input { background: rgba(0,0,0,0.03); }
   letter-spacing: 0.01em;
 }
 body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
+
+/* ── Light mode color improvements ──────────────────────────────────────── */
+/* Pick cards — stronger border + shadow for definition on white bg */
+body.tg-light .pick-card {
+  border-color: rgba(0,0,0,0.10);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06);
+}
+/* Left accent glow toned down — too bright on white */
+body.tg-light .pick-card::before { box-shadow: none; }
+body.tg-light .pick-card::after  { opacity: 0.5; }
+
+/* Progress / upside bar fill — keep shimmer, boost track contrast */
+body.tg-light .upside-fill {
+  box-shadow: 0 0 8px rgba(37,99,235,0.25), 0 0 16px rgba(5,150,105,0.15);
+}
+body.tg-light .target-fill {
+  box-shadow: none;
+}
+
+/* Paper Trade button — amber on white needs more contrast */
+body.tg-light .btn-paper {
+  color: #b45309;
+  background: rgba(180,83,9,0.08);
+  border-color: rgba(180,83,9,0.28);
+}
+body.tg-light .btn-paper.done {
+  color: rgba(180,83,9,0.45);
+  background: rgba(180,83,9,0.04);
+  border-color: rgba(180,83,9,0.15);
+}
+
+/* Bought badge — stronger green on white */
+body.tg-light .btn-buy.done {
+  background: rgba(5,150,105,0.10);
+  color: #047857;
+  border-color: rgba(5,150,105,0.30);
+}
+
+/* Paper mode banner — darken amber on light bg */
+body.tg-light .paper-mode-banner {
+  color: #92400e;
+  background: rgba(180,83,9,0.08);
+  border-color: rgba(180,83,9,0.25);
+}
+
+/* Summary boxes — slightly more defined */
+body.tg-light .summary-box {
+  background: rgba(0,0,0,0.025);
+  border: 1px solid rgba(0,0,0,0.07);
+}
+
+/* Hint text — slightly darker for better readability */
+body.tg-light { --hint: #4b5563; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.toast-success { border-left-color: var(--green); box-shadow: 0 12px 38px rgba(0,0,0,0.50), 0 0 18px rgba(0,212,170,0.18); }
 .toast.toast-error   { border-left-color: var(--red);   box-shadow: 0 12px 38px rgba(0,0,0,0.50), 0 0 18px rgba(255,90,90,0.18); }
