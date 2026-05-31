@@ -6123,6 +6123,58 @@ async function loadPaperPortfolio(forceRefresh = false) {
     </div>`;
 
     if (history.length) {
+      // ── Paper P&L chart ──────────────────────────────────────────────────────
+      const cumPts = [];
+      let cum = 0;
+      history.slice().reverse().forEach(t => {
+        const pct = parseFloat(t.gain_pct ?? t.return_pct ?? 0);
+        const cost = (parseFloat(t.entry_price) || 0) * (parseFloat(t.shares) || 1);
+        cum += cost * pct / 100;
+        cumPts.push({ date: (t.closed_date || '').slice(0, 10), val: parseFloat(cum.toFixed(2)) });
+      });
+      if (cumPts.length >= 2) {
+        const isPos = cumPts[cumPts.length - 1].val >= 0;
+        const lineColor = isPos ? '#00d4aa' : '#ff5a5a';
+        const fillColor = isPos ? 'rgba(0,212,170,0.08)' : 'rgba(255,90,90,0.08)';
+        const totalPnl  = cumPts[cumPts.length - 1].val;
+        html += `<div class="section-hdr" style="padding-top:18px">
+          📈 Paper P&amp;L
+          <span style="float:right;font-size:13px;font-weight:600;color:${isPos ? 'var(--green)' : 'var(--red)'}">
+            ${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(2)}
+          </span>
+        </div>
+        <div id="paper-pnl-card" style="background:var(--card);border-radius:var(--radius);padding:12px;margin-bottom:12px">
+          <canvas id="paper-pnl-canvas" style="width:100%;height:100px;display:block"></canvas>
+        </div>`;
+        // Render chart after DOM update
+        setTimeout(() => {
+          const canvas = document.getElementById('paper-pnl-canvas');
+          if (!canvas || !window.Chart) return;
+          new Chart(canvas, {
+            type: 'line',
+            data: {
+              labels: cumPts.map(p => p.date.slice(5)),
+              datasets: [{
+                data: cumPts.map(p => p.val),
+                borderColor: lineColor, borderWidth: 2,
+                pointRadius: 0, fill: true,
+                backgroundColor: fillColor, tension: 0.4,
+              }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false, animation: false,
+              plugins: { legend: { display: false }, tooltip: {
+                callbacks: { label: ctx => (ctx.raw >= 0 ? '+$' : '-$') + Math.abs(ctx.raw).toFixed(2) }
+              }},
+              scales: {
+                x: { display: false },
+                y: { display: false, grid: { display: false } }
+              }
+            }
+          });
+        }, 50);
+      }
+
       html += '<div class="section-hdr" style="padding-top:18px">Paper History</div>';
       html += history.slice(0, 15).map(t => {
         const pct = parseFloat(t.gain_pct ?? t.return_pct ?? 0);
