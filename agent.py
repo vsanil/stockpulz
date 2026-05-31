@@ -739,6 +739,8 @@ def run_morning(config: dict, now_et: datetime):
 # ── Trade-close broadcast helper (shared by confirmation + close-check runs) ──
 
 def _broadcast_trade_closes(current_prices: dict) -> None:
+    """Auto-close disabled — positions must be closed manually by the user."""
+    return  # noqa: auto-close removed per user preference
     """Check and close trades for all recipients, sending close alerts + debriefs."""
     _app_url = (os.environ.get("APP_URL") or "").rstrip("/")
     for uid in _all_recipients():
@@ -3377,42 +3379,8 @@ def run_price_alerts():
                     if not s.empty:
                         current_prices[tickers[0]] = float(s.iloc[-1])
 
-            newly_closed = check_and_close_trades(current_prices, uid)
-            for trade in newly_closed:
-                ticker = trade["ticker"]
-                sign   = "+" if trade["return_pct"] >= 0 else ""
-                pct    = f"{sign}{trade['return_pct']:.1f}%"
-                usd    = f"${trade['gain_usd']:+.2f}"
-                price  = f"${trade['closed_price']}"
-
-                if trade["outcome"] == "target":
-                    msg = (
-                        f"🎯 <b>{ticker} TARGET HIT!</b>\n"
-                        f"Closed @ <code>{price}</code>  ·  <b>{pct}</b>  ({usd})\n"
-                        f"<i>Position auto-closed and logged to your history.</i>"
-                    )
-                    kb = [[
-                        _miniapp_btn("📊 View Portfolio", "portfolio",   "POSITIONS"),
-                        _miniapp_btn("📈 My Stats",       "performance", "STATS"),
-                    ]]
-                elif trade["outcome"] == "stop":
-                    msg = (
-                        f"🔴 <b>{ticker} STOP HIT</b>\n"
-                        f"Closed @ <code>{price}</code>  ·  <b>{pct}</b>  ({usd})\n"
-                        f"<i>Position auto-closed. Risk managed ✓</i>"
-                    )
-                    kb = [[
-                        _miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS"),
-                        _miniapp_btn("📈 Today's Picks",  "picks",     "TODAY"),
-                    ]]
-                else:  # expired
-                    msg = (
-                        f"⏱ <b>{ticker} position expired</b> (28 days)\n"
-                        f"Closed @ <code>{price}</code>  ·  <b>{pct}</b>  ({usd})"
-                    )
-                    kb = [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]]
-
-                send_inline_keyboard(msg, kb, chat_id=uid)
+            # Auto-close disabled — price_alert_manager sends the notification;
+            # user closes the position manually via the portfolio tab.
 
                 # Target-approach alert: warn when within 5% of target (not yet hit)
             for trade in log.get("open", []):
