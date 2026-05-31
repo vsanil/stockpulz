@@ -8658,7 +8658,10 @@ function openPaperBuySheet(prefillTicker = '', prefillEntry = '', prefillStop = 
   openOverlay('paper-buy-overlay');
   setTimeout(() => {
     if (prefillTicker) {
-      _onPaperBuyTickerInput(prefillTicker);
+      // Pre-filled from pick card — skip the 600ms debounce, fetch price immediately
+      const hint = document.getElementById('pbuy-price-hint');
+      if (hint) hint.innerHTML = '<span style="opacity:.4">Looking up…</span>';
+      _fetchPaperBuyPrice(prefillTicker);
       if (sharesInp) sharesInp.focus();
     } else if (tickerInp) {
       tickerInp.focus();
