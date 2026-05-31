@@ -2351,7 +2351,9 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
       <button class="sheet-close" onclick="closeOverlay('addcash-overlay')">✕</button>
     </div>
     <div class="sheet-body">
-      <p class="sheet-hint">Add funds to your paper trading account.</p>
+      <p class="sheet-hint">Add funds to your paper trading account.<br>
+        <span style="font-size:13px;color:var(--hint)">Current balance: <b id="addcash-balance">—</b></span>
+      </p>
       <input type="number" id="addcash-input" class="ticker-input"
              placeholder="e.g. 5000" step="100" min="1"
              style="font-size:20px;letter-spacing:0"
@@ -2803,6 +2805,7 @@ let positionsCache= [];
 let activeFilter  = 'all';
 let boughtSet      = new Set(JSON.parse(sessionStorage.getItem('sp_bought')       || '[]'));
 let paperBoughtSet = new Set(JSON.parse(sessionStorage.getItem('sp_paper_bought') || '[]'));
+let paperCash = null;
 let lwChart       = null;
 let lwSeries      = null;
 let sellTicker    = null;
@@ -3356,6 +3359,15 @@ async function confirmSell() {
   const input = document.getElementById('sell-price-input');
   if (!sellTicker) return;
 
+  const confirmed = await new Promise(resolve => {
+    tg.showPopup({
+      title: `Sell ${sellTicker}?`,
+      message: 'Confirm you want to close this position.',
+      buttons: [{ id: 'yes', type: 'destructive', text: 'Sell' }, { type: 'cancel' }]
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
+
   btn.disabled    = true;
   btn.textContent = '⏳ Closing…';
 
@@ -3703,6 +3715,16 @@ async function confirmBuyWithLevels() {
   const stop   = parseFloat(document.getElementById('buypos-stop').value)   || null;
   const target = parseFloat(document.getElementById('buypos-target').value) || null;
   const sym    = _buyposSym;
+
+  const confirmed = await new Promise(resolve => {
+    const cost = (entry && shares) ? ` · $${(entry * shares).toLocaleString('en-US', {maximumFractionDigits: 0})}` : '';
+    tg.showPopup({
+      title: `Log ${sym || 'position'}?`,
+      message: `${shares || '?'} shares @ $${entry || '?'}${cost}`,
+      buttons: [{ id: 'yes', type: 'default', text: 'Log it' }, { type: 'cancel' }]
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
 
   btn.disabled    = true;
   btn.textContent = '⏳ Logging…';
@@ -6006,6 +6028,7 @@ async function loadPaperPortfolio(forceRefresh = false) {
     const history   = data.history   || [];
     const cash      = data.cash      || 0;
     const startCash = data.starting_cash || 10000;
+    paperCash = cash;
 
     // Seed paperBoughtSet from server positions so pick card buttons are correct
     positions.forEach(p => {
@@ -6092,10 +6115,11 @@ async function loadPaperPortfolio(forceRefresh = false) {
       });
     }
 
-    // Buy + Add Cash buttons
+    // Buy + Add Cash + Reset buttons
     html += `<div style="display:flex;gap:10px;justify-content:center;padding:10px 0 4px">
       <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--green);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="_openPaperBuyOrPicker()">📄 Buy</button>
       <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--btn);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="openAddCashSheet()">💵 Add Cash</button>
+      <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--red);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="confirmResetPaper()">🔄 Reset</button>
     </div>`;
 
     if (history.length) {
@@ -6461,6 +6485,14 @@ async function submitAlert() {
 
 async function deleteAlert(ticker, target) {
   tg.HapticFeedback?.impactOccurred('medium');
+  const confirmed = await new Promise(resolve => {
+    tg.showPopup({
+      title: `Delete alert?`,
+      message: `Remove alert for ${ticker} at $${target}?`,
+      buttons: [{ id: 'yes', type: 'destructive', text: 'Delete' }, { type: 'cancel' }]
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
   try {
     await api('/api/miniapp/remove_alert', 'POST', { ticker, target });
     tg.HapticFeedback?.notificationOccurred('success');
@@ -8606,6 +8638,14 @@ async function addWatchTicker() {
 
 async function removeWatchTicker(ticker) {
   tg.HapticFeedback?.selectionChanged();
+  const confirmed = await new Promise(resolve => {
+    tg.showPopup({
+      title: `Remove ${ticker}?`,
+      message: 'Remove from your watchlist?',
+      buttons: [{ id: 'yes', type: 'destructive', text: 'Remove' }, { type: 'cancel' }]
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
   try {
     const res = await api('/api/miniapp/update_watchlist', 'POST', { action: 'remove', ticker });
     _settCfg.watchlist = res.watchlist || [];
@@ -8746,6 +8786,22 @@ function openAddCashSheet() {
   if (inp) inp.value = '';
   const btn = document.getElementById('addcash-btn');
   if (btn) { btn.disabled = false; btn.textContent = 'Add Cash'; }
+  // Show current balance
+  try {
+    const balEl = document.getElementById('addcash-balance');
+    if (balEl) {
+      if (paperCash != null) {
+        balEl.textContent = '$' + paperCash.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      } else {
+        api('/api/miniapp/paper').then(d => {
+          if (balEl && d && d.cash != null) {
+            paperCash = d.cash;
+            balEl.textContent = '$' + d.cash.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+          }
+        }).catch(() => {});
+      }
+    }
+  } catch(_) {}
   openOverlay('addcash-overlay');
   setTimeout(() => { if (inp) inp.focus(); }, 300);
 }
@@ -8755,6 +8811,16 @@ async function confirmAddCash() {
   const btn = document.getElementById('addcash-btn');
   const amount = parseFloat(inp?.value || '0');
   if (!amount || amount <= 0) { inp?.focus(); return; }
+
+  const confirmed = await new Promise(resolve => {
+    tg.showPopup({
+      title: 'Add Cash?',
+      message: `Add $${amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} to your paper account?`,
+      buttons: [{ id: 'yes', type: 'default', text: 'Add' }, { type: 'cancel' }]
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
+
   btn.disabled = true;
   btn.textContent = 'Adding…';
   try {
@@ -8769,6 +8835,29 @@ async function confirmAddCash() {
     tg.HapticFeedback?.notificationOccurred('error');
     tg.showPopup?.({ message: 'Could not add cash — try again.' });
   }
+}
+
+function confirmResetPaper() {
+  tg.showPopup({
+    title: 'Reset Paper Account?',
+    message: 'This will clear all positions and reset your cash to $10,000. This cannot be undone.',
+    buttons: [
+      { id: 'reset', type: 'destructive', text: 'Reset' },
+      { type: 'cancel' }
+    ]
+  }, async (btnId) => {
+    if (btnId !== 'reset') return;
+    try {
+      await api('/api/miniapp/paper_reset', 'POST', {});
+      paperCash = 10000;
+      tg.HapticFeedback?.notificationOccurred('success');
+      showToast('Paper account reset to $10,000');
+      _invalidatePortfolioCache();
+      loadPortfolio(true);
+    } catch(e) {
+      showToast('Could not reset — try again.');
+    }
+  });
 }
 
 // ── Paper: buy / sell ─────────────────────────────────────────────────────────
@@ -9014,8 +9103,20 @@ async function confirmPaperBuy() {
   const priceVal  = parseFloat(priceInp?.value)  || null;
   const stopVal   = parseFloat(stopInp?.value)   || null;
   const targetVal = parseFloat(targetInp?.value) || null;
-  if (!ticker)       { tickerInp?.focus(); return; }
-  if (!(shares > 0)) { sharesInp?.focus(); return; }
+  if (!ticker) { showToast('Enter a ticker'); tickerInp?.focus(); return; }
+
+  const confirmed = await new Promise(resolve => {
+    const price = priceVal || _pbuyCurrentPrice || 0;
+    const sharesDisplay = (shares > 0) ? shares : '?';
+    const cost = (price && shares > 0) ? ` · $${(price * shares).toLocaleString('en-US', {maximumFractionDigits: 0})}` : '';
+    tg.showPopup({
+      title: `Paper buy ${ticker}?`,
+      message: `${sharesDisplay} shares @ $${price ? price.toFixed(2) : '?'}${cost}`,
+      buttons: [{ id: 'yes', type: 'default', text: 'Buy' }, { type: 'cancel' }]
+    }, id => resolve(id === 'yes'));
+  });
+  if (!confirmed) return;
+
   btn.disabled = true; btn.textContent = 'Buying…';
   try {
     const body = { ticker, shares };
