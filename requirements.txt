@@ -11,3 +11,5 @@ html5lib>=1.1
 mplfinance>=0.12.10b0
 matplotlib>=3.7.0
 aiohttp>=3.9.0
+supabase>=2.0.0
+finnhub-python>=2.4.0
