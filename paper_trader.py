@@ -81,10 +81,10 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
         from price_alert_manager import add_alert
         if stop_loss is not None:
             add_alert(str(chat_id), ticker, round(stop_loss, 4),
-                      direction="below", auto=True)
+                      direction="auto", auto=True)
         if target_price is not None:
             add_alert(str(chat_id), ticker, round(target_price, 4),
-                      direction="above", auto=True)
+                      direction="auto", auto=True)
     except Exception:
         pass  # non-critical — don't fail the buy if alert registration fails
 

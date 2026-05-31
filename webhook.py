@@ -3415,7 +3415,6 @@ def miniapp_backtest_pick():
 
     try:
         import yfinance as yf
-        import pandas as pd
 
         hist = yf.Ticker(ticker).history(period="1y")
         if hist.empty:
