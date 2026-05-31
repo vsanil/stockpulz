@@ -3363,6 +3363,20 @@ def miniapp_paper_add_cash():
 
 
 
+@app.route("/api/miniapp/paper_reset", methods=["POST"])
+def miniapp_paper_reset():
+    """Reset the user's paper portfolio to $10,000 with no positions."""
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    from paper_trader import paper_reset
+    try:
+        paper_reset(chat_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── CLI webhook registration ──────────────────────────────────────────────────
 
 if __name__ == "__main__":
