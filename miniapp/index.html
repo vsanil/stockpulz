@@ -581,6 +581,28 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.04); }
   color: #f5a623 !important;
   border-bottom-color: #f5a623 !important;
 }
+/* ── Paper pick picker rows ─────────────────────────────────────────────── */
+.picker-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 14px;
+  margin-bottom: 8px;
+  background: var(--card);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .15s, transform .10s;
+  gap: 12px;
+}
+.picker-row:active        { background: var(--card-hover); transform: scale(.98); }
+.picker-row-bought        { opacity: 0.55; }
+.picker-row-left          { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.picker-type-emoji        { font-size: 18px; flex-shrink: 0; }
+.picker-sym               { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; }
+.picker-meta              { font-size: 11px; color: var(--hint); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker-row-right         { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+.picker-tf                { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: rgba(255,255,255,.08); color: var(--hint); letter-spacing: .4px; }
+.picker-conv              { font-size: 11px; font-weight: 700; }
+body.tg-light .picker-tf  { background: rgba(0,0,0,.07); }
 /* ── Paper nav dot on Portfolio icon ────────────────────────────────────── */
 .nav-paper-dot {
   position: absolute; top: 4px; right: 10px;
@@ -2392,6 +2414,19 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
   </div>
 </div>
 
+<!-- ── Paper pick picker overlay ────────────────────────────────────────── -->
+<div id="paper-picker-overlay" class="overlay" onclick="handleOverlayTap(event,'paper-picker-overlay')">
+  <div class="bottom-sheet" style="max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">📄 Pick to Paper Trade</div>
+      <button class="sheet-close" onclick="closeOverlay('paper-picker-overlay')">✕</button>
+    </div>
+    <div style="padding:0 18px 6px;font-size:12px;color:var(--hint)">Tap a pick to pre-fill the buy sheet with its entry, stop &amp; target.</div>
+    <div id="paper-picker-body" style="overflow-y:auto;flex:1;padding:6px 16px 24px"></div>
+  </div>
+</div>
+
 <!-- ── Feedback overlay ──────────────────────────────────────────────────── -->
 <div id="feedback-overlay" class="overlay" onclick="handleOverlayTap(event,'feedback-overlay')">
   <div class="bottom-sheet">
@@ -2787,13 +2822,18 @@ const _TAB_VALID = new Set(_TAB_ORDER);
       // Set paper mode BEFORE gotoTab so loadPortfolio() picks it up immediately
       if (reqMode === 'paper') portfolioMode = 'paper';
       gotoTab(reqTab);
-      // Optionally open the paper buy sheet pre-filled from URL params
-      if (reqMode === 'paper' && reqAction === 'buy') {
-        const ticker = (params.get('ticker') || '').toUpperCase();
-        const entry  = params.get('entry')  || '';
-        const stop   = params.get('stop')   || '';
-        const target = params.get('target') || '';
-        setTimeout(() => openPaperBuySheet(ticker, entry, stop, target), 900);
+      if (reqMode === 'paper') {
+        if (reqAction === 'buy') {
+          // Specific pick link from Telegram — open pre-filled buy sheet directly
+          const ticker = (params.get('ticker') || '').toUpperCase();
+          const entry  = params.get('entry')  || '';
+          const stop   = params.get('stop')   || '';
+          const target = params.get('target') || '';
+          setTimeout(() => openPaperBuySheet(ticker, entry, stop, target), 900);
+        } else {
+          // Generic "paper trade" link — show pick selector so user can choose
+          setTimeout(() => openPaperPickerSheet(), 900);
+        }
       }
     }, { once: true });
   }
@@ -2839,8 +2879,13 @@ function gotoTab(name) {
 let _coldBannerTimer = null;
 let _coldBannerCount = 0; // track concurrent slow requests
 let _coldStartOccurred = false; // set true the first time the banner fires this session
+let _serverAwake = false; // set true once any api() call gets a response — suppresses cold timers for background requests
 
 function _showColdBanner() {
+  // If any prior request already got a response the server is up — don't show
+  // the banner for slow background requests (e.g. loadPicks while user views
+  // the portfolio tab after a deep-link).
+  if (_serverAwake) return;
   _coldBannerCount++;
   _coldStartOccurred = true;
   document.getElementById('cold-banner')?.classList.add('show');
@@ -2876,8 +2921,11 @@ async function api(path, method = 'GET', body = null) {
   opts.signal = controller.signal;
   const abortTimer = setTimeout(() => controller.abort(), 25000);
 
-  // Show cold-start banner if request takes > 4s (Render free-tier wake)
-  const coldTimer = setTimeout(_showColdBanner, 4000);
+  // Show cold-start banner if request takes > 4s (Render free-tier wake).
+  // Skip if any prior request already got a response — server is awake and
+  // background fetches (e.g. loadPicks on picks tab while user views portfolio)
+  // should not hold the banner open.
+  const coldTimer = _serverAwake ? null : setTimeout(_showColdBanner, 4000);
   let r;
   try {
     r = await fetch(url, opts);
@@ -2891,8 +2939,11 @@ async function api(path, method = 'GET', body = null) {
     throw fetchErr;
   } finally {
     clearTimeout(abortTimer);
-    clearTimeout(coldTimer);
+    if (coldTimer) clearTimeout(coldTimer);
     _hideColdBanner();
+    // Mark server awake once any response arrives (even 4xx/5xx means server is up).
+    // AbortError (r = undefined) does NOT mark awake — server may still be cold.
+    if (r) _serverAwake = true;
   }
   if (!r.ok) {
     const err = new Error('HTTP ' + r.status);
@@ -5960,7 +6011,7 @@ async function loadPaperPortfolio(forceRefresh = false) {
 
     // Buy + Add Cash buttons
     html += `<div style="display:flex;gap:10px;justify-content:center;padding:10px 0 4px">
-      <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--green);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="openPaperBuySheet()">📄 Buy</button>
+      <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--green);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="_openPaperBuyOrPicker()">📄 Buy</button>
       <button class="pos-btn" style="background:var(--card);border:1px solid var(--border);color:var(--btn);font-weight:700;padding:9px 20px;border-radius:10px;font-size:13px;cursor:pointer" onclick="openAddCashSheet()">💵 Add Cash</button>
     </div>`;
 
@@ -8634,6 +8685,145 @@ async function confirmAddCash() {
 
 let _pbuyCurrentPrice = null;
 let _pbuyPriceFetchTimer = null;
+
+// If picks are loaded open the picker so user can choose; otherwise fall back
+// to the blank buy sheet (e.g. on weekends when there are no picks yet).
+function _openPaperBuyOrPicker() {
+  const hasPicks = picksCache && (
+    (picksCache.stocks?.short_term?.length  || 0) +
+    (picksCache.stocks?.long_term?.length   || 0) +
+    (picksCache.crypto?.short_term?.length  || 0) +
+    (picksCache.crypto?.long_term?.length   || 0) +
+    (picksCache.etfs?.short_term?.length    || 0) +
+    (picksCache.commodities?.short_term?.length || 0)
+  ) > 0;
+  if (hasPicks) openPaperPickerSheet();
+  else openPaperBuySheet();
+}
+
+// ── Paper pick picker ─────────────────────────────────────────────────────────
+// Shows today's picks immediately (picksCache, zero latency) then loads past
+// weekly picks from /api/miniapp/picks_history async and appends below.
+// Session-level cache avoids refetching if the picker is opened multiple times.
+let _picksHistCache = null;  // { "2025-05-29": {picks day}, ... }
+
+// Flatten one day's picks object into a tagged array
+function _flattenDayPicks(dayData, dateLabel) {
+  const out = [];
+  const _add = (arr, type, tf) => (arr || []).forEach(p => {
+    const sym = (p.ticker || p.symbol || '').toUpperCase();
+    if (sym) out.push({...p, _sym: sym, _type: type, _tf: tf, _date: dateLabel});
+  });
+  _add(dayData.stocks?.short_term,      'stock',     'ST');
+  _add(dayData.stocks?.long_term,       'stock',     'LT');
+  _add(dayData.crypto?.short_term,      'crypto',    'ST');
+  _add(dayData.crypto?.long_term,       'crypto',    'LT');
+  _add(dayData.etfs?.short_term,        'etf',       'ST');
+  _add(dayData.etfs?.long_term,         'etf',       'LT');
+  _add(dayData.commodities?.short_term, 'commodity', 'ST');
+  _add(dayData.commodities?.long_term,  'commodity', 'LT');
+  return out;
+}
+
+// Build a single picker row HTML string
+function _pickerRowHtml(p) {
+  const _convColor = c => {
+    const lc = String(c || '').toLowerCase();
+    if (lc.includes('high'))   return 'var(--green)';
+    if (lc.includes('medium')) return '#f5a623';
+    return 'var(--hint)';
+  };
+  const _typeEmoji = t => ({ crypto: '🪙', etf: '🗂', commodity: '🛢' }[t] || '📈');
+  const entry  = p.entry_price  ? `$${fmtPrice(p.entry_price)}`  : '—';
+  const stop   = p.stop_loss    ? `$${fmtPrice(p.stop_loss)}`    : '—';
+  const target = p.target_price ? `$${fmtPrice(p.target_price)}` : '—';
+  const convLc = String(p.conviction || '').toLowerCase();
+  const convLabel = convLc.includes('high') ? 'High ▲' : convLc.includes('medium') ? 'Med' : 'Low';
+  const bought = paperBoughtSet.has(p._sym);
+  const eEntry  = p.entry_price  || '';
+  const eStop   = p.stop_loss    || '';
+  const eTarget = p.target_price || '';
+  return `<div class="picker-row${bought ? ' picker-row-bought' : ''}"
+    onclick="closeOverlay('paper-picker-overlay');setTimeout(()=>openPaperBuySheet('${p._sym}','${eEntry}','${eStop}','${eTarget}'),150)">
+    <div class="picker-row-left">
+      <span class="picker-type-emoji">${_typeEmoji(p._type)}</span>
+      <div style="min-width:0">
+        <div class="picker-sym">${p._sym}${bought ? ' <span style="color:var(--green);font-size:11px">✓ held</span>' : ''}</div>
+        <div class="picker-meta">entry ${entry} · stop ${stop} · tgt ${target}</div>
+      </div>
+    </div>
+    <div class="picker-row-right">
+      <span class="picker-tf">${p._tf}</span>
+      <span class="picker-conv" style="color:${_convColor(p.conviction)}">${convLabel}</span>
+    </div>
+  </div>`;
+}
+
+function openPaperPickerSheet() {
+  tg.HapticFeedback?.impactOccurred('light');
+  const body = document.getElementById('paper-picker-body');
+  if (!body) { openPaperBuySheet(); return; }
+
+  // ── Today's picks (from cache — instant) ──────────────────────────────────
+  const todayPicks = picksCache ? _flattenDayPicks(picksCache, 'today') : [];
+
+  let html = '';
+  if (todayPicks.length) {
+    html += `<div style="font-size:11px;font-weight:700;color:var(--hint);padding:4px 0 8px;text-transform:uppercase;letter-spacing:.5px">Today</div>`;
+    html += todayPicks.map(_pickerRowHtml).join('');
+  }
+
+  // ── Past picks placeholder — filled async below ───────────────────────────
+  html += `<div style="font-size:11px;font-weight:700;color:var(--hint);padding:14px 0 8px;text-transform:uppercase;letter-spacing:.5px">Past This Week</div>
+    <div id="picker-hist-body"><div style="color:var(--hint);font-size:12px;padding:4px 0">Loading past picks…</div></div>`;
+
+  if (!todayPicks.length) {
+    html = `<div class="empty" style="padding:20px 0">
+      <div class="empty-icon" style="font-size:28px">📅</div>
+      <div class="empty-title">No picks today</div>
+      <div class="empty-sub">Picks arrive at 7 AM ET on weekdays.</div>
+    </div>` + html;
+  }
+
+  // Manual entry fallback at the bottom
+  html += `<div style="padding:16px 0 4px;text-align:center">
+    <button class="btn-cancel" style="font-size:13px" onclick="closeOverlay('paper-picker-overlay');setTimeout(openPaperBuySheet,150)">✏️ Enter Ticker Manually</button>
+  </div>`;
+
+  body.innerHTML = html;
+  openOverlay('paper-picker-overlay');
+
+  // ── Load past picks async ─────────────────────────────────────────────────
+  (async () => {
+    const histBody = () => document.getElementById('picker-hist-body');
+    try {
+      if (!_picksHistCache) {
+        const d = await api('/api/miniapp/picks_history');
+        _picksHistCache = d.history || {};
+      }
+      const el = histBody();
+      if (!el) return;  // overlay closed before we finished
+      const dates = Object.keys(_picksHistCache).sort().reverse();
+      if (!dates.length) {
+        el.innerHTML = '<div style="color:var(--hint);font-size:12px;padding:4px 0">No past picks this week.</div>';
+        return;
+      }
+      let histHtml = '';
+      for (const dateStr of dates) {
+        const dayPicks = _flattenDayPicks(_picksHistCache[dateStr], dateStr);
+        if (!dayPicks.length) continue;
+        const dateLabel = new Date(dateStr + 'T12:00:00Z')
+          .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        histHtml += `<div style="font-size:11px;color:var(--hint);margin:10px 0 4px;opacity:.7">${dateLabel}</div>`;
+        histHtml += dayPicks.map(_pickerRowHtml).join('');
+      }
+      el.innerHTML = histHtml || '<div style="color:var(--hint);font-size:12px;padding:4px 0">No past picks this week.</div>';
+    } catch(_) {
+      const el = histBody();
+      if (el) el.innerHTML = '<div style="color:var(--hint);font-size:12px;padding:4px 0">Could not load past picks.</div>';
+    }
+  })();
+}
 
 function openPaperBuySheet(prefillTicker = '', prefillEntry = '', prefillStop = '', prefillTarget = '') {
   tg.HapticFeedback?.impactOccurred('light');
