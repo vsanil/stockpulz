@@ -546,6 +546,48 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.04); }
   border: 1px solid rgba(0,212,170,.28);
   box-shadow: 0 0 0 0 transparent, inset 0 1px 0 rgba(0,212,170,0.10);
 }
+/* ── Paper Trade button on pick cards ───────────────────────────────────── */
+.btn-paper {
+  flex: 1; padding: 12px;
+  border-radius: 12px; border: 1px solid rgba(245,166,35,0.35);
+  background: rgba(245,166,35,0.10);
+  color: #f5a623;
+  font-size: 13px; font-weight: 700; cursor: pointer;
+  font-family: inherit;
+  transition: transform .12s ease, filter .15s, background .15s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  white-space: nowrap;
+}
+.btn-paper:active { transform: scale(0.96); filter: brightness(1.1); }
+.btn-paper.done {
+  background: rgba(245,166,35,0.06);
+  color: rgba(245,166,35,0.55);
+  border: 1px solid rgba(245,166,35,0.18);
+}
+/* ── Paper mode banner at top of Portfolio tab ──────────────────────────── */
+.paper-mode-banner {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(245,166,35,0.12);
+  border: 1px solid rgba(245,166,35,0.28);
+  border-radius: 10px;
+  padding: 9px 14px;
+  margin-bottom: 14px;
+  font-size: 12px; font-weight: 700;
+  color: #f5a623;
+  letter-spacing: 0.02em;
+}
+/* ── Paper active state on Real/Paper toggle ────────────────────────────── */
+.rp-btn.paper-active {
+  color: #f5a623 !important;
+  border-bottom-color: #f5a623 !important;
+}
+/* ── Paper nav dot on Portfolio icon ────────────────────────────────────── */
+.nav-paper-dot {
+  position: absolute; top: 4px; right: 10px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #f5a623;
+  display: none;
+}
 .btn-chart-sm {
   padding: 12px 14px; border-radius: 12px;
   background: rgba(255,255,255,0.04);
@@ -569,7 +611,7 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.04); }
     linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01)),
     var(--card);
   border: 1px solid var(--border);
-  border-radius: 16px; padding: 14px 10px; text-align: center;
+  border-radius: 16px; padding: 12px 8px; text-align: center;
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(10px);
   position: relative; overflow: hidden;
@@ -583,7 +625,7 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.04); }
   font-size: 10px; color: var(--hint); margin-bottom: 6px;
   text-transform: uppercase; letter-spacing: 0.10em; font-weight: 700;
 }
-.summary-val { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+.summary-val { font-size: clamp(14px, 4vw, 22px); font-weight: 800; letter-spacing: -0.5px; }
 .val-pos { color: var(--green); text-shadow: 0 0 16px rgba(0,212,170,0.30); }
 .val-neg { color: var(--red);   text-shadow: 0 0 16px rgba(255,90,90,0.30); }
 .val-neu { color: var(--text); }
@@ -2134,8 +2176,9 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
     <span class="nav-badge" id="picks-badge" style="display:none">0</span>
     <div class="nav-label">Picks</div>
   </div>
-  <div class="nav-item" id="nav-portfolio" onclick="gotoTab('portfolio')">
+  <div class="nav-item" id="nav-portfolio" onclick="gotoTab('portfolio')" style="position:relative">
     <div class="nav-icon"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="18" height="12" rx="2"/><path d="M7 8V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="2" y1="14" x2="20" y2="14"/></svg></div>
+    <div class="nav-paper-dot" id="port-paper-dot"></div>
     <div class="nav-label">Portfolio</div>
   </div>
   <div class="nav-item" id="nav-performance" onclick="gotoTab('performance')">
@@ -2705,7 +2748,8 @@ let picksCache    = null;
 let picksLoadedAt = null;
 let positionsCache= [];
 let activeFilter  = 'all';
-let boughtSet     = new Set(JSON.parse(sessionStorage.getItem('sp_bought') || '[]'));
+let boughtSet      = new Set(JSON.parse(sessionStorage.getItem('sp_bought')       || '[]'));
+let paperBoughtSet = new Set(JSON.parse(sessionStorage.getItem('sp_paper_bought') || '[]'));
 let lwChart       = null;
 let lwSeries      = null;
 let sellTicker    = null;
@@ -2988,6 +3032,16 @@ function fmtPct(v, showPlus = true) {
   const sign = showPlus && n >= 0 ? '+' : '';
   return sign + n.toFixed(1) + '%';
 }
+// Compact dollar formatter — shows $11K instead of $11,000 to fit narrow cards
+function _fmtCash(n) {
+  const r = Math.round(n);
+  const abs = Math.abs(r);
+  const sign = r < 0 ? '-' : '';
+  if (abs >= 1_000_000) return sign + '$' + (abs / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (abs >= 10_000)    return sign + '$' + Math.round(abs / 1_000) + 'K';
+  return sign + '$' + abs.toLocaleString();
+}
+
 // HTML-escape helper — prevents XSS when injecting user text into innerHTML
 const esc = s => String(s == null ? '' : s)
   .replace(/&/g, '&amp;')
@@ -4020,8 +4074,9 @@ async function renderHistoryPicks() {
 }
 
 function renderPickCard(p, idx = 0) {
-  const sym      = p._sym;
-  const isBought = boughtSet.has(sym);
+  const sym          = p._sym;
+  const isBought     = boughtSet.has(sym);
+  const isPaperBought = paperBoughtSet.has(sym);
   const conv     = String(p.conviction || '').toLowerCase();
   const convCls  = conv.includes('high') ? 'conv-high' : conv.includes('low') ? 'conv-low' : 'conv-medium';
   const convIcon = conv.includes('high') ? '🔥' : conv.includes('low') ? '⚡' : '✨';
@@ -4092,6 +4147,12 @@ function renderPickCard(p, idx = 0) {
         <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
                 onclick="markBought('${sym}','${p._type}','${p._tf}')">
           ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
+        </button>
+      </div>
+      <div class="pick-actions" style="margin-top:6px">
+        <button class="btn-paper${isPaperBought ? ' done' : ''}" id="paper-${sym}"
+                onclick="markPaperBought('${sym}',${parseFloat(p.entry_price)||0},${parseFloat(p.stop_loss)||0},${parseFloat(p.target_price)||0})">
+          ${isPaperBought ? '<span>📄</span> Paper\'d' : '<span>📄</span> Paper Trade'}
         </button>
       </div>
     </div>
@@ -4421,6 +4482,28 @@ async function markBought(sym, assetType, tf) {
 
   // ── Open confirmation sheet with pre-filled pick levels ────────────────
   openBuySheet(sym, assetType, tf);
+}
+
+function markPaperBought(sym, entry, stop, target) {
+  // Open the paper buy sheet pre-filled with the pick's levels.
+  // After a successful buy, confirmPaperBuy() will mark the button.
+  openPaperBuySheet(
+    sym,
+    entry  ? String(entry)  : '',
+    stop   ? String(stop)   : '',
+    target ? String(target) : ''
+  );
+}
+
+// Called after a successful paper buy to update pick card button state.
+function _markPickPaperBought(sym) {
+  paperBoughtSet.add(sym);
+  try { sessionStorage.setItem('sp_paper_bought', JSON.stringify([...paperBoughtSet])); } catch(_) {}
+  const btn = document.getElementById('paper-' + sym);
+  if (btn) {
+    btn.classList.add('done');
+    btn.innerHTML = '<span>📄</span> Paper\'d';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -5758,6 +5841,9 @@ async function switchPortfolioMode(mode) {
   historySheetLoaded = false;
   dividendsSheetLoaded = false;
   tg.HapticFeedback?.selectionChanged();
+  // Show amber nav dot when in paper mode
+  const dot = document.getElementById('port-paper-dot');
+  if (dot) dot.style.display = mode === 'paper' ? 'block' : 'none';
   loadedTabs['portfolio'] = false;
   loadPortfolio();
 }
@@ -5787,6 +5873,14 @@ async function loadPaperPortfolio(forceRefresh = false) {
     const cash      = data.cash      || 0;
     const startCash = data.starting_cash || 10000;
 
+    // Seed paperBoughtSet from server positions so pick card buttons are correct
+    positions.forEach(p => {
+      if (p.ticker) {
+        paperBoughtSet.add(p.ticker.toUpperCase());
+      }
+    });
+    try { sessionStorage.setItem('sp_paper_bought', JSON.stringify([...paperBoughtSet])); } catch(_) {}
+
     const unrealPnl = positions.reduce((sum, p) => {
       if (p.pnl_pct != null && p.entry_price && p.shares) {
         return sum + (p.live_price - p.entry_price) * p.shares;
@@ -5795,26 +5889,27 @@ async function loadPaperPortfolio(forceRefresh = false) {
     }, 0);
     const totalVal = cash + positions.reduce((s, p) => s + (p.live_price || p.entry_price || 0) * (p.shares || 0), 0);
 
-    // Real/Paper toggle at top
+    // Real/Paper toggle at top (amber active for paper)
     let html = `<div class="rp-toggle">
-      <button class="rp-btn"        id="rp-real" onclick="switchPortfolioMode('real')">Real</button>
-      <button class="rp-btn active" id="rp-paper" onclick="switchPortfolioMode('paper')">Paper</button>
-    </div>`;
+      <button class="rp-btn"                   id="rp-real"  onclick="switchPortfolioMode('real')">Real</button>
+      <button class="rp-btn active paper-active" id="rp-paper" onclick="switchPortfolioMode('paper')">📄 Paper</button>
+    </div>
+    <div class="paper-mode-banner">📄 PAPER MODE — simulated trades only</div>`;
 
     const returnPct = startCash > 0 ? ((totalVal - startCash) / startCash * 100) : 0;
     const retCls    = returnPct > 0 ? 'val-pos' : returnPct < 0 ? 'val-neg' : 'val-neu';
     html += `<div class="summary-row">
       <div class="summary-box">
         <div class="summary-lbl">Cash</div>
-        <div class="summary-val val-neu">$${Math.round(cash).toLocaleString()}</div>
+        <div class="summary-val val-neu">${_fmtCash(cash)}</div>
       </div>
       <div class="summary-box">
         <div class="summary-lbl">Unrealized</div>
-        <div class="summary-val ${unrealPnl >= 0 ? 'val-pos' : 'val-neg'}">${unrealPnl >= 0 ? '+' : ''}$${Math.abs(unrealPnl).toFixed(0)}</div>
+        <div class="summary-val ${unrealPnl >= 0 ? 'val-pos' : 'val-neg'}">${unrealPnl >= 0 ? '+' : ''}${_fmtCash(Math.abs(unrealPnl))}</div>
       </div>
       <div class="summary-box">
         <div class="summary-lbl">Total Value</div>
-        <div class="summary-val val-neu">$${Math.round(totalVal).toLocaleString()}</div>
+        <div class="summary-val val-neu">${_fmtCash(totalVal)}</div>
       </div>
       <div class="summary-box">
         <div class="summary-lbl">Return</div>
@@ -8644,6 +8739,8 @@ async function confirmPaperBuy() {
       return;
     }
     tg.HapticFeedback?.notificationOccurred('success');
+    // Mark pick card paper-bought state (works for both current & history picks)
+    _markPickPaperBought(ticker);
     closeOverlay('paper-buy-overlay');
     _invalidatePortfolioCache();
     loadPortfolio(true);
