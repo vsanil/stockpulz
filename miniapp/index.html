@@ -2653,6 +2653,20 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
   </div>
 </div>
 
+<!-- ── Backtest overlay ──────────────────────────────────────────────────── -->
+<div id="backtest-overlay" class="overlay" onclick="handleOverlayTap(event,'backtest-overlay')">
+  <div class="bottom-sheet" style="max-height:88vh">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title">🔁 Backtest Pick</div>
+      <button class="sheet-close" onclick="closeOverlay('backtest-overlay')">✕</button>
+    </div>
+    <div id="backtest-body" style="padding:16px;overflow-y:auto;height:calc(88vh - 60px)">
+      <div class="loading"><div class="spinner"></div>Running backtest…</div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Stock Screener overlay ─────────────────────────────────────────────── -->
 <div id="screener-overlay" class="overlay" onclick="handleOverlayTap(event,'screener-overlay')">
   <div class="bottom-sheet" style="max-height:92vh">
@@ -3160,6 +3174,110 @@ async function _chartSetPeriod(period) {
     document.getElementById(id)?.classList.toggle('active', p === period);
   });
   await _renderChart(_chartState);
+}
+
+async function openBacktestSheet(ticker, entry, stop, target) {
+  tg.HapticFeedback?.impactOccurred('light');
+  const body = document.getElementById('backtest-body');
+  body.innerHTML = '<div class="loading"><div class="spinner"></div>Running backtest…</div>';
+  openOverlay('backtest-overlay');
+
+  try {
+    const params = new URLSearchParams({ ticker, entry: entry||0, stop: stop||0, target: target||0 });
+    const d = await api('/api/miniapp/backtest_pick?' + params.toString());
+
+    const rr     = d.risk_reward ? `<b>${d.risk_reward}:1</b>` : '—';
+    const wr     = d.win_rate != null ? `<b style="color:${d.win_rate>=50?'var(--green)':'var(--red)'}">${d.win_rate}%</b>` : '—';
+    const total  = (d.wins||0) + (d.losses||0);
+    const hold   = d.avg_hold_days ? `${d.avg_hold_days} days` : '—';
+    const cur    = d.current_price ? `$${fmtPrice(d.current_price)}` : '—';
+
+    let html = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:20px;font-weight:700">${ticker}</div>
+        <div style="font-size:13px;color:var(--hint)">Current: ${cur}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+        <div class="summary-box"><div class="summary-lbl">Entry</div><div class="summary-val val-neu">${entry ? '$'+fmtPrice(entry) : '—'}</div></div>
+        <div class="summary-box"><div class="summary-lbl">Stop</div><div class="summary-val val-neg">${stop ? '$'+fmtPrice(stop) : '—'}</div></div>
+        <div class="summary-box"><div class="summary-lbl">Target</div><div class="summary-val val-pos">${target ? '$'+fmtPrice(target) : '—'}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+        <div class="summary-box"><div class="summary-lbl">Win Rate</div><div class="summary-val">${wr}</div></div>
+        <div class="summary-box"><div class="summary-lbl">Wins</div><div class="summary-val val-pos">${d.wins||0}</div></div>
+        <div class="summary-box"><div class="summary-lbl">Losses</div><div class="summary-val val-neg">${d.losses||0}</div></div>
+        <div class="summary-box"><div class="summary-lbl">R:R</div><div class="summary-val">${rr}</div></div>
+      </div>`;
+
+    if (total < 3) {
+      html += `<div style="font-size:12px;color:var(--hint);margin-bottom:12px;text-align:center">
+        ⚠️ Only ${total} historical simulation${total!==1?'s':''} found — price rarely traded near this entry. Results may not be statistically significant.
+      </div>`;
+    } else {
+      html += `<div style="font-size:12px;color:var(--hint);margin-bottom:12px;text-align:center">
+        Based on ${total} historical sim${total!==1?'s':''} · avg hold ${hold} · past 12 months
+      </div>`;
+    }
+
+    // Price chart with entry/stop/target lines
+    if (d.dates && d.dates.length >= 2) {
+      html += `<div style="background:var(--card);border-radius:var(--radius);padding:12px;margin-bottom:12px">
+        <canvas id="backtest-chart-canvas" style="width:100%;height:120px;display:block"></canvas>
+      </div>`;
+    }
+
+    html += `<p style="font-size:11px;color:var(--hint);text-align:center;margin-top:8px">
+      Simulated entries within 2% of entry price · 60-day max hold · past performance ≠ future results
+    </p>`;
+
+    body.innerHTML = html;
+
+    // Draw chart
+    if (d.dates && d.dates.length >= 2 && window.Chart) {
+      const canvas = document.getElementById('backtest-chart-canvas');
+      if (canvas) {
+        var annotations = [];
+        if (entry)  annotations.push({ y: entry,  color: 'rgba(255,255,255,0.4)', label: 'Entry' });
+        if (stop)   annotations.push({ y: stop,   color: 'rgba(255,90,90,0.6)',   label: 'Stop'  });
+        if (target) annotations.push({ y: target, color: 'rgba(0,212,170,0.6)',   label: 'Target'});
+
+        new Chart(canvas, {
+          type: 'line',
+          data: {
+            labels: d.dates.map(function(dt) { return dt.slice(5); }),
+            datasets: [
+              {
+                data: d.prices,
+                borderColor: 'rgba(150,150,200,0.8)',
+                borderWidth: 1.5,
+                pointRadius: 0,
+                fill: false,
+                tension: 0.2,
+              },
+              ...annotations.map(function(a) {
+                return {
+                  data: d.dates.map(function() { return a.y; }),
+                  borderColor: a.color,
+                  borderWidth: 1.5,
+                  borderDash: [4, 3],
+                  pointRadius: 0,
+                  fill: false,
+                  label: a.label,
+                };
+              })
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+            scales: { x: { display: false }, y: { display: false, grid: { display: false } } }
+          }
+        });
+      }
+    }
+  } catch(e) {
+    body.innerHTML = '<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Backtest failed</div><div class="empty-sub">Could not load historical data.</div></div>';
+  }
 }
 
 async function openChart(sym, assetType, entryPrice = 0, targetPrice = 0, stopPrice = 0) {
@@ -4293,6 +4411,7 @@ function renderPickCard(p, idx = 0) {
         </div>` : ''}
       <div class="pick-actions">
         <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
+        <button class="btn-chart-sm" style="color:var(--accent)" onclick="openBacktestSheet('${sym}',${parseFloat(p.entry_price)||0},${parseFloat(p.stop_loss)||0},${parseFloat(p.target_price)||0})">🔁 Backtest</button>
         <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
                 onclick="markBought('${sym}','${p._type}','${p._tf}')">
           ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
