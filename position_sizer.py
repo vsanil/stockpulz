@@ -47,6 +47,7 @@ Output per pick (added as "sizing" key):
   note              str   — human-readable sizing explanation
   capped_by         str   — "position_cap" | "risk_cap" | None
 """
+from __future__ import annotations
 
 # ── Conviction scale ──────────────────────────────────────────────────────────
 

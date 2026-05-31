@@ -5,6 +5,7 @@ All functions here are stateless wrappers around the Telegram Bot API.
 No application or business logic belongs in this file.
 Imported by bot_commands.py and re-exported through telegram_notifier.py.
 """
+from __future__ import annotations
 
 import os
 import re

@@ -5,6 +5,7 @@ Contains all pure formatting functions (no Telegram API calls, no command parsin
 Imported by telegram_notifier.py, agent.py (via telegram_notifier re-exports), and
 any other module that needs to build a message string.
 """
+from __future__ import annotations
 
 import html
 import os

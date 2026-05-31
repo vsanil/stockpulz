@@ -13,6 +13,7 @@ Only short-term picks are tracked (they have clear entry/target/stop).
 Long-term DCA picks are tracked separately via weekly_picks.json.
 Trades expire after 28 days if neither target nor stop is hit.
 """
+from __future__ import annotations
 
 from datetime import date
 from config_manager import load_user_trade_log, save_user_trade_log
@@ -227,12 +228,13 @@ def get_performance_stats(chat_id: str, asset_type: str | None = None) -> dict |
 
 def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
                 entry_override=None, stop_override=None,
-                shares_override=None, timeframe_override=None) -> tuple[dict, bool]:
+                shares_override=None, timeframe_override=None,
+                target_override=None) -> tuple[dict, bool]:
     """
     Add a ticker to a user's portfolio (no price/qty needed).
     Uses today's pick levels for target/stop alerts if available.
-    entry_override / stop_override: user-supplied prices from the Mini App that
-    take priority over (or fill in for) AI pick levels.
+    entry_override / stop_override / target_override: user-supplied prices from
+    the Mini App that take priority over (or fill in for) AI pick levels.
     Returns (trade_dict, already_existed).
     """
     today  = date.today().isoformat()
@@ -248,6 +250,9 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
                 updated = True
             if stop_override is not None:
                 t["stop_loss"] = float(stop_override)
+                updated = True
+            if target_override is not None:
+                t["target_price"] = float(target_override)
                 updated = True
             if updated:
                 save_user_trade_log(chat_id, log)
@@ -283,6 +288,8 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
         entry = float(entry_override)
     if stop_override is not None:
         stop = float(stop_override)
+    if target_override is not None:
+        target = float(target_override)
     if timeframe_override is not None:
         timeframe = timeframe_override  # caller-supplied beats pick lookup
 

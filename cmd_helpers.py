@@ -2,6 +2,7 @@
 cmd_helpers.py — Pure shared utilities extracted from bot_commands.py.
 No imports from other cmd_*.py modules.
 """
+from __future__ import annotations
 
 import os
 import time

@@ -19,6 +19,8 @@ Fixtures are auto-discovered by pytest. Just import what you need:
         ...
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys

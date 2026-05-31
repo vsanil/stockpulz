@@ -345,6 +345,35 @@ class TestAddHolding:
         trade, _ = trade_logger.add_holding("AAPL", UID, stop_override=140.0)
         assert trade["stop_loss"] == 140.0
 
+    def test_target_override_applied_new_position(self, _gist_store):
+        """target_override is stored for a brand-new position."""
+        trade, existed = trade_logger.add_holding("MSFT", UID, target_override=450.0)
+        assert not existed
+        assert trade["target_price"] == 450.0
+
+    def test_target_override_updates_existing_position(self, _gist_store):
+        """target_override updates target on a duplicate add."""
+        trade_logger.add_holding("MSFT", UID, target_override=400.0)
+        trade, existed = trade_logger.add_holding("MSFT", UID, target_override=450.0)
+        assert existed
+        assert trade["target_price"] == 450.0
+
+    def test_target_override_beats_picks_target(self, _gist_store):
+        """User-supplied target_override takes priority over AI pick level."""
+        picks = {
+            "stocks": {
+                "short_term": [{
+                    "ticker": "MSFT", "entry_price": 400.0,
+                    "target_price": 440.0, "stop_loss": 380.0,
+                    "conviction": 4, "thesis": "Cloud growth.",
+                }],
+                "long_term": [],
+            },
+            "crypto": {"short_term": [], "long_term": []},
+        }
+        trade, _ = trade_logger.add_holding("MSFT", UID, picks=picks, target_override=460.0)
+        assert trade["target_price"] == 460.0
+
     def test_ticker_uppercased(self, _gist_store):
         trade, _ = trade_logger.add_holding("aapl", UID)
         assert trade["ticker"] == "AAPL"

@@ -1,6 +1,7 @@
 """
 cmd_admin.py — Admin commands extracted from bot_commands.py.
 """
+from __future__ import annotations
 
 import os
 import threading

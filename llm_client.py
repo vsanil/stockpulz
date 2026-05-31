@@ -3,6 +3,7 @@ llm_client.py — Shared Anthropic client singleton.
 
 Import _get_client() from here instead of creating per-module instances.
 """
+from __future__ import annotations
 
 import os
 import anthropic

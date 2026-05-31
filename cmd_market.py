@@ -1,6 +1,7 @@
 """
 cmd_market.py — Market data + portfolio commands extracted from bot_commands.py.
 """
+from __future__ import annotations
 
 import threading
 

@@ -12,6 +12,7 @@ Env vars:
   MOCK_DATA=true  → skip live screeners (fast test)
   RUN_MODE=morning|confirmation|weekly → override auto-detection
 """
+from __future__ import annotations
 
 import os
 import sys

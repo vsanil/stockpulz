@@ -4,6 +4,7 @@ performance_tracker.py — Saturday weekly P&L recap + community benchmark.
 Loads this week's picks from the Gist, fetches current prices via yfinance
 (stocks) and CoinGecko (crypto), then computes compact performance stats.
 """
+from __future__ import annotations
 
 import math
 import requests

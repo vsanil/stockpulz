@@ -2,6 +2,7 @@
 config_manager.py — Read/write agent config from a GitHub Gist (JSON store).
 Falls back to hardcoded defaults if the Gist is unreachable.
 """
+from __future__ import annotations
 
 import os
 import json

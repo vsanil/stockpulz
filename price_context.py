@@ -12,6 +12,7 @@ Gives Claude the chart setup behind each candidate:
 Called from ai_analyzer._build_stock_candidates() alongside news/sentiment fetching.
 Returns a compact context_str that Claude reads as natural language chart notes.
 """
+from __future__ import annotations
 
 import yfinance as yf
 import pandas as pd

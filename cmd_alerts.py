@@ -1,6 +1,7 @@
 """
 cmd_alerts.py — Price alert commands extracted from bot_commands.py.
 """
+from __future__ import annotations
 
 from telegram_api import send_message, send_inline_keyboard
 from config_manager import save_pending_state

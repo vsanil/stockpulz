@@ -11,6 +11,7 @@ Usage via Telegram commands:
   /unalert NVDA           → remove all NVDA alerts
   /unalert NVDA 1000      → remove specific alert
 """
+from __future__ import annotations
 
 from datetime import datetime
 import yfinance as yf

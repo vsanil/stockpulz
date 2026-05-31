@@ -1,6 +1,7 @@
 """
 cmd_trade_exec.py — Trade execution helpers extracted from bot_commands.py.
 """
+from __future__ import annotations
 
 import os
 import threading

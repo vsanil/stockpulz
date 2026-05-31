@@ -15,6 +15,7 @@ Macro enrichment (fetched once per run, Gist-cached 4h):
 All enrichments fail silently — regime classification never depends on them.
 User count has zero impact on fetch volume; all users read from the same cache.
 """
+from __future__ import annotations
 
 import os
 import time

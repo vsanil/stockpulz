@@ -7,6 +7,7 @@ Telegram HTTP layer lives in telegram_api.py.
 This file exists so that agent.py and webhook.py keep their existing imports
 without modification.
 """
+from __future__ import annotations
 
 # ── Telegram API re-exports (webhook.py imports these) ───────────────────────
 from telegram_api import (                          # noqa: F401

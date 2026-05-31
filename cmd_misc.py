@@ -1,6 +1,7 @@
 """
 cmd_misc.py — Help, status, utility commands extracted from bot_commands.py.
 """
+from __future__ import annotations
 
 from telegram_api import send_message, send_inline_keyboard
 from cmd_helpers import _is_admin

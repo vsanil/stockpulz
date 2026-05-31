@@ -17,6 +17,7 @@ Usage:
   python backtester.py          → runs and prints summary
   from backtester import run_backtest  → returns result dict for Telegram
 """
+from __future__ import annotations
 
 import math
 import warnings

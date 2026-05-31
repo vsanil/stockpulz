@@ -2,6 +2,7 @@
 ai_analyzer.py — Claude API integration for stock + crypto analysis.
 Accepts screener candidates, enriches stocks with Finnhub news, returns structured picks.
 """
+from __future__ import annotations
 
 import os
 import json

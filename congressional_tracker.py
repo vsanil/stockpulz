@@ -15,6 +15,7 @@ significantly, with studies showing ~6-12% annualised alpha. Cluster buys
 Disclosure lag: 30-45 days by law. Use as a medium-term (LT) signal only.
 Cached 24h — filings are batch-released, not real-time.
 """
+from __future__ import annotations
 
 import requests
 from datetime import date, datetime, timedelta
