@@ -103,6 +103,38 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
         [("long_term",  s) for s in screener_results.get("long_term",  [])]
     )
 
+    # ── PERF: Bulk price pre-fetch for sanity check ───────────────────────────
+    # One yf.download() call instead of one yf.Ticker().fast_info per candidate.
+    # Reduces HTTP round-trips from N to 1 for the price sanity check loop.
+    _stock_tickers_to_check = [
+        s["ticker"] for _, s in all_picks
+        if s.get("current_price", 0) > 0 and s["ticker"] not in _KNOWN_CRYPTO
+    ]
+    _bulk_live_prices: dict[str, float] = {}
+    if _stock_tickers_to_check:
+        try:
+            import yfinance as yf
+            _bulk_raw = yf.download(
+                " ".join(_stock_tickers_to_check), period="1d", interval="1d",
+                progress=False, auto_adjust=True,
+            )
+            if not _bulk_raw.empty:
+                _bulk_close = _bulk_raw["Close"] if "Close" in _bulk_raw.columns else _bulk_raw
+                if hasattr(_bulk_close, "columns"):
+                    for _t in _stock_tickers_to_check:
+                        if _t in _bulk_close.columns:
+                            _s = _bulk_close[_t].dropna()
+                            if len(_s):
+                                _bulk_live_prices[_t] = float(_s.iloc[-1])
+                else:
+                    # Single-ticker flat DataFrame
+                    if len(_stock_tickers_to_check) == 1 and len(_bulk_raw) > 0:
+                        _bulk_live_prices[_stock_tickers_to_check[0]] = float(_bulk_raw["Close"].iloc[-1])
+            print(f"[ai_analyzer] Bulk price pre-fetch: got {len(_bulk_live_prices)}"
+                  f"/{len(_stock_tickers_to_check)} prices.")
+        except Exception as _exc:
+            print(f"[ai_analyzer] Bulk price pre-fetch failed (will skip sanity check): {_exc}")
+
     for category, stock in all_picks:
         ticker = stock["ticker"]
 
@@ -137,21 +169,16 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
 
         # Price sanity check — second line of defence after screener.py's check.
         # Catches stale cache entries with yfinance data glitches (e.g. MU at $576
-        # instead of $85). Fetch a fresh close and compare; drop if >3x or <1/3.
-        # Skip for known crypto symbols — they're not on Yahoo Finance as equities.
+        # instead of $85). Uses bulk pre-fetched prices (no extra HTTP calls).
         raw_price = stock.get("current_price")
         if raw_price and raw_price > 0 and ticker not in _KNOWN_CRYPTO:
-            try:
-                import yfinance as yf
-                live = yf.Ticker(ticker).fast_info.get("last_price") or yf.Ticker(ticker).fast_info.get("previous_close")
-                if live and live > 0:
-                    ratio = raw_price / live
-                    if ratio > 3.0 or ratio < 0.33:
-                        print(f"[ai_analyzer] Price sanity fail for {ticker}: "
-                              f"cached={raw_price:.2f} vs live={live:.2f} — dropping candidate.")
-                        skip = True
-            except Exception:
-                pass  # live fetch failed — let candidate through, Claude will handle it
+            live = _bulk_live_prices.get(ticker)
+            if live and live > 0:
+                ratio = raw_price / live
+                if ratio > 3.0 or ratio < 0.33:
+                    print(f"[ai_analyzer] Price sanity fail for {ticker}: "
+                          f"cached={raw_price:.2f} vs live={live:.2f} — dropping candidate.")
+                    skip = True
 
         if skip:
             continue
@@ -375,17 +402,49 @@ def _build_commodity_candidates() -> list[dict]:
     COMMODITY CONVICTION RUBRIC scores — without them the AI can't
     rate anything above ★★ and correctly returns [].
     Called once per morning run; no screener required.
+
+    Uses a single yf.download() bulk call instead of N serial Ticker().history()
+    calls — reduces HTTP round-trips from 7 to 1.
     """
+    tickers = [t for t, _, _ in _COMMODITY_TICKERS]
+    meta    = {t: (name, commodity) for t, name, commodity in _COMMODITY_TICKERS}
+
+    try:
+        raw = yf.download(
+            " ".join(tickers), period="3mo", interval="1d",
+            progress=False, auto_adjust=True, group_by="ticker",
+        )
+    except Exception as exc:
+        print(f"[ai_analyzer] Commodity bulk download failed: {exc}")
+        return []
+
+    # Normalise to a dict of {ticker: DataFrame(Close, Volume)}
+    # yf.download with multiple tickers returns a MultiIndex df; single ticker
+    # returns a flat df.  Handle both.
+    def _ticker_df(raw, ticker: str):
+        if hasattr(raw.columns, "levels"):
+            # MultiIndex: (field, ticker)
+            try:
+                return raw.xs(ticker, axis=1, level=1)[["Close", "Volume"]]
+            except KeyError:
+                return None
+        # Single-ticker fallback (shouldn't happen with 7 tickers but be safe)
+        return raw[["Close", "Volume"]] if ticker == tickers[0] else None
+
     candidates = []
-    for ticker, name, commodity in _COMMODITY_TICKERS:
+    for ticker in tickers:
+        name, commodity = meta[ticker]
         try:
-            hist = yf.Ticker(ticker).history(period="3mo", interval="1d")
-            if len(hist) < 22:          # need at least ~1 month of data
+            df = _ticker_df(raw, ticker)
+            if df is None or len(df) < 22:
                 continue
 
-            close      = hist["Close"]
-            volume     = hist["Volume"]
-            price      = round(float(close.iloc[-1]), 2)
+            close  = df["Close"].dropna()
+            volume = df["Volume"].dropna()
+            if len(close) < 22:
+                continue
+
+            price = round(float(close.iloc[-1]), 2)
 
             # 1-month return (approx 21 trading days)
             ret_1m = None
@@ -417,6 +476,7 @@ def _build_commodity_candidates() -> list[dict]:
             })
         except Exception as exc:
             print(f"[ai_analyzer] Commodity candidate error for {ticker}: {exc}")
+
     print(f"[ai_analyzer] Built {len(candidates)} commodity candidates.")
     return candidates
 
@@ -1114,12 +1174,35 @@ def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
 
 # ── Claude call ───────────────────────────────────────────────────────────────
 
-def _call_claude(system: str, user: str, model: str = "claude-sonnet-4-6") -> dict:
-    """Call Claude API and parse JSON response. Raises on failure."""
+def _call_claude(system: str, user: str, model: str = "claude-sonnet-4-6",
+                 use_caching: bool = False) -> dict:
+    """Call Claude API and parse JSON response. Raises on failure.
+
+    Args:
+        system:      System prompt text (role / persona / rules).
+        user:        User message content (candidate data + context).
+        model:       Anthropic model string.
+        use_caching: When True, marks the system block with cache_control so
+                     Anthropic can cache identical static system prompts across
+                     calls — approximately 10× cheaper on cached input tokens.
+                     Use only for calls where the system text is truly static.
+    """
+    # Correct API semantics: system= is a separate top-level parameter, NOT
+    # part of the messages array.  Combining them in a single user message
+    # (old behaviour) breaks role separation and blocks prompt caching.
+    if use_caching:
+        system_param = [
+            {"type": "text", "text": system,
+             "cache_control": {"type": "ephemeral"}}
+        ]
+    else:
+        system_param = system
+
     message = _get_client().messages.create(
         model=model,
         max_tokens=MAX_TOKENS,
-        messages=[{"role": "user", "content": f"{system}\n\n{user}"}],
+        system=system_param,
+        messages=[{"role": "user", "content": user}],
     )
     return json.loads(_strip_fences(message.content[0].text.strip()))
 
@@ -1176,10 +1259,13 @@ def analyze_with_claude(
         commodity_candidates=commodity_candidates,
     )
 
-    # Sonnet for main analysis — quality matters for picks
+    # Sonnet for main analysis — quality matters for picks.
+    # use_caching=True adds cache_control to the system block so Anthropic
+    # reuses the cached system prompt on repeat calls (≈10× cheaper).
     print("[ai_analyzer] Calling Claude Sonnet (stocks + crypto)...")
     try:
-        picks = _call_claude(SYSTEM_PROMPT, user_prompt, model="claude-sonnet-4-6")
+        picks = _call_claude(SYSTEM_PROMPT, user_prompt, model="claude-sonnet-4-6",
+                             use_caching=True)
         print("[ai_analyzer] Claude response parsed successfully.")
         picks = _validate_and_clean_picks(picks, valid_stock_tickers)
     except (json.JSONDecodeError, KeyError, IndexError) as exc:

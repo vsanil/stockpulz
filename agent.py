@@ -143,101 +143,72 @@ CRYPTO_RETRY_DELAYS = [15, 30, 60, 120]   # seconds between retries (4 attempts 
 VIX_ALERT_THRESHOLD = 25   # warn when VIX exceeds this level
 
 
+# ── US Market holiday helpers (module-level, shared by detector + name lookup) ─
+
+def _holiday_observed(fixed: date) -> date:
+    """Shift a fixed-date holiday to its observed date when it falls on a weekend."""
+    if fixed.weekday() == 5:   # Saturday → Friday
+        return fixed - timedelta(days=1)
+    if fixed.weekday() == 6:   # Sunday → Monday
+        return fixed + timedelta(days=1)
+    return fixed
+
+
+def _nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> date:
+    """Return the nth occurrence of weekday (0=Mon…6=Sun) in the given month."""
+    first  = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + 7 * (n - 1))
+
+
+def _last_weekday_of_month(year: int, month: int, weekday: int) -> date:
+    """Return the last occurrence of weekday in the given month."""
+    import calendar
+    last = date(year, month, calendar.monthrange(year, month)[1])
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _easter_sunday(year: int) -> date:
+    """Computus algorithm — returns Easter Sunday for the given year."""
+    a       = year % 19
+    b, c    = divmod(year, 100)
+    d2, e   = divmod(b, 4)
+    f       = (b + 8) // 25
+    g       = (b - f + 1) // 3
+    h       = (19 * a + b - d2 - g + 15) % 30
+    i, k    = divmod(c, 4)
+    l       = (32 + 2 * e + 2 * i - h - k) % 7
+    m       = (a + 11 * h + 22 * l) // 451
+    mo, day = divmod(h + l - 7 * m + 114, 31)
+    return date(year, mo, day + 1)
+
+
+def _us_market_holidays(year: int) -> dict:
+    """Return {date: name} for all US stock-market holidays in the given year."""
+    return {
+        _holiday_observed(date(year, 1, 1)):           "New Year's Day",
+        _nth_weekday_of_month(year, 1, 0, 3):          "MLK Day",
+        _nth_weekday_of_month(year, 2, 0, 3):          "Presidents' Day",
+        _easter_sunday(year) - timedelta(days=2):      "Good Friday",
+        _last_weekday_of_month(year, 5, 0):            "Memorial Day",
+        _holiday_observed(date(year, 6, 19)):          "Juneteenth",
+        _holiday_observed(date(year, 7, 4)):           "Independence Day",
+        _nth_weekday_of_month(year, 9, 0, 1):          "Labor Day",
+        _nth_weekday_of_month(year, 11, 3, 4):         "Thanksgiving",
+        _holiday_observed(date(year, 12, 25)):         "Christmas",
+    }
+
+
 # ── US Market holiday detector ────────────────────────────────────────────────
 
 def is_market_holiday(d: date) -> bool:
     """Return True if d is a US stock market holiday (NYSE/NASDAQ)."""
-    y = d.year
-
-    def _observed(fixed: date) -> date:
-        """Shift fixed holiday to observed date when it falls on a weekend."""
-        if fixed.weekday() == 5:  # Saturday → Friday
-            return fixed - timedelta(days=1)
-        if fixed.weekday() == 6:  # Sunday → Monday
-            return fixed + timedelta(days=1)
-        return fixed
-
-    def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
-        """Return the nth occurrence of weekday (0=Mon…6=Sun) in the given month."""
-        first  = date(year, month, 1)
-        offset = (weekday - first.weekday()) % 7
-        return first + timedelta(days=offset + 7 * (n - 1))
-
-    def _last_weekday(year: int, month: int, weekday: int) -> date:
-        """Return the last occurrence of weekday in the given month."""
-        import calendar
-        last = date(year, month, calendar.monthrange(year, month)[1])
-        return last - timedelta(days=(last.weekday() - weekday) % 7)
-
-    def _easter(year: int) -> date:
-        """Computus algorithm — returns Easter Sunday."""
-        a = year % 19
-        b, c = divmod(year, 100)
-        d2, e = divmod(b, 4)
-        f  = (b + 8) // 25
-        g  = (b - f + 1) // 3
-        h  = (19 * a + b - d2 - g + 15) % 30
-        i, k = divmod(c, 4)
-        l  = (32 + 2 * e + 2 * i - h - k) % 7
-        m  = (a + 11 * h + 22 * l) // 451
-        mo, day = divmod(h + l - 7 * m + 114, 31)
-        return date(year, mo, day + 1)
-
-    holidays = {
-        _observed(date(y, 1, 1)),           # New Year's Day
-        _nth_weekday(y, 1, 0, 3),           # MLK Day (3rd Mon Jan)
-        _nth_weekday(y, 2, 0, 3),           # Presidents' Day (3rd Mon Feb)
-        _easter(y) - timedelta(days=2),     # Good Friday
-        _last_weekday(y, 5, 0),             # Memorial Day (last Mon May)
-        _observed(date(y, 6, 19)),          # Juneteenth
-        _observed(date(y, 7, 4)),           # Independence Day
-        _nth_weekday(y, 9, 0, 1),           # Labor Day (1st Mon Sep)
-        _nth_weekday(y, 11, 3, 4),          # Thanksgiving (4th Thu Nov)
-        _observed(date(y, 12, 25)),         # Christmas
-    }
-    return d in holidays
+    return d in _us_market_holidays(d.year)
 
 
 def get_holiday_name(d: date) -> str:
     """Return the holiday name for d if it is a US market holiday, else empty string."""
-    y = d.year
-
-    def _observed(fixed: date) -> date:
-        if fixed.weekday() == 5: return fixed - timedelta(days=1)
-        if fixed.weekday() == 6: return fixed + timedelta(days=1)
-        return fixed
-
-    def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
-        first = date(year, month, 1)
-        offset = (weekday - first.weekday()) % 7
-        return first + timedelta(days=offset + 7 * (n - 1))
-
-    def _last_weekday(year: int, month: int, weekday: int) -> date:
-        import calendar
-        last = date(year, month, calendar.monthrange(year, month)[1])
-        return last - timedelta(days=(last.weekday() - weekday) % 7)
-
-    def _easter(year: int) -> date:
-        a = year % 19; b, c = divmod(year, 100); d2, e = divmod(b, 4)
-        f = (b + 8) // 25; g = (b - f + 1) // 3
-        h = (19 * a + b - d2 - g + 15) % 30; i, k = divmod(c, 4)
-        l = (32 + 2 * e + 2 * i - h - k) % 7; m = (a + 11 * h + 22 * l) // 451
-        mo, day = divmod(h + l - 7 * m + 114, 31)
-        return date(year, mo, day + 1)
-
-    named = {
-        _observed(date(y, 1, 1)):         "New Year's Day",
-        _nth_weekday(y, 1, 0, 3):         "MLK Day",
-        _nth_weekday(y, 2, 0, 3):         "Presidents' Day",
-        _easter(y) - timedelta(days=2):   "Good Friday",
-        _last_weekday(y, 5, 0):           "Memorial Day",
-        _observed(date(y, 6, 19)):        "Juneteenth",
-        _observed(date(y, 7, 4)):         "Independence Day",
-        _nth_weekday(y, 9, 0, 1):         "Labor Day",
-        _nth_weekday(y, 11, 3, 4):        "Thanksgiving",
-        _observed(date(y, 12, 25)):       "Christmas",
-    }
-    return named.get(d, "")
+    return _us_market_holidays(d.year).get(d, "")
 
 
 def next_trading_day(d: date) -> date:
@@ -490,30 +461,44 @@ def run_morning(config: dict, now_et: datetime):
         cache            = None   # screener cache — set inside weekday block
 
         if not is_weekend and not is_holiday:
-            # ── Macro context (SPY%, 10Y yield, VIX) — always fetched live ───
+            # ── Macro context (SPY%, 10Y yield, VIX) — one bulk download ────
             try:
                 import yfinance as yf
-                spy_hist = yf.Ticker("SPY").history(period="2d")
-                tnx_hist = yf.Ticker("^TNX").history(period="1d")
-                vix_hist = yf.Ticker("^VIX").history(period="1d")
+                macro_hist = yf.download(
+                    "SPY ^TNX ^VIX", period="2d", interval="1d",
+                    progress=False, auto_adjust=True,
+                )
+                # Handle both single-ticker (Series) and multi-ticker (DataFrame)
+                if not macro_hist.empty:
+                    close = macro_hist["Close"] if "Close" in macro_hist.columns else macro_hist
 
-                if len(spy_hist) >= 2:
-                    spy_prev = float(spy_hist["Close"].iloc[-2])
-                    spy_curr = float(spy_hist["Close"].iloc[-1])
-                    macro_context["spy_pct"]   = round((spy_curr - spy_prev) / spy_prev * 100, 2)
-                    macro_context["spy_price"] = round(spy_curr, 2)
-                if not tnx_hist.empty:
-                    macro_context["tnx_yield"] = round(float(tnx_hist["Close"].iloc[-1]), 2)
-                if not vix_hist.empty:
-                    vix = float(vix_hist["Close"].iloc[-1])
-                    macro_context["vix"] = round(vix, 1)
-                    print(f"[agent] VIX = {vix:.1f}")
-                    if vix > VIX_ALERT_THRESHOLD:
-                        _alert(
-                            f"⚠️ <b>High Volatility Alert</b> — VIX = <code>{vix:.1f}</code>\n"
-                            f"Market fear is elevated. Consider tightening stop-losses "
-                            f"and reducing short-term position sizes today."
-                        )
+                    def _get_col(col: str):
+                        """Safely extract a column from a multi-ticker Close DataFrame."""
+                        if hasattr(close, "columns"):
+                            return close[col].dropna() if col in close.columns else None
+                        return None
+
+                    spy_c = _get_col("SPY")
+                    tnx_c = _get_col("^TNX")
+                    vix_c = _get_col("^VIX")
+
+                    if spy_c is not None and len(spy_c) >= 2:
+                        spy_prev = float(spy_c.iloc[-2])
+                        spy_curr = float(spy_c.iloc[-1])
+                        macro_context["spy_pct"]   = round((spy_curr - spy_prev) / spy_prev * 100, 2)
+                        macro_context["spy_price"] = round(spy_curr, 2)
+                    if tnx_c is not None and len(tnx_c) >= 1:
+                        macro_context["tnx_yield"] = round(float(tnx_c.iloc[-1]), 2)
+                    if vix_c is not None and len(vix_c) >= 1:
+                        vix = float(vix_c.iloc[-1])
+                        macro_context["vix"] = round(vix, 1)
+                        print(f"[agent] VIX = {vix:.1f}")
+                        if vix > VIX_ALERT_THRESHOLD:
+                            _alert(
+                                f"⚠️ <b>High Volatility Alert</b> — VIX = <code>{vix:.1f}</code>\n"
+                                f"Market fear is elevated. Consider tightening stop-losses "
+                                f"and reducing short-term position sizes today."
+                            )
             except Exception as exc:
                 print(f"[agent] Macro context fetch failed (non-critical): {exc}")
 
@@ -1045,17 +1030,17 @@ def _check_picks_stop_loss(current_prices: dict, picks: dict, uid: str) -> None:
 
 
 # ── Persistent stop-alert deduplication ──────────────────────────────────────
-# Keys are stored in cache_layer (Redis via Upstash when configured, in-memory
-# otherwise).  TTL = 28 hours so stale keys never survive past overnight.
+# Each key gets its own cache entry so per-key TTLs are independent.
+# Old approach stored all keys in a single list — any _mark_alerted(ttl=72h)
+# call silently extended the TTL for every other key in that list.
 
-_ALERTED_STOPS_CACHE_KEY = "alerted_stops"
-_ALERTED_STOPS_TTL       = 28 * 3600  # 28 hours
+_ALERTED_KEY_PREFIX = "alerted:"
+_ALERTED_STOPS_TTL  = 28 * 3600  # 28 hours default
 
 
 def _is_alerted(key: str) -> bool:
     """Return True if we have already fired an alert for this key today."""
-    alerted: list = cache_get(_ALERTED_STOPS_CACHE_KEY) or []
-    return key in alerted
+    return cache_get(f"{_ALERTED_KEY_PREFIX}{key}") is not None
 
 
 def _mark_alerted(key: str, ttl_hours: int | None = None) -> None:
@@ -1063,12 +1048,11 @@ def _mark_alerted(key: str, ttl_hours: int | None = None) -> None:
 
     ttl_hours overrides the default 28-hour window — use for longer cooldowns
     (e.g. stop-coverage nudge uses 72 h so it doesn't fire every day).
+    Each key has an independent TTL — setting a 72-hour TTL for one key
+    no longer affects the expiry of other alerted keys.
     """
-    alerted: list = cache_get(_ALERTED_STOPS_CACHE_KEY) or []
-    if key not in alerted:
-        alerted.append(key)
     ttl = (ttl_hours * 3600) if ttl_hours else _ALERTED_STOPS_TTL
-    cache_set(_ALERTED_STOPS_CACHE_KEY, alerted, ttl_seconds=ttl)
+    cache_set(f"{_ALERTED_KEY_PREFIX}{key}", True, ttl_seconds=ttl)
 
 
 # ── Close check (3:30 PM — silent unless a trade closed) ─────────────────────
@@ -1399,7 +1383,7 @@ def run_friday_wrap():
                         )
                         client = _get_client()
                         resp = client.messages.create(
-                            model="claude-haiku-4-5",
+                            model="claude-haiku-4-5-20251001",
                             max_tokens=80,
                             messages=[{"role": "user", "content": prompt}],
                         )
