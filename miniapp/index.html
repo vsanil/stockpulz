@@ -8888,7 +8888,7 @@ function openPaperPickerSheet() {
     const histBody = () => document.getElementById('picker-hist-body');
     try {
       if (!_picksHistCache) {
-        const d = await api('/api/miniapp/picks_history');
+        const d = await api('/api/miniapp/picks/history');
         _picksHistCache = d.history || {};
       }
       const el = histBody();
