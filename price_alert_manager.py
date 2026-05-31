@@ -253,7 +253,8 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
 
         if hit:
             arrow  = "📈" if a["direction"] == "above" else "📉"
-            change = (current - a["price_at_set"]) / a["price_at_set"] * 100
+            price_at_set = a.get("price_at_set") or current
+            change = (current - price_at_set) / price_at_set * 100 if price_at_set else 0
             recurring_note = "  🔁 <i>(recurring)</i>" if a.get("recurring") else ""
             msg    = (
                 f"🔔 <b>PRICE ALERT TRIGGERED</b> {arrow}\n\n"
@@ -306,6 +307,8 @@ def check_all_alerts(send_fn=None, send_keyboard_fn=None) -> int:
     alerts  = _load_alerts()
     total   = 0
     for chat_id in list(alerts.keys()):
+        if str(chat_id).startswith('_'):  # skip metadata keys like _history_*
+            continue
         fired = check_alerts(chat_id, send_fn=send_fn, send_keyboard_fn=send_keyboard_fn)
         total += len(fired)
     return total
