@@ -3388,6 +3388,98 @@ def miniapp_paper_reset():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/miniapp/backtest_pick", methods=["GET"])
+def miniapp_backtest_pick():
+    """
+    Backtest a specific pick: given ticker + entry/stop/target,
+    simulate how it would have performed over the past year.
+    Returns win/loss stats + daily price history for charting.
+    """
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    ticker = (request.args.get("ticker") or "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+
+    try:
+        entry  = float(request.args.get("entry",  0) or 0)
+        stop   = float(request.args.get("stop",   0) or 0)
+        target = float(request.args.get("target", 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid levels"}), 400
+
+    try:
+        import yfinance as yf
+        import pandas as pd
+
+        hist = yf.Ticker(ticker).history(period="1y")
+        if hist.empty:
+            return jsonify({"error": f"No data for {ticker}"}), 404
+
+        prices = hist["Close"].dropna()
+        dates  = [d.strftime("%Y-%m-%d") for d in prices.index]
+        closes = [round(float(p), 4) for p in prices.values]
+
+        # Simulate entries: for each day in the past year where price was
+        # within 2% of the entry, measure whether target or stop was hit first.
+        wins = losses = skipped = 0
+        avg_days_to_exit = []
+
+        if entry > 0 and (stop > 0 or target > 0):
+            prices_list = list(prices.values)
+            for i, p in enumerate(prices_list):
+                # Entry signal: price within 2% of entry level
+                if abs(p - entry) / entry > 0.02:
+                    continue
+                # Simulate forward from entry
+                hit_target = hit_stop = False
+                days_held  = 0
+                for j in range(i + 1, min(i + 60, len(prices_list))):
+                    fwd = prices_list[j]
+                    days_held += 1
+                    if target > 0 and fwd >= target:
+                        hit_target = True
+                        break
+                    if stop > 0 and fwd <= stop:
+                        hit_stop = True
+                        break
+                if hit_target:
+                    wins += 1
+                    avg_days_to_exit.append(days_held)
+                elif hit_stop:
+                    losses += 1
+                    avg_days_to_exit.append(days_held)
+                else:
+                    skipped += 1
+
+        total_sims = wins + losses
+        win_rate   = round(wins / total_sims * 100, 1) if total_sims > 0 else None
+        avg_hold   = round(sum(avg_days_to_exit) / len(avg_days_to_exit), 1) if avg_days_to_exit else None
+
+        # Risk/reward ratio
+        rr = round((target - entry) / (entry - stop), 2) if (entry > 0 and stop > 0 and target > 0 and entry > stop) else None
+
+        return jsonify({
+            "ticker":      ticker,
+            "entry":       entry,
+            "stop":        stop,
+            "target":      target,
+            "wins":        wins,
+            "losses":      losses,
+            "skipped":     skipped,
+            "win_rate":    win_rate,
+            "avg_hold_days": avg_hold,
+            "risk_reward": rr,
+            "prices":      closes,
+            "dates":       dates,
+            "current_price": closes[-1] if closes else None,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── CLI webhook registration ──────────────────────────────────────────────────
 
 if __name__ == "__main__":

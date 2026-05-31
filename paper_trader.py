@@ -76,6 +76,18 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
     data["cash"] = round(data["cash"] - cost, 2)
     save_user_paper(chat_id, data)
 
+    # ── Auto-register price alerts for stop-loss and target ───────────────────
+    try:
+        from price_alert_manager import add_alert
+        if stop_loss is not None:
+            add_alert(str(chat_id), ticker, round(stop_loss, 4),
+                      direction="below", auto=True)
+        if target_price is not None:
+            add_alert(str(chat_id), ticker, round(target_price, 4),
+                      direction="above", auto=True)
+    except Exception:
+        pass  # non-critical — don't fail the buy if alert registration fails
+
     return (
         f"📄 <b>Paper Buy</b>\n"
         f"<b>{ticker}</b> × {shares} shares @ ${buy_price:,.2f}\n"
