@@ -3391,6 +3391,60 @@ def miniapp_paper_reset():
         return jsonify({"error": str(e)}), 500
 
 
+def _backtest_fetch_prices(ticker: str) -> tuple[list, list]:
+    """
+    Fetch 1-year daily price history for a ticker.
+    Tries yfinance first; falls back to CoinGecko for crypto tickers
+    that yfinance doesn't cover (e.g. HYPE, ASTER, LAB).
+    Returns (dates, closes) — both empty lists if nothing found.
+    """
+    import yfinance as yf
+
+    # ── Try yfinance (stocks + major crypto like BTC-USD) ─────────────────────
+    for suffix in ("", "-USD"):
+        try:
+            hist = yf.Ticker(ticker + suffix).history(period="1y")
+            if not hist.empty:
+                prices = hist["Close"].dropna()
+                dates  = [d.strftime("%Y-%m-%d") for d in prices.index]
+                closes = [round(float(p), 4) for p in prices.values]
+                if dates:
+                    return dates, closes
+        except Exception:
+            pass
+
+    # ── Fall back to CoinGecko for exotic crypto ──────────────────────────────
+    try:
+        # Step 1: search for the coin ID by symbol
+        search_url = "https://api.coingecko.com/api/v3/search"
+        sr = requests.get(search_url, params={"query": ticker}, timeout=10)
+        if sr.ok:
+            coins = sr.json().get("coins", [])
+            # Find best match: symbol matches exactly (case-insensitive)
+            coin_id = None
+            for c in coins[:10]:
+                if c.get("symbol", "").upper() == ticker:
+                    coin_id = c["id"]
+                    break
+            if coin_id:
+                # Step 2: fetch 365 days of daily prices
+                chart_url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+                cr = requests.get(chart_url,
+                                  params={"vs_currency": "usd", "days": "365", "interval": "daily"},
+                                  timeout=15)
+                if cr.ok:
+                    pts = cr.json().get("prices", [])  # [[timestamp_ms, price], ...]
+                    if pts:
+                        from datetime import datetime as _dt
+                        dates  = [_dt.utcfromtimestamp(p[0] / 1000).strftime("%Y-%m-%d") for p in pts]
+                        closes = [round(float(p[1]), 6) for p in pts]
+                        return dates, closes
+    except Exception:
+        pass
+
+    return [], []
+
+
 @app.route("/api/miniapp/backtest_pick", methods=["GET"])
 def miniapp_backtest_pick():
     """
@@ -3414,15 +3468,9 @@ def miniapp_backtest_pick():
         return jsonify({"error": "invalid levels"}), 400
 
     try:
-        import yfinance as yf
-
-        hist = yf.Ticker(ticker).history(period="1y")
-        if hist.empty:
-            return jsonify({"error": f"No data for {ticker}"}), 404
-
-        prices = hist["Close"].dropna()
-        dates  = [d.strftime("%Y-%m-%d") for d in prices.index]
-        closes = [round(float(p), 4) for p in prices.values]
+        dates, closes = _backtest_fetch_prices(ticker)
+        if not dates:
+            return jsonify({"error": f"No historical data found for {ticker}"}), 404
 
         # Simulate entries: for each day in the past year where price was
         # within 2% of the entry, measure whether target or stop was hit first.
@@ -3430,7 +3478,7 @@ def miniapp_backtest_pick():
         avg_days_to_exit = []
 
         if entry > 0 and (stop > 0 or target > 0):
-            prices_list = list(prices.values)
+            prices_list = closes
             for i, p in enumerate(prices_list):
                 # Entry signal: price within 2% of entry level
                 if abs(p - entry) / entry > 0.02:
