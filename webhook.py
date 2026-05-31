@@ -22,13 +22,15 @@ from flask import Flask, request, jsonify, session, redirect, send_from_director
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 
-sentry_sdk.init(
-    dsn=os.environ.get("SENTRY_DSN", ""),
-    integrations=[FlaskIntegration()],
-    send_default_pii=False,
-    traces_sample_rate=0.1,   # capture 10% of requests for performance
-    environment=os.environ.get("RENDER_EXTERNAL_URL", "development"),
-)
+_sentry_dsn = os.environ.get("SENTRY_DSN", "")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        integrations=[FlaskIntegration()],
+        send_default_pii=False,
+        traces_sample_rate=0.1,
+        environment=os.environ.get("RENDER_EXTERNAL_URL", "development"),
+    )
 
 from config_manager import get_config, get_allowed_users
 from telegram_notifier import handle_incoming_command, handle_callback_query, set_webhook, send_typing_action, typing_until_done, send_message
