@@ -577,6 +577,21 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.04); }
   letter-spacing: 0.02em;
 }
 /* ── Paper active state on Real/Paper toggle ────────────────────────────── */
+/* ── Onboarding wizard ────────────────────────────────────────────────────── */
+.ob-dot { width:8px;height:8px;border-radius:50%;background:var(--border);transition:background .2s; }
+.ob-dot.active { background:var(--accent); }
+.ob-option {
+  display:flex;align-items:center;gap:14px;padding:14px 16px;
+  border-radius:14px;border:2px solid var(--border);background:var(--card);
+  cursor:pointer;margin-bottom:10px;transition:border-color .15s,background .15s;
+}
+.ob-option:active { transform:scale(.98); }
+.ob-option.selected { border-color:var(--accent);background:rgba(99,102,241,.08); }
+.ob-option-icon { font-size:24px;flex-shrink:0; }
+.ob-option-body { flex:1; }
+.ob-option-title { font-size:15px;font-weight:600;color:var(--text); }
+.ob-option-desc  { font-size:12px;color:var(--hint);margin-top:2px; }
+
 .rp-btn.paper-active {
   color: #f5a623 !important;
   border-bottom-color: #f5a623 !important;
@@ -2339,6 +2354,19 @@ body.tg-light .toast { background: rgba(255,255,255,0.96); color: #0a0b0f; }
       <button class="btn-primary" id="watchalert-save-btn" onclick="saveWatchAlert()">Set Alert</button>
       <button class="btn-cancel" onclick="closeOverlay('watchalert-overlay')">Cancel</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Onboarding wizard overlay ─────────────────────────────────────────── -->
+<div id="onboard-overlay" class="overlay" style="background:var(--bg);z-index:9999;align-items:center;justify-content:center">
+  <div style="width:100%;max-width:400px;padding:32px 24px;box-sizing:border-box">
+    <!-- Step indicator -->
+    <div id="onboard-steps" style="display:flex;gap:6px;justify-content:center;margin-bottom:32px">
+      <div class="ob-dot active" id="ob-dot-1"></div>
+      <div class="ob-dot" id="ob-dot-2"></div>
+      <div class="ob-dot" id="ob-dot-3"></div>
+    </div>
+    <div id="onboard-content"></div>
   </div>
 </div>
 
@@ -9577,6 +9605,139 @@ requestAnimationFrame(() => _moveNavIndicator('picks'));
 loadPicks();
 // Signal deep-link handler that the app is ready
 window.dispatchEvent(new Event('_appReady'));
+
+// ── Onboarding check ─────────────────────────────────────────────────────────
+(async function _checkOnboarding() {
+  try {
+    const s = await api('/api/miniapp/settings');
+    const cfg = s.settings || {};
+    // Show wizard if user hasn't onboarded and has no budget set
+    if (!cfg.onboarded && !cfg.stock_budget) {
+      _obStep = 1;
+      _obData = {};
+      _renderObStep();
+      document.getElementById('onboard-overlay').classList.add('open');
+    }
+  } catch(_) {}
+})();
+
+// ── Onboarding wizard ─────────────────────────────────────────────────────────
+var _obStep = 1;
+var _obData = {};
+
+const _OB_STEPS = 3;
+
+function _obSetDots(step) {
+  for (let i = 1; i <= _OB_STEPS; i++) {
+    const d = document.getElementById('ob-dot-' + i);
+    if (d) d.classList.toggle('active', i === step);
+  }
+}
+
+function _renderObStep() {
+  _obSetDots(_obStep);
+  const el = document.getElementById('onboard-content');
+  if (!el) return;
+
+  if (_obStep === 1) {
+    const name = (tgUser.first_name || 'Trader').split(' ')[0];
+    el.innerHTML = `
+      <div style="text-align:center;margin-bottom:28px">
+        <div style="font-size:48px;margin-bottom:12px">📈</div>
+        <div style="font-size:24px;font-weight:700;margin-bottom:8px">Welcome, ${name}!</div>
+        <div style="font-size:14px;color:var(--hint);line-height:1.5">
+          StockPulz delivers AI-curated stock &amp; crypto picks every morning at 7 AM ET.<br><br>
+          Let's set up your account in 2 quick steps.
+        </div>
+      </div>
+      <button class="btn-primary" onclick="_obNext()">Get Started →</button>
+    `;
+  } else if (_obStep === 2) {
+    const sel = _obData.risk || '';
+    el.innerHTML = `
+      <div style="margin-bottom:20px">
+        <div style="font-size:18px;font-weight:700;margin-bottom:6px">📊 Risk Profile</div>
+        <div style="font-size:13px;color:var(--hint)">How aggressive do you want your picks?</div>
+      </div>
+      ${[
+        { key:'conservative', icon:'🛡️', title:'Conservative', desc:'Lower risk · ETFs & blue chips · smaller gains' },
+        { key:'moderate',     icon:'⚖️', title:'Moderate',     desc:'Balanced mix · growth + stability' },
+        { key:'aggressive',   icon:'🚀', title:'Aggressive',   desc:'Higher risk · momentum plays · bigger upside' },
+      ].map(o => `
+        <div class="ob-option${sel===o.key?' selected':''}" onclick="_obSelect('risk','${o.key}',this)">
+          <div class="ob-option-icon">${o.icon}</div>
+          <div class="ob-option-body">
+            <div class="ob-option-title">${o.title}</div>
+            <div class="ob-option-desc">${o.desc}</div>
+          </div>
+          ${sel===o.key ? '<div style="color:var(--accent);font-size:18px">✓</div>' : ''}
+        </div>
+      `).join('')}
+      <button class="btn-primary" style="margin-top:8px" onclick="_obNext()" ${sel?'':'disabled'}>Next →</button>
+    `;
+  } else if (_obStep === 3) {
+    const sel = _obData.budget || '';
+    el.innerHTML = `
+      <div style="margin-bottom:20px">
+        <div style="font-size:18px;font-weight:700;margin-bottom:6px">💰 Per-Trade Budget</div>
+        <div style="font-size:13px;color:var(--hint)">How much per stock trade? (You can change this anytime)</div>
+      </div>
+      ${[
+        { key:'100',  icon:'💵', title:'$100',   desc:'Good for testing the waters' },
+        { key:'250',  icon:'💵', title:'$250',   desc:'Popular starting point' },
+        { key:'500',  icon:'💵', title:'$500',   desc:'Meaningful position size' },
+        { key:'1000', icon:'💵', title:'$1,000+', desc:'Experienced trader' },
+      ].map(o => `
+        <div class="ob-option${sel===o.key?' selected':''}" onclick="_obSelect('budget','${o.key}',this)">
+          <div class="ob-option-icon">${o.icon}</div>
+          <div class="ob-option-body">
+            <div class="ob-option-title">${o.title}</div>
+            <div class="ob-option-desc">${o.desc}</div>
+          </div>
+          ${sel===o.key ? '<div style="color:var(--accent);font-size:18px">✓</div>' : ''}
+        </div>
+      `).join('')}
+      <button class="btn-primary" style="margin-top:8px" id="ob-finish-btn" onclick="_obFinish()" ${sel?'':'disabled'}>
+        ✅ Let's Go!
+      </button>
+    `;
+  }
+}
+
+function _obSelect(field, val, el) {
+  tg.HapticFeedback?.selectionChanged();
+  _obData[field] = val;
+  _renderObStep();
+}
+
+function _obNext() {
+  tg.HapticFeedback?.impactOccurred('light');
+  _obStep++;
+  _renderObStep();
+}
+
+async function _obFinish() {
+  tg.HapticFeedback?.notificationOccurred('success');
+  const btn = document.getElementById('ob-finish-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    await api('/api/miniapp/update_settings', 'POST', {
+      risk_profile:  _obData.risk   || 'moderate',
+      stock_budget:  parseFloat(_obData.budget || '250'),
+      crypto_budget: parseFloat(_obData.budget || '250') * 0.2,
+      onboarded:     true,
+    });
+    _settCfg.risk_profile = _obData.risk || 'moderate';
+    _settCfg.stock_budget = parseFloat(_obData.budget || '250');
+    _settCfg.onboarded    = true;
+  } catch(_) {}
+  // Close overlay
+  document.getElementById('onboard-overlay').classList.remove('open');
+  showToast('🎉 You\'re all set! Picks arrive at 7 AM ET on weekdays.');
+  // Reload picks to reflect new settings
+  loadedTabs['picks'] = false;
+  loadPicks();
+}
 
 // ── Deep-link: ?chart=TICKER&asset_type=crypto ────────────────────────────────
 (function() {

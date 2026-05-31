@@ -1368,6 +1368,7 @@ def miniapp_settings():
         "target_gain_pct": ucfg.get("target_gain_pct"),
         "watchlist":       ucfg.get("watchlist", []),
         "excluded_sectors": ucfg.get("excluded_sectors", []),
+        "onboarded":       ucfg.get("onboarded", False),
         **notif_prefs,
     }})
 
@@ -1939,6 +1940,8 @@ def miniapp_update_settings():
     if "target_gain_pct" in body:
         try: ucfg["target_gain_pct"] = float(body["target_gain_pct"])
         except: pass
+    if "onboarded" in body:
+        ucfg["onboarded"] = bool(body["onboarded"])
     save_user_config(chat_id, ucfg)
     return jsonify({"ok": True})
 
