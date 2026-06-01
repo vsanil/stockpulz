@@ -9665,16 +9665,8 @@ window.dispatchEvent(new Event('_appReady'));
     const s = await api('/api/miniapp/settings');
     const cfg = s.settings || {};
     // Show wizard if user hasn't onboarded and has no budget set
-    // Only show for truly new users — skip if they have a watchlist, excluded sectors,
-    // or any notification prefs set (signs of an existing active user)
-    const looksNew = !cfg.stock_budget && !(cfg.watchlist && cfg.watchlist.length) &&
-                     !cfg.excluded_sectors?.length;
-    if (cfg.onboarded === false && looksNew) {
-      _obStep = 1;
-      _obData = {};
-      _renderObStep();
-      document.getElementById('onboard-overlay').classList.add('open');
-    }
+    // Onboarding wizard temporarily disabled — backend onboarded flag not yet reliable
+    // TODO: re-enable once save_user_config persists onboarded correctly on Render
   } catch(_) {}
 })();
 
