@@ -574,7 +574,9 @@ class TestMisc:
         assert r.status_code == 200
 
     def test_quote_returns_price(self, client):
-        r = get(client, "/api/miniapp/quote", ticker="AAPL")
+        from unittest.mock import patch
+        with patch("webhook._fast_quote", return_value=(189.50, 0.5)):
+            r = get(client, "/api/miniapp/quote", ticker="AAPL")
         assert r.status_code == 200
         data = r.get_json()
         assert "price" in data or "ok" in data
