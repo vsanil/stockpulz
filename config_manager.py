@@ -673,8 +673,15 @@ def _load_gist_file(filename: str) -> dict | None:
     if cached is not None:
         return cached
     try:
-        from storage import get_storage_backend
+        from storage import get_storage_backend, GistBackend
         result = get_storage_backend().read(filename)
+        # If primary backend (Supabase) has no data, fall back to Gist
+        if result is None:
+            try:
+                gist = GistBackend()
+                result = gist.read(filename)
+            except Exception:
+                pass
         if result is not None:
             _cache_set(filename, result)
         return result
