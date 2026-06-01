@@ -1748,6 +1748,28 @@ def _fast_quote(ticker: str, crypto_set) -> tuple[float | None, float | None]:
             return price, change
     except Exception:
         pass
+    # Unknown ticker — try CoinGecko as last resort (catches exotic crypto not in crypto_set)
+    try:
+        sr = requests.get("https://api.coingecko.com/api/v3/search",
+                          params={"query": ticker}, timeout=8)
+        if sr.ok:
+            coins = sr.json().get("coins", [])
+            coin  = next((c for c in coins[:10] if c.get("symbol", "").upper() == ticker), None)
+            if coin:
+                pr = requests.get("https://api.coingecko.com/api/v3/simple/price",
+                                  params={"ids": coin["id"], "vs_currencies": "usd",
+                                          "include_24hr_change": "true"}, timeout=8)
+                if pr.ok:
+                    data   = pr.json().get(coin["id"], {})
+                    price  = data.get("usd")
+                    change = data.get("usd_24h_change")
+                    if price:
+                        price  = float(price)
+                        change = round(float(change), 2) if change else None
+                        _quote_cache[ticker] = {"price": price, "change_pct": change, "ts": now}
+                        return price, change
+    except Exception:
+        pass
     return None, None
 
 
@@ -2148,15 +2170,26 @@ def miniapp_markets():
     return jsonify(result)
 
 
+_regime_cache: dict = {}
+_REGIME_TTL = 900  # 15 minutes
+
 @app.route("/api/miniapp/regime")
 def miniapp_regime():
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
+    now = time.time()
+    if _regime_cache.get("ts") and now - _regime_cache["ts"] < _REGIME_TTL:
+        return jsonify({"ok": True, "regime": _regime_cache["data"]})
     from market_regime import get_market_regime
     try:
         r = get_market_regime()
+        _regime_cache["data"] = r
+        _regime_cache["ts"]   = now
         return jsonify({"ok": True, "regime": r})
     except Exception as e:
+        # Return stale cache rather than error if available
+        if _regime_cache.get("data"):
+            return jsonify({"ok": True, "regime": _regime_cache["data"]})
         return jsonify({"ok": False, "error": str(e)})
 
 
