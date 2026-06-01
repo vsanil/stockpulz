@@ -103,6 +103,19 @@ class TestPaperBuy:
             msg = paper_buy("BAD", 1, CHAT)
         assert "Could not fetch" in msg
 
+    def test_live_price_coingecko_fallback(self):
+        """_live_price internals tested in test_live_price_unit.py
+        (autouse patch_live_price fixture intercepts here).
+        This test verifies paper_buy succeeds when _live_price returns a value."""
+        # patch_live_price autouse returns _LIVE_PRICE — just confirm buy succeeds
+        from paper_trader import paper_buy
+        import paper_trader as _pt
+        with patch("config_manager.load_user_paper", return_value={
+            "positions": [], "history": [], "cash": 10000.0, "starting_cash": 10000.0
+        }), patch("config_manager.save_user_paper"):
+            msg = paper_buy("HYPE", 1, "9999999")
+        assert "Paper Buy" in msg or "❌" not in msg
+
 
 # ── paper_sell ────────────────────────────────────────────────────────────────
 
