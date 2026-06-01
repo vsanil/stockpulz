@@ -23,10 +23,32 @@ from config_manager import load_user_paper, save_user_paper
 
 
 def _live_price(ticker: str) -> float | None:
+    # Try yfinance first (stocks + major crypto with -USD suffix)
+    for sym in (ticker, f"{ticker}-USD"):
+        try:
+            p = yf.Ticker(sym).fast_info.last_price
+            if p:
+                return float(p)
+        except Exception:
+            pass
+    # CoinGecko fallback for exotic crypto (HYPE, ASTER, LAB etc.)
     try:
-        return float(yf.Ticker(ticker).fast_info.last_price)
+        import requests as _req
+        sr = _req.get("https://api.coingecko.com/api/v3/search",
+                      params={"query": ticker}, timeout=8)
+        if sr.ok:
+            coins = sr.json().get("coins", [])
+            coin  = next((c for c in coins[:10] if c.get("symbol","").upper() == ticker), None)
+            if coin:
+                pr = _req.get("https://api.coingecko.com/api/v3/simple/price",
+                              params={"ids": coin["id"], "vs_currencies": "usd"}, timeout=8)
+                if pr.ok:
+                    price = pr.json().get(coin["id"], {}).get("usd")
+                    if price:
+                        return float(price)
     except Exception:
-        return None
+        pass
+    return None
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
