@@ -3351,18 +3351,7 @@ def miniapp_paper_buy():
         except (TypeError, ValueError):
             return jsonify({"error": "shares must be a positive number"}), 400
     else:
-        # Shares not provided — auto-calculate from user's budget if available
-        try:
-            from config_manager import get_user_config
-            ucfg   = get_user_config(chat_id)
-            budget = ucfg.get("crypto_budget") or ucfg.get("stock_budget")
-            entry  = float(price) if price else None
-            if budget and entry and entry > 0:
-                shares = max(1.0, round(float(budget) / entry, 4))
-            else:
-                shares = 1.0  # fallback: buy 1 unit
-        except Exception:
-            shares = 1.0
+        shares = 1.0  # default to 1 unit when not provided
     if price is not None:
         try:   price = float(price)
         except (TypeError, ValueError): price = None
