@@ -1721,6 +1721,28 @@ def _fast_quote(ticker: str, crypto_set) -> tuple[float | None, float | None]:
             return price, change
     except Exception:
         pass
+    # CoinGecko fallback for exotic crypto yfinance doesn't cover
+    try:
+        sr = requests.get("https://api.coingecko.com/api/v3/search",
+                          params={"query": ticker}, timeout=8)
+        if sr.ok:
+            coins = sr.json().get("coins", [])
+            coin  = next((c for c in coins[:10] if c.get("symbol", "").upper() == ticker), None)
+            if coin:
+                pr = requests.get(f"https://api.coingecko.com/api/v3/simple/price",
+                                  params={"ids": coin["id"], "vs_currencies": "usd",
+                                          "include_24hr_change": "true"}, timeout=8)
+                if pr.ok:
+                    data   = pr.json().get(coin["id"], {})
+                    price  = data.get("usd")
+                    change = data.get("usd_24h_change")
+                    if price:
+                        price  = float(price)
+                        change = round(float(change), 2) if change else None
+                        _quote_cache[ticker] = {"price": price, "change_pct": change, "ts": now}
+                        return price, change
+    except Exception:
+        pass
     return None, None
 
 
