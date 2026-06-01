@@ -1708,39 +1708,44 @@ def _fast_quote(ticker: str, crypto_set) -> tuple[float | None, float | None]:
     hit = _quote_cache.get(ticker)
     if hit and now - hit["ts"] < _QUOTE_TTL:
         return hit["price"], hit["change_pct"]
+    is_crypto = ticker in crypto_set
+
+    # ── Crypto: always use CoinGecko (better coverage than yfinance) ──────────
+    if is_crypto:
+        try:
+            sr = requests.get("https://api.coingecko.com/api/v3/search",
+                              params={"query": ticker}, timeout=8)
+            if sr.ok:
+                coins = sr.json().get("coins", [])
+                coin  = next((c for c in coins[:10] if c.get("symbol", "").upper() == ticker), None)
+                if coin:
+                    pr = requests.get("https://api.coingecko.com/api/v3/simple/price",
+                                      params={"ids": coin["id"], "vs_currencies": "usd",
+                                              "include_24hr_change": "true"}, timeout=8)
+                    if pr.ok:
+                        data   = pr.json().get(coin["id"], {})
+                        price  = data.get("usd")
+                        change = data.get("usd_24h_change")
+                        if price:
+                            price  = float(price)
+                            change = round(float(change), 2) if change else None
+                            _quote_cache[ticker] = {"price": price, "change_pct": change, "ts": now}
+                            return price, change
+        except Exception:
+            pass
+        return None, None
+
+    # ── Stocks/ETFs/commodities: use yfinance ─────────────────────────────────
     try:
         import yfinance as _yf
-        yf_sym = f"{ticker}-USD" if ticker in crypto_set else ticker
-        fi     = _yf.Ticker(yf_sym).fast_info
-        price  = getattr(fi, "last_price", None)
-        prev   = getattr(fi, "previous_close", None)
+        fi    = _yf.Ticker(ticker).fast_info
+        price = getattr(fi, "last_price", None)
+        prev  = getattr(fi, "previous_close", None)
         if price:
             price  = float(price)
             change = round((price - float(prev)) / float(prev) * 100, 2) if prev and float(prev) > 0 else None
             _quote_cache[ticker] = {"price": price, "change_pct": change, "ts": now}
             return price, change
-    except Exception:
-        pass
-    # CoinGecko fallback for exotic crypto yfinance doesn't cover
-    try:
-        sr = requests.get("https://api.coingecko.com/api/v3/search",
-                          params={"query": ticker}, timeout=8)
-        if sr.ok:
-            coins = sr.json().get("coins", [])
-            coin  = next((c for c in coins[:10] if c.get("symbol", "").upper() == ticker), None)
-            if coin:
-                pr = requests.get(f"https://api.coingecko.com/api/v3/simple/price",
-                                  params={"ids": coin["id"], "vs_currencies": "usd",
-                                          "include_24hr_change": "true"}, timeout=8)
-                if pr.ok:
-                    data   = pr.json().get(coin["id"], {})
-                    price  = data.get("usd")
-                    change = data.get("usd_24h_change")
-                    if price:
-                        price  = float(price)
-                        change = round(float(change), 2) if change else None
-                        _quote_cache[ticker] = {"price": price, "change_pct": change, "ts": now}
-                        return price, change
     except Exception:
         pass
     return None, None
