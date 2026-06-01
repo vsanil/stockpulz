@@ -122,20 +122,25 @@ class SupabaseBackend(StorageBackend):
             raise ImportError("supabase package not installed. Run: pip install supabase")
 
     def read(self, filename: str) -> dict | list | None:
-        try:
-            resp = (
-                self._client.table("documents")
-                .select("content")
-                .eq("filename", filename)
-                .maybe_single()
-                .execute()
-            )
-            if resp.data:
-                return resp.data["content"]
-            return None
-        except Exception as exc:
-            print(f"[storage/supabase] read({filename}) failed: {exc}")
-            return None
+        import threading
+        result = [None]
+        def _do():
+            try:
+                resp = (
+                    self._client.table("documents")
+                    .select("content")
+                    .eq("filename", filename)
+                    .maybe_single()
+                    .execute()
+                )
+                if resp.data:
+                    result[0] = resp.data["content"]
+            except Exception as exc:
+                print(f"[storage/supabase] read({filename}) failed: {exc}")
+        t = threading.Thread(target=_do, daemon=True)
+        t.start()
+        t.join(timeout=2.0)  # max 2s — fall back to Gist if slower
+        return result[0]
 
     def write(self, filename: str, data: dict | list) -> None:
         try:
