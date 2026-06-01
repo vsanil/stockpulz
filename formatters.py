@@ -550,7 +550,7 @@ def format_daily_message(picks: dict, config: dict,
         lines += e_lines
 
     # ── Footer ────────────────────────────────────────────────────────────────
-    _app_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    _app_url = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or "").rstrip("/")
     _paper_cta = (
         "tap <b>📄 Paper Trade</b> below"
         if _app_url
@@ -595,7 +595,7 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     etfs   = picks.get("etfs", {})
 
     # Hoist here so _pair can close over it
-    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    render_url = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or "").rstrip("/")
 
     def _header(label: str) -> list[dict]:
         return [{"text": label, "callback_data": "noop"}]
