@@ -86,6 +86,12 @@ def _yf_ohlcv(ticker: str, days: int = 92) -> list | None:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+def validate_ticker(ticker: str) -> bool:
+    """Return True if ticker resolves to a real tradeable asset (stock or crypto).
+    Uses _yf_price as the check — fast_info lookup, no .info call."""
+    return _yf_price(ticker.upper()) is not None
+
+
 def get_live_price(ticker: str) -> float | None:
     """Fetch the latest trade price for one ticker (stock or crypto).
 
