@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "stockpulz",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "set -a && source .env && set +a && python3 webhook.py"],
+      "port": 5000
+    }
+  ]
+}
