@@ -2819,7 +2819,7 @@ body.tg-light { --hint: #4b5563; }
 
 <script>
 // ── Telegram init ─────────────────────────────────────────────────────────────
-const tg       = window.Telegram.WebApp;
+const tg       = window.Telegram?.WebApp || {};
 // Apply saved theme override before first paint to avoid flash
 try {
   const _saved = localStorage.getItem('sp_theme');
@@ -2827,7 +2827,8 @@ try {
   if (_saved === 'dark')   document.body.classList.remove('tg-light');
 } catch(_) {}
 const tgUser   = tg.initDataUnsafe?.user || {};
-const userId   = String(tgUser.id || '');
+// Local dev fallback: pass ?chat_id=YOUR_ID in the URL when testing outside Telegram
+const userId   = String(tgUser.id || new URLSearchParams(location.search).get('chat_id') || '');
 const initData = tg.initData || '';
 
 tg.ready();
