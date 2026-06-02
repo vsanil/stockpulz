@@ -9,7 +9,7 @@ import os
 
 from telegram_api import send_message, typing_until_done, send_typing_action, send_inline_keyboard
 from config_manager import get_config, get_user_config, load_picks, load_user_trade_log, get_allowed_users
-from formatters import format_daily_message, format_confirmation_message
+from formatters import format_daily_message, format_confirmation_message, _p
 from cmd_helpers import _fetch_live_price, _resolve_ticker_candidates
 from cmd_trade_exec import _send_chart
 from cmd_settings import _prompt_for_param

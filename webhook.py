@@ -1037,8 +1037,12 @@ def admin_fix_ticker():
     if not old_t or not new_t:
         return jsonify({"error": "both 'from' and 'to' are required"}), 400
 
+    # Include owner (TELEGRAM_CHAT_ID) who may not be in allowed_users list
+    owner    = os.environ.get("TELEGRAM_CHAT_ID", "")
+    all_uids = list({*get_allowed_users(), *([ owner] if owner else [])})
+
     total = 0
-    for uid in get_allowed_users():
+    for uid in all_uids:
         log     = load_user_trade_log(uid)
         changed = 0
         for trade in log.get("open", []) + log.get("closed", []):
