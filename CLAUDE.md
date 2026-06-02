@@ -36,6 +36,14 @@ Rules:
 ### Timing / schedule references
 - Morning run cron: `0 11 * * 1-5` = 7:00 AM ET
 - All user-facing strings must say 7 AM ET — never 8 AM ET
+- Scheduling is via GitHub Actions (`.github/workflows/daily_run.yml`) — Render cron jobs were retired
+- GitHub Actions free tier can delay cron jobs by hours during peak load — this is expected, not a code bug
+- Late-delivery guard in `run_morning` skips picks and notifies users if the job starts at or after 9:00 AM ET on a trading day
+
+### Performance stats — median not mean
+- `get_recent_stats()` in `performance_tracker.py` now returns both `avg_return` and `median_return`
+- The morning message perf bar uses `median_return` (outlier-resistant) — a single large crypto return can make `avg_return` misleading (e.g. +441%)
+- All other callers (cmd_market.py, cmd_trades.py, cmd_admin.py) still use `avg_return` — do not change those without checking the display context
 
 ### Commit discipline
 - Always `git add` ALL changed files together — never leave related changes uncommitted

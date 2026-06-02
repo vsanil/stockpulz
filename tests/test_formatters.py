@@ -255,6 +255,33 @@ class TestFormatDailyMessage:
         if aapl_pos != -1 and msft_pos != -1:
             assert aapl_pos < msft_pos
 
+    def _recent_stats(self, avg_return, median_return=None, wins=4, losses=0):
+        total = {
+            "wins": wins, "losses": losses,
+            "win_rate": round(wins / (wins + losses) * 100, 1) if (wins + losses) else 0,
+            "avg_return": avg_return,
+        }
+        if median_return is not None:
+            total["median_return"] = median_return
+        return {"days": 30, "total": total, "spy_return": 5.0}
+
+    def test_perf_bar_shows_median_label_when_field_present(self):
+        stats = self._recent_stats(avg_return=441.4, median_return=3.2)
+        result = format_daily_message(_picks(), _cfg(), recent_stats=stats)
+        assert "median" in result
+        assert "3.2" in result
+
+    def test_perf_bar_hides_skewed_avg_when_median_present(self):
+        stats = self._recent_stats(avg_return=441.4, median_return=3.2)
+        result = format_daily_message(_picks(), _cfg(), recent_stats=stats)
+        assert "441" not in result
+
+    def test_perf_bar_falls_back_to_avg_when_median_absent(self):
+        stats = self._recent_stats(avg_return=5.1)
+        result = format_daily_message(_picks(), _cfg(), recent_stats=stats)
+        assert "avg" in result
+        assert "5.1" in result
+
     def test_pick_with_theme_does_not_raise(self):
         """Regression: _theme_tag used _re from _clean_thesis scope → NameError.
         Any pick with a 'theme' field must not crash format_daily_message."""
