@@ -203,15 +203,20 @@ def get_recent_stats(trade_logs: list[dict], days: int = 30) -> dict | None:
         avg_gain   = sum(wins)   / len(wins)   if wins   else 0.0
         avg_loss   = sum(losses) / len(losses) if losses else 0.0
         expectancy = win_rate * avg_gain + (1 - win_rate) * avg_loss
+        sorted_r   = sorted(returns)
+        n          = len(sorted_r)
+        median     = (sorted_r[n // 2] if n % 2 == 1
+                      else (sorted_r[n // 2 - 1] + sorted_r[n // 2]) / 2)
         return {
-            "count":      len(trades),
-            "wins":       len(wins),
-            "losses":     len(losses),
-            "win_rate":   round(win_rate * 100, 1),
-            "avg_return": round(sum(returns) / len(returns), 1),
-            "avg_gain":   round(avg_gain, 1),
-            "avg_loss":   round(avg_loss, 1),
-            "expectancy": round(expectancy, 2),
+            "count":         len(trades),
+            "wins":          len(wins),
+            "losses":        len(losses),
+            "win_rate":      round(win_rate * 100, 1),
+            "avg_return":    round(sum(returns) / len(returns), 1),
+            "median_return": round(median, 1),
+            "avg_gain":      round(avg_gain, 1),
+            "avg_loss":      round(avg_loss, 1),
+            "expectancy":    round(expectancy, 2),
         }
 
     stocks = [t for t in all_closed if t.get("asset_type") == "stock"]
