@@ -276,8 +276,10 @@ def format_daily_message(picks: dict, config: dict,
     if recent_stats and recent_stats.get("total"):
         t  = recent_stats["total"]
         spy = recent_stats.get("spy_return")
-        _s = lambda x: "+" if x >= 0 else ""
-        perf = f"📊 <i>{t['wins']}W/{t['losses']}L · {t['win_rate']}% · avg {_s(t['avg_return'])}{t['avg_return']}%"
+        _s         = lambda x: "+" if x >= 0 else ""
+        _ret_val   = t.get("median_return", t["avg_return"])
+        _ret_label = "median" if "median_return" in t else "avg"
+        perf = f"📊 <i>{t['wins']}W/{t['losses']}L · {t['win_rate']}% · {_ret_label} {_s(_ret_val)}{_ret_val}%"
         if spy is not None:
             perf += f" · vs SPY {_s(spy)}{spy}%"
         perf += f"  ({recent_stats['days']}d)</i>"

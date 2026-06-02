@@ -253,3 +253,72 @@ class TestAlertDedup:
         from cache_layer import cache_get
         _mark_alerted("mykey")
         assert cache_get(f"{_ALERTED_KEY_PREFIX}mykey") is True
+
+
+# ── Late-delivery guard ───────────────────────────────────────────────────────
+
+import pytz as _pytz
+
+_ET = _pytz.timezone("America/New_York")
+
+
+def _et(hour, minute=0, weekday_offset=0):
+    """Return a timezone-aware ET datetime on a known weekday (Mon Jun 2 2026)."""
+    from datetime import datetime
+    # Jun 2 2026 = Tuesday (weekday 1)
+    base = datetime(2026, 6, 2, hour, minute)
+    return _ET.localize(base)
+
+
+class TestLateDeliveryGuard:
+
+    def _run(self, now_et, monkeypatch, mock_data=False):
+        sent = []
+        monkeypatch.setattr(ag, "MOCK_DATA", mock_data)
+        monkeypatch.setattr(ag, "_log_cron_run", lambda *a, **kw: None)
+        monkeypatch.setattr(ag, "_all_recipients", lambda: ["user1"])
+        monkeypatch.setattr(ag, "send_message", lambda msg, chat_id=None: sent.append(msg))
+        monkeypatch.setattr(ag, "is_market_holiday", lambda d: False)
+        # Prevent screener / Claude from running if guard is bypassed
+        monkeypatch.setattr(ag, "run_screener", lambda *a, **kw: {})
+        ag.run_morning({}, now_et)
+        return sent
+
+    def test_guard_fires_at_9am_sends_delay_notice(self, monkeypatch):
+        sent = self._run(_et(9, 0), monkeypatch)
+        assert len(sent) == 1
+        assert "skipped" in sent[0] or "delayed" in sent[0].lower()
+
+    def test_guard_fires_after_9am(self, monkeypatch):
+        sent = self._run(_et(11, 45), monkeypatch)
+        assert len(sent) == 1
+
+    def _guard_did_not_fire(self, now_et, monkeypatch, mock_data=False):
+        """Return True if the late-delivery guard did NOT send a delay notice.
+        Patches yfinance.download to raise immediately so the non-guard path
+        exits in milliseconds without making network calls."""
+        import yfinance as _yf
+        sent = []
+        monkeypatch.setattr(ag, "MOCK_DATA", mock_data)
+        monkeypatch.setattr(ag, "_log_cron_run", lambda *a, **kw: None)
+        monkeypatch.setattr(ag, "_all_recipients", lambda: ["user1"])
+        monkeypatch.setattr(ag, "send_message", lambda msg, chat_id=None: sent.append(msg))
+        monkeypatch.setattr(ag, "is_market_holiday", lambda d: False)
+        monkeypatch.setattr(_yf, "download", lambda *a, **kw: (_ for _ in ()).throw(
+            RuntimeError("test-stop")))
+        try:
+            ag.run_morning({}, now_et)
+        except Exception:
+            pass
+        return not any("Morning picks skipped" in m for m in sent)
+
+    def test_guard_does_not_fire_before_9am(self, monkeypatch):
+        assert self._guard_did_not_fire(_et(8, 59), monkeypatch)
+
+    def test_guard_skipped_on_weekend(self, monkeypatch):
+        from datetime import datetime
+        now_et = _ET.localize(datetime(2026, 6, 6, 10, 0))  # Saturday
+        assert self._guard_did_not_fire(now_et, monkeypatch)
+
+    def test_guard_skipped_when_mock_data(self, monkeypatch):
+        assert self._guard_did_not_fire(_et(11, 0), monkeypatch, mock_data=True)
