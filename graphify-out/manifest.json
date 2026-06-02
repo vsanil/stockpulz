@@ -50,8 +50,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/webhook.py": {
-    "mtime": 1780291647.2157557,
-    "ast_hash": "cb1157379c5d0fecb5740fb880aa29d3",
+    "mtime": 1780380426.1509392,
+    "ast_hash": "552f70a8f522c2a7cddcf5fc4c85aa96",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/congressional_tracker.py": {
@@ -130,8 +130,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/market_data.py": {
-    "mtime": 1780202827.9965262,
-    "ast_hash": "cbb2918fe22704da4222b597a191d327",
+    "mtime": 1780380363.1408179,
+    "ast_hash": "9aeead616a9606b05b490a7b0849ff9f",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/cache_layer.py": {
@@ -245,8 +245,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/conftest.py": {
-    "mtime": 1780202639.483891,
-    "ast_hash": "4ca431e39ace48ac5f290757f852e38c",
+    "mtime": 1780380528.4343033,
+    "ast_hash": "a7426fafc0ed36d003230aa4acc67c7a",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_frontend_js.py": {
@@ -330,8 +330,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.claude/settings.local.json": {
-    "mtime": 1780373866.824404,
-    "ast_hash": "22da823654d44bb751bc2a7e97f2c7b1",
+    "mtime": 1780380444.899757,
+    "ast_hash": "15bb8221aa9b96dd12c0eff7244ffb93",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/on_push.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/CLAUDE.md": {
-    "mtime": 1780172358.4644547,
-    "ast_hash": "768509bf05246297d0ef6958e8d5cb3c",
+    "mtime": 1780374880.7233367,
+    "ast_hash": "596d8a8728cc6efca6582b0f7b6f42dd",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/docs/index.html": {
@@ -432,6 +432,11 @@
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/stockpulz_demo.gif": {
     "mtime": 1778734139.431133,
     "ast_hash": "8ba9f4395751a038c266d0d46ab3fd41",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/fix_ticker.py": {
+    "mtime": 1780380380.7096865,
+    "ast_hash": "6124587092b1f7cc605f8e5bfbf1c228",
     "semantic_hash": ""
   }
 }
