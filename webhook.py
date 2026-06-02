@@ -1024,6 +1024,34 @@ def admin_broadcast():
     return jsonify({"ok": True, "sent": sent, "failed": failed})
 
 
+@app.route("/admin/fix_ticker", methods=["POST"])
+@_require_admin
+def admin_fix_ticker():
+    """Rename a ticker across all users' open + closed trade logs.
+    Body: {"from": "AVERY", "to": "AVY"}
+    One-time migration tool — idempotent if run again."""
+    from config_manager import get_allowed_users, load_user_trade_log, save_user_trade_log
+    body    = request.get_json(silent=True) or {}
+    old_t   = str(body.get("from", "")).upper().strip()
+    new_t   = str(body.get("to",   "")).upper().strip()
+    if not old_t or not new_t:
+        return jsonify({"error": "both 'from' and 'to' are required"}), 400
+
+    total = 0
+    for uid in get_allowed_users():
+        log     = load_user_trade_log(uid)
+        changed = 0
+        for trade in log.get("open", []) + log.get("closed", []):
+            if trade.get("ticker") == old_t:
+                trade["ticker"] = new_t
+                changed += 1
+        if changed:
+            save_user_trade_log(uid, log)
+            total += changed
+
+    return jsonify({"ok": True, "renamed": total, "from": old_t, "to": new_t})
+
+
 # ── Mini App routes ───────────────────────────────────────────────────────────
 
 _MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "miniapp")
@@ -1292,6 +1320,10 @@ def miniapp_log_bought():
     ticker     = str(body.get("ticker", "")).upper().strip()
     if not ticker:
         return jsonify({"error": "missing ticker"}), 400
+
+    from market_data import validate_ticker
+    if not validate_ticker(ticker):
+        return jsonify({"error": f"'{ticker}' is not a recognised ticker — check the symbol and try again"}), 400
 
     entry_override     = body.get("entry_price")
     stop_override      = body.get("stop_loss")

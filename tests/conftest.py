@@ -128,6 +128,7 @@ def _mock_prices(monkeypatch):
     monkeypatch.setattr(market_data, "get_live_price",  _fake_get_live_price)
     monkeypatch.setattr(market_data, "get_live_prices", _fake_get_live_prices)
     monkeypatch.setattr(market_data, "get_ohlcv",       _fake_get_ohlcv)
+    monkeypatch.setattr(market_data, "validate_ticker", lambda t: True)
 
     # Also patch the alert manager's internal price fetcher
     import price_alert_manager
