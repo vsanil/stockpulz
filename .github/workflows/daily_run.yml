@@ -11,29 +11,8 @@ name: StockPulz Scheduled Runs
 #   Private repos → 2000 min/month (these jobs use ~1400 min/month combined)
 
 on:
-  schedule:
-    # ── Weekday runs (Mon–Fri, UTC times) ──────────────────────────────────────
-    - cron: "0 3 * * 1-5"       # 11:00 PM ET  — overnight prescreener (scores 600 tickers)
-    - cron: "45 12 * * 1-5"     #  8:45 AM ET  — pre-market pulse for open positions
-    - cron: "0 15 * * 1-5"      # 11:00 AM ET  — personalized position digest (mid-morning)
-    - cron: "0 11 * * 1-5"      #  7:00 AM ET  — morning picks delivery (pre-market)
-    - cron: "30 14 * * 1-5"     # 10:30 AM ET  — confirmation run (1h after open)
-    - cron: "30 19 * * 1-5"     #  3:30 PM ET  — EOD close check (30 min before close)
-    - cron: "15 20 * * 1-5"     #  4:15 PM ET  — full EOD wrap-up (after close)
-    # ── Weekend runs ────────────────────────────────────────────────────────────
-    - cron: "0 12 * * 6"        #  8:00 AM ET Saturday — crypto picks + weekly recap
-    - cron: "0 12 * * 0"        #  8:00 AM ET Sunday   — Week Ahead briefing
-    - cron: "0 23 * * 5"        #  7:00 PM ET Friday   — Friday evening wrap-up
-    - cron: "0 21 * * 1-4"      #  5:00 PM ET Mon–Thu  — macro event alert check
-    - cron: "30 16 * * 1-5"     # 12:30 PM ET weekdays — midday intraday check
-    - cron: "0 14 * * 1-5"      # 10:00 AM ET weekdays — VIX volatility spike alerts
-    - cron: "0 16 * * 1-5"      # 12:00 PM ET weekdays — position news digest (midday)
-    - cron: "0 20 * * 1-5"      #  4:00 PM ET weekdays — pre-earnings guidance
-    - cron: "0 13 1 * *"        #  9:00 AM ET 1st of month — monthly market commentary
-    - cron: "0 14 1,15 11,12 *" #  9:00 AM ET 1st + 15th of Nov/Dec — tax-loss harvest check
-    - cron: "0 13 * * 1-5"     #  9:00 AM ET weekdays — watchdog (alerts if morning run was missed)
-
-  # Manual trigger — useful for testing individual modes without waiting for schedule
+  # All scheduled jobs have moved to cron-job.org → Render /trigger/<mode> endpoints.
+  # This workflow is kept for manual testing only.
   workflow_dispatch:
     inputs:
       run_mode:
