@@ -40,7 +40,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-HTML_FILE = ROOT / "miniapp" / "index.html"
+HTML_FILE    = ROOT / "miniapp" / "index.html"
+WEBHOOK_FILE = ROOT / "webhook.py"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -359,21 +360,52 @@ def check_async_await(js: str, line_offset: int = 0) -> list[Issue]:
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
+def extract_admin_html(webhook_path: Path = WEBHOOK_FILE) -> str:
+    """
+    Extract the _ADMIN_DASH_HTML triple-quoted string from webhook.py.
+    Returns the resolved Python string value (backslash sequences interpreted).
+    """
+    src = webhook_path.read_text(encoding='utf-8')
+    m = re.search(r'_ADMIN_DASH_HTML\s*=\s*"""(.*?)"""', src, re.DOTALL)
+    if not m:
+        return ""
+    # Interpret common Python escape sequences so the HTML is accurate
+    raw = m.group(1)
+    raw = raw.replace("\\'", "'").replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
+    return raw
+
+
 def run_all_checks(html_path: Path = HTML_FILE) -> list[Issue]:
+    all_issues: list[Issue] = []
+
+    # ── 1. miniapp/index.html ─────────────────────────────────────────────────
     html = html_path.read_text(encoding='utf-8')
     js, offset = extract_js(html)
     if not js:
-        return [Issue('ERROR', 'extract', 0,
-                      f"No <script> block found in {html_path}")]
+        all_issues.append(Issue('ERROR', 'extract', 0,
+                                f"No <script> block found in {html_path}"))
+    else:
+        all_issues += check_syntax(js)
+        all_issues += check_tzdz(js, offset)
+        all_issues += check_blocked_apis(js, offset)
 
-    issues: list[Issue] = []
-    issues += check_syntax(js)
-    issues += check_tzdz(js, offset)
-    issues += check_blocked_apis(js, offset)
-    # async/await check is informational — too many false positives from
-    # arrow functions and class methods; enable once false-positive rate drops
-    # issues += check_async_await(js, offset)
-    return issues
+    # ── 2. webhook.py admin dashboard (_ADMIN_DASH_HTML) ─────────────────────
+    admin_html = extract_admin_html()
+    if admin_html:
+        admin_js, admin_offset = extract_js(admin_html)
+        if admin_js:
+            for issue in check_syntax(admin_js):
+                issue.message = f"[admin dashboard] {issue.message}"
+                all_issues.append(issue)
+            for issue in check_blocked_apis(admin_js, admin_offset):
+                issue.message = f"[admin dashboard] {issue.message}"
+                all_issues.append(issue)
+        # Note: TDZ check skipped for admin dashboard (no top-level IIFEs there)
+    else:
+        all_issues.append(Issue('WARN', 'extract', 0,
+                                "Could not extract _ADMIN_DASH_HTML from webhook.py"))
+
+    return all_issues
 
 
 def _debug_list(html_path: Path = HTML_FILE) -> None:
@@ -409,7 +441,7 @@ def main() -> None:
 
     if issues:
         print(f"\n{'='*60}")
-        print("JS CHECK — miniapp/index.html")
+        print("JS CHECK — miniapp/index.html + webhook.py admin dashboard")
         print('='*60)
         for issue in sorted(issues):
             print(issue)
