@@ -114,20 +114,24 @@ def trigger_morning():
         print(f"[trigger_morning] Duplicate check failed (non-critical): {_e}")
 
     # Spawn morning run as isolated background subprocess
+    owner_only  = request.args.get("owner_only", "").lower() in ("1", "true")
+    extra_env   = {"RUN_MODE": "morning"}
+    if owner_only:
+        extra_env["OWNER_ONLY"] = "1"
     import threading, subprocess, sys as _sys
     def _run():
         try:
             subprocess.run(
                 [_sys.executable, "agent.py"],
-                env={**os.environ, "RUN_MODE": "morning"},
+                env={**os.environ, **extra_env},
                 cwd=os.path.dirname(os.path.abspath(__file__)),
                 timeout=600,
             )
         except Exception as _exc:
             print(f"[trigger_morning] Background run error: {_exc}")
     threading.Thread(target=_run, daemon=True).start()
-    print("[trigger_morning] Morning run spawned.")
-    return jsonify({"ok": True, "triggered": True}), 200
+    print(f"[trigger_morning] Morning run spawned (owner_only={owner_only}).")
+    return jsonify({"ok": True, "triggered": True, "owner_only": owner_only}), 200
 
 
 @app.route("/trigger/prescreener", methods=["POST", "GET"])

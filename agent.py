@@ -3714,12 +3714,15 @@ def compute_pick_streaks(weekly_picks: dict) -> dict:
 
 
 def _all_recipients() -> list[str]:
-    """Return all allowed chat_ids (always includes owner)."""
+    """Return all allowed chat_ids (always includes owner).
+    If OWNER_ONLY=1 env var is set, returns only the owner (for manual test triggers)."""
+    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if os.environ.get("OWNER_ONLY") == "1":
+        return [owner] if owner else []
     try:
         from config_manager import get_allowed_users
         return get_allowed_users()
     except Exception:
-        owner = os.environ.get("TELEGRAM_CHAT_ID", "")
         return [owner] if owner else []
 
 
