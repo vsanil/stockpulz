@@ -77,6 +77,12 @@ Rules:
 - When server data changes (position updated, pick bought, watchlist changed), always call `_invalidatePortfolioCache()` or equivalent and set `loadedTabs[tab] = false` for affected tabs
 - Never show stale data after a write — reload the affected tab/section immediately after a successful save
 
+### pandas 2.x compatibility — always use StringIO
+- `pd.read_html(string)` and `pd.read_csv(string)` no longer accept raw HTML/CSV strings in pandas 2.x — they try to open the string as a file path and raise `[Errno 2] No such file or directory`
+- Always wrap response text: `pd.read_html(StringIO(resp.text))` / `pd.read_csv(StringIO(resp.text))`
+- When touching any file that calls `pd.read_html` or `pd.read_csv` with response content, grep all call sites and verify they all use `StringIO`
+- Every module that makes external HTTP calls and parses the response must have at least one mocked response test
+
 ### Syntax check before declaring done
 - After editing any Python file, run `python -m py_compile <file>` mentally or literally — never skip this
 - After editing index.html JS, run `python scripts/check_js.py` (or `pytest tests/test_frontend_js.py`) — no exceptions

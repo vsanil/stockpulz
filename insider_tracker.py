@@ -10,6 +10,7 @@ Cluster buys (multiple insiders buying at once) are the strongest signal.
 import time
 import requests
 import pandas as pd
+from io import StringIO
 
 OPENINSIDER_TICKER_URL = (
     "http://openinsider.com/screener?"
@@ -76,7 +77,7 @@ def get_insider_signal(ticker: str) -> dict:
         if resp.status_code != 200:
             return _empty_signal("fetch failed")
 
-        tables = pd.read_html(resp.text)
+        tables = pd.read_html(StringIO(resp.text))
         if not tables:
             return _empty_signal("no table")
 
@@ -163,7 +164,7 @@ def get_cluster_buys() -> list[str]:
         resp = requests.get(OPENINSIDER_CLUSTER_URL, headers=HEADERS, timeout=10)
         if resp.status_code != 200:
             return []
-        tables = pd.read_html(resp.text)
+        tables = pd.read_html(StringIO(resp.text))
         for t in tables:
             for col in t.columns:
                 if "ticker" in str(col).lower() or "symbol" in str(col).lower():
