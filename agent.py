@@ -311,7 +311,7 @@ MOCK_PICKS = {
         "long_term": [],
     },
     "options_plays": [],
-    "macro_context": "SPY +0.4% · VIX 18.2 · 10Y 4.32% — Risk-on tone, momentum favours longs. <i>[MOCK DATA]</i>",
+    "macro_context": {"spy_pct": 0.4, "vix": 18.2, "tnx_yield": 4.32},
 }
 
 
