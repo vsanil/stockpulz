@@ -714,11 +714,11 @@ LT STOCK CONVICTION RUBRIC — applies to long_term stock picks only (DO NOT use
   LT picks are long-horizon — the bar is quality, not momentum. Return [] only if nothing reaches 2 signals.
 
 ST STOCK CONVICTION GATE (ABSOLUTE RULE):
-  - Minimum conviction is set by the risk profile (conservative ★★★★+, moderate ★★★★+, aggressive ★★★+).
+  - Minimum conviction is set by the risk profile (conservative ★★★★+, moderate ★★★+, aggressive ★★★+).
   - Do NOT pad to hit pick count targets. Fewer genuine picks beats more filler picks EVERY time.
   - A pick that barely squeaks past the threshold should be DROPPED, not included.
-  - If only 1 stock qualifies, return 1. If none qualify, return [].
-  - Empty arrays [] are acceptable and often the most honest answer.
+  - If only 1 stock qualifies, return 1. Always aim for at least 1 pick if any candidate clears the minimum bar.
+  - Return [] only if truly no candidate reaches the minimum conviction — this should be rare, not the default.
 
 SECTOR DIVERSITY RULE (HARD RULE — applies to the full output):
   - Maximum 2 picks from the same sector across ALL sections (ST stocks + LT stocks combined).
