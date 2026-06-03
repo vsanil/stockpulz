@@ -473,6 +473,107 @@ def _get_alpaca_snapshots(tickers: list[str]) -> dict[str, float]:
     return prices
 
 
+def _alpaca_single_bars(ticker: str, days: int = 365) -> "pd.DataFrame | None":
+    """Fetch daily bars for one stock ticker via Alpaca. Returns DataFrame or None."""
+    import datetime as _dt
+    key    = os.environ.get("ALPACA_KEY_ID", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if not key or not secret:
+        return None
+    start_date = (_dt.date.today() - _dt.timedelta(days=days + 10)).isoformat()
+    headers = {
+        "APCA-API-KEY-ID":     key,
+        "APCA-API-SECRET-KEY": secret,
+        "Accept":              "application/json",
+    }
+    try:
+        resp = requests.get(
+            f"https://data.alpaca.markets/v2/stocks/bars/{ticker}",
+            headers=headers,
+            params={"timeframe": "1Day", "start": start_date, "limit": 1000, "feed": "iex"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return None
+        bars = resp.json().get("bars") or []
+        if not bars:
+            return None
+        df = pd.DataFrame(bars)
+        df["t"] = pd.to_datetime(df["t"], utc=True).dt.tz_localize(None)
+        df = df.set_index("t").rename(columns={
+            "o": "Open", "h": "High", "l": "Low", "c": "Close", "v": "Volume",
+        })[["Open", "High", "Low", "Close", "Volume"]]
+        df.index.name = "Date"
+        return df
+    except Exception:
+        return None
+
+
+def _alpaca_bulk_bars(tickers: list, days: int = 92) -> dict:
+    """
+    Fetch daily bars for many tickers via Alpaca multi-symbol endpoint.
+    Returns {ticker: DataFrame} with OHLCV columns — empty dict on failure.
+    Chunks 100 tickers per request; handles pagination via next_page_token.
+    """
+    import datetime as _dt
+    key    = os.environ.get("ALPACA_KEY_ID", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if not key or not secret:
+        return {}
+    start_date = (_dt.date.today() - _dt.timedelta(days=days + 10)).isoformat()
+    headers = {
+        "APCA-API-KEY-ID":     key,
+        "APCA-API-SECRET-KEY": secret,
+        "Accept":              "application/json",
+    }
+    url       = "https://data.alpaca.markets/v2/stocks/bars"
+    raw_bars: dict = {}
+    chunk_size = 100
+
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i:i + chunk_size]
+        params: dict = {
+            "symbols":   ",".join(chunk),
+            "timeframe": "1Day",
+            "start":     start_date,
+            "limit":     10000,
+            "feed":      "iex",
+        }
+        page_token = None
+        while True:
+            if page_token:
+                params["page_token"] = page_token
+            try:
+                resp = requests.get(url, headers=headers, params=params, timeout=30)
+                if resp.status_code != 200:
+                    print(f"[screener] Alpaca bars chunk {i // chunk_size} error: {resp.status_code}")
+                    break
+                data = resp.json()
+                for sym, bars in (data.get("bars") or {}).items():
+                    raw_bars.setdefault(sym.upper(), []).extend(bars)
+                page_token = data.get("next_page_token")
+                if not page_token:
+                    break
+            except Exception as exc:
+                print(f"[screener] Alpaca bars chunk {i // chunk_size} failed: {exc}")
+                break
+
+    result: dict = {}
+    for ticker, bars in raw_bars.items():
+        if not bars:
+            continue
+        df = pd.DataFrame(bars)
+        df["t"] = pd.to_datetime(df["t"], utc=True).dt.tz_localize(None)
+        df = df.set_index("t").rename(columns={
+            "o": "Open", "h": "High", "l": "Low", "c": "Close", "v": "Volume",
+        })[["Open", "High", "Low", "Close", "Volume"]]
+        df.index.name = "Date"
+        result[ticker] = df
+
+    print(f"[screener] Alpaca bulk bars: {len(result)} tickers fetched.")
+    return result
+
+
 # ── Finnhub company profile (replaces yfinance .info for name/sector) ────────
 
 # Map Finnhub industry labels → SECTOR_MEDIAN_PE keys (GICS-style)
@@ -830,8 +931,11 @@ def _long_term_score(
     # A stock with strong fundamentals but in a long-term downtrend is a value trap.
     # Requiring price > 200MA ensures we buy quality in an uptrend, not falling knives.
     try:
-        import yfinance as _yf_lt
-        hist_lt = _yf_lt.Ticker(ticker or info.get("symbol", "")).history(period="1y", interval="1d")
+        _sym_lt = ticker or info.get("symbol", "")
+        hist_lt = _alpaca_single_bars(_sym_lt, days=365)
+        if hist_lt is None or hist_lt.empty:
+            import yfinance as _yf_lt
+            hist_lt = _yf_lt.Ticker(_sym_lt).history(period="1y", interval="1d")
         if not hist_lt.empty and len(hist_lt) >= 200:
             ma200    = float(hist_lt["Close"].rolling(200).mean().iloc[-1])
             cur_px   = float(hist_lt["Close"].iloc[-1])
@@ -900,25 +1004,34 @@ def run_screener(
             print(f"[screener] Watchlist added {len(extra)} extra tickers: {extra}")
 
     # ── Step 1: Bulk price history download ──────────────────────────────────
-    print(f"[screener] Bulk downloading {len(tickers)} tickers (one API call)...")
-    try:
-        raw = yf.download(
-            tickers,
-            period="3mo",
-            group_by="ticker",
-            auto_adjust=True,
-            threads=True,
-            progress=False,
-            timeout=30,
+    # Include SPY in the bulk fetch so RS baseline is always available.
+    _bulk_tickers = list(dict.fromkeys(tickers + ["SPY"]))
+    print(f"[screener] Bulk downloading {len(_bulk_tickers)} tickers via Alpaca...")
+    raw = _alpaca_bulk_bars(_bulk_tickers)
+    if not raw:
+        # Alpaca keys absent or call failed — fall back to yfinance
+        print("[screener] Alpaca bars unavailable, falling back to yfinance...")
+        try:
+            _raw_yf = yf.download(
+                tickers,
+                period="3mo",
+                group_by="ticker",
+                auto_adjust=True,
+                threads=True,
+                progress=False,
+                timeout=30,
+            )
+        except Exception as exc:
+            print(f"[screener] Bulk download failed: {exc}")
+            return {"short_term": [], "long_term": []}
+        _avail_yf = (
+            set(_raw_yf.columns.get_level_values(0))
+            if hasattr(_raw_yf.columns, "levels")
+            else set(tickers[:1])
         )
-    except Exception as exc:
-        print(f"[screener] Bulk download failed: {exc}")
-        return {"short_term": [], "long_term": []}
+        raw = {t: _raw_yf[t].dropna(how="all") for t in _avail_yf}
 
-    if hasattr(raw.columns, "levels"):
-        available = set(raw.columns.get_level_values(0))
-    else:
-        available = set(tickers[:1])
+    available = set(raw.keys())
 
     # ── SPY 20-day return — computed once as RS baseline ──────────────────────
     # Relative strength vs SPY = stock 20d return minus SPY 20d return.
@@ -928,7 +1041,8 @@ def run_screener(
         if "SPY" in available:
             spy_close = raw["SPY"]["Close"].dropna()
         else:
-            spy_close = yf.Ticker("SPY").history(period="2mo", timeout=10)["Close"].dropna()
+            _spy_df   = _alpaca_single_bars("SPY", days=65)
+            spy_close = _spy_df["Close"].dropna() if _spy_df is not None else pd.Series(dtype=float)
         if len(spy_close) >= 21:
             spy_20d_return = round(
                 (float(spy_close.iloc[-1]) - float(spy_close.iloc[-21])) / float(spy_close.iloc[-21]) * 100, 1
