@@ -100,18 +100,21 @@ def trigger_morning():
         return jsonify({"error": "unauthorized"}), 403
 
     # Duplicate-run guard — skip if morning already ran today (ET)
-    try:
-        import pytz as _tz
-        from datetime import datetime as _dt
-        from config_manager import get_config as _gcfg
-        _cfg     = _gcfg()
-        _last    = _cfg.get("cron_last_morning", "")
-        _today   = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
-        if _last and _last[:10] >= _today:
-            print(f"[trigger_morning] Already ran today ({_last[:16]}) — skipping.")
-            return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
-    except Exception as _e:
-        print(f"[trigger_morning] Duplicate check failed (non-critical): {_e}")
+    # Pass ?force=true to bypass (admin/testing only — secret still required)
+    force = request.args.get("force", "").lower() in ("1", "true")
+    if not force:
+        try:
+            import pytz as _tz
+            from datetime import datetime as _dt
+            from config_manager import get_config as _gcfg
+            _cfg     = _gcfg()
+            _last    = _cfg.get("cron_last_morning", "")
+            _today   = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
+            if _last and _last[:10] >= _today:
+                print(f"[trigger_morning] Already ran today ({_last[:16]}) — skipping.")
+                return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
+        except Exception as _e:
+            print(f"[trigger_morning] Duplicate check failed (non-critical): {_e}")
 
     # Spawn morning run as isolated background subprocess
     owner_only  = request.args.get("owner_only", "").lower() in ("1", "true")
