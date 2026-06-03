@@ -176,6 +176,75 @@ def trigger_prescreener():
     return jsonify({"ok": True, "triggered": True}), 200
 
 
+@app.route("/trigger/<mode>", methods=["POST", "GET"])
+def trigger_mode(mode: str):
+    """
+    Generic trigger endpoint for any agent run mode.
+    Called by cron-job.org for all scheduled jobs.
+    Protected by CRON_SECRET env var.
+
+    Supported modes: confirmation, weekly, close_check, eod_summary,
+    week_ahead, premarket, digest, friday_wrap, macro_alert, midday_check,
+    vix_check, news_check, pre_earnings, monthly_commentary, watchdog, tax_harvest.
+
+    ?owner_only=true  — send only to admin (for testing)
+    ?secret=XXX       — required
+    """
+    _VALID_MODES = {
+        "confirmation", "weekly", "close_check", "eod_summary",
+        "week_ahead", "premarket", "digest", "friday_wrap",
+        "macro_alert", "midday_check", "vix_check", "news_check",
+        "pre_earnings", "monthly_commentary", "watchdog", "tax_harvest",
+        "morning", "prescreener",   # kept for completeness; dedicated endpoints take priority
+    }
+    if mode not in _VALID_MODES:
+        return jsonify({"error": f"unknown mode: {mode}"}), 400
+
+    secret   = os.environ.get("CRON_SECRET", "")
+    provided = request.args.get("secret", "") or (request.get_json(silent=True) or {}).get("secret", "")
+    if not secret or provided != secret:
+        return jsonify({"error": "unauthorized"}), 403
+
+    # Per-mode duplicate guard — skip if this mode already ran today (ET)
+    try:
+        import pytz as _tz
+        from datetime import datetime as _dt
+        from config_manager import get_config as _gcfg
+        _cfg   = _gcfg()
+        _key   = f"cron_last_{mode}"
+        _last  = _cfg.get(_key, "")
+        _today = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
+        if _last and _last[:10] >= _today:
+            print(f"[trigger/{mode}] Already ran today ({_last[:16]}) — skipping.")
+            return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
+    except Exception as _e:
+        print(f"[trigger/{mode}] Duplicate check failed (non-critical): {_e}")
+
+    owner_only = request.args.get("owner_only", "").lower() in ("1", "true")
+    extra_env  = {"RUN_MODE": mode}
+    if owner_only:
+        extra_env["OWNER_ONLY"] = "1"
+
+    # Timeouts vary by mode — longer for heavy jobs
+    _LONG_MODES = {"morning", "prescreener", "weekly", "eod_summary", "monthly_commentary"}
+    timeout = 600 if mode in _LONG_MODES else 300
+
+    import threading, subprocess, sys as _sys
+    def _run():
+        try:
+            subprocess.run(
+                [_sys.executable, "agent.py"],
+                env={**os.environ, **extra_env},
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                timeout=timeout,
+            )
+        except Exception as _exc:
+            print(f"[trigger/{mode}] Background run error: {_exc}")
+    threading.Thread(target=_run, daemon=True).start()
+    print(f"[trigger/{mode}] Spawned (owner_only={owner_only}, timeout={timeout}s).")
+    return jsonify({"ok": True, "triggered": True, "mode": mode, "owner_only": owner_only}), 200
+
+
 # ── Telegram webhook receiver ─────────────────────────────────────────────────
 
 @app.route("/webhook", methods=["POST"])
