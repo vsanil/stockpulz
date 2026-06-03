@@ -130,6 +130,48 @@ def trigger_morning():
     return jsonify({"ok": True, "triggered": True}), 200
 
 
+@app.route("/trigger/prescreener", methods=["POST", "GET"])
+def trigger_prescreener():
+    """
+    Called by cron-job.org at 3:00 AM UTC (11 PM EDT) on weekdays.
+    Runs the overnight prescreener that caches stock scores for the morning run.
+    Protected by CRON_SECRET env var.
+    """
+    secret   = os.environ.get("CRON_SECRET", "")
+    provided = request.args.get("secret", "") or (request.get_json(silent=True) or {}).get("secret", "")
+    if not secret or provided != secret:
+        return jsonify({"error": "unauthorized"}), 403
+
+    # Duplicate guard — skip if prescreener already ran tonight
+    try:
+        import pytz as _tz
+        from datetime import datetime as _dt
+        from config_manager import get_config as _gcfg
+        _cfg   = _gcfg()
+        _last  = _cfg.get("cron_last_prescreener", "")
+        _today = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
+        if _last and _last[:10] >= _today:
+            print(f"[trigger_prescreener] Already ran today ({_last[:16]}) — skipping.")
+            return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
+    except Exception as _e:
+        print(f"[trigger_prescreener] Duplicate check failed (non-critical): {_e}")
+
+    import threading, subprocess, sys as _sys
+    def _run():
+        try:
+            subprocess.run(
+                [_sys.executable, "agent.py"],
+                env={**os.environ, "RUN_MODE": "prescreener"},
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                timeout=300,
+            )
+        except Exception as _exc:
+            print(f"[trigger_prescreener] Background run error: {_exc}")
+    threading.Thread(target=_run, daemon=True).start()
+    print("[trigger_prescreener] Prescreener spawned.")
+    return jsonify({"ok": True, "triggered": True}), 200
+
+
 # ── Telegram webhook receiver ─────────────────────────────────────────────────
 
 @app.route("/webhook", methods=["POST"])
