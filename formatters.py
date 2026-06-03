@@ -143,7 +143,7 @@ def _macro_narrative_line(m: dict) -> str:
       "📊 Market: SPY +1.2% · VIX 17 (calm) · 10Y 4.3%  →  ✅ Bullish backdrop"
       "📊 Market: SPY -0.8% · VIX 23 (elevated) · 10Y 4.5%  →  ⚠️ Stay cautious"
     """
-    if not m:
+    if not m or not isinstance(m, dict):
         return ""
 
     spy_pct = m.get("spy_pct")
