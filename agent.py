@@ -3532,7 +3532,15 @@ def main():
     elif mode == "digest":
         run_digest()
     elif mode == "morning":
-        run_morning(config, now_et)
+        # Duplicate-run guard — cron-job.org is the primary trigger; GitHub Actions
+        # is the backup. If cron-job.org already ran this morning, skip to avoid
+        # sending picks twice.
+        _last_morning = config.get("cron_last_morning", "")
+        _today_et     = now_et.date().isoformat()
+        if _last_morning and _last_morning[:10] >= _today_et and not MOCK_DATA:
+            print(f"[agent] Morning already ran today ({_last_morning[:16]}) — skipping duplicate (GitHub Actions backup).")
+        else:
+            run_morning(config, now_et)
     elif mode == "weekly":
         run_weekly_recap(config, now_et)
     elif mode == "week_ahead":
