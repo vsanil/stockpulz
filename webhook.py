@@ -557,22 +557,34 @@ function cron(c,lastMorning){
   return Object.keys(SCHED).map(function(k){
     var last=c[k]||(k==='morning'?lastMorning:'');
     var dc=last?'d-green':'d-muted';
-    var runBtn='<button class="btn-sm" style="padding:2px 8px;font-size:11px" data-mode="'+k+'" data-mock="0" onclick="runAgent(this.dataset.mode,false)">&#9654; Run</button>';
-    var mockBtn=(k==='morning'||k==='weekly')?'<button class="btn-sm" style="padding:2px 8px;font-size:11px;margin-left:4px" data-mode="'+k+'" onclick="runAgent(this.dataset.mode,true)">&#9654; Mock</button>':'';
+    var runBtn='<button class="btn-sm" style="padding:2px 8px;font-size:11px" data-mode="'+k+'" data-label="&#9654; Run" onclick="runAgent(this,false)">&#9654; Run</button>';
+    var mockBtn=(k==='morning'||k==='weekly')?'<button class="btn-sm" style="padding:2px 8px;font-size:11px;margin-left:4px" data-mode="'+k+'" data-label="&#9654; Mock" onclick="runAgent(this,true)">&#9654; Mock</button>':'';
     return'<div class="cron-row"><span class="cron-left"><span class="dot '+dc+'"></span>'+k.replace(/_/g,' ')+'</span>'
       +'<span class="cron-time">'+(last?age(last):'not yet')+' &middot; '+SCHED[k]+'</span>'
       +'<span style="margin-left:8px">'+runBtn+mockBtn+'</span></div>';
   }).join('');
 }
 
-async function runAgent(mode,mock){
+async function runAgent(btn,mock){
+  var mode=btn.dataset.mode;
   if(!confirm((mock?'[MOCK] ':'')+'Run '+mode+' now?'))return;
+  // Disable all run buttons while in progress
+  var allBtns=document.querySelectorAll('[data-mode]');
+  allBtns.forEach(function(b){b.disabled=true;b.style.opacity='0.45';});
+  var secs=mock?30:180;
+  var iv=setInterval(function(){
+    secs--;
+    btn.textContent='⏳ '+secs+'s';
+    if(secs<=0){
+      clearInterval(iv);
+      allBtns.forEach(function(b){b.disabled=false;b.style.opacity='';b.textContent=b.dataset.label;});
+    }
+  },1000);
   try{
     var r=await fetch('/admin/run_agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode,mock:mock})});
     var d=await r.json();
-    if(d.ok)alert('✅ '+mode+(mock?' (mock)':'')+' started — check Telegram in ~30s');
-    else alert('Error: '+(d.error||'unknown'));
-  }catch(e){alert('Request failed: '+e);}
+    if(!d.ok){clearInterval(iv);allBtns.forEach(function(b){b.disabled=false;b.style.opacity='';b.textContent=b.dataset.label;});alert('Error: '+(d.error||'unknown'));}
+  }catch(e){clearInterval(iv);allBtns.forEach(function(b){b.disabled=false;b.style.opacity='';b.textContent=b.dataset.label;});alert('Request failed: '+e);}
 }
 
 function pickRows(arr,isCrypto){
