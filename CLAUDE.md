@@ -36,9 +36,11 @@ Rules:
 ### Timing / schedule references
 - Morning run cron: `0 11 * * 1-5` = 7:00 AM ET
 - All user-facing strings must say 7 AM ET — never 8 AM ET
-- Scheduling is via GitHub Actions (`.github/workflows/daily_run.yml`) — Render cron jobs were retired
-- GitHub Actions free tier can delay cron jobs by hours during peak load — this is expected, not a code bug
-- Late-delivery guard in `run_morning` skips picks and notifies users if the job starts at or after 9:00 AM ET on a trading day
+- **Primary scheduler**: cron-job.org (free) → POST `https://<render-url>/trigger/morning?secret=CRON_SECRET` at 11:00 AM UTC on weekdays. Fires within seconds, reliable.
+- **Backup scheduler**: GitHub Actions (`.github/workflows/daily_run.yml`) — still runs all other jobs (confirmation, EOD, alerts, etc.). Morning cron kept as fallback but duplicate-run guard in `/trigger/morning` prevents double-sending.
+- GitHub Actions free tier can delay cron jobs by hours during peak load — this is why cron-job.org was added for the morning run
+- `CRON_SECRET` env var must be set on Render — include as `?secret=CRON_SECRET` in cron-job.org URL
+- Late-delivery guard was removed — picks now always send since cron-job.org fires on time
 
 ### Performance stats — median not mean
 - `get_recent_stats()` in `performance_tracker.py` now returns both `avg_return` and `median_return`

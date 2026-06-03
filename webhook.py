@@ -85,6 +85,51 @@ def _keep_alive_loop():
 threading.Thread(target=_keep_alive_loop, daemon=True).start()
 
 
+# ── External cron trigger (cron-job.org → Render) ────────────────────────────
+
+@app.route("/trigger/morning", methods=["POST", "GET"])
+def trigger_morning():
+    """
+    Called by cron-job.org at 11:00 AM UTC (7 AM EDT) on weekdays.
+    Spawns the morning picks run in a background subprocess and returns immediately.
+    Protected by CRON_SECRET env var — include as ?secret=XXX in the cron URL.
+    """
+    secret   = os.environ.get("CRON_SECRET", "")
+    provided = request.args.get("secret", "") or (request.get_json(silent=True) or {}).get("secret", "")
+    if not secret or provided != secret:
+        return jsonify({"error": "unauthorized"}), 403
+
+    # Duplicate-run guard — skip if morning already ran today (ET)
+    try:
+        import pytz as _tz
+        from datetime import datetime as _dt
+        from config_manager import get_config as _gcfg
+        _cfg     = _gcfg()
+        _last    = _cfg.get("cron_last_morning", "")
+        _today   = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
+        if _last and _last[:10] >= _today:
+            print(f"[trigger_morning] Already ran today ({_last[:16]}) — skipping.")
+            return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
+    except Exception as _e:
+        print(f"[trigger_morning] Duplicate check failed (non-critical): {_e}")
+
+    # Spawn morning run as isolated background subprocess
+    import threading, subprocess, sys as _sys
+    def _run():
+        try:
+            subprocess.run(
+                [_sys.executable, "agent.py"],
+                env={**os.environ, "RUN_MODE": "morning"},
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                timeout=600,
+            )
+        except Exception as _exc:
+            print(f"[trigger_morning] Background run error: {_exc}")
+    threading.Thread(target=_run, daemon=True).start()
+    print("[trigger_morning] Morning run spawned.")
+    return jsonify({"ok": True, "triggered": True}), 200
+
+
 # ── Telegram webhook receiver ─────────────────────────────────────────────────
 
 @app.route("/webhook", methods=["POST"])
