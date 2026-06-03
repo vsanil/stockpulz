@@ -5,8 +5,7 @@ name: Price Alerts (Market Hours)
 # Estimated runtime: ~1-2 min per run = ~60-120 min/month total.
 
 on:
-  schedule:
-    - cron: "*/30 13-19 * * 1-5"   # Every 30 min, 9:00 AM–3:30 PM ET (Mon–Fri)
+  # Moved to cron-job.org → /trigger/price_alerts every 30 min during market hours.
 
   workflow_dispatch:
     inputs:

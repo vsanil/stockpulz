@@ -357,7 +357,9 @@ def _run_crypto_with_retry() -> dict:
                 if attempt > 1:
                     _alert(f"✅ Crypto screener recovered on attempt {attempt}/5.", admin_only=True)
                 return result
-            raise ValueError("Screener returned empty results")
+            # Screener ran without error but found no qualifying candidates — don't retry
+            print(f"[agent] Crypto screener: no qualifying candidates today (attempt {attempt}).")
+            return empty
         except Exception as exc:
             print(f"[agent] Crypto screener attempt {attempt}/5 failed: {exc}")
             if attempt == 3:
