@@ -557,8 +557,8 @@ function cron(c,lastMorning){
   return Object.keys(SCHED).map(function(k){
     var last=c[k]||(k==='morning'?lastMorning:'');
     var dc=last?'d-green':'d-muted';
-    var runBtn='<button class="btn-sm" style="padding:2px 8px;font-size:11px" onclick="runAgent(\''+k+'\',false)">▶ Run</button>';
-    var mockBtn=(k==='morning'||k==='weekly')?'<button class="btn-sm" style="padding:2px 8px;font-size:11px;margin-left:4px" onclick="runAgent(\''+k+'\',true)">▶ Mock</button>':'';
+    var runBtn='<button class="btn-sm" style="padding:2px 8px;font-size:11px" data-mode="'+k+'" data-mock="0" onclick="runAgent(this.dataset.mode,false)">&#9654; Run</button>';
+    var mockBtn=(k==='morning'||k==='weekly')?'<button class="btn-sm" style="padding:2px 8px;font-size:11px;margin-left:4px" data-mode="'+k+'" onclick="runAgent(this.dataset.mode,true)">&#9654; Mock</button>':'';
     return'<div class="cron-row"><span class="cron-left"><span class="dot '+dc+'"></span>'+k.replace(/_/g,' ')+'</span>'
       +'<span class="cron-time">'+(last?age(last):'not yet')+' &middot; '+SCHED[k]+'</span>'
       +'<span style="margin-left:8px">'+runBtn+mockBtn+'</span></div>';
