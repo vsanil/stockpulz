@@ -208,20 +208,23 @@ def trigger_mode(mode: str):
     if not secret or provided != secret:
         return jsonify({"error": "unauthorized"}), 403
 
-    # Per-mode duplicate guard — skip if this mode already ran today (ET)
-    try:
-        import pytz as _tz
-        from datetime import datetime as _dt
-        from config_manager import get_config as _gcfg
-        _cfg   = _gcfg()
-        _key   = f"cron_last_{mode}"
-        _last  = _cfg.get(_key, "")
-        _today = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
-        if _last and _last[:10] >= _today:
-            print(f"[trigger/{mode}] Already ran today ({_last[:16]}) — skipping.")
-            return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
-    except Exception as _e:
-        print(f"[trigger/{mode}] Duplicate check failed (non-critical): {_e}")
+    # Per-mode duplicate guard — skip if this mode already ran today (ET).
+    # price_alerts runs every 30 min during market hours — skip the daily guard for it.
+    _MULTI_RUN_MODES = {"price_alerts"}
+    if mode not in _MULTI_RUN_MODES:
+        try:
+            import pytz as _tz
+            from datetime import datetime as _dt
+            from config_manager import get_config as _gcfg
+            _cfg   = _gcfg()
+            _key   = f"cron_last_{mode}"
+            _last  = _cfg.get(_key, "")
+            _today = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
+            if _last and _last[:10] >= _today:
+                print(f"[trigger/{mode}] Already ran today ({_last[:16]}) — skipping.")
+                return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
+        except Exception as _e:
+            print(f"[trigger/{mode}] Duplicate check failed (non-critical): {_e}")
 
     owner_only = request.args.get("owner_only", "").lower() in ("1", "true")
     extra_env  = {"RUN_MODE": mode}

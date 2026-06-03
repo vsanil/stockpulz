@@ -270,33 +270,14 @@ def _et(hour, minute=0, weekday_offset=0):
     return _ET.localize(base)
 
 
-class TestLateDeliveryGuard:
+class TestMorningRunGuards:
+    """Tests that run_morning() exits cleanly on weekends and does not
+    send unexpected 'picks skipped' messages in normal conditions.
+    The old late-delivery guard was removed — these tests verify the
+    replacement behaviour (no spurious messages, clean exit)."""
 
-    def _run(self, now_et, monkeypatch, mock_data=False):
-        sent = []
-        monkeypatch.setattr(ag, "MOCK_DATA", mock_data)
-        monkeypatch.setattr(ag, "_log_cron_run", lambda *a, **kw: None)
-        monkeypatch.setattr(ag, "_all_recipients", lambda: ["user1"])
-        monkeypatch.setattr(ag, "send_message", lambda msg, chat_id=None: sent.append(msg))
-        monkeypatch.setattr(ag, "is_market_holiday", lambda d: False)
-        # Prevent screener / Claude from running if guard is bypassed
-        monkeypatch.setattr(ag, "run_screener", lambda *a, **kw: {})
-        ag.run_morning({}, now_et)
-        return sent
-
-    def test_guard_fires_at_9am_sends_delay_notice(self, monkeypatch):
-        sent = self._run(_et(9, 0), monkeypatch)
-        assert len(sent) == 1
-        assert "skipped" in sent[0] or "delayed" in sent[0].lower()
-
-    def test_guard_fires_after_9am(self, monkeypatch):
-        sent = self._run(_et(11, 45), monkeypatch)
-        assert len(sent) == 1
-
-    def _guard_did_not_fire(self, now_et, monkeypatch, mock_data=False):
-        """Return True if the late-delivery guard did NOT send a delay notice.
-        Patches yfinance.download to raise immediately so the non-guard path
-        exits in milliseconds without making network calls."""
+    def _run_morning_mocked(self, now_et, monkeypatch, mock_data=False):
+        """Run run_morning() with all external calls mocked. Returns sent messages."""
         import yfinance as _yf
         sent = []
         monkeypatch.setattr(ag, "MOCK_DATA", mock_data)
@@ -304,21 +285,28 @@ class TestLateDeliveryGuard:
         monkeypatch.setattr(ag, "_all_recipients", lambda: ["user1"])
         monkeypatch.setattr(ag, "send_message", lambda msg, chat_id=None: sent.append(msg))
         monkeypatch.setattr(ag, "is_market_holiday", lambda d: False)
+        monkeypatch.setattr(ag, "_run_crypto_with_retry", lambda: {"short_term": [], "long_term": []})
         monkeypatch.setattr(_yf, "download", lambda *a, **kw: (_ for _ in ()).throw(
             RuntimeError("test-stop")))
         try:
             ag.run_morning({}, now_et)
         except Exception:
             pass
-        return not any("Morning picks skipped" in m for m in sent)
+        return sent
 
-    def test_guard_does_not_fire_before_9am(self, monkeypatch):
-        assert self._guard_did_not_fire(_et(8, 59), monkeypatch)
+    def test_no_spurious_message_before_market_open(self, monkeypatch):
+        """Before 9 AM ET on a weekday — run proceeds normally, no 'skipped' notice."""
+        sent = self._run_morning_mocked(_et(8, 59), monkeypatch)
+        assert not any("Morning picks skipped" in m for m in sent)
 
-    def test_guard_skipped_on_weekend(self, monkeypatch):
+    def test_no_spurious_message_on_weekend(self, monkeypatch):
+        """Weekend — run_morning exits early for stocks but no error message sent."""
         from datetime import datetime
         now_et = _ET.localize(datetime(2026, 6, 6, 10, 0))  # Saturday
-        assert self._guard_did_not_fire(now_et, monkeypatch)
+        sent = self._run_morning_mocked(now_et, monkeypatch)
+        assert not any("Morning picks skipped" in m for m in sent)
 
-    def test_guard_skipped_when_mock_data(self, monkeypatch):
-        assert self._guard_did_not_fire(_et(11, 0), monkeypatch, mock_data=True)
+    def test_no_spurious_message_with_mock_data(self, monkeypatch):
+        """MOCK_DATA=True — run uses mock picks, no network calls, no error messages."""
+        sent = self._run_morning_mocked(_et(11, 0), monkeypatch, mock_data=True)
+        assert not any("Morning picks skipped" in m for m in sent)

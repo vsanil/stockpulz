@@ -710,8 +710,9 @@ LT STOCK CONVICTION RUBRIC — applies to long_term stock picks only (DO NOT use
     • last_eps_surprise_pct > 5% (strong recent beat — business momentum)
   Do NOT use RSI, MACD, volume_ratio, breakout, or options flow as LT signals — these are irrelevant.
 
-  LT CONVICTION GATE: Minimum ★★★ (2 LT signals) for ALL risk profiles.
-  LT picks are long-horizon — the bar is quality, not momentum. Return [] only if nothing reaches 2 signals.
+  LT CONVICTION GATE: Minimum ★★ (1 LT signal) for moderate and aggressive risk profiles; ★★★ (2 signals) for conservative.
+  LT picks are long-horizon — time in market matters. Always return at least 1 LT pick if any candidate reaches the minimum bar.
+  Return [] only if truly no candidate has any qualifying LT signal.
 
 ST STOCK CONVICTION GATE (ABSOLUTE RULE):
   - Minimum conviction is set by the risk profile (conservative ★★★★+, moderate ★★★+, aggressive ★★★+).
