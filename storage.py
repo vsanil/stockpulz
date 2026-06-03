@@ -150,6 +150,12 @@ class SupabaseBackend(StorageBackend):
             ).execute()
         except Exception as exc:
             print(f"[storage/supabase] write({filename}) failed: {exc}")
+            # Fall back to Gist so data is never silently lost
+            try:
+                GistBackend().write(filename, data)
+                print(f"[storage/supabase] write({filename}) fell back to Gist OK.")
+            except Exception as exc2:
+                print(f"[storage/supabase] Gist fallback also failed: {exc2}")
 
     def name(self) -> str:
         return "supabase"
