@@ -4,7 +4,7 @@
     {
       "name": "stockpulz",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "set -a && source .env && set +a && python3 webhook.py"],
+      "runtimeArgs": ["-c", "set -a && source /Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.env && set +a && python3 /Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/webhook.py"],
       "port": 5000
     }
   ]
