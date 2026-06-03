@@ -452,20 +452,6 @@ def run_morning(config: dict, now_et: datetime):
         _alert("🏖️ <b>Market Closed</b> — US holiday today. No stock picks.\n"
                "<i>Crypto runs 24/7 — picks below if any signals found.</i>")
 
-    # Late-delivery guard — GitHub Actions cron can queue for hours during peak load.
-    # Pre-market analysis arriving after market open is misleading, so skip and notify.
-    if not is_weekend and not is_holiday and not MOCK_DATA and now_et.hour >= 9:
-        _late_msg = (
-            f"⚠️ <b>Morning picks skipped</b>\n\n"
-            f"The scheduler started at {now_et.strftime('%-I:%M %p ET')} — "
-            f"after market open. Sending stale pre-market analysis at this point "
-            f"would be misleading.\n\n"
-            f"<i>Fresh picks tomorrow at 7 AM ET.</i>"
-        )
-        for _uid in _all_recipients():
-            send_message(_late_msg, chat_id=_uid)
-        print(f"[agent] Late-delivery guard triggered at {now_et.strftime('%H:%M ET')} — picks skipped.")
-        return
 
     if MOCK_DATA:
         print("[agent] Using mock data — skipping live screeners.")
