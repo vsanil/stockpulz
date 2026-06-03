@@ -2831,8 +2831,8 @@ const tgUser   = tg.initDataUnsafe?.user || {};
 const userId   = String(tgUser.id || new URLSearchParams(location.search).get('chat_id') || '');
 const initData = tg.initData || '';
 
-tg.ready();
-tg.expand();
+if (typeof tg.ready    === 'function') tg.ready();
+if (typeof tg.expand   === 'function') tg.expand();
 // Prevent vertical swipe-to-close gesture from firing during normal scroll (Bot API 7.7+)
 if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
 // Never show "Changes may not be saved" dialog — all data is saved in real-time

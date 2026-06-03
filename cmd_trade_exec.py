@@ -149,6 +149,16 @@ def _execute_bought(ticker: str, chat_id: str,
                 ticker = canonical
     except Exception:
         pass  # keep original ticker if resolution fails
+
+    # Validate ticker is real before saving
+    try:
+        from market_data import validate_ticker
+        if not validate_ticker(ticker):
+            return (f"❌ <b>{ticker}</b> isn't a recognised symbol — check the ticker and try again.\n"
+                    f"<i>Example: <code>/bought AAPL</code> or <code>/bought BTC</code></i>")
+    except Exception:
+        pass  # fail open — never block a user from logging a trade over a network error
+
     picks  = load_picks()
     trade, existed = add_holding(ticker, chat_id, picks=picks)
 
