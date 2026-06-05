@@ -1003,102 +1003,101 @@ def run_screener(
             tickers = tickers + extra
             print(f"[screener] Watchlist added {len(extra)} extra tickers: {extra}")
 
-    # ── Step 1: Bulk price history download ──────────────────────────────────
-    # Include SPY in the bulk fetch so RS baseline is always available.
-    _bulk_tickers = list(dict.fromkeys(tickers + ["SPY"]))
-    print(f"[screener] Bulk downloading {len(_bulk_tickers)} tickers via Alpaca...")
-    raw = _alpaca_bulk_bars(_bulk_tickers)
-    if not raw:
-        # Alpaca keys absent or call failed — fall back to yfinance
-        print("[screener] Alpaca bars unavailable, falling back to yfinance...")
-        try:
-            _raw_yf = yf.download(
-                tickers,
-                period="3mo",
-                group_by="ticker",
-                auto_adjust=True,
-                threads=True,
-                progress=False,
-                timeout=30,
-            )
-        except Exception as exc:
-            print(f"[screener] Bulk download failed: {exc}")
-            return {"short_term": [], "long_term": []}
-        _avail_yf = (
-            set(_raw_yf.columns.get_level_values(0))
-            if hasattr(_raw_yf.columns, "levels")
-            else set(tickers[:1])
-        )
-        raw = {t: _raw_yf[t].dropna(how="all") for t in _avail_yf}
+    import gc as _gc
 
-    available = set(raw.keys())
-
-    # ── SPY 20-day return — computed once as RS baseline ──────────────────────
+    # ── Step 1: SPY baseline — fetched once, freed immediately after ──────────
     # Relative strength vs SPY = stock 20d return minus SPY 20d return.
-    # Positive = outperforming market; negative = lagging.
     spy_20d_return = None
     try:
-        if "SPY" in available:
-            spy_close = raw["SPY"]["Close"].dropna()
-        else:
-            _spy_df   = _alpaca_single_bars("SPY", days=65)
-            spy_close = _spy_df["Close"].dropna() if _spy_df is not None else pd.Series(dtype=float)
-        if len(spy_close) >= 21:
+        _spy_df = _alpaca_single_bars("SPY", days=65)
+        _spy_close = _spy_df["Close"].dropna() if _spy_df is not None else pd.Series(dtype=float)
+        if len(_spy_close) >= 21:
             spy_20d_return = round(
-                (float(spy_close.iloc[-1]) - float(spy_close.iloc[-21])) / float(spy_close.iloc[-21]) * 100, 1
+                (float(_spy_close.iloc[-1]) - float(_spy_close.iloc[-21])) / float(_spy_close.iloc[-21]) * 100, 1
             )
             print(f"[screener] SPY 20d return: {spy_20d_return:+.1f}% (RS baseline)")
     except Exception as exc:
         print(f"[screener] SPY 20d return fetch failed: {exc}")
+    finally:
+        _spy_df = None; _spy_close = None; _gc.collect()
 
-    # ── Step 2: Score all tickers + compute dollar volume ─────────────────────
+    # ── Step 2: Chunk download + score (100 tickers at a time) ────────────────
+    # Processing in chunks keeps peak DataFrame memory at ~100 tickers instead
+    # of 400+ all at once. Same API calls, same data, same scores — 4× lower
+    # peak RAM. Each chunk is freed with gc.collect() before the next loads.
+    _CHUNK = 100
     all_scored: list[dict] = []
-    for ticker in tickers:
-        try:
-            if ticker not in available:
+    n_chunks = (len(tickers) + _CHUNK - 1) // _CHUNK
+    print(f"[screener] Scoring {len(tickers)} tickers in {n_chunks} chunks of {_CHUNK}...")
+
+    for _ci, _i in enumerate(range(0, len(tickers), _CHUNK), start=1):
+        _chunk = tickers[_i:_i + _CHUNK]
+        _raw = _alpaca_bulk_bars(_chunk)
+
+        if not _raw:
+            # Alpaca unavailable — yfinance fallback for this chunk
+            try:
+                _yf_raw = yf.download(
+                    _chunk, period="3mo", group_by="ticker",
+                    auto_adjust=True, threads=True, progress=False, timeout=30,
+                )
+                if hasattr(_yf_raw.columns, "levels"):
+                    _raw = {t: _yf_raw[t].dropna(how="all")
+                            for t in set(_yf_raw.columns.get_level_values(0))}
+                else:
+                    _raw = {}
+            except Exception as _exc:
+                print(f"[screener] Chunk {_ci}/{n_chunks} fallback failed: {_exc}")
                 continue
-            hist = raw[ticker].dropna(how="all")
-            if len(hist) < 30:
+            finally:
+                _yf_raw = None
+
+        for ticker in _chunk:
+            try:
+                if ticker not in _raw:
+                    continue
+                hist = _raw[ticker].dropna(how="all")
+                if len(hist) < 30:
+                    continue
+                current_price = float(hist["Close"].iloc[-1])
+                if pd.isna(current_price) or current_price <= 0:
+                    continue
+
+                # Sanity-check: skip wild outliers (split/data glitches)
+                median_price = float(hist["Close"].tail(20).median())
+                if median_price > 0 and (current_price > median_price * 3 or current_price < median_price / 3):
+                    continue
+
+                st_score, st_metrics = _short_term_score(hist)
+
+                # Relative strength vs SPY
+                if spy_20d_return is not None:
+                    try:
+                        close_s = hist["Close"].dropna()
+                        if len(close_s) >= 21:
+                            stock_20d = (float(close_s.iloc[-1]) - float(close_s.iloc[-21])) / float(close_s.iloc[-21]) * 100
+                            st_metrics["rs_vs_spy"] = round(stock_20d - spy_20d_return, 1)
+                    except Exception:
+                        pass
+
+                # Dollar volume = avg(close × volume) over last 30 days
+                avg_dollar_vol = float((hist["Close"] * hist["Volume"]).tail(30).mean())
+
+                all_scored.append({
+                    "ticker":         ticker,
+                    "current_price":  round(current_price, 2),
+                    "score":          st_score,
+                    "avg_dollar_vol": avg_dollar_vol,
+                    **st_metrics,
+                })
+            except Exception:
                 continue
-            current_price = float(hist["Close"].iloc[-1])
-            if pd.isna(current_price) or current_price <= 0:
-                continue
 
-            # Sanity-check against 20-day median — catches yfinance split/data glitches
-            # where a single day's close is wildly off (e.g. MU showing $576 instead of $85)
-            median_price = float(hist["Close"].tail(20).median())
-            if median_price > 0 and (current_price > median_price * 3 or current_price < median_price / 3):
-                print(f"[screener] Price sanity fail for {ticker}: "
-                      f"current={current_price:.2f} vs 20d median={median_price:.2f} — skipping.")
-                continue
+        # Free this chunk's DataFrames before loading the next
+        _raw = None; _gc.collect()
+        print(f"[screener] Chunk {_ci}/{n_chunks} done ({len(all_scored)} scored).")
 
-            st_score, st_metrics = _short_term_score(hist)
-
-            # Relative strength vs SPY — stock 20d return minus market 20d return
-            if spy_20d_return is not None:
-                try:
-                    close_s = hist["Close"].dropna()
-                    if len(close_s) >= 21:
-                        stock_20d = (float(close_s.iloc[-1]) - float(close_s.iloc[-21])) / float(close_s.iloc[-21]) * 100
-                        st_metrics["rs_vs_spy"] = round(stock_20d - spy_20d_return, 1)
-                except Exception:
-                    pass
-
-            # Dollar volume = avg(close × volume) over last 30 days
-            # High dollar volume ≈ large, liquid, established company
-            avg_dollar_vol = float((hist["Close"] * hist["Volume"]).tail(30).mean())
-
-            all_scored.append({
-                "ticker":          ticker,
-                "current_price":   round(current_price, 2),
-                "score":           st_score,
-                "avg_dollar_vol":  avg_dollar_vol,
-                **st_metrics,
-            })
-        except Exception:
-            continue
-
-    print(f"[screener] Scored {len(all_scored)} tickers.")
+    print(f"[screener] Scored {len(all_scored)} tickers total.")
 
     # ── Step 3: Build independent ST and LT candidate pools ──────────────────
     # ST pool: highest technical scores (momentum/breakout plays)
