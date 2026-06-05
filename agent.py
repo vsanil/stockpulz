@@ -3507,8 +3507,8 @@ def run_watchdog():
         _alert(
             f"⚠️ <b>Missed morning run</b> — picks may not have been sent today ({today.strftime('%b %-d')}).\n"
             f"{since}\n\n"
-            f"<i>Trigger manually: GitHub Actions → StockPulz Scheduled Runs → "
-            f"Run workflow → run_mode: morning</i>",
+            f"<i>Trigger manually: cron-job.org → StockPulz-morning → Run now\n"
+            f"Or: https://stock-agent-enqx.onrender.com/trigger/morning?secret=CRON_SECRET&force=true</i>",
             admin_only=True,
         )
     except Exception as exc:
