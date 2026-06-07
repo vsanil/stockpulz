@@ -1553,10 +1553,9 @@ def run_tax_loss_harvest_check():
                 f"⚠️ <b>Watch the wash-sale rule:</b> If you sell at a loss, don't buy the same "
                 f"stock back within 30 days or the deduction is disallowed.\n\n"
                 f"<i>This is general information, not tax advice. Consult your tax advisor for "
-                f"your specific situation.</i>\n\n"
-                f"Use /sold TICKER to close a position."
+                f"your specific situation.</i>"
             )
-            send_message(msg, chat_id=uid)
+            send_inline_keyboard(msg, [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]], chat_id=uid)
             _mark_alerted(dedup_key)
 
         except Exception as exc:
@@ -2117,10 +2116,9 @@ def run_pre_earnings_guidance():
                         f"<b>Two common approaches:</b>\n"
                         f"• <b>Hold through</b> — if you believe in the long-term thesis and your stop is in place\n"
                         f"• <b>Trim before</b> — sell half now to lock in some gains, let the rest ride\n\n"
-                        f"There's no universally right answer.{stop_str}\n\n"
-                        f"Use /sold {sym} to reduce your position, or /updatestop {sym} to tighten your stop before the report."
+                        f"There's no universally right answer.{stop_str}"
                     )
-                    send_message(msg, chat_id=uid, parse_mode="HTML")
+                    send_inline_keyboard(msg, [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]], chat_id=uid)
                 except Exception as exc:
                     print(f"[agent] pre_earnings: data fetch failed for {sym}: {exc}")
         except Exception as exc:
@@ -2843,14 +2841,13 @@ def _check_portfolio_drawdown(uid: str, current_prices: dict) -> None:
         total_loss = total_curr_value - total_prev_value
         breakdown  = "\n".join(position_lines) if position_lines else "  <i>No per-position detail available</i>"
 
-        send_message(
+        send_inline_keyboard(
             f"🚨 <b>Portfolio Drawdown Alert</b>\n\n"
             f"Your open positions are down <b>{drawdown_pct:.1f}%</b> today "
             f"(${abs(total_loss):,.0f} on the day).\n\n"
             f"<b>By position:</b>\n{breakdown}\n\n"
-            f"<i>Threshold: -{threshold:.0f}% · Adjust in /settings</i>\n"
-            f"/positions — review your portfolio\n"
-            f"/risk — check your total exposure",
+            f"<i>Threshold: -{threshold:.0f}% · Adjust in /settings</i>",
+            [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
             chat_id=uid,
         )
 
@@ -2887,10 +2884,10 @@ def _check_trade_reminders() -> None:
                 ticker = r.get("ticker", "?")
                 note   = r.get("note", "")
                 note_part = f"\n📝 <i>{note}</i>" if note else ""
-                send_message(
+                send_inline_keyboard(
                     f"⏰ <b>Trade Reminder: {ticker}</b>{note_part}\n\n"
-                    f"You asked to be reminded about this position today.\n"
-                    f"/positions — see current P&amp;L  ·  /prices {ticker} — live quote",
+                    f"You asked to be reminded about this position today.",
+                    [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
                     chat_id=uid,
                 )
 
