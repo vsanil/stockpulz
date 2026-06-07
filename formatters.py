@@ -625,22 +625,30 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         return f"buy_pick|{ticker}|{entry_str}|{shares}|{asset_type}|{stop_pct}|{target_pct}"
 
     def _log_btn(pick: dict, asset_type: str) -> list[dict]:
-        """Return a single full-width '📌 Log TICKER' button for one pick."""
+        """Return [Log TICKER, 📡 Alert at $X] buttons for one pick."""
         ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
         entry  = pick.get("entry_price")  or ""
         stop   = pick.get("stop_loss")    or ""
         target = pick.get("target_price") or ""
 
         if render_url:
-            btn = {"text": f"📌 Log {ticker}", "web_app": {
+            log_btn = {"text": f"📌 Log {ticker}", "web_app": {
                 "url": (f"{render_url}/miniapp?tab=portfolio&action=add"
                         f"&ticker={ticker}&asset_type={asset_type}"
                         f"&entry={entry}&stop={stop}&target={target}")
             }}
         else:
-            btn = {"text": f"📌 Log {ticker}", "callback_data": _buy_callback(pick, asset_type)}
+            log_btn = {"text": f"📌 Log {ticker}", "callback_data": _buy_callback(pick, asset_type)}
 
-        return [btn]
+        row = [log_btn]
+        if entry:
+            try:
+                price_str = f"${float(entry):,.0f}" if float(entry) >= 100 else f"${float(entry):.2f}"
+                row.append({"text": f"📡 Alert at {price_str}",
+                             "callback_data": f"entry_alert|{ticker}|{entry}"})
+            except Exception:
+                pass
+        return row
 
     def _add_section(picks_list: list, get_sym, asset_type: str, header: str, icon: str = ""):
         """

@@ -70,7 +70,7 @@ from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
     format_eod_full_summary, format_week_ahead, build_picks_keyboard, _p,
 )
-from telegram_api import send_message, send_inline_keyboard, broadcast_all
+from telegram_api import send_message, send_inline_keyboard, broadcast_all, send_photo
 from cache_layer import cache_get, cache_set
 
 ET        = pytz.timezone("America/New_York")
@@ -687,6 +687,9 @@ def run_morning(config: dict, now_et: datetime):
                                         closed_reason=market_closed_reason,
                                         next_open_label=next_open_label)
 
+    # ── Auto-set entry + stop alerts for all picks ────────────────────────────
+    _auto_set_pick_alerts(picks, _all_recipients())
+
     # ── Monday "Week Ahead" block ─────────────────────────────────────────────
     if now_et.weekday() == 0:   # Monday only
         try:
@@ -1214,6 +1217,24 @@ def run_eod_summary():
                                 f"no stop on {tickers_str}. "
                                 f"<code>/updatestop TICKER PRICE</code> to protect."
                             )
+
+                # Options flow alert — fire if unusual activity on any held position
+                if open_positions:
+                    try:
+                        opts_note = _check_options_flow_alert(uid, open_positions)
+                        if opts_note:
+                            eod_insights.append(opts_note)
+                    except Exception as _opts_exc:
+                        print(f"[agent] options flow check failed for {uid}: {_opts_exc}")
+
+                # Congressional cluster alert — fire when 3+ members buy a held ticker
+                if open_positions:
+                    try:
+                        congress_note = _check_congressional_alert(uid, open_positions)
+                        if congress_note:
+                            eod_insights.append(congress_note)
+                    except Exception as _cong_exc:
+                        print(f"[agent] congressional check failed for {uid}: {_cong_exc}")
 
                 if eod_insights:
                     insights_header = "\n\n━━━━━━━━━━━━━━━━━━━━━━\n📋 <b>Portfolio Insights</b>\n\n"
@@ -2465,6 +2486,95 @@ def _check_portfolio_correlation(uid: str, open_positions: list) -> str | None:
     )
 
 
+# ── Options Flow Alert ────────────────────────────────────────────────────────
+
+def _check_options_flow_alert(uid: str, open_positions: list) -> str | None:
+    """
+    Check held tickers for unusual options activity. Returns a text block if any
+    position shows unusual flow or a score >= 3. Deduped 24h per ticker per user.
+    """
+    from options_flow import batch_options_signals
+
+    tickers = list(dict.fromkeys(
+        p["ticker"].upper() for p in open_positions if p.get("ticker")
+    ))
+    if not tickers:
+        return None
+
+    signals = batch_options_signals(tickers)
+    hits: list[str] = []
+    for ticker, sig in signals.items():
+        if not (sig.get("unusual") or sig.get("signal_score", 0) >= 3):
+            continue
+        dedup_key = f"options_flow_{uid}_{ticker}"
+        if _is_alerted(dedup_key):
+            continue
+        _mark_alerted(dedup_key, ttl_hours=24)
+
+        score      = sig.get("signal_score", 0)
+        iv_label   = sig.get("iv_label", "")
+        bullish    = sig.get("bullish_flow", False)
+        bearish    = sig.get("bearish_flow", False)
+        sweep      = sig.get("sweep_detected", False)
+
+        direction  = "📈 bullish" if bullish else ("📉 bearish" if bearish else "⚡ mixed")
+        sweep_str  = " Sweep detected." if sweep else ""
+        iv_str     = f" IV: {iv_label}." if iv_label and iv_label != "NORMAL" else ""
+        hits.append(
+            f"<b>{ticker}</b> — unusual options flow ({direction}, score {score:+d}).{sweep_str}{iv_str}"
+        )
+
+    if not hits:
+        return None
+
+    body = "\n".join(hits)
+    return (
+        f"🔥 <b>Unusual Options Activity</b> on your held positions:\n\n{body}\n\n"
+        f"Smart money may be positioning — check before market close."
+    )
+
+
+# ── Congressional Cluster Alert ───────────────────────────────────────────────
+
+def _check_congressional_alert(uid: str, open_positions: list) -> str | None:
+    """
+    Fire when 3+ Congress members have recently bought a ticker you hold (cluster buy).
+    Deduped once per week per ticker per user.
+    """
+    from congressional_tracker import batch_congressional_signals
+
+    tickers = list(dict.fromkeys(
+        p["ticker"].upper() for p in open_positions if p.get("ticker")
+    ))
+    if not tickers:
+        return None
+
+    signals = batch_congressional_signals(tickers)
+    hits: list[str] = []
+    week_num = date.today().isocalendar()[1]
+    for ticker, sig in signals.items():
+        if not sig.get("is_cluster"):
+            continue
+        dedup_key = f"congressional_{uid}_{ticker}_{week_num}"
+        if _is_alerted(dedup_key):
+            continue
+        _mark_alerted(dedup_key, ttl_hours=168)  # 7-day cooldown
+
+        members = sig.get("congress_members", 0)
+        buys    = sig.get("congress_buys", 0)
+        note    = sig.get("note", "")
+        hits.append(f"<b>{ticker}</b> — {members} members, {buys} purchase(s). {note}")
+
+    if not hits:
+        return None
+
+    body = "\n".join(hits)
+    return (
+        f"🏛 <b>Congressional Cluster Buy</b> on your held positions:\n\n{body}\n\n"
+        f"3+ members buying the same stock you hold is historically significant."
+    )
+
+
 # ── Weekly recap (Saturday morning) ──────────────────────────────────────────
 
 def run_weekly_recap(config: dict, now_et: datetime):
@@ -2502,6 +2612,14 @@ def run_weekly_recap(config: dict, now_et: datetime):
                             ]],
                             chat_id=uid,
                         )
+                        # Weekly alpha card — visual summary of performance
+                        try:
+                            from card_generator import generate_performance_card
+                            card = generate_performance_card(uid)
+                            if card:
+                                send_photo(card, caption="📊 Your weekly alpha card", chat_id=uid)
+                        except Exception as _card_exc:
+                            print(f"[agent] Weekly card failed for {uid} (non-critical): {_card_exc}")
                 except Exception as exc:
                     print(f"[agent] Weekly recap failed for {uid}: {exc}")
         else:
@@ -3786,10 +3904,6 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
         total_set = 0
         for uid in recipients:
             try:
-                from config_manager import get_user_config
-                ucfg = get_user_config(uid)
-                if not ucfg.get("auto_stop_alerts", False):
-                    continue  # opt-in only — skip users who haven't enabled this
                 log = load_user_trade_log(uid)
                 open_tickers = {t.get("ticker", "").upper() for t in log.get("open", [])}
                 for pick in all_sections:
@@ -3797,13 +3911,15 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
                     if not ticker or ticker in open_tickers:
                         continue
                     try:
+                        # Stop-loss alert — fires if pick drops to stop
                         stop = pick.get("stop_loss")
                         if stop:
                             add_alert(uid, ticker, float(stop), direction="below", auto=True)
                             total_set += 1
-                        entry_low = pick.get("entry_low")
-                        if entry_low:
-                            add_alert(uid, ticker, float(entry_low), direction="below", auto=True)
+                        # Entry zone alert — fires when price dips to entry (for picks above zone)
+                        entry = pick.get("entry_price")
+                        if entry:
+                            add_alert(uid, ticker, float(entry), direction="below", auto=True)
                             total_set += 1
                     except Exception as exc:
                         print(f"[agent] _auto_set_pick_alerts: alert set failed for {ticker}/{uid}: {exc}")
