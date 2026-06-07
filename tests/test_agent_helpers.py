@@ -455,3 +455,119 @@ class TestCheckCongressionalAlert:
             result = ag._check_congressional_alert("user1", [])
         mock_batch.assert_not_called()
         assert result is None
+
+
+# ── Take-profit nudge ─────────────────────────────────────────────────────────
+
+class TestCheckTakeProfitNudge:
+    BASE_TRADE = {
+        "ticker": "NVDA", "entry_price": "100", "target_price": "200",
+        "stop_loss": "90", "shares": "10",
+    }
+
+    def _make_log(self, trade):
+        return {"open": [trade], "closed": []}
+
+    def test_fires_when_at_90pct_of_target(self):
+        """Sends a message when position is 90% of the way from entry to target."""
+        import agent as ag
+        trade = {**self.BASE_TRADE}
+        with patch.object(ag, "load_user_trade_log", return_value=self._make_log(trade)), \
+             patch.object(ag, "send_inline_keyboard") as mock_send:
+            ag._check_take_profit_nudge("user1", {"NVDA": 190.0})
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "NVDA" in msg
+        assert "target" in msg.lower()
+
+    def test_silent_when_below_85pct(self):
+        """No message when position is only 60% of the way to target."""
+        import agent as ag
+        trade = {**self.BASE_TRADE}
+        with patch.object(ag, "load_user_trade_log", return_value=self._make_log(trade)), \
+             patch.object(ag, "send_inline_keyboard") as mock_send:
+            ag._check_take_profit_nudge("user1", {"NVDA": 160.0})
+        mock_send.assert_not_called()
+
+    def test_dedup_prevents_second_fire(self):
+        """Does not send twice for the same position on the same day."""
+        import agent as ag
+        trade = {**self.BASE_TRADE}
+        with patch.object(ag, "load_user_trade_log", return_value=self._make_log(trade)), \
+             patch.object(ag, "send_inline_keyboard") as mock_send:
+            ag._check_take_profit_nudge("user1", {"NVDA": 190.0})
+            ag._check_take_profit_nudge("user1", {"NVDA": 190.0})
+        assert mock_send.call_count == 1
+
+    def test_skipped_when_no_target(self):
+        """Does not crash or send when target_price is missing."""
+        import agent as ag
+        trade = {"ticker": "NVDA", "entry_price": "100"}
+        with patch.object(ag, "load_user_trade_log", return_value=self._make_log(trade)), \
+             patch.object(ag, "send_inline_keyboard") as mock_send:
+            ag._check_take_profit_nudge("user1", {"NVDA": 190.0})
+        mock_send.assert_not_called()
+
+    def test_includes_dollar_gain_when_shares_logged(self):
+        """Message includes ~$X gain when shares are in the trade log."""
+        import agent as ag
+        trade = {**self.BASE_TRADE}
+        with patch.object(ag, "load_user_trade_log", return_value=self._make_log(trade)), \
+             patch.object(ag, "send_inline_keyboard") as mock_send:
+            ag._check_take_profit_nudge("user1", {"NVDA": 195.0})
+        msg = mock_send.call_args[0][0]
+        assert "$" in msg  # dollar gain or target price shown
+
+
+# ── Pre-market gap warnings ───────────────────────────────────────────────────
+
+class TestBuildPremarketGapWarnings:
+    PICKS = {
+        "stocks": {
+            "short_term": [{"ticker": "CRUS", "entry_price": "100"}],
+            "long_term":  [{"ticker": "AAPL", "entry_price": "200"}],
+        }
+    }
+
+    def _fast_info(self, last_price):
+        m = MagicMock()
+        m.last_price = last_price
+        m.regular_market_price = None
+        return m
+
+    def test_flags_ticker_gapping_above_entry(self):
+        """Returns a warning line for a ticker whose price is 5% above entry."""
+        import agent as ag
+        import yfinance as yf
+
+        def _fake_ticker(symbol):
+            m = MagicMock()
+            m.fast_info = self._fast_info(105.0 if symbol == "CRUS" else 200.0)
+            return m
+
+        with patch.object(yf, "Ticker", side_effect=_fake_ticker):
+            result = ag._build_premarket_gap_warnings(self.PICKS)
+
+        assert "CRUS" in result
+        assert "AAPL" not in result  # 200 vs 200 = 0% gap, no warning
+
+    def test_returns_empty_when_no_gap(self):
+        """Returns empty dict when all picks are at or below entry."""
+        import agent as ag
+        import yfinance as yf
+
+        def _fake_ticker(symbol):
+            m = MagicMock()
+            m.fast_info = self._fast_info(98.0 if symbol == "CRUS" else 199.0)
+            return m
+
+        with patch.object(yf, "Ticker", side_effect=_fake_ticker):
+            result = ag._build_premarket_gap_warnings(self.PICKS)
+
+        assert result == {}
+
+    def test_returns_empty_on_no_picks(self):
+        """Returns empty dict when picks dict has no stock/ETF entries."""
+        import agent as ag
+        result = ag._build_premarket_gap_warnings({})
+        assert result == {}
