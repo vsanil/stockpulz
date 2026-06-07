@@ -13,6 +13,7 @@ Usage via Telegram commands:
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime
 import yfinance as yf
 
@@ -279,6 +280,12 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
                     "text": f"🔔 Re-arm at ${a['target']:,.2f}",
                     "callback_data": f"rearm_alert|{t}|{a['target']}|{a['direction']}",
                 }]]
+                _app_url = os.environ.get("APP_URL", "").rstrip("/")
+                if _app_url:
+                    keyboard.append([{
+                        "text": f"📊 {t} Chart  ↗",
+                        "web_app": {"url": f"{_app_url}/miniapp?chart={t}"},
+                    }])
                 send_keyboard_fn(msg, keyboard, chat_id=str(chat_id))
             elif send_fn:
                 send_fn(msg)  # _alert() broadcasts to all; no chat_id needed
