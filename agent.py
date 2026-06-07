@@ -2497,7 +2497,8 @@ def _check_portfolio_correlation(uid: str, open_positions: list) -> str | None:
 def _check_options_flow_alert(uid: str, open_positions: list) -> str | None:
     """
     Check held tickers for unusual options activity. Returns a text block if any
-    position shows unusual flow or a score >= 3. Deduped 24h per ticker per user.
+    position shows BOTH unusual vol/OI ratio AND signal_score >= 3, with enough
+    volume to rule out thin chains (call+put volume >= 200). Deduped 24h per ticker.
     """
     from options_flow import batch_options_signals
 
@@ -2510,14 +2511,18 @@ def _check_options_flow_alert(uid: str, open_positions: list) -> str | None:
     signals = batch_options_signals(tickers)
     hits: list[str] = []
     for ticker, sig in signals.items():
-        if not (sig.get("unusual") or sig.get("signal_score", 0) >= 3):
+        # Require BOTH unusual flag AND meaningful conviction score — OR/score-only
+        # fired too many false positives on thin options chains
+        unusual = sig.get("unusual", False)
+        score   = sig.get("signal_score", 0)
+        total_vol = (sig.get("call_volume") or 0) + (sig.get("put_volume") or 0)
+        if not (unusual and score >= 3 and total_vol >= 200):
             continue
         dedup_key = f"options_flow_{uid}_{ticker}"
         if _is_alerted(dedup_key):
             continue
         _mark_alerted(dedup_key, ttl_hours=24)
 
-        score      = sig.get("signal_score", 0)
         iv_label   = sig.get("iv_label", "")
         bullish    = sig.get("bullish_flow", False)
         bearish    = sig.get("bearish_flow", False)
@@ -2577,7 +2582,8 @@ def _check_congressional_alert(uid: str, open_positions: list) -> str | None:
     body = "\n".join(hits)
     return (
         f"🏛 <b>Congressional Cluster Buy</b> on your held positions:\n\n{body}\n\n"
-        f"3+ members buying the same stock you hold is historically significant."
+        f"3+ members buying the same stock you hold is historically significant. "
+        f"<i>Note: STOCK Act filings typically lag 30–45 days — this reflects recent reported activity, not today's trades.</i>"
     )
 
 
@@ -3180,6 +3186,41 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
             )
 
 
+# ── RSI helper (cached, shared across all per-user nudge calls in one run) ────
+
+_rsi_cache: dict[str, tuple[float, float]] = {}  # ticker → (rsi, timestamp)
+
+def _get_rsi(ticker: str, period: int = 14) -> float | None:
+    """
+    Compute 14-period RSI for a ticker. Cached 30 minutes in-process so
+    multiple users holding the same ticker pay only one yfinance call.
+    """
+    import time as _time
+    cached = _rsi_cache.get(ticker)
+    if cached and (_time.time() - cached[1]) < 1800:
+        return cached[0]
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(ticker).history(period=f"{period + 6}d", interval="1d", auto_adjust=True)
+        if len(hist) < period + 1:
+            return None
+        closes = hist["Close"].tolist()
+        deltas  = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        gains   = [max(0.0, d) for d in deltas]
+        losses  = [max(0.0, -d) for d in deltas]
+        avg_g   = sum(gains[-period:]) / period
+        avg_l   = sum(losses[-period:]) / period
+        if avg_l == 0:
+            rsi = 100.0
+        else:
+            rs  = avg_g / avg_l
+            rsi = round(100.0 - 100.0 / (1.0 + rs), 1)
+        _rsi_cache[ticker] = (rsi, _time.time())
+        return rsi
+    except Exception:
+        return None
+
+
 # ── Take-profit nudge ────────────────────────────────────────────────────────
 
 def _check_take_profit_nudge(uid: str, current_prices: dict) -> None:
@@ -3215,7 +3256,7 @@ def _check_take_profit_nudge(uid: str, current_prices: dict) -> None:
         pct_to_tgt  = (target_f - curr_f) / target_f * 100
         progress_pct = int(progress * 100)
 
-        # Optional: gain in dollars
+        # Dollar gain
         gain_str = ""
         try:
             shares = trade.get("shares") or trade.get("quantity")
@@ -3232,10 +3273,24 @@ def _check_take_profit_nudge(uid: str, current_prices: dict) -> None:
         except Exception:
             pass
 
+        # RSI context — fetch once per ticker (cached 30 min, shared across users)
+        rsi = _get_rsi(ticker)
+        if rsi is not None:
+            if rsi >= 70:
+                rsi_str = f"RSI <b>{rsi:.0f}</b> — overbought. Strong case for taking partial profits now."
+            elif rsi >= 60:
+                rsi_str = f"RSI <b>{rsi:.0f}</b> — elevated. Consider trimming or tightening stop."
+            else:
+                rsi_str = f"RSI <b>{rsi:.0f}</b> — not extended. Momentum still intact."
+        else:
+            rsi_str = None
+
+        rsi_line = f"\n{rsi_str}" if rsi_str else ""
+
         send_inline_keyboard(
             f"🎯 <b>{ticker} near target</b> — {progress_pct}% of the way there\n"
             f"Up <b>{pct_gain:.1f}%</b> · target <code>${_p(target_f)}</code> "
-            f"({pct_to_tgt:.1f}% away).{gain_str}\n\n"
+            f"({pct_to_tgt:.1f}% away).{gain_str}{rsi_line}\n\n"
             f"<i>Consider taking partial profits or tightening your stop to lock in gains.</i>\n\n"
             f"<code>/sold {ticker}</code> to close  ·  <code>/updatestop {ticker}</code> to tighten",
             [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
@@ -4016,12 +4071,20 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
 
 def _build_premarket_gap_warnings(picks: dict) -> dict[str, str]:
     """
-    For each stock/ETF pick, check if the current price is > 3% above the entry_price.
-    Returns {ticker: warning_line} for picks that are gapping significantly above entry.
-    Uses yfinance fast_info (pre-market or last trade) — non-blocking, best-effort.
+    For each stock/ETF pick, check if the current pre-market price is > 3% above entry.
+    Only runs before 9:30 AM ET — stale data after market opens is not useful.
+    Uses yfinance history(prepost=True) for actual pre-market ticks, not fast_info
+    which often returns the previous session's close instead of a real pre-market quote.
     """
+    import pytz
     import yfinance as yf
     import concurrent.futures as _cf
+
+    # Skip entirely once market opens — pre-market data is stale after 9:30 AM ET
+    _et = pytz.timezone("America/New_York")
+    _now_et = datetime.now(_et)
+    if _now_et.hour > 9 or (_now_et.hour == 9 and _now_et.minute >= 30):
+        return {}
 
     all_picks: list[dict] = []
     stocks = picks.get("stocks", picks)
@@ -4035,22 +4098,30 @@ def _build_premarket_gap_warnings(picks: dict) -> dict[str, str]:
     if not all_picks:
         return {}
 
+    _market_open_et = _now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+
     def _fetch(pick: dict):
         ticker = pick["ticker"].upper()
         try:
-            info  = yf.Ticker(ticker).fast_info
-            price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
-            if not price:
+            hist = yf.Ticker(ticker).history(period="1d", interval="1m", prepost=True)
+            if hist.empty:
                 return ticker, None
+            # Filter to confirmed pre-market bars only (before 9:30 AM ET today)
+            hist.index = hist.index.tz_convert(_et)
+            today = _now_et.date()
+            pre = hist[(hist.index.date == today) & (hist.index < _market_open_et)]
+            if pre.empty:
+                return ticker, None
+            price = float(pre["Close"].iloc[-1])
             entry = float(pick["entry_price"])
             if entry <= 0:
                 return ticker, None
-            gap_pct = (float(price) - entry) / entry * 100
+            gap_pct = (price - entry) / entry * 100
             if gap_pct >= 3.0:
-                price_fmt = f"${float(price):,.2f}" if float(price) < 100 else f"${float(price):,.0f}"
+                price_fmt = f"${price:,.2f}" if price < 100 else f"${price:,.0f}"
                 entry_fmt = f"${entry:,.2f}" if entry < 100 else f"${entry:,.0f}"
                 return ticker, (
-                    f"<b>{ticker}</b> gapping +{gap_pct:.1f}% ({price_fmt} vs entry {entry_fmt}) "
+                    f"<b>{ticker}</b> gapping +{gap_pct:.1f}% pre-market ({price_fmt} vs entry {entry_fmt}) "
                     f"— now above entry window. Wait for pullback or skip."
                 )
         except Exception:
