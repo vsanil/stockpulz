@@ -773,7 +773,7 @@ def format_confirmation_message(picks: dict, current_prices: dict,
         for c in comm_lt:
             lines.append(price_line(c.get("ticker", ""), c.get("entry_price"), c.get("target_price"), None))
 
-    lines += ["", "🔴 stop hit  ✅ on track  ⚠️ watch  🟡 flat", "<i>⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share  ·  💬 /feedback"]
+    lines += ["", "🔴 stop hit  ✅ on track  ⚠️ watch  🟡 flat", "<i>⚠️ Not financial advice.</i>"]
     return "\n".join(lines)
 
 
@@ -960,7 +960,7 @@ def format_eod_summary(picks: dict, current_prices: dict, open_holdings: list[di
 
     lines += [
         "",
-        "<i>🟢 +1%+  🟡 flat  🔴 −1%+  ·  ⚠️ Not financial advice.</i>  📋 /help  ·  📲 /share  ·  💬 /feedback",
+        "<i>🟢 +1%+  🟡 flat  🔴 −1%+  ·  ⚠️ Not financial advice.</i>",
     ]
     return "\n".join(lines)
 
@@ -1182,7 +1182,6 @@ def format_eod_full_summary(
     lines += [
         "",
         "<i>Market closed. See you tomorrow.</i>",
-        "📋 /help  ·  📲 /share  ·  💬 /feedback  ·  📊 /positions  ·  📜 /history",
     ]
     return "\n".join(lines)
 

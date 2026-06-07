@@ -954,7 +954,15 @@ def run_confirmation():
                 if ucfg.get("paused") or ucfg.get("skip_confirmation"):
                     print(f"[agent] Skipping confirmation for {uid} (paused or opted out).")
                     continue
-                _conf_kb = [[_miniapp_btn("📊 Open Dashboard  ↗", "picks", "TODAY")]]
+                _conf_kb = [
+                    [_miniapp_btn("📊 Open Dashboard  ↗", "picks", "TODAY")],
+                    [
+                        _miniapp_btn("📋 Help",     "picks",       "HELP"),
+                        _miniapp_btn("📲 Share",    "picks",       "SHARE"),
+                        _miniapp_btn("💬 Feedback", "picks",       "FEEDBACK"),
+                        _miniapp_btn("📊 Positions","portfolio",   "POSITIONS"),
+                    ],
+                ]
                 send_inline_keyboard(message, _conf_kb, chat_id=uid)
             except Exception as exc:
                 print(f"[agent] WARNING: Confirmation send failed for {uid}: {exc}")
@@ -1210,11 +1218,19 @@ def run_eod_summary():
                 if DRY_RUN:
                     print(f"\nDRY RUN — EOD Summary + Insights for {uid}:\n{msg}")
                 else:
-                    _eod_kb = [[
-                        _miniapp_btn("📊 Portfolio",      "portfolio",   "POSITIONS"),
-                        _miniapp_btn("📈 Today's Picks",  "picks",       "TODAY"),
-                        _miniapp_btn("📉 Performance",    "performance", "STATS"),
-                    ]]
+                    _eod_kb = [
+                        [
+                            _miniapp_btn("📊 Portfolio",     "portfolio",   "POSITIONS"),
+                            _miniapp_btn("📈 Today's Picks", "picks",       "TODAY"),
+                            _miniapp_btn("📉 Performance",   "performance", "STATS"),
+                        ],
+                        [
+                            _miniapp_btn("📋 Help",     "picks",     "HELP"),
+                            _miniapp_btn("📲 Share",    "picks",     "SHARE"),
+                            _miniapp_btn("💬 Feedback", "picks",     "FEEDBACK"),
+                            _miniapp_btn("📜 History",  "portfolio", "HISTORY"),
+                        ],
+                    ]
                     send_inline_keyboard(msg, _eod_kb, chat_id=uid)
         except Exception as exc:
             print(f"[agent] EOD summary failed for {uid} (non-critical): {exc}")
