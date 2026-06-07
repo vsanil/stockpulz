@@ -355,3 +355,103 @@ class TestCryptoRetryNoBusyWait:
 
         assert result == {"short_term": [], "long_term": []}
         assert len(calls) == 5, f"Expected 5 attempts on exception, got {len(calls)}"
+
+
+# ── Options flow alert ────────────────────────────────────────────────────────
+
+class TestCheckOptionsFlowAlert:
+    POSITIONS = [{"ticker": "NVDA"}, {"ticker": "AAPL"}]
+
+    def _unusual_signal(self, ticker):
+        return {"unusual": True, "signal_score": 4, "bullish_flow": True,
+                "bearish_flow": False, "sweep_detected": True, "iv_label": "ELEVATED"}
+
+    def _normal_signal(self, ticker):
+        return {"unusual": False, "signal_score": 0, "bullish_flow": False,
+                "bearish_flow": False, "sweep_detected": False, "iv_label": "NORMAL"}
+
+    def test_returns_text_when_unusual_activity(self):
+        """Returns a non-None string when any held position has unusual options flow."""
+        import agent as ag
+        signals = {"NVDA": self._unusual_signal("NVDA"), "AAPL": self._normal_signal("AAPL")}
+        with patch("options_flow.batch_options_signals", return_value=signals):
+            result = ag._check_options_flow_alert("user1", self.POSITIONS)
+        assert result is not None
+        assert "NVDA" in result
+        assert "unusual" in result.lower() or "options" in result.lower()
+
+    def test_returns_none_when_no_unusual_activity(self):
+        """Returns None when all held positions have normal options flow."""
+        import agent as ag
+        signals = {"NVDA": self._normal_signal("NVDA"), "AAPL": self._normal_signal("AAPL")}
+        with patch("options_flow.batch_options_signals", return_value=signals):
+            result = ag._check_options_flow_alert("user1", self.POSITIONS)
+        assert result is None
+
+    def test_dedup_prevents_second_fire(self):
+        """Same ticker does not fire twice within the 24h dedup window."""
+        import agent as ag
+        signals = {"NVDA": self._unusual_signal("NVDA"), "AAPL": self._normal_signal("AAPL")}
+        with patch("options_flow.batch_options_signals", return_value=signals):
+            first  = ag._check_options_flow_alert("user1", self.POSITIONS)
+            second = ag._check_options_flow_alert("user1", self.POSITIONS)
+        assert first is not None
+        assert second is None
+
+    def test_returns_none_when_no_positions(self):
+        """Returns None immediately when open_positions is empty."""
+        import agent as ag
+        with patch("options_flow.batch_options_signals") as mock_batch:
+            result = ag._check_options_flow_alert("user1", [])
+        mock_batch.assert_not_called()
+        assert result is None
+
+
+# ── Congressional cluster alert ───────────────────────────────────────────────
+
+class TestCheckCongressionalAlert:
+    POSITIONS = [{"ticker": "NVDA"}, {"ticker": "AAPL"}]
+
+    def _cluster_signal(self, ticker):
+        return {"is_cluster": True, "congress_members": 4, "congress_buys": 5,
+                "congress_score": 10, "note": "CLUSTER BUY: 5 purchase(s) by 4 member(s)"}
+
+    def _no_signal(self, ticker):
+        return {"is_cluster": False, "congress_members": 0, "congress_buys": 0,
+                "congress_score": 0, "note": "no recent congressional buys"}
+
+    def test_returns_text_on_cluster_buy(self):
+        """Returns a non-None string when a held ticker has a congressional cluster buy."""
+        import agent as ag
+        signals = {"NVDA": self._cluster_signal("NVDA"), "AAPL": self._no_signal("AAPL")}
+        with patch("congressional_tracker.batch_congressional_signals", return_value=signals):
+            result = ag._check_congressional_alert("user1", self.POSITIONS)
+        assert result is not None
+        assert "NVDA" in result
+        assert "Congressional" in result or "congressional" in result.lower()
+
+    def test_returns_none_when_no_cluster(self):
+        """Returns None when no held positions have a congressional cluster buy."""
+        import agent as ag
+        signals = {"NVDA": self._no_signal("NVDA"), "AAPL": self._no_signal("AAPL")}
+        with patch("congressional_tracker.batch_congressional_signals", return_value=signals):
+            result = ag._check_congressional_alert("user1", self.POSITIONS)
+        assert result is None
+
+    def test_dedup_prevents_second_fire(self):
+        """Cluster buy for same ticker does not fire twice in the same week."""
+        import agent as ag
+        signals = {"NVDA": self._cluster_signal("NVDA"), "AAPL": self._no_signal("AAPL")}
+        with patch("congressional_tracker.batch_congressional_signals", return_value=signals):
+            first  = ag._check_congressional_alert("user1", self.POSITIONS)
+            second = ag._check_congressional_alert("user1", self.POSITIONS)
+        assert first is not None
+        assert second is None
+
+    def test_returns_none_when_no_positions(self):
+        """Returns None immediately when open_positions is empty."""
+        import agent as ag
+        with patch("congressional_tracker.batch_congressional_signals") as mock_batch:
+            result = ag._check_congressional_alert("user1", [])
+        mock_batch.assert_not_called()
+        assert result is None

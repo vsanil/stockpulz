@@ -1308,6 +1308,29 @@ def handle_callback_query(callback_query: dict) -> None:
         mark_note_skipped(note_id)
         send_message("⏭ Release note skipped.", chat_id=chat_id)
 
+    elif action == "entry_alert":
+        # One-tap entry zone alert from morning picks keyboard
+        # callback_data: entry_alert|TICKER|ENTRY_PRICE
+        ticker = parts[1].upper() if len(parts) > 1 else ""
+        try:
+            price = float(parts[2]) if len(parts) > 2 else None
+        except ValueError:
+            price = None
+        if not ticker or price is None:
+            send_message("⚠️ Could not set alert — missing parameters.", chat_id=chat_id)
+        else:
+            try:
+                from price_alert_manager import add_alert as _aa
+                _aa(chat_id, ticker, price, direction="below", auto=False)
+                price_fmt = f"${price:,.0f}" if price >= 100 else f"${price:.2f}"
+                send_message(
+                    f"📡 <b>Entry alert set</b> — you'll be notified when "
+                    f"<b>{ticker}</b> drops to <b>{price_fmt}</b>.",
+                    chat_id=chat_id,
+                )
+            except Exception as exc:
+                send_message(f"⚠️ Could not set alert: {exc}", chat_id=chat_id)
+
     elif action == "rearm_alert":
         # Re-set a fired alert at the same price + direction
         # callback_data: rearm_alert|TICKER|TARGET|DIRECTION
