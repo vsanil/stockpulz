@@ -363,12 +363,15 @@ class TestCheckOptionsFlowAlert:
     POSITIONS = [{"ticker": "NVDA"}, {"ticker": "AAPL"}]
 
     def _unusual_signal(self, ticker):
+        # call_volume + put_volume >= 200 required to pass the thin-chain filter
         return {"unusual": True, "signal_score": 4, "bullish_flow": True,
-                "bearish_flow": False, "sweep_detected": True, "iv_label": "ELEVATED"}
+                "bearish_flow": False, "sweep_detected": True, "iv_label": "ELEVATED",
+                "call_volume": 150, "put_volume": 80}
 
     def _normal_signal(self, ticker):
         return {"unusual": False, "signal_score": 0, "bullish_flow": False,
-                "bearish_flow": False, "sweep_detected": False, "iv_label": "NORMAL"}
+                "bearish_flow": False, "sweep_detected": False, "iv_label": "NORMAL",
+                "call_volume": 10, "put_volume": 5}
 
     def test_returns_text_when_unusual_activity(self):
         """Returns a non-None string when any held position has unusual options flow."""
@@ -521,6 +524,32 @@ class TestCheckTakeProfitNudge:
 
 # ── Pre-market gap warnings ───────────────────────────────────────────────────
 
+import pandas as pd
+import pytz
+
+def _make_premarket_history(price: float):
+    """Build a minimal 1-min history DataFrame with one pre-market bar at 7 AM ET."""
+    et = pytz.timezone("America/New_York")
+    ts = pd.Timestamp("2026-06-06 07:00:00", tz=et)
+    idx = pd.DatetimeIndex([ts])
+    return pd.DataFrame({"Close": [price], "Open": [price], "High": [price], "Low": [price], "Volume": [1000]}, index=idx)
+
+def _premarket_fake_ticker(prices: dict):
+    """Return a factory that produces mock Ticker objects using history()."""
+    def _factory(symbol):
+        m = MagicMock()
+        m.history.return_value = _make_premarket_history(prices.get(symbol, 0))
+        return m
+    return _factory
+
+# Fake datetime that always reports 7:00 AM ET (pre-market)
+class _FakePremarketDatetime:
+    @staticmethod
+    def now(tz=None):
+        et = pytz.timezone("America/New_York")
+        return pd.Timestamp("2026-06-06 07:00:00", tz=et)
+
+
 class TestBuildPremarketGapWarnings:
     PICKS = {
         "stocks": {
@@ -529,39 +558,40 @@ class TestBuildPremarketGapWarnings:
         }
     }
 
-    def _fast_info(self, last_price):
-        m = MagicMock()
-        m.last_price = last_price
-        m.regular_market_price = None
-        return m
-
     def test_flags_ticker_gapping_above_entry(self):
-        """Returns a warning line for a ticker whose price is 5% above entry."""
+        """Returns a warning line for a ticker gapping 5% above entry in pre-market."""
         import agent as ag
         import yfinance as yf
 
-        def _fake_ticker(symbol):
-            m = MagicMock()
-            m.fast_info = self._fast_info(105.0 if symbol == "CRUS" else 200.0)
-            return m
-
-        with patch.object(yf, "Ticker", side_effect=_fake_ticker):
+        with patch.object(yf, "Ticker", side_effect=_premarket_fake_ticker({"CRUS": 105.0, "AAPL": 200.0})), \
+             patch("agent.datetime", _FakePremarketDatetime):
             result = ag._build_premarket_gap_warnings(self.PICKS)
 
         assert "CRUS" in result
-        assert "AAPL" not in result  # 200 vs 200 = 0% gap, no warning
+        assert "AAPL" not in result  # 0% gap — no warning
 
     def test_returns_empty_when_no_gap(self):
         """Returns empty dict when all picks are at or below entry."""
         import agent as ag
         import yfinance as yf
 
-        def _fake_ticker(symbol):
-            m = MagicMock()
-            m.fast_info = self._fast_info(98.0 if symbol == "CRUS" else 199.0)
-            return m
+        with patch.object(yf, "Ticker", side_effect=_premarket_fake_ticker({"CRUS": 98.0, "AAPL": 199.0})), \
+             patch("agent.datetime", _FakePremarketDatetime):
+            result = ag._build_premarket_gap_warnings(self.PICKS)
 
-        with patch.object(yf, "Ticker", side_effect=_fake_ticker):
+        assert result == {}
+
+    def test_returns_empty_after_market_open(self):
+        """Returns empty dict when called after 9:30 AM ET — data would be stale."""
+        import agent as ag
+
+        class _PostOpen:
+            @staticmethod
+            def now(tz=None):
+                et = pytz.timezone("America/New_York")
+                return pd.Timestamp("2026-06-06 10:00:00", tz=et)
+
+        with patch("agent.datetime", _PostOpen):
             result = ag._build_premarket_gap_warnings(self.PICKS)
 
         assert result == {}
@@ -569,5 +599,6 @@ class TestBuildPremarketGapWarnings:
     def test_returns_empty_on_no_picks(self):
         """Returns empty dict when picks dict has no stock/ETF entries."""
         import agent as ag
-        result = ag._build_premarket_gap_warnings({})
+        with patch("agent.datetime", _FakePremarketDatetime):
+            result = ag._build_premarket_gap_warnings({})
         assert result == {}
