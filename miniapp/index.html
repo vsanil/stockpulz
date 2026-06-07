@@ -2978,6 +2978,9 @@ function gotoTab(name) {
   curTab = name;
   tg.HapticFeedback?.selectionChanged();
 
+  // Stop live price refresh when leaving portfolio tab
+  if (name !== 'portfolio') { clearInterval(_portLiveInterval); _portLiveInterval = null; }
+
   // Always reset sub-tabs to first position when switching main tabs
   if (name === 'picks') {
     picksView    = 'picks';
@@ -3003,6 +3006,9 @@ function gotoTab(name) {
     if (name === 'performance') loadPerformance();
     if (name === 'watchlist')   loadWatchlist();
     if (name === 'settings')    loadSettings();
+  } else if (name === 'portfolio') {
+    // Portfolio already loaded — restart live refresh
+    _startPortfolioLiveRefresh();
   }
 }
 
@@ -4481,7 +4487,7 @@ function renderPickCard(p, idx = 0) {
         </div>
       </div>
       <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
-      ${conv ? `<div style="margin:6px 0 4px;position:relative;z-index:1"><span class="conv-tag ${convCls}">${convIcon} Conviction ${p.conviction}/5</span></div>` : ''}
+      ${conv ? `<div style="margin:6px 0 4px;position:relative;z-index:1"><span class="conv-tag ${convCls}" style="cursor:pointer" onclick="(function(el){const t=el.closest('.pick-card').querySelector('.pick-thesis-toggle');if(t)togglePickThesis(t);})(this)" title="Tap to expand analysis">${convIcon} Conviction ${p.conviction}/5</span></div>` : ''}
       ${(p.thesis || p.reason || p.theme || p.edge) ? `
         <button class="pick-thesis-toggle" onclick="togglePickThesis(this)" aria-label="Toggle analysis">
           <span>Analysis</span>
@@ -4494,6 +4500,7 @@ function renderPickCard(p, idx = 0) {
       <div class="pick-actions">
         <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
         <button class="btn-chart-sm" style="color:var(--accent)" onclick="openBacktestSheet('${sym}',${parseFloat(p.entry_price)||0},${parseFloat(p.stop_loss)||0},${parseFloat(p.target_price)||0})">🔁 Backtest</button>
+        ${p.entry_price ? `<button class="btn-chart-sm" style="color:#48bb78" id="alert-btn-${sym}" onclick="setPickEntryAlert('${sym}',${parseFloat(p.entry_price)||0},this)">📡 Alert at $${fmtPrice(p.entry_price)}</button>` : ''}
         <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
                 onclick="markBought('${sym}','${p._type}','${p._tf}')">
           ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
@@ -4802,6 +4809,22 @@ async function addToWatchlistFromPick(ticker) {
   }
 }
 
+async function setPickEntryAlert(sym, price, btn) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '…';
+  try {
+    await api('/api/miniapp/add_alert', 'POST', { ticker: sym, target: price, direction: 'below' });
+    btn.textContent = '✅ Alert set';
+    btn.style.color = 'var(--hint)';
+    tg.HapticFeedback?.notificationOccurred('success');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = orig;
+    showToast('Could not set alert — try again');
+  }
+}
+
 async function markBought(sym, assetType, tf) {
   const btn = document.getElementById('buy-' + sym);
   if (!btn) return;
@@ -4861,6 +4884,7 @@ function _markPickPaperBought(sym) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let portfolioMode = 'real'; // 'real' | 'paper'
+let _portLiveInterval = null; // 15-second silent price-refresh timer
 
 // Per-mode response cache — avoids a fresh API round-trip when the user taps
 // Real ↔ Paper within the same session (5-minute TTL).
@@ -5371,9 +5395,55 @@ async function loadPortfolio(forceRefresh = false) {
     _loadAlertPrices(positionsCache.map(p => p.ticker)); // prime live-price cache
     _loadPortfolioDividends(); // fire-and-forget dividend income
     _loadTaxLots();            // fire-and-forget tax lot summary
+    _startPortfolioLiveRefresh(); // silent 15s price updates
   } catch (e) {
     _tabError('port-spinner', loadPortfolio, e);
   }
+}
+
+function _startPortfolioLiveRefresh() {
+  clearInterval(_portLiveInterval);
+  _portLiveInterval = null;
+  if (!positionsCache.length) return;
+  _portLiveInterval = setInterval(_refreshPortfolioPrices, 15000);
+}
+
+async function _refreshPortfolioPrices() {
+  if (curTab !== 'portfolio' || !positionsCache.length) {
+    clearInterval(_portLiveInterval); _portLiveInterval = null; return;
+  }
+  const tickers = positionsCache.map(p => p.ticker || p.symbol).filter(Boolean);
+  if (!tickers.length) return;
+  try {
+    const sep = '/api/miniapp/live_prices?tickers=' + tickers.join(',');
+    const url = sep + '&chat_id=' + encodeURIComponent(userId) + '&init_data=' + encodeURIComponent(initData);
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const prices = data.prices || {};
+    positionsCache.forEach(p => {
+      const sym   = p.ticker || p.symbol;
+      const price = prices[sym];
+      if (!price || !p.entry_price) return;
+      const curEl = document.getElementById('pos-cur-' + sym);
+      if (curEl) curEl.textContent = ' → $' + fmtPrice(price);
+      const pct   = (price - parseFloat(p.entry_price)) / parseFloat(p.entry_price) * 100;
+      const pctEl = document.getElementById('pos-pct-' + sym);
+      if (pctEl) {
+        pctEl.textContent = fmtPct(pct);
+        pctEl.className   = 'pos-pct ' + (pct > 0 ? 'val-pos' : pct < 0 ? 'val-neg' : 'val-neu');
+      }
+      if (p.target_price) {
+        const range = parseFloat(p.target_price) - parseFloat(p.entry_price);
+        const move  = price - parseFloat(p.entry_price);
+        const prog  = range > 0 ? Math.min(100, Math.max(0, (move / range) * 100)) : 0;
+        const barEl  = document.getElementById('pos-bar-'  + sym);
+        const progEl = document.getElementById('pos-prog-' + sym);
+        if (barEl)  barEl.style.width = prog + '%';
+        if (progEl) progEl.textContent = Math.round(prog) + '% to target';
+      }
+    });
+  } catch (_) { /* silent — background refresh failure never surfaces to user */ }
 }
 
 async function _loadPortfolioDividends() {
