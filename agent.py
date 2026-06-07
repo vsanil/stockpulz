@@ -2649,12 +2649,12 @@ def run_weekly_recap(config: dict, now_et: datetime):
                 user_cfg = {**config, **get_user_config(uid)}
                 if user_cfg.get("paused"):
                     continue
-                msg = get_missed_picks_message(uid)
+                msg, kb = get_missed_picks_message(uid)
                 if msg:
                     if DRY_RUN:
                         print(f"\n[DRY RUN] Missed picks for {uid}:\n{msg}")
                     else:
-                        send_message(msg, chat_id=uid)
+                        send_inline_keyboard(msg, kb, chat_id=uid)
             except Exception as exc:
                 print(f"[agent] Missed picks digest failed for {uid} (non-critical): {exc}")
     except Exception as exc:
