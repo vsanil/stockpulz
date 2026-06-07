@@ -501,7 +501,8 @@ def run_morning(config: dict, now_et: datetime):
                             _alert(
                                 f"⚠️ <b>High Volatility Alert</b> — VIX = <code>{vix:.1f}</code>\n"
                                 f"Market fear is elevated. Consider tightening stop-losses "
-                                f"and reducing short-term position sizes today."
+                                f"and reducing short-term position sizes today.",
+                                tab="portfolio",
                             )
             except Exception as exc:
                 print(f"[agent] Macro context fetch failed (non-critical): {exc}")
@@ -732,6 +733,7 @@ def run_morning(config: dict, now_et: datetime):
             f"🛢 {n_comm} commodities  ·  "
             f"🎯 {n_opts} options plays",
             admin_only=True,
+            tab="picks",
         )
         # Save timestamp for /dashboard
         update_config("last_morning_run", datetime.utcnow().isoformat())
@@ -3510,6 +3512,7 @@ def run_watchdog():
             f"<i>Trigger manually: cron-job.org → StockPulz-morning → Run now\n"
             f"Or: https://stock-agent-enqx.onrender.com/trigger/morning?secret=CRON_SECRET&force=true</i>",
             admin_only=True,
+            tab="picks",
         )
     except Exception as exc:
         print(f"[watchdog] Error during watchdog check: {exc}")
@@ -4058,21 +4061,33 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
     return len(outbox)
 
 
-def _alert(text: str, admin_only: bool = False):
+def _alert(text: str, admin_only: bool = False, tab: str = "picks"):
     """
-    Send an operational alert.
+    Send an operational alert with an Open Dashboard button.
     admin_only=True  → owner only (errors, warnings, system messages)
     admin_only=False → all users (trade closes, earnings warnings, market info)
+    tab              → mini-app tab the button opens (default: picks)
     """
     print(f"[agent] ALERT: {text}")
     if DRY_RUN:
         return
+
+    _app_url = (os.environ.get("APP_URL") or "").rstrip("/")
+    keyboard = [[_miniapp_btn("📊 Open Dashboard  ↗", tab, "TODAY")]] if _app_url else None
+
     if admin_only:
         owner = os.environ.get("TELEGRAM_CHAT_ID", "")
         if owner:
-            send_message(text, chat_id=owner)
+            if keyboard:
+                send_inline_keyboard(text, keyboard, chat_id=owner)
+            else:
+                send_message(text, chat_id=owner)
     else:
-        broadcast_all([{"chat_id": uid, "text": text} for uid in _all_recipients()])
+        payloads = [{"chat_id": uid, "text": text} for uid in _all_recipients()]
+        if keyboard:
+            for p in payloads:
+                p["keyboard"] = keyboard
+        broadcast_all(payloads)
 
 
 if __name__ == "__main__":
