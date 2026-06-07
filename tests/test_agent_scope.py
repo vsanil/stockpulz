@@ -186,6 +186,35 @@ class TestAllRecipientsFunction:
             result = agent._all_recipients()
         assert len(result) >= 1
 
+    def test_owner_only_env_returns_only_owner(self):
+        """OWNER_ONLY=1 must bypass get_allowed_users and return only TELEGRAM_CHAT_ID."""
+        with patch.dict(os.environ, {"OWNER_ONLY": "1", "TELEGRAM_CHAT_ID": "777"}):
+            with patch("config_manager.get_allowed_users", return_value=["111", "222", "333"]):
+                result = agent._all_recipients()
+        assert result == ["777"], f"expected ['777'], got {result}"
+
+    def test_owner_only_not_set_returns_all_users(self):
+        """Without OWNER_ONLY, returns the full allowed users list."""
+        env = {k: v for k, v in os.environ.items() if k != "OWNER_ONLY"}
+        with patch.dict(os.environ, env, clear=True):
+            with patch("config_manager.get_allowed_users", return_value=["aaa", "bbb"]):
+                result = agent._all_recipients()
+        assert "aaa" in result and "bbb" in result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestAlertTab:
+    """_alert() tab parameter controls mini-app deep-link on the button."""
+
+    def test_alert_accepts_tab_param(self):
+        sig = inspect.signature(agent._alert)
+        assert "tab" in sig.parameters, "_alert must accept a 'tab' parameter"
+
+    def test_alert_tab_has_default(self):
+        sig = inspect.signature(agent._alert)
+        default = sig.parameters["tab"].default
+        assert default != inspect.Parameter.empty, "tab should have a default value"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 class TestComputePickStreaks:
