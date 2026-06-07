@@ -111,11 +111,16 @@ def get_missed_picks_message(chat_id: str) -> str:
         entry_s = f"  <i>entry ${_p(float(entry))}</i>" if entry else ""
         lines.append(f"{emoji} <b>{tk}</b>  {move_s}{entry_s}")
 
-    lines.append(
-        "\n<i>These are picks from this week you didn't log.\n"
-        "Use /bought TICKER to add any you still want to track.</i>"
-    )
-    return "\n".join(lines)
+    lines.append("\n<i>These are picks from this week you didn't log.</i>")
+    text = "\n".join(lines)
+    _app_url = os.environ.get("APP_URL", "").rstrip("/")
+    keyboard = []
+    if _app_url:
+        keyboard = [[
+            {"text": "📌 Log a Position", "web_app": {"url": f"{_app_url}/miniapp?tab=portfolio&action=add"}},
+            {"text": "📋 Today's Picks",  "web_app": {"url": f"{_app_url}/miniapp?tab=picks"}},
+        ]]
+    return text, keyboard
 
 
 def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
@@ -1941,15 +1946,16 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             entry_s = f"  <i>entry ${_p(float(entry))}</i>" if entry else ""
             lines.append(f"{emoji} <b>{tk}</b>  {move_s}{entry_s}")
 
-        lines.append(
-            "\n<i>These are picks from this week you didn't log a /bought on.\n"
-            "Use /bought TICKER to add any you still want to track.</i>"
-        )
+        lines.append("\n<i>These are picks from this week you didn't log.</i>")
         _app_url = os.environ.get("APP_URL", "").rstrip("/")
+        _kb = []
         if _app_url:
-            send_inline_keyboard("\n".join(lines), [[{"text": "📋 Today's Picks", "web_app": {"url": f"{_app_url}/miniapp?tab=picks"}}]], chat_id=chat_id)
-            return ""
-        return "\n".join(lines)
+            _kb = [[
+                {"text": "📌 Log a Position", "web_app": {"url": f"{_app_url}/miniapp?tab=portfolio&action=add"}},
+                {"text": "📋 Today's Picks",  "web_app": {"url": f"{_app_url}/miniapp?tab=picks"}},
+            ]]
+        send_inline_keyboard("\n".join(lines), _kb, chat_id=chat_id)
+        return ""
 
     # ── /best-setup — win rate analysis by sector / asset type / timeframe ──────
     if text == "BESTSETUP":
