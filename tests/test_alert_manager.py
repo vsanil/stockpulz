@@ -230,3 +230,49 @@ class TestClearAlerts:
         add_alert("1111111", "AAPL", 200.0, direction="above")
         clear_alerts(CHAT)
         assert "AAPL" in list_alerts("1111111")
+
+
+# ── chart deep-link button ────────────────────────────────────────────────────
+
+class TestAlertChartButton:
+    """Triggered alert must include a chart deep-link button when APP_URL is set."""
+
+    def test_keyboard_has_chart_button_when_app_url_set(self):
+        """send_keyboard_fn receives a keyboard with a web_app chart button."""
+        import os
+        from unittest.mock import patch
+        keyboards = []
+        add_alert(CHAT, "NVDA", 185.0, direction="above")  # NVDA current ~189 → triggers
+
+        def _capture_keyboard(msg, kb, chat_id=None):
+            keyboards.append(kb)
+
+        with patch.dict(os.environ, {"APP_URL": "https://example.onrender.com"}):
+            check_alerts(CHAT, send_keyboard_fn=_capture_keyboard)
+
+        assert len(keyboards) == 1, "keyboard_fn should have been called once"
+        flat = [btn for row in keyboards[0] for btn in row]
+        chart_btns = [b for b in flat if "Chart" in b.get("text", "") and "web_app" in b]
+        assert len(chart_btns) == 1, f"Expected 1 chart button, got: {flat}"
+        assert "NVDA" in chart_btns[0]["text"]
+        assert "nvda" in chart_btns[0]["web_app"]["url"].lower() or \
+               "NVDA" in chart_btns[0]["web_app"]["url"]
+
+    def test_keyboard_no_chart_button_without_app_url(self):
+        """Without APP_URL the chart button is not added."""
+        import os
+        from unittest.mock import patch
+        keyboards = []
+        add_alert(CHAT, "NVDA", 185.0, direction="above")
+
+        def _capture_keyboard(msg, kb, chat_id=None):
+            keyboards.append(kb)
+
+        env = {k: v for k, v in os.environ.items() if k != "APP_URL"}
+        with patch.dict(os.environ, env, clear=True):
+            check_alerts(CHAT, send_keyboard_fn=_capture_keyboard)
+
+        if keyboards:
+            flat = [btn for row in keyboards[0] for btn in row]
+            chart_btns = [b for b in flat if "web_app" in b]
+            assert len(chart_btns) == 0

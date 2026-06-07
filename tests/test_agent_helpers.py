@@ -310,3 +310,48 @@ class TestMorningRunGuards:
         """MOCK_DATA=True — run uses mock picks, no network calls, no error messages."""
         sent = self._run_morning_mocked(_et(11, 0), monkeypatch, mock_data=True)
         assert not any("Morning picks skipped" in m for m in sent)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestCryptoRetryNoBusyWait:
+    """_run_crypto_with_retry must return immediately on clean empty result.
+
+    Regression: previously empty result raised ValueError → retry loop slept
+    15+30+60+120s = 225s before giving up. Fixed: if screener runs without
+    exception but returns 0 candidates, return empty dict immediately.
+    """
+
+    def test_returns_empty_immediately_when_screener_finds_nothing(self):
+        """Screener runs OK but finds 0 coins → no retry, no sleep, instant return."""
+        import agent as ag
+        calls = []
+
+        def _fake_screener():
+            calls.append(1)
+            return {"short_term": [], "long_term": []}  # clean empty — not an exception
+
+        with patch.object(ag, "run_crypto_screener", side_effect=_fake_screener), \
+             patch.object(ag, "time") as mock_time:
+            result = ag._run_crypto_with_retry()
+
+        assert result == {"short_term": [], "long_term": []}
+        assert len(calls) == 1, f"Expected 1 screener call, got {len(calls)} — retry loop fired"
+        mock_time.sleep.assert_not_called()
+
+    def test_retries_on_exception(self):
+        """Real API failure (exception) must still trigger retry logic."""
+        import agent as ag
+        calls = []
+
+        def _failing_screener():
+            calls.append(1)
+            raise RuntimeError("CoinGecko timeout")
+
+        with patch.object(ag, "run_crypto_screener", side_effect=_failing_screener), \
+             patch.object(ag, "time") as mock_time, \
+             patch.object(ag, "_alert"):
+            mock_time.sleep = lambda *a: None  # skip actual sleep
+            result = ag._run_crypto_with_retry()
+
+        assert result == {"short_term": [], "long_term": []}
+        assert len(calls) == 5, f"Expected 5 attempts on exception, got {len(calls)}"
