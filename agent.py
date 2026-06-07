@@ -21,6 +21,15 @@ from datetime import datetime, date, timedelta
 
 import pytz
 
+# ── Sentry error tracking (subprocess — separate from Flask's Sentry) ─────────
+try:
+    import sentry_sdk
+    _sentry_dsn = os.environ.get("SENTRY_DSN", "")
+    if _sentry_dsn:
+        sentry_sdk.init(dsn=_sentry_dsn, send_default_pii=False, traces_sample_rate=0.0)
+except Exception:
+    pass  # Sentry is non-critical — never block the agent
+
 # ── Mini App deep-link button helper ─────────────────────────────────────────
 # Tab names mirror the Mini App nav: picks | portfolio | performance | watchlist | settings
 def _miniapp_btn(label: str, tab: str, fallback_cmd: str) -> dict:
@@ -59,7 +68,7 @@ from position_sizer import apply_portfolio_sizing, portfolio_summary
 from price_checker import get_current_prices
 from formatters import (
     format_daily_message, format_confirmation_message, format_weekly_recap_message,
-    format_eod_summary, format_eod_full_summary, format_week_ahead, build_picks_keyboard, _p,
+    format_eod_full_summary, format_week_ahead, build_picks_keyboard, _p,
 )
 from telegram_api import send_message, send_inline_keyboard, broadcast_all
 from cache_layer import cache_get, cache_set
