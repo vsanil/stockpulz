@@ -1172,6 +1172,12 @@ def run_eod_summary():
             except Exception as _hf_exc:
                 print(f"[agent] Hold/fold nudge failed for {uid} (non-critical): {_hf_exc}")
 
+            # ── Take-profit nudges ────────────────────────────────────────────
+            try:
+                _check_take_profit_nudge(uid, current_prices)
+            except Exception as _tp_exc:
+                print(f"[agent] Take-profit nudge failed for {uid} (non-critical): {_tp_exc}")
+
             # ── Informational insights: health + cash + correlation + stop coverage
             # Appended to the EOD message so it's one send instead of two.
             if not _is_quiet_hours(uid):
@@ -3146,17 +3152,95 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
             if _is_alerted(key):
                 continue
             _mark_alerted(key)
+            # Dollar risk: how much the user would lose if stop hits
+            risk_str = ""
+            try:
+                shares = trade.get("shares") or trade.get("quantity")
+                alloc  = trade.get("allocation") or trade.get("position_size")
+                if shares:
+                    risk_usd = (curr_f - stop_f) * float(shares)
+                elif alloc:
+                    est_shares = float(alloc) / entry_f
+                    risk_usd = (curr_f - stop_f) * est_shares
+                else:
+                    risk_usd = None
+                if risk_usd is not None:
+                    risk_str = f"  Your risk to stop: <b>~${risk_usd:,.0f}</b>."
+            except Exception:
+                pass
             send_inline_keyboard(
                 f"🤔 <b>Hold or fold? — {ticker}</b>\n"
-                f"Down <b>{pct_from_entry:.1f}%</b> from your entry. "
-                f"Stop is at <code>${_p(stop_f)}</code> "
-                f"({pct_to_stop:.1f}% away).\n\n"
+                f"Down <b>{pct_from_entry:.1f}%</b> from entry · stop "
+                f"<code>${_p(stop_f)}</code> ({pct_to_stop:.1f}% away).{risk_str}\n\n"
                 f"<i>If the thesis still holds, stay in. "
                 f"If something has changed, it's okay to cut early and protect capital.</i>\n\n"
                 f"<code>/sold {ticker}</code> to close  ·  <code>/updatestop {ticker}</code> to adjust",
                 [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
                 chat_id=uid,
             )
+
+
+# ── Take-profit nudge ────────────────────────────────────────────────────────
+
+def _check_take_profit_nudge(uid: str, current_prices: dict) -> None:
+    """
+    Fire when a position is >= 85% of the way from entry to target.
+    Suggests considering a partial exit or tightening the stop.
+    Once per position per day via cache dedup.
+    """
+    log = load_user_trade_log(uid)
+    for trade in log.get("open", []):
+        ticker = trade.get("ticker")
+        entry  = trade.get("entry_price")
+        target = trade.get("target_price")
+        stop   = trade.get("stop_loss")
+        if not (ticker and entry and target):
+            continue
+        current = current_prices.get(ticker)
+        if not current:
+            continue
+        entry_f, target_f, curr_f = float(entry), float(target), float(current)
+        if target_f <= entry_f:
+            continue
+        progress = (curr_f - entry_f) / (target_f - entry_f)
+        if progress < 0.85:
+            continue
+
+        key = f"tp_nudge_{uid}_{ticker}_{date.today()}"
+        if _is_alerted(key):
+            continue
+        _mark_alerted(key)
+
+        pct_gain    = (curr_f - entry_f) / entry_f * 100
+        pct_to_tgt  = (target_f - curr_f) / target_f * 100
+        progress_pct = int(progress * 100)
+
+        # Optional: gain in dollars
+        gain_str = ""
+        try:
+            shares = trade.get("shares") or trade.get("quantity")
+            alloc  = trade.get("allocation") or trade.get("position_size")
+            if shares:
+                gain_usd = (curr_f - entry_f) * float(shares)
+            elif alloc:
+                est_shares = float(alloc) / entry_f
+                gain_usd = (curr_f - entry_f) * est_shares
+            else:
+                gain_usd = None
+            if gain_usd is not None:
+                gain_str = f"  Unrealised gain: <b>~${gain_usd:,.0f}</b>."
+        except Exception:
+            pass
+
+        send_inline_keyboard(
+            f"🎯 <b>{ticker} near target</b> — {progress_pct}% of the way there\n"
+            f"Up <b>{pct_gain:.1f}%</b> · target <code>${_p(target_f)}</code> "
+            f"({pct_to_tgt:.1f}% away).{gain_str}\n\n"
+            f"<i>Consider taking partial profits or tightening your stop to lock in gains.</i>\n\n"
+            f"<code>/sold {ticker}</code> to close  ·  <code>/updatestop {ticker}</code> to tighten",
+            [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
+            chat_id=uid,
+        )
 
 
 # ── Macro events helper ──────────────────────────────────────────────────────
@@ -3930,6 +4014,57 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
         print(f"[agent] _auto_set_pick_alerts failed (non-critical): {exc}")
 
 
+def _build_premarket_gap_warnings(picks: dict) -> dict[str, str]:
+    """
+    For each stock/ETF pick, check if the current price is > 3% above the entry_price.
+    Returns {ticker: warning_line} for picks that are gapping significantly above entry.
+    Uses yfinance fast_info (pre-market or last trade) — non-blocking, best-effort.
+    """
+    import yfinance as yf
+    import concurrent.futures as _cf
+
+    all_picks: list[dict] = []
+    stocks = picks.get("stocks", picks)
+    for p in stocks.get("short_term", []) + stocks.get("long_term", []):
+        if p.get("ticker") and p.get("entry_price"):
+            all_picks.append(p)
+    for p in picks.get("etfs", {}).get("short_term", []) + picks.get("etfs", {}).get("long_term", []):
+        if p.get("ticker") and p.get("entry_price"):
+            all_picks.append(p)
+
+    if not all_picks:
+        return {}
+
+    def _fetch(pick: dict):
+        ticker = pick["ticker"].upper()
+        try:
+            info  = yf.Ticker(ticker).fast_info
+            price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
+            if not price:
+                return ticker, None
+            entry = float(pick["entry_price"])
+            if entry <= 0:
+                return ticker, None
+            gap_pct = (float(price) - entry) / entry * 100
+            if gap_pct >= 3.0:
+                price_fmt = f"${float(price):,.2f}" if float(price) < 100 else f"${float(price):,.0f}"
+                entry_fmt = f"${entry:,.2f}" if entry < 100 else f"${entry:,.0f}"
+                return ticker, (
+                    f"<b>{ticker}</b> gapping +{gap_pct:.1f}% ({price_fmt} vs entry {entry_fmt}) "
+                    f"— now above entry window. Wait for pullback or skip."
+                )
+        except Exception:
+            pass
+        return ticker, None
+
+    warnings: dict[str, str] = {}
+    with _cf.ThreadPoolExecutor(max_workers=8) as pool:
+        for ticker, warn in pool.map(_fetch, all_picks):
+            if warn:
+                warnings[ticker] = warn
+    return warnings
+
+
 def _send_morning_personalised(picks: dict, global_config: dict, label: str = "",
                                market_closed: bool = False,
                                closed_reason: str = "",
@@ -4086,6 +4221,16 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
     except Exception as _cn_exc:
         print(f"[agent] Company name fetch failed (non-critical): {_cn_exc}")
 
+    # ── Pre-market gap check — flag picks that have already gapped above entry ──
+    premarket_gap_warnings: dict[str, str] = {}
+    if not market_closed:
+        try:
+            premarket_gap_warnings = _build_premarket_gap_warnings(picks)
+            if premarket_gap_warnings:
+                print(f"[agent] Pre-market gap warnings for: {list(premarket_gap_warnings.keys())}")
+        except Exception as _gap_exc:
+            print(f"[agent] Pre-market gap check failed (non-critical): {_gap_exc}")
+
     # ── Build all per-user payloads first (CPU-bound, fast), then broadcast concurrently ──
     outbox: list[dict] = []
     n_paused = 0
@@ -4134,6 +4279,14 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
                                            closed_reason=closed_reason,
                                            next_open_label=next_open_label,
                                            company_names=_picks_company_names or None)
+
+            # Prepend pre-market gap warnings if any picks are gapping above entry
+            if premarket_gap_warnings:
+                gap_lines = "\n".join(premarket_gap_warnings.values())
+                message = (
+                    f"⚡ <b>Pre-market gap alert</b>\n{gap_lines}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n\n" + message
+                )
 
             # Append /bought tip for users who have never logged a trade
             user_log = user_positions_cache.get(uid, None)
