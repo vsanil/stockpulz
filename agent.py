@@ -75,6 +75,45 @@ from cache_layer import cache_get, cache_set
 
 ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
+
+
+def _download_prices(tickers: list[str], **yf_kwargs) -> dict[str, float]:
+    """
+    Fetch latest close prices for a list of tickers.
+    Handles crypto symbols: BNB → BNB-USD, ETH → ETH-USD, etc.
+    Returns {orig_ticker: price} — keys always use the original symbol.
+    """
+    if not tickers:
+        return {}
+    from price_checker import _SYMBOL_TO_CG_ID
+    # Build yfinance symbol → original symbol mapping
+    yf_map: dict[str, str] = {}
+    for t in tickers:
+        yf_t = f"{t}-USD" if t.upper() in _SYMBOL_TO_CG_ID else t
+        yf_map[yf_t] = t
+    yf_tickers = list(yf_map.keys())
+    try:
+        raw = yf.download(" ".join(yf_tickers), progress=False, **yf_kwargs)
+        if raw.empty:
+            return {}
+        close = raw["Close"] if "Close" in raw else raw
+        prices: dict[str, float] = {}
+        if hasattr(close, "columns"):
+            for yf_t, orig_t in yf_map.items():
+                if yf_t in close.columns:
+                    try:
+                        prices[orig_t] = float(close[yf_t].dropna().iloc[-1])
+                    except Exception:
+                        pass
+        elif len(yf_tickers) == 1:
+            try:
+                orig = list(yf_map.values())[0]
+                prices[orig] = float(close.dropna().iloc[-1])
+            except Exception:
+                pass
+        return prices
+    except Exception:
+        return {}
 MOCK_DATA = os.environ.get("MOCK_DATA", "false").lower() == "true"
 
 # Default conviction threshold — picks below this are filtered before broadcast.
@@ -919,9 +958,15 @@ def run_confirmation():
                 scan = [t for t in watchlist if t and t not in pick_symbols]
                 if not scan:
                     continue
-                hist = yf.download(" ".join(scan), period="60d", interval="1d",
+                from price_checker import _SYMBOL_TO_CG_ID as _CG_IDS_WL
+                yf_scan_map = {(f"{t}-USD" if t.upper() in _CG_IDS_WL else t): t for t in scan}
+                hist = yf.download(" ".join(yf_scan_map.keys()), period="60d", interval="1d",
                                    progress=False, auto_adjust=True)
-                closes = hist["Close"] if hasattr(hist["Close"], "columns") else hist[["Close"]].rename(columns={"Close": scan[0]})
+                _close_raw = hist["Close"]
+                if not hasattr(_close_raw, "columns"):
+                    _close_raw = _close_raw.to_frame(name=list(yf_scan_map.keys())[0])
+                # Remap columns back to original tickers
+                closes = _close_raw.rename(columns=yf_scan_map)
                 for ticker in scan:
                     try:
                         col = closes[ticker] if ticker in closes.columns else closes.iloc[:, 0]
@@ -1346,29 +1391,20 @@ def run_friday_wrap():
             if open_trades:
                 try:
                     open_tickers = list({t["ticker"] for t in open_trades if t.get("ticker")})
-                    raw = yf.download(
-                        " ".join(open_tickers), period="1d", interval="1d",
-                        progress=False, auto_adjust=True,
-                    )
-                    if not raw.empty:
-                        if hasattr(raw["Close"], "columns"):
-                            prices = {t: float(raw["Close"][t].dropna().iloc[-1])
-                                      for t in open_tickers if t in raw["Close"].columns}
-                        else:
-                            prices = {open_tickers[0]: float(raw["Close"].dropna().iloc[-1])} if open_tickers else {}
-                        for trade in open_trades:
-                            ticker = trade.get("ticker")
-                            entry  = trade.get("entry_price")
-                            curr   = prices.get(ticker) if ticker else None
-                            if not (ticker and entry and curr):
-                                continue
-                            alloc  = trade.get("allocation") or trade.get("budget") or 0
-                            shares = trade.get("shares") or trade.get("quantity")
-                            if shares:
-                                unrealised_pnl += (float(curr) - float(entry)) * float(shares)
-                            elif alloc:
-                                est_shares = float(alloc) / float(entry)
-                                unrealised_pnl += (float(curr) - float(entry)) * est_shares
+                    prices = _download_prices(open_tickers, period="1d", interval="1d", auto_adjust=True)
+                    for trade in open_trades:
+                        ticker = trade.get("ticker")
+                        entry  = trade.get("entry_price")
+                        curr   = prices.get(ticker) if ticker else None
+                        if not (ticker and entry and curr):
+                            continue
+                        alloc  = trade.get("allocation") or trade.get("budget") or 0
+                        shares = trade.get("shares") or trade.get("quantity")
+                        if shares:
+                            unrealised_pnl += (float(curr) - float(entry)) * float(shares)
+                        elif alloc:
+                            est_shares = float(alloc) / float(entry)
+                            unrealised_pnl += (float(curr) - float(entry)) * est_shares
                 except Exception as exc:
                     print(f"[agent] Friday wrap — unrealised P&L fetch failed for {uid}: {exc}")
 
@@ -1505,17 +1541,9 @@ def run_tax_loss_harvest_check():
 
             open_tickers = list({t["ticker"] for t in open_trades if t.get("ticker")})
             try:
-                raw = yf.download(
-                    " ".join(open_tickers), period="1d", interval="1d",
-                    progress=False, auto_adjust=True,
-                )
-                if raw.empty:
+                prices = _download_prices(open_tickers, period="1d", interval="1d", auto_adjust=True)
+                if not prices:
                     continue
-                if hasattr(raw["Close"], "columns"):
-                    prices = {t: float(raw["Close"][t].dropna().iloc[-1])
-                              for t in open_tickers if t in raw["Close"].columns}
-                else:
-                    prices = {open_tickers[0]: float(raw["Close"].dropna().iloc[-1])} if open_tickers else {}
             except Exception as exc:
                 print(f"[agent] Tax harvest — price fetch failed for {uid}: {exc}")
                 continue
@@ -2779,28 +2807,30 @@ def _check_portfolio_drawdown(uid: str, current_prices: dict) -> None:
         if not tickers:
             return
 
-        # Fetch 2 days of data to get prev close + current
-        raw = yf.download(" ".join(tickers), period="2d", interval="1d",
+        # Fetch 2 days of data to get prev close + current (handles crypto via _download_prices)
+        from price_checker import _SYMBOL_TO_CG_ID as _CG_IDS
+        yf_map = {(f"{t}-USD" if t.upper() in _CG_IDS else t): t for t in tickers}
+        yf_tickers = list(yf_map.keys())
+        raw = yf.download(" ".join(yf_tickers), period="2d", interval="1d",
                           progress=False, auto_adjust=True)
         if raw.empty or len(raw) < 2:
             return
 
         close_data = raw["Close"]
         if not hasattr(close_data, "columns"):
-            # Single ticker — wrap in dict
-            close_data = close_data.to_frame(name=tickers[0])
+            close_data = close_data.to_frame(name=yf_tickers[0])
 
         prev_closes: dict = {}
         curr_closes: dict = {}
-        for t in tickers:
-            if t not in close_data.columns:
+        for yf_t, orig_t in yf_map.items():
+            if yf_t not in close_data.columns:
                 continue
-            col = close_data[t].dropna()
+            col = close_data[yf_t].dropna()
             if len(col) >= 2:
-                prev_closes[t] = float(col.iloc[-2])
-                curr_closes[t] = float(col.iloc[-1])
+                prev_closes[orig_t] = float(col.iloc[-2])
+                curr_closes[orig_t] = float(col.iloc[-1])
             elif len(col) == 1:
-                curr_closes[t] = float(col.iloc[-1])
+                curr_closes[orig_t] = float(col.iloc[-1])
 
         # Use intraday current_prices if more recent than daily close
         for t in tickers:
@@ -3657,20 +3687,7 @@ def run_price_alerts():
                 continue
 
             tickers = list({t["ticker"] for t in open_trades})
-            raw = yf.download(" ".join(tickers), period="1d", interval="1m",
-                              progress=False, auto_adjust=True)
-            current_prices = {}
-            if hasattr(raw["Close"], "columns"):
-                for t in tickers:
-                    if t in raw["Close"].columns:
-                        s = raw["Close"][t].dropna()
-                        if not s.empty:
-                            current_prices[t] = float(s.iloc[-1])
-            else:
-                if tickers:
-                    s = raw["Close"].dropna()
-                    if not s.empty:
-                        current_prices[tickers[0]] = float(s.iloc[-1])
+            current_prices = _download_prices(tickers, period="1d", interval="1m", auto_adjust=True)
 
             # Auto-close disabled — price_alert_manager sends the notification;
             # user closes the position manually via the portfolio tab.
