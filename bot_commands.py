@@ -116,8 +116,8 @@ def handle_incoming_command(message_text: str, chat_id: str | None = None) -> st
     # Record last-seen + log the command (background — non-blocking)
     def _record_seen():
         try:
-            from datetime import datetime as _dt
-            update_user_config(chat_id, "last_seen", _dt.utcnow().isoformat())
+            from datetime import datetime as _dt, timezone as _tz
+            update_user_config(chat_id, "last_seen", _dt.now(_tz.utc).isoformat())
         except Exception:
             pass
         try:

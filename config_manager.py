@@ -295,12 +295,12 @@ def get_pending_users() -> dict:
 
 def add_pending_user(chat_id: str, first_name: str = "", username: str = "") -> None:
     """Add a user to the pending approval list."""
-    from datetime import datetime
+    from datetime import datetime, timezone
     pending = get_pending_users()
     pending[str(chat_id)] = {
         "first_name":    first_name,
         "username":      username,
-        "requested_at":  datetime.utcnow().isoformat(),
+        "requested_at":  datetime.now(timezone.utc).isoformat(),
     }
     _write_gist_file(PENDING_USERS_FILE, pending)
 
@@ -318,7 +318,7 @@ def remove_pending_user(chat_id: str) -> None:
 def save_picks(picks: dict) -> None:
     """Save morning picks to Gist as picks.json for the confirmation run."""
     import pytz
-    from datetime import datetime
+    from datetime import datetime, timezone
     picks["_saved_date"] = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
     url = f"https://api.github.com/gists/{_gist_id()}"
     payload = {
@@ -341,7 +341,7 @@ def load_picks() -> dict | None:
     Date comparison uses US/Eastern timezone so picks stay valid until midnight ET
     (not midnight UTC which would expire them at 8 PM ET)."""
     import pytz
-    from datetime import datetime
+    from datetime import datetime, timezone
     today_et = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
     try:
         url = f"https://api.github.com/gists/{_gist_id()}"
@@ -508,10 +508,10 @@ def save_screener_cache(stock_results: dict, crypto_results: dict) -> None:
     Save pre-scored screener candidates from the midnight run.
     Stored as screener_cache.json in the Gist.
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
     payload = {
         "schema_version": SCREENER_CACHE_SCHEMA_VERSION,
-        "cached_at":      datetime.utcnow().isoformat(),
+        "cached_at":      datetime.now(timezone.utc).isoformat(),
         "stocks":         stock_results,
         "crypto":         crypto_results,
     }
@@ -541,7 +541,7 @@ def load_screener_cache() -> dict | None:
             return None
 
         cached_at = datetime.fromisoformat(data["cached_at"])
-        age = datetime.utcnow() - cached_at
+        age = datetime.now(timezone.utc) - cached_at
         if age > timedelta(hours=SCREENER_CACHE_MAX_AGE_HOURS):
             print(f"[config_manager] Screener cache is {age} old — too stale, ignoring.")
             return None
@@ -623,8 +623,8 @@ def load_macro_cache() -> dict | None:
         return None
     try:
         cached_at = datetime.fromisoformat(data["cached_at"])
-        if datetime.utcnow() - cached_at > timedelta(hours=MACRO_CACHE_TTL_HOURS):
-            print(f"[config_manager] Macro cache expired ({datetime.utcnow() - cached_at} old).")
+        if datetime.now(timezone.utc) - cached_at > timedelta(hours=MACRO_CACHE_TTL_HOURS):
+            print(f"[config_manager] Macro cache expired ({datetime.now(timezone.utc) - cached_at} old).")
             return None
         return data
     except Exception as exc:
@@ -638,9 +638,9 @@ def save_macro_cache(
     sector_rotation: dict | None = None,
 ) -> None:
     """Save macro signals to Gist with current UTC timestamp."""
-    from datetime import datetime
+    from datetime import datetime, timezone
     payload = {
-        "cached_at":       datetime.utcnow().isoformat(),
+        "cached_at":       datetime.now(timezone.utc).isoformat(),
         "fear_greed":      fear_greed,
         "rate_trend":      rate_trend,
         "sector_rotation": sector_rotation,
@@ -750,7 +750,7 @@ def load_feedback() -> list:
 def add_feedback(chat_id: str, text: str, username: str = "", first_name: str = "",
                  platform: str = "", page: str = "") -> None:
     """Append a new feedback entry with user + app context for admin triage."""
-    from datetime import datetime
+    from datetime import datetime, timezone
     data = _load_gist_file(FEEDBACK_FILE) or {"entries": []}
     data.setdefault("entries", [])
     data["entries"].insert(0, {
@@ -758,7 +758,7 @@ def add_feedback(chat_id: str, text: str, username: str = "", first_name: str = 
         "first_name":   first_name,
         "username":     username,
         "text":         text,
-        "submitted_at": datetime.utcnow().isoformat(),
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
         "read":         False,
         "platform":     platform,   # e.g. "ios", "android", "tdesktop"
         "page":         page,       # mini app tab active when feedback was sent
@@ -791,9 +791,9 @@ def log_user_event(chat_id: str, event_type: str, detail: str, level: str = "inf
     Levels: "info", "warn", "error"
     Types: "command", "error", "alert", "position", "settings", "system"
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
     entry = {
-        "ts":     datetime.utcnow().isoformat(),
+        "ts":     datetime.now(timezone.utc).isoformat(),
         "level":  level,
         "type":   event_type,
         "detail": str(detail)[:300],

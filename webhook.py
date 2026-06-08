@@ -13,7 +13,7 @@ import sys
 import time
 import threading
 import secrets as _sec
-from datetime import datetime as _dt, timedelta as _td
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 from functools import wraps as _wraps
 
 import requests
@@ -1005,7 +1005,7 @@ def admin_data():
 
     cfg     = get_config()
     owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
-    now_utc = _dt.utcnow()
+    now_utc = _dt.now(_tz.utc)
     users   = []
     total_open   = 0
     active_today = 0

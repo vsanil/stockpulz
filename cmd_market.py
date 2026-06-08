@@ -862,7 +862,7 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
     # ── /accuracy — personal win rate breakdown ───────────────────────────────
     if text == "ACCURACY":
         try:
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
             log     = load_user_trade_log(chat_id)
             closed  = log.get("closed", [])
             if not closed:
@@ -876,7 +876,7 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                     "<i>Tip: /history shows all your open &amp; closed trades.</i>"
                 )
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             def _period_stats(trades, days=None):
                 subset = trades
                 if days:

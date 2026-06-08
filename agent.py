@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 import pytz
 
@@ -144,7 +144,7 @@ def _picks_are_empty(picks: dict) -> bool:
 def _log_cron_run(mode: str) -> None:
     """Record the last run timestamp for a cron mode in the shared config."""
     try:
-        update_config(f"cron_last_{mode}", datetime.utcnow().isoformat())
+        update_config(f"cron_last_{mode}", datetime.now(timezone.utc).isoformat())
     except Exception as exc:
         print(f"[agent] cron log failed for {mode}: {exc}")
 
@@ -748,7 +748,7 @@ def run_morning(config: dict, now_et: datetime):
             tab="picks",
         )
         # Save timestamp for /dashboard
-        update_config("last_morning_run", datetime.utcnow().isoformat())
+        update_config("last_morning_run", datetime.now(timezone.utc).isoformat())
     except Exception as exc:
         print(f"[agent] Admin run summary failed (non-critical): {exc}")
 

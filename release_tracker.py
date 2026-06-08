@@ -36,7 +36,7 @@ def add_pending_note(summary: str, commit_hashes: list) -> None:
     data["pending"].append({
         "id": str(uuid.uuid4())[:8],
         "summary": summary,
-        "created_at": datetime.datetime.utcnow().isoformat(),
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "commits": commit_hashes,
     })
     _save(data)
@@ -48,7 +48,7 @@ def mark_note_sent(note_id: str, final_text: str) -> None:
     note = next((n for n in data["pending"] if n["id"] == note_id), None)
     if note:
         data["pending"] = [n for n in data["pending"] if n["id"] != note_id]
-        note["sent_at"] = datetime.datetime.utcnow().isoformat()
+        note["sent_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         note["final_text"] = final_text
         data["sent"].append(note)
         _save(data)
