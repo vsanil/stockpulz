@@ -439,6 +439,8 @@ def format_daily_message(picks: dict, config: dict,
     _closed_short = "closed" if market_closed else ""
 
     # ── Sections — each pick is its own expandable blockquote ─────────────────
+    _near_misses = (picks.get("stocks") or {}).get("near_misses") or {}
+
     if st_picks:
         lines += ["", "📈 <b>STOCKS — SHORT TERM</b>"]
         for s in st_picks:
@@ -446,6 +448,16 @@ def format_daily_message(picks: dict, config: dict,
     elif show_st:
         _st_skip = _closed_short or "no qualifying setup today"
         lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· {_st_skip}</i>"]
+        _nm_st = _near_misses.get("short_term") or []
+        if _nm_st and not _closed_short:
+            lines += ["<i>Near misses — didn't clear the bar:</i>"]
+            for nm in _nm_st[:3]:
+                tk    = nm.get("ticker", "")
+                price = nm.get("current_price")
+                score = nm.get("score", 0)
+                why   = nm.get("near_miss_reason", "close to threshold")
+                p_str = f"  ${price:,.2f}" if price else ""
+                lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}/100  · <i>{why}</i>"]
 
     if lt_picks:
         lines += ["", "🏦 <b>STOCKS — LONG TERM</b>"]
@@ -454,6 +466,16 @@ def format_daily_message(picks: dict, config: dict,
     elif show_lt:
         _lt_skip = _closed_short or "no stock cleared the quality bar today"
         lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
+        _nm_lt = _near_misses.get("long_term") or []
+        if _nm_lt and not _closed_short:
+            lines += ["<i>Near misses — didn't clear the bar:</i>"]
+            for nm in _nm_lt[:3]:
+                tk    = nm.get("ticker", "")
+                price = nm.get("current_price")
+                score = nm.get("score", 0)
+                why   = nm.get("near_miss_reason", "close to threshold")
+                p_str = f"  ${price:,.2f}" if price else ""
+                lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}/100  · <i>{why}</i>"]
 
     if cst_picks:
         lines += ["", "🪙 <b>CRYPTO</b>  <i>· high risk</i>"]
@@ -484,6 +506,8 @@ def format_daily_message(picks: dict, config: dict,
             lines += [f"<blockquote expandable>{_row_options(o)}</blockquote>"]
     elif st_picks:
         lines += ["", "🎯 <b>OPTIONS</b>  <i>· no qualifying conviction today</i>"]
+    elif show_st and not _closed_short:
+        lines += ["", "🎯 <b>OPTIONS</b>  <i>· no underlying stock setups today</i>"]
 
     # ── Watchlist: hit callout + "On Your Radar" section ─────────────────────
     if watchlist:

@@ -101,6 +101,7 @@ def _filter_by_conviction(picks: dict, min_conviction: int) -> dict:
         result["stocks"] = {
             "short_term": _clean(s.get("short_term", [])),
             "long_term":  _clean(s.get("long_term",  [])),
+            "near_misses": s.get("near_misses", {}),  # pass through, no filtering
         }
     if "crypto" in result:
         c = result["crypto"]
@@ -619,6 +620,14 @@ def run_morning(config: dict, now_et: datetime):
         # Attach macro context so the formatter can display it
         if macro_context:
             picks["macro_context"] = macro_context
+
+        # Preserve near-misses from screener — Claude doesn't see these,
+        # attach them directly so the formatter can show "almost qualified" picks
+        _nm = stock_candidates.get("near_misses")
+        if _nm:
+            if "stocks" not in picks:
+                picks["stocks"] = {}
+            picks["stocks"]["near_misses"] = _nm
 
     # ── Position sizing ───────────────────────────────────────────────────────
     # Only run if the user has configured a portfolio_size.
