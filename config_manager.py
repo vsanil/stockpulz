@@ -655,9 +655,19 @@ def save_macro_cache(
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _write_config(config: dict) -> None:
-    """Write config dict to the Gist as config.json (also invalidates cache)."""
-    _write_gist_file(GIST_FILENAME, config)   # _write_gist_file already invalidates
-    print(f"[config_manager] Config updated: {config}")
+    """Write config dict directly to Gist as config.json via GitHub API.
+    Must use the same path as get_config() reads from — NOT the storage backend
+    (Supabase), which get_config() never reads."""
+    _cache_invalidate(GIST_FILENAME)
+    url = f"https://api.github.com/gists/{_gist_id()}"
+    payload = {"files": {GIST_FILENAME: {"content": json.dumps(config, indent=2)}}}
+    try:
+        resp = requests.patch(url, headers=_gist_headers(), json=payload, timeout=10)
+        resp.raise_for_status()
+        _cache_set(GIST_FILENAME, config)
+        print(f"[config_manager] Config updated: {config}")
+    except Exception as exc:
+        print(f"[config_manager] WARNING: Could not write Gist config ({exc}).")
 
 
 def _load_gist_file(filename: str) -> dict | None:
