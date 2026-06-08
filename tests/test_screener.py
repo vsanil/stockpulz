@@ -54,6 +54,32 @@ class TestDeduplicateByCorrelation:
 # ── run_screener raw= scope regression ───────────────────────────────────────
 
 class TestRunScreenerRawScope:
+    def test_near_miss_reason_st(self):
+        """_add_near_miss_reason returns a reason string for ST picks."""
+        from screener import _add_near_miss_reason
+        pick = {"ticker": "AAPL", "score": 45, "current_price": 210.0,
+                "st_metrics": {"rsi": 72, "macd_crossover": False, "volume_ratio": 1.1, "above_ema20": True}}
+        result = _add_near_miss_reason(pick, is_st=True)
+        assert "near_miss_reason" in result
+        assert len(result["near_miss_reason"]) > 0
+
+    def test_near_miss_reason_lt(self):
+        """_add_near_miss_reason returns a reason string for LT picks."""
+        from screener import _add_near_miss_reason
+        pick = {"ticker": "MSFT", "score": 55, "current_price": 415.0,
+                "lt_metrics": {"pe_ratio": 45, "debt_to_equity": 0.5}}
+        result = _add_near_miss_reason(pick, is_st=False)
+        assert "near_miss_reason" in result
+        assert "P/E" in result["near_miss_reason"]
+
+    def test_near_miss_reason_always_returns_string(self):
+        """near_miss_reason is always a non-empty string."""
+        from screener import _add_near_miss_reason
+        pick = {"ticker": "XYZ", "score": 60, "st_metrics": {}}
+        result = _add_near_miss_reason(pick, is_st=True)
+        assert isinstance(result["near_miss_reason"], str)
+        assert len(result["near_miss_reason"]) > 0
+
     def test_raw_not_defined_error_is_fixed(self):
         """
         Regression: 'name raw is not defined' NameError was raised because

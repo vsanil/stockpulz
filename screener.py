@@ -960,6 +960,45 @@ def _long_term_score(
     return score, metrics
 
 
+# ── Near-miss reason helper ───────────────────────────────────────────────────
+
+def _add_near_miss_reason(pick: dict, is_st: bool) -> dict:
+    """
+    Add a human-readable 'near_miss_reason' to a candidate that almost qualified.
+    Reads the existing metrics dict to find the primary limiting factor.
+    """
+    pick = dict(pick)
+    m = pick.get("st_metrics" if is_st else "lt_metrics") or {}
+    reasons = []
+
+    if is_st:
+        rsi = m.get("rsi")
+        if rsi is not None:
+            if rsi > 65:
+                reasons.append(f"RSI {rsi:.0f} — overbought")
+            elif rsi < 30:
+                reasons.append(f"RSI {rsi:.0f} — oversold")
+        if not m.get("macd_crossover"):
+            reasons.append("no MACD crossover")
+        vol = m.get("volume_ratio")
+        if vol is not None and vol < 1.5:
+            reasons.append(f"vol ratio {vol:.1f}x")
+        if not m.get("above_ema20"):
+            reasons.append("below EMA20")
+    else:
+        pe = m.get("pe_ratio")
+        if pe and pe > 40:
+            reasons.append(f"P/E {pe:.0f} — stretched")
+        if not m.get("revenue_growth") and m.get("revenue_growth") != 0:
+            reasons.append("no revenue growth data")
+        debt = m.get("debt_to_equity")
+        if debt and debt > 2:
+            reasons.append(f"high debt/equity {debt:.1f}")
+
+    pick["near_miss_reason"] = " · ".join(reasons[:2]) if reasons else "close to threshold"
+    return pick
+
+
 # ── Main screener ─────────────────────────────────────────────────────────────
 
 def run_screener(
@@ -1448,10 +1487,19 @@ def run_screener(
     print(f"[screener] Top long-term:  {[s['ticker'] for s in long_top]}")
     print(f"[screener] Regime: {regime} — {regime_info['note']}")
 
+    # ── Near-misses: top candidates that didn't make the final cut ────────────
+    _top_st_tickers = {s["ticker"] for s in short_top}
+    _top_lt_tickers = {s["ticker"] for s in long_top}
+    nm_st = [_add_near_miss_reason(c, is_st=True)
+             for c in short_candidates if c["ticker"] not in _top_st_tickers][:3]
+    nm_lt = [_add_near_miss_reason(c, is_st=False)
+             for c in long_candidates  if c["ticker"] not in _top_lt_tickers][:3]
+
     return {
-        "short_term": short_top,
-        "long_term":  long_top,
-        "regime":     regime_info,
+        "short_term":  short_top,
+        "long_term":   long_top,
+        "regime":      regime_info,
+        "near_misses": {"short_term": nm_st, "long_term": nm_lt},
     }
 
 
