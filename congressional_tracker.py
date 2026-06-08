@@ -18,7 +18,7 @@ Cached 24h — filings are batch-released, not real-time.
 from __future__ import annotations
 
 import requests
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from config_manager import load_signal_cache, save_signal_cache
 
@@ -48,7 +48,7 @@ def _is_cache_fresh(cache: dict) -> bool:
         return False
     try:
         cached_dt = datetime.fromisoformat(ts)
-        age_hrs = (datetime.utcnow() - cached_dt).total_seconds() / 3600
+        age_hrs = (datetime.now(timezone.utc) - cached_dt).total_seconds() / 3600
         return age_hrs < CACHE_TTL_HRS
     except Exception:
         return False
@@ -162,7 +162,7 @@ def get_all_congressional_trades() -> dict[str, dict]:
 
     # Save to signal cache
     cache[CACHE_KEY] = {
-        "cached_at": datetime.utcnow().isoformat(),
+        "cached_at": datetime.now(timezone.utc).isoformat(),
         "trades":    trades,
     }
     save_signal_cache(cache)

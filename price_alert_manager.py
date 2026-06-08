@@ -14,7 +14,7 @@ Usage via Telegram commands:
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import yfinance as yf
 
 from config_manager import _load_gist_file, _write_gist_file
@@ -138,7 +138,7 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
         "ticker":       ticker,
         "target":       target_price,
         "direction":    direction,
-        "set_at":       datetime.utcnow().isoformat(),
+        "set_at":       datetime.now(timezone.utc).isoformat(),
         "price_at_set": round(current, 2),
     }
     if recurring:
@@ -270,7 +270,7 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
             hist.append({
                 "ticker":          t,
                 "triggered_price": round(current, 2),
-                "triggered_at":    datetime.utcnow().isoformat(),
+                "triggered_at":    datetime.now(timezone.utc).isoformat(),
                 "target":          a["target"],
                 "direction":       a["direction"],
             })
@@ -294,7 +294,7 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
                 remaining.append({
                     **a,
                     "price_at_set": round(current, 2),
-                    "set_at":       datetime.utcnow().isoformat(),
+                    "set_at":       datetime.now(timezone.utc).isoformat(),
                 })
         else:
             remaining.append(a)

@@ -116,7 +116,7 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
         users   = get_allowed_users()
         owner   = str(os.environ.get("TELEGRAM_CHAT_ID", ""))
         pending = get_pending_users()
-        now_utc = _dt.utcnow()
+        now_utc = _dt.now(_tz.utc)
 
         # ── Active users (seen in last 7 days) ────────────────────────────────
         active_7d = 0
