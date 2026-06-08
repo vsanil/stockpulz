@@ -199,6 +199,7 @@ def trigger_mode(mode: str):
         "macro_alert", "midday_check", "vix_check", "news_check",
         "pre_earnings", "monthly_commentary", "watchdog", "tax_harvest",
         "morning", "prescreener",   # kept for completeness; dedicated endpoints take priority
+        "price_alerts",             # runs every 30 min during market hours
     }
     if mode not in _VALID_MODES:
         return jsonify({"error": f"unknown mode: {mode}"}), 400

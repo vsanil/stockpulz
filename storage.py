@@ -133,7 +133,7 @@ class SupabaseBackend(StorageBackend):
                     .maybe_single()
                     .execute()
                 )
-                if resp.data:
+                if resp is not None and resp.data:
                     result[0] = resp.data["content"]
             except Exception as exc:
                 print(f"[storage/supabase] read({filename}) failed: {exc}")
