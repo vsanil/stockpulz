@@ -802,6 +802,10 @@ def _deduplicate_by_correlation(
     if len(picks) <= 1:
         return picks[:max_picks]
 
+    # hist_data may be None if the download failed — skip correlation filter
+    if hist_data is None:
+        return picks[:max_picks]
+
     # Build close price matrix for candidate tickers
     close_dict = {}
     for p in picks:
@@ -1422,6 +1426,19 @@ def run_screener(
     long_candidates = [_flatten_long(enriched[s["ticker"]]) for s in lt_pool
                        if s["ticker"] in enriched]
     long_candidates = sorted(long_candidates, key=lambda x: x["score"], reverse=True)
+
+    # Fetch historical price data for correlation deduplication
+    _all_candidate_tickers = list(dict.fromkeys(
+        [s["ticker"] for s in short_candidates] +
+        [s["ticker"] for s in long_candidates]
+    ))
+    raw = None
+    if _all_candidate_tickers:
+        try:
+            import yfinance as _yf
+            raw = _yf.download(_all_candidate_tickers, period="30d", progress=False)
+        except Exception as _raw_exc:
+            print(f"[screener] correlation data fetch failed (non-critical): {_raw_exc}")
 
     # Apply correlation filter to remove redundant picks
     short_top = _deduplicate_by_correlation(short_candidates, raw, max_st)
