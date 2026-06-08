@@ -160,6 +160,11 @@ Rules:
 - cron-job.org has a REST API: `GET/PATCH https://api.cron-job.org/jobs/<id>` with `Authorization: Bearer <key>` — use it for programmatic fixes instead of saying "I can't access that"
 - To fix a broken cron job: fetch job details, patch the URL, set `enabled: true`
 
+### Memory updates — do it as you go, not just at the end
+- Update project_state.md after every significant change, not just at session end
+- If a new bug pattern is found mid-session, add it to CLAUDE.md immediately
+- "Updating memory" is not optional cleanup — it is part of every commit
+
 ### External service access — always ask for API keys first
 - Before saying "I can't access X", check if X has a REST API and ask the user for an API key
 - cron-job.org, Render, GitHub — all have REST APIs accessible via Bearer token
