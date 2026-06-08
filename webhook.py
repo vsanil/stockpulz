@@ -116,23 +116,20 @@ def trigger_morning():
         except Exception as _e:
             print(f"[trigger_morning] Duplicate check failed (non-critical): {_e}")
 
-    # Spawn morning run as isolated background subprocess
+    # Spawn morning run as a detached subprocess — start_new_session=True ensures
+    # agent.py survives gunicorn worker restarts (new process group, not killed
+    # by SIGTERM to the parent worker).
     owner_only  = request.args.get("owner_only", "").lower() in ("1", "true")
     extra_env   = {"RUN_MODE": "morning"}
     if owner_only:
         extra_env["OWNER_ONLY"] = "1"
-    import threading, subprocess, sys as _sys
-    def _run():
-        try:
-            subprocess.run(
-                [_sys.executable, "agent.py"],
-                env={**os.environ, **extra_env},
-                cwd=os.path.dirname(os.path.abspath(__file__)),
-                timeout=600,
-            )
-        except Exception as _exc:
-            print(f"[trigger_morning] Background run error: {_exc}")
-    threading.Thread(target=_run, daemon=True).start()
+    import subprocess, sys as _sys
+    subprocess.Popen(
+        [_sys.executable, "agent.py"],
+        env={**os.environ, **extra_env},
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        start_new_session=True,   # detach from gunicorn worker process group
+    )
     print(f"[trigger_morning] Morning run spawned (owner_only={owner_only}).")
     return jsonify({"ok": True, "triggered": True, "owner_only": owner_only}), 200
 
@@ -163,18 +160,13 @@ def trigger_prescreener():
     except Exception as _e:
         print(f"[trigger_prescreener] Duplicate check failed (non-critical): {_e}")
 
-    import threading, subprocess, sys as _sys
-    def _run():
-        try:
-            subprocess.run(
-                [_sys.executable, "agent.py"],
-                env={**os.environ, "RUN_MODE": "prescreener"},
-                cwd=os.path.dirname(os.path.abspath(__file__)),
-                timeout=300,
-            )
-        except Exception as _exc:
-            print(f"[trigger_prescreener] Background run error: {_exc}")
-    threading.Thread(target=_run, daemon=True).start()
+    import subprocess, sys as _sys
+    subprocess.Popen(
+        [_sys.executable, "agent.py"],
+        env={**os.environ, "RUN_MODE": "prescreener"},
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        start_new_session=True,
+    )
     print("[trigger_prescreener] Prescreener spawned.")
     return jsonify({"ok": True, "triggered": True}), 200
 
@@ -232,23 +224,14 @@ def trigger_mode(mode: str):
     if owner_only:
         extra_env["OWNER_ONLY"] = "1"
 
-    # Timeouts vary by mode — longer for heavy jobs
-    _LONG_MODES = {"morning", "prescreener", "weekly", "eod_summary", "monthly_commentary"}
-    timeout = 600 if mode in _LONG_MODES else 300
-
-    import threading, subprocess, sys as _sys
-    def _run():
-        try:
-            subprocess.run(
-                [_sys.executable, "agent.py"],
-                env={**os.environ, **extra_env},
-                cwd=os.path.dirname(os.path.abspath(__file__)),
-                timeout=timeout,
-            )
-        except Exception as _exc:
-            print(f"[trigger/{mode}] Background run error: {_exc}")
-    threading.Thread(target=_run, daemon=True).start()
-    print(f"[trigger/{mode}] Spawned (owner_only={owner_only}, timeout={timeout}s).")
+    import subprocess, sys as _sys
+    subprocess.Popen(
+        [_sys.executable, "agent.py"],
+        env={**os.environ, **extra_env},
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        start_new_session=True,   # detach from gunicorn worker process group
+    )
+    print(f"[trigger/{mode}] Spawned (owner_only={owner_only}).")
     return jsonify({"ok": True, "triggered": True, "mode": mode, "owner_only": owner_only}), 200
 
 
