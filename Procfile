@@ -1,1 +1,1 @@
-web: gunicorn webhook:app --workers 2 --bind 0.0.0.0:${PORT:-10000} --timeout 120
+web: gunicorn webhook:app --workers 1 --bind 0.0.0.0:${PORT:-10000} --timeout 120
