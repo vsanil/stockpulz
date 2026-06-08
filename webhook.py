@@ -125,7 +125,20 @@ def trigger_morning():
         extra_env["OWNER_ONLY"] = "1"
     if force:
         extra_env["FORCE_MORNING"] = "1"
-    import subprocess, sys as _sys
+    import subprocess, sys as _sys, signal as _signal
+    # Kill any existing agent.py processes before spawning — prevents memory
+    # buildup from multiple concurrent runs (each start_new_session=True process
+    # survives independently and all consume memory simultaneously).
+    try:
+        result = subprocess.run(["pgrep", "-f", "agent.py"], capture_output=True, text=True)
+        for pid in result.stdout.strip().split():
+            try:
+                os.kill(int(pid), _signal.SIGTERM)
+            except Exception:
+                pass
+        print(f"[trigger_morning] Killed existing agent.py processes: {result.stdout.strip()}")
+    except Exception:
+        pass
     subprocess.Popen(
         [_sys.executable, "agent.py"],
         env={**os.environ, **extra_env},
@@ -226,7 +239,17 @@ def trigger_mode(mode: str):
     if owner_only:
         extra_env["OWNER_ONLY"] = "1"
 
-    import subprocess, sys as _sys
+    import subprocess, sys as _sys, signal as _signal
+    # Kill existing agent.py processes to prevent memory buildup from concurrent runs
+    try:
+        result = subprocess.run(["pgrep", "-f", "agent.py"], capture_output=True, text=True)
+        for pid in result.stdout.strip().split():
+            try:
+                os.kill(int(pid), _signal.SIGTERM)
+            except Exception:
+                pass
+    except Exception:
+        pass
     subprocess.Popen(
         [_sys.executable, "agent.py"],
         env={**os.environ, **extra_env},
