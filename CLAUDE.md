@@ -154,3 +154,13 @@ Rules:
 - Auto-refresh timers must be silent: no spinners, no full re-renders, no innerHTML swaps that reset scroll position. Use targeted DOM updates (getElementById, textContent, style.width).
 - If a background job (refresh, sync, price update) fails, swallow the error silently. Never surface a background failure to the user as an error state.
 - When in doubt: do less. A conservative change that improves load time by 20% with zero UX risk beats an aggressive change that saves 60% but has a 5% chance of a visible flash.
+
+### cron-job.org management
+- CRON_SECRET contains `#` — must always be URL-encoded as `%23` in cron-job.org job URLs or Render receives the wrong secret
+- cron-job.org has a REST API: `GET/PATCH https://api.cron-job.org/jobs/<id>` with `Authorization: Bearer <key>` — use it for programmatic fixes instead of saying "I can't access that"
+- To fix a broken cron job: fetch job details, patch the URL, set `enabled: true`
+
+### External service access — always ask for API keys first
+- Before saying "I can't access X", check if X has a REST API and ask the user for an API key
+- cron-job.org, Render, GitHub — all have REST APIs accessible via Bearer token
+- One API call saves multiple manual steps for the user
