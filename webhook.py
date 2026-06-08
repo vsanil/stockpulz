@@ -123,6 +123,8 @@ def trigger_morning():
     extra_env   = {"RUN_MODE": "morning"}
     if owner_only:
         extra_env["OWNER_ONLY"] = "1"
+    if force:
+        extra_env["FORCE_MORNING"] = "1"
     import subprocess, sys as _sys
     subprocess.Popen(
         [_sys.executable, "agent.py"],

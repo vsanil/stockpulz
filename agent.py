@@ -3847,7 +3847,8 @@ def main():
         # sending picks twice.
         _last_morning = config.get("cron_last_morning", "")
         _today_et     = now_et.date().isoformat()
-        if _last_morning and _last_morning[:10] >= _today_et and not MOCK_DATA:
+        _force        = os.environ.get("FORCE_MORNING", "").lower() in ("1", "true")
+        if _last_morning and _last_morning[:10] >= _today_et and not MOCK_DATA and not _force:
             print(f"[agent] Morning already ran today ({_last_morning[:16]}) — skipping duplicate (GitHub Actions backup).")
         else:
             run_morning(config, now_et)
