@@ -702,14 +702,17 @@ def _load_gist_file(filename: str) -> dict | None:
 
 def _write_gist_file(filename: str, data: dict) -> None:
     """
-    Write any dict as a JSON blob via the active storage backend.
+    Write any dict as a JSON blob directly to Gist via GitHub API.
     Always invalidates the in-memory cache before writing.
 
-    Routing: get_storage_backend() auto-selects Gist or Supabase based on env vars.
+    Must write to Gist directly (not get_storage_backend()) because
+    _load_gist_file falls back to GistBackend on Supabase read failures —
+    data written to Supabase is never found by the fallback read path.
+    Same fix applied to _write_config (Jun 08).
     """
     _cache_invalidate(filename)   # invalidate before write so stale data is never served
-    from storage import get_storage_backend
-    get_storage_backend().write(filename, data)
+    from storage import GistBackend
+    GistBackend().write(filename, data)
 
 
 # ── Pending conversation state (multi-step commands) ─────────────────────────
