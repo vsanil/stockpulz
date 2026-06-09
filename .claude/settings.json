@@ -11,5 +11,15 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(curl -s https://stock-agent-enqx.onrender.com/health)",
+      "Bash(curl -s -H *)",
+      "Bash(python3 scripts/check_js.py)",
+      "Bash(python3 -m py_compile *)",
+      "Bash(python3 -m pytest tests/ *)",
+      "Bash(python3 -m pytest tests/test_*)"
+    ]
   }
 }
