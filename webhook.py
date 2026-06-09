@@ -175,14 +175,25 @@ def trigger_prescreener():
     except Exception as _e:
         print(f"[trigger_prescreener] Duplicate check failed (non-critical): {_e}")
 
-    import subprocess, sys as _sys
+    import subprocess, sys as _sys, signal as _signal
+    # Kill any stale prescreener processes before spawning a fresh one
+    try:
+        result = subprocess.run(["pgrep", "-f", "run_prescreener.py"], capture_output=True, text=True)
+        if result.stdout.strip():
+            for pid in result.stdout.strip().split():
+                try:
+                    os.kill(int(pid), _signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            print(f"[trigger_prescreener] Killed stale prescreener: {result.stdout.strip()}")
+    except Exception:
+        pass
     subprocess.Popen(
-        [_sys.executable, "agent.py"],
-        env={**os.environ, "RUN_MODE": "prescreener"},
+        [_sys.executable, "run_prescreener.py"],
         cwd=os.path.dirname(os.path.abspath(__file__)),
         start_new_session=True,
     )
-    print("[trigger_prescreener] Prescreener spawned.")
+    print("[trigger_prescreener] Prescreener spawned (run_prescreener.py).")
     return jsonify({"ok": True, "triggered": True}), 200
 
 
