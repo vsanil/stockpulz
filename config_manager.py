@@ -672,26 +672,21 @@ def _write_config(config: dict) -> None:
 
 def _load_gist_file(filename: str) -> dict | None:
     """
-    Fetch and parse a JSON file from the active storage backend.
+    Fetch and parse a JSON file directly from Gist via GitHub API.
     Checks in-memory cache first — saves a round-trip on cache hits.
     Returns None on any error.
 
-    Routing: get_storage_backend() auto-selects Gist or Supabase based on env vars.
-    Callers never change — swap storage by setting SUPABASE_URL + SUPABASE_KEY.
+    Reads directly from GistBackend (not get_storage_backend()) because
+    Supabase reads consistently return None on this instance, and the silent
+    fallback was masking the failure. Symmetric with _write_gist_file.
+    Same fix applied to _write_config and _write_gist_file (Jun 08-09).
     """
     cached = _cache_get(filename)
     if cached is not None:
         return cached
     try:
-        from storage import get_storage_backend, GistBackend
-        result = get_storage_backend().read(filename)
-        # If primary backend (Supabase) has no data, fall back to Gist
-        if result is None:
-            try:
-                gist = GistBackend()
-                result = gist.read(filename)
-            except Exception:
-                pass
+        from storage import GistBackend
+        result = GistBackend().read(filename)
         if result is not None:
             _cache_set(filename, result)
         return result
