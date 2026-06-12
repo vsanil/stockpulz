@@ -13,6 +13,10 @@ matplotlib>=3.7.0
 aiohttp>=3.9.0
 supabase>=2.0.0
 upstash-redis>=1.0.0
+# Explicit pins: anthropic + supabase + upstash-redis all need httpx; without
+# these top-level pins pip 25.x backtracks into ResolutionImpossible on Render.
+httpx>=0.27,<0.29
+httpcore>=1.0,<2
 sentry-sdk[flask]>=2.0.0
 finnhub-python>=2.4.0
 curl_cffi>=0.7.0
