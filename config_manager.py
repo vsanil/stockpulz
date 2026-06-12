@@ -525,7 +525,7 @@ def load_screener_cache() -> dict | None:
     and matches the current schema version.  Returns the cache dict
     {schema_version, cached_at, stocks, crypto} or None if invalid.
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     data = _load_gist_file(SCREENER_CACHE_FILE)
     if not data:
         return None
@@ -617,7 +617,7 @@ def load_macro_cache() -> dict | None:
     Returns None if missing or older than MACRO_CACHE_TTL_HOURS.
     Structure: { "cached_at": ISO str, "fear_greed": {...}, "rate_trend": {...} }
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     data = _load_gist_file(MACRO_CACHE_FILE)
     if not data:
         return None

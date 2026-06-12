@@ -409,3 +409,70 @@ class TestBuyCounts:
         _gist_store.write("buy_counts.json", {"date": yesterday, "counts": {"NVDA": 5}})
         n = config_manager.increment_buy_count("NVDA")
         assert n == 1   # reset to 1, not 6
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestScreenerCache:
+    """save_screener_cache → load_screener_cache round-trip.
+
+    Regression: the Jun 8 utcnow() cleanup left load_screener_cache using
+    timezone.utc without importing timezone (function-local datetime import).
+    The NameError was swallowed by the except → cache NEVER loaded → morning
+    runs fell back to the full 600-ticker screener → OOM on 512MB Render.
+    """
+
+    STOCKS = {"short_term": [{"ticker": "RJF", "score": 80}],
+              "long_term":  [{"ticker": "UNH", "lt_score": 70}]}
+    CRYPTO = {"short_term": [], "long_term": []}
+
+    def test_round_trip_returns_saved_data(self, _gist_store):
+        config_manager.save_screener_cache(self.STOCKS, self.CRYPTO)
+        cache = config_manager.load_screener_cache()
+        assert cache is not None, "fresh cache must load (NameError regression)"
+        assert cache["stocks"] == self.STOCKS
+        assert cache["crypto"] == self.CRYPTO
+
+    def test_rejects_old_schema(self, _gist_store):
+        config_manager.save_screener_cache(self.STOCKS, self.CRYPTO)
+        data = _gist_store.load("screener_cache.json")
+        data["schema_version"] = config_manager.SCREENER_CACHE_SCHEMA_VERSION - 1
+        _gist_store.write("screener_cache.json", data)
+        assert config_manager.load_screener_cache() is None
+
+    def test_rejects_stale_cache(self, _gist_store):
+        from datetime import datetime, timedelta, timezone
+        config_manager.save_screener_cache(self.STOCKS, self.CRYPTO)
+        data = _gist_store.load("screener_cache.json")
+        stale = datetime.now(timezone.utc) - timedelta(
+            hours=config_manager.SCREENER_CACHE_MAX_AGE_HOURS + 1)
+        data["cached_at"] = stale.isoformat()
+        _gist_store.write("screener_cache.json", data)
+        assert config_manager.load_screener_cache() is None
+
+    def test_missing_cache_returns_none(self, _gist_store):
+        assert config_manager.load_screener_cache() is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestMacroCache:
+    """save_macro_cache → load_macro_cache round-trip (same NameError family)."""
+
+    def test_round_trip_returns_saved_data(self, _gist_store):
+        config_manager.save_macro_cache({"value": 10}, {"trend": "down"})
+        cache = config_manager.load_macro_cache()
+        assert cache is not None, "fresh macro cache must load (NameError regression)"
+        assert cache["fear_greed"] == {"value": 10}
+        assert cache["rate_trend"] == {"trend": "down"}
+
+    def test_rejects_expired_cache(self, _gist_store):
+        from datetime import datetime, timedelta, timezone
+        config_manager.save_macro_cache({"value": 10}, {"trend": "down"})
+        data = _gist_store.load("macro_cache.json")
+        stale = datetime.now(timezone.utc) - timedelta(
+            hours=config_manager.MACRO_CACHE_TTL_HOURS + 1)
+        data["cached_at"] = stale.isoformat()
+        _gist_store.write("macro_cache.json", data)
+        assert config_manager.load_macro_cache() is None
+
+    def test_missing_cache_returns_none(self, _gist_store):
+        assert config_manager.load_macro_cache() is None
