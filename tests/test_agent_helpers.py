@@ -602,3 +602,48 @@ class TestBuildPremarketGapWarnings:
         with patch("agent.datetime", _FakePremarketDatetime):
             result = ag._build_premarket_gap_warnings({})
         assert result == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestScreenerCacheWithRetry:
+    """_screener_cache_with_retry — transient Gist failures must not cost picks."""
+
+    def test_returns_cache_first_try(self):
+        with patch.object(ag, "load_screener_cache", return_value={"stocks": {}}):
+            assert ag._screener_cache_with_retry() == {"stocks": {}}
+
+    def test_recovers_after_transient_failures(self):
+        calls = iter([ConnectionError("gist down"), None, {"stocks": {}}])
+
+        def _flaky():
+            v = next(calls)
+            if isinstance(v, Exception):
+                raise v
+            return v
+
+        with patch.object(ag, "load_screener_cache", side_effect=_flaky), \
+             patch.object(ag.time, "sleep"):
+            assert ag._screener_cache_with_retry(attempts=3) == {"stocks": {}}
+
+    def test_returns_none_when_all_attempts_fail(self):
+        with patch.object(ag, "load_screener_cache", return_value=None), \
+             patch.object(ag.time, "sleep") as mock_sleep:
+            assert ag._screener_cache_with_retry(attempts=3) is None
+            assert mock_sleep.call_count == 2   # no sleep after final attempt
+
+    def test_returns_none_when_all_attempts_raise(self):
+        with patch.object(ag, "load_screener_cache", side_effect=RuntimeError("boom")), \
+             patch.object(ag.time, "sleep"):
+            assert ag._screener_cache_with_retry(attempts=3) is None
+
+
+class TestCanRunLiveScreener:
+    """_can_run_live_screener — 512MB OOM guard keyed off Render's RENDER env var."""
+
+    def test_blocked_on_render(self, monkeypatch):
+        monkeypatch.setenv("RENDER", "true")
+        assert ag._can_run_live_screener() is False
+
+    def test_allowed_elsewhere(self, monkeypatch):
+        monkeypatch.delenv("RENDER", raising=False)
+        assert ag._can_run_live_screener() is True
