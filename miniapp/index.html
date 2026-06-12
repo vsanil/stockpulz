@@ -518,9 +518,10 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.08); border-color: rgba(0,0
 }
 
 /* Pick action row: Chart (small) + Buy (flex) */
-.pick-actions { display: flex; gap: 8px; position: relative; z-index: 1; }
+.pick-actions { display: flex; flex-wrap: wrap; gap: 8px; position: relative; z-index: 1; }
 .btn-buy {
   flex: 1; padding: 12px;
+  min-width: 150px;   /* can't fit beside Chart/Backtest/Alert → wraps to its own full-width row */
   border-radius: 12px; border: none;
   background: linear-gradient(135deg, var(--accent) 0%, #5a9bff 50%, var(--green) 140%);
   color: #fff;
@@ -632,7 +633,8 @@ body.tg-light .picker-tf  { background: rgba(0,0,0,.07); }
   color: var(--text); font-size: 13px; font-weight: 600;
   cursor: pointer; font-family: inherit;
   transition: transform .12s, background .15s, border-color .15s;
-  display: flex; align-items: center; gap: 5px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  flex: 1 0 auto;   /* grow to fill wrapped rows evenly; never shrink/clip */
   white-space: nowrap;
   backdrop-filter: blur(8px);
 }
