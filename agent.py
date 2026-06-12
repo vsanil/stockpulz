@@ -3953,6 +3953,12 @@ def run_digest():
                 if not log.get("open"):
                     continue
                 reply = _parse_and_execute("DIGEST", original="/digest", chat_id=chat_id)
+                # Background job: never surface failures to users. The command
+                # layer's catch-all returns a "Something went wrong" reply —
+                # swallow it here (admin sees the log), users see nothing.
+                if reply and "Something went wrong" in reply:
+                    print(f"[agent] run_digest: handler errored for {chat_id} — suppressed.")
+                    continue
                 if reply:
                     send_message(reply, chat_id=chat_id)
                     sent += 1

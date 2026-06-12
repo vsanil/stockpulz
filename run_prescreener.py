@@ -1,11 +1,14 @@
 """
-run_prescreener.py — Lightweight midnight pre-screener.
+run_prescreener.py — Lightweight midnight pre-screener (MANUAL/LOCAL USE).
 
 Scores 600 tickers and saves top candidates to Gist for the 7 AM morning run.
-Intentionally thin: imports only screener + config_manager + crypto_screener.
-No anthropic, no telegram, no formatters — peak RAM ~200MB vs ~300MB for agent.py.
+Thin imports only (screener + config_manager + crypto_screener) — but even
+this proved too heavy for Render's 512MB instance (OOMed Jun 11 2026).
 
-Spawned by webhook.py /trigger/prescreener instead of agent.py.
+Production prescreening runs on GitHub Actions (daily_run.yml, 03:00 +
+07:00 UTC schedules, 7GB runners). webhook.py /trigger/prescreener relays
+there via workflow dispatch. Keep this script for generating the cache
+from a laptop when GitHub is unavailable: python3 run_prescreener.py
 """
 from __future__ import annotations
 

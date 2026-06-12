@@ -149,11 +149,17 @@ def trigger_morning():
     return jsonify({"ok": True, "triggered": True, "owner_only": owner_only}), 200
 
 
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "vsanil/stockpulz")
+
+
 @app.route("/trigger/prescreener", methods=["POST", "GET"])
 def trigger_prescreener():
     """
     Called by cron-job.org at 3:00 AM UTC (11 PM EDT) on weekdays.
-    Runs the overnight prescreener that caches stock scores for the morning run.
+    Relays to GitHub Actions via workflow dispatch — the 600-ticker screener
+    needs more RAM than this 512MB instance (proven OOM; never run it here).
+    GH's own 03:00/07:00 UTC schedules are the primary; this relay is a
+    redundant trigger and the manual recovery path.
     Protected by CRON_SECRET env var.
     """
     secret   = os.environ.get("CRON_SECRET", "")
@@ -162,39 +168,46 @@ def trigger_prescreener():
         return jsonify({"error": "unauthorized"}), 403
 
     # Duplicate guard — skip if prescreener already ran tonight
-    try:
-        import pytz as _tz
-        from datetime import datetime as _dt
-        from config_manager import get_config as _gcfg
-        _cfg   = _gcfg()
-        _last  = _cfg.get("cron_last_prescreener", "")
-        _today = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
-        if _last and _last[:10] >= _today:
-            print(f"[trigger_prescreener] Already ran today ({_last[:16]}) — skipping.")
-            return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
-    except Exception as _e:
-        print(f"[trigger_prescreener] Duplicate check failed (non-critical): {_e}")
+    # (bypass with ?force=true for manual recovery)
+    force = request.args.get("force", "").lower() == "true"
+    if not force:
+        try:
+            import pytz as _tz
+            from datetime import datetime as _dt
+            from config_manager import get_config as _gcfg
+            _cfg   = _gcfg()
+            _last  = _cfg.get("cron_last_prescreener", "")
+            _today = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
+            if _last and _last[:10] >= _today:
+                print(f"[trigger_prescreener] Already ran today ({_last[:16]}) — skipping.")
+                return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
+        except Exception as _e:
+            print(f"[trigger_prescreener] Duplicate check failed (non-critical): {_e}")
 
-    import subprocess, sys as _sys, signal as _signal
-    # Kill any stale prescreener processes before spawning a fresh one
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if not gh_token:
+        print("[trigger_prescreener] GITHUB_TOKEN not set — cannot dispatch workflow.")
+        return jsonify({"ok": False, "error": "GITHUB_TOKEN not configured"}), 500
+
     try:
-        result = subprocess.run(["pgrep", "-f", "run_prescreener.py"], capture_output=True, text=True)
-        if result.stdout.strip():
-            for pid in result.stdout.strip().split():
-                try:
-                    os.kill(int(pid), _signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-            print(f"[trigger_prescreener] Killed stale prescreener: {result.stdout.strip()}")
-    except Exception:
-        pass
-    subprocess.Popen(
-        [_sys.executable, "run_prescreener.py"],
-        cwd=os.path.dirname(os.path.abspath(__file__)),
-        start_new_session=True,
-    )
-    print("[trigger_prescreener] Prescreener spawned (run_prescreener.py).")
-    return jsonify({"ok": True, "triggered": True}), 200
+        import requests as _rq
+        resp = _rq.post(
+            f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/daily_run.yml/dispatches",
+            headers={
+                "Authorization": f"Bearer {gh_token}",
+                "Accept": "application/vnd.github+json",
+            },
+            json={"ref": "main", "inputs": {"run_mode": "prescreener"}},
+            timeout=10,
+        )
+        if resp.status_code == 204:
+            print("[trigger_prescreener] GitHub Actions prescreener dispatched.")
+            return jsonify({"ok": True, "dispatched": True}), 200
+        print(f"[trigger_prescreener] Dispatch failed: {resp.status_code} {resp.text[:200]}")
+        return jsonify({"ok": False, "error": f"dispatch returned {resp.status_code}"}), 502
+    except Exception as exc:
+        print(f"[trigger_prescreener] Dispatch error: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 502
 
 
 @app.route("/trigger/<mode>", methods=["POST", "GET"])

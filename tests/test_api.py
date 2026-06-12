@@ -810,3 +810,62 @@ class TestOpenTradesLtCrypto:
         log = load_user_trade_log(chat_id)
         avax_entries = [t for t in log["open"] if t["ticker"] == "AVAX"]
         assert len(avax_entries) == 1, "duplicate trade should not be added"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PRESCREENER TRIGGER — relays to GitHub Actions (512MB OOM guard)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestTriggerPrescreener:
+    """/trigger/prescreener must dispatch the GH workflow, never spawn locally."""
+
+    SECRET = "test-cron-secret"
+
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("CRON_SECRET", self.SECRET)
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+
+    def test_wrong_secret_returns_403(self, client):
+        r = client.post("/trigger/prescreener?secret=wrong")
+        assert r.status_code == 403
+
+    def test_dispatches_github_workflow(self, client, monkeypatch):
+        import webhook as wh
+        from unittest.mock import MagicMock
+        mock_post = MagicMock(return_value=MagicMock(status_code=204))
+        monkeypatch.setattr("requests.post", mock_post)
+        r = client.post(f"/trigger/prescreener?secret={self.SECRET}&force=true")
+        assert r.status_code == 200
+        assert r.get_json()["dispatched"] is True
+        url = mock_post.call_args[0][0]
+        assert "actions/workflows/daily_run.yml/dispatches" in url
+        assert mock_post.call_args[1]["json"]["inputs"]["run_mode"] == "prescreener"
+
+    def test_missing_token_returns_500(self, client, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN")
+        r = client.post(f"/trigger/prescreener?secret={self.SECRET}&force=true")
+        assert r.status_code == 500
+        assert r.get_json()["ok"] is False
+
+    def test_github_error_returns_502(self, client, monkeypatch):
+        from unittest.mock import MagicMock
+        monkeypatch.setattr(
+            "requests.post",
+            MagicMock(return_value=MagicMock(status_code=500, text="boom")),
+        )
+        r = client.post(f"/trigger/prescreener?secret={self.SECRET}&force=true")
+        assert r.status_code == 502
+
+    def test_duplicate_guard_skips_same_day(self, client, monkeypatch, _gist_store):
+        from datetime import datetime
+        import pytz
+        today_iso = datetime.now(pytz.timezone("America/New_York")).isoformat()
+        cfg = _gist_store.load("config.json") or {}
+        cfg["cron_last_prescreener"] = today_iso
+        _gist_store.write("config.json", cfg)
+        import config_manager
+        monkeypatch.setattr(config_manager, "get_config", lambda: cfg)
+        r = client.post(f"/trigger/prescreener?secret={self.SECRET}")
+        assert r.status_code == 200
+        assert r.get_json().get("skipped") is True

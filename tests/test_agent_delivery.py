@@ -222,3 +222,39 @@ class TestSendMorningParamPassing:
             assert required in params, (
                 f"_send_morning_personalised is missing parameter '{required}'"
             )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestRunDigestSilentFailure:
+    """Scheduled digest must NEVER surface errors to users.
+
+    Regression (2026-06-11): the DIGEST command handler threw, the command
+    layer's catch-all returned "Something went wrong. Please try again in a
+    moment." and run_digest broadcast that error to every user.
+    """
+
+    def _run(self, reply):
+        import agent
+        sent = []
+        with patch("config_manager.get_allowed_users", return_value=["111"]), \
+             patch("config_manager.get_user_config", return_value={}), \
+             patch("config_manager.load_user_trade_log",
+                   return_value={"open": [{"ticker": "NVDA"}]}), \
+             patch("config_manager.update_config", return_value=None), \
+             patch("bot_commands._parse_and_execute", return_value=reply), \
+             patch("telegram_api.send_message",
+                   side_effect=lambda text, chat_id=None, **kw: sent.append(text)):
+            agent.run_digest()
+        return sent
+
+    def test_error_reply_suppressed(self):
+        sent = self._run("⚠️ Something went wrong. Please try again in a moment.")
+        assert sent == []
+
+    def test_normal_digest_delivered(self):
+        sent = self._run("🌅 <b>Morning Digest</b>")
+        assert sent == ["🌅 <b>Morning Digest</b>"]
+
+    def test_empty_reply_not_sent(self):
+        sent = self._run("")
+        assert sent == []
