@@ -15,6 +15,30 @@ Rules:
 - For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
 - After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
 
+## Memory / OOM architecture (settled Jun 12, 2026 — do not relitigate)
+
+- **Render 512MB CANNOT run the 600-ticker screener in any form** — full agent.py OOMs, thin run_prescreener.py OOMs. Proven empirically 5+ times. Do not try again.
+- **Prescreener runs on GitHub Actions** (7GB): daily_run.yml schedules 03:00 UTC primary + 07:00 UTC backup, both → prescreener mode. Cache save is idempotent.
+- **Render /trigger/prescreener is a relay** — dispatches the GH workflow via GITHUB_TOKEN; never spawns locally. cron-job.org keeps hitting it unchanged (redundant third trigger).
+- **`_can_run_live_screener()` guard in agent.py**: morning run NEVER falls back to the live screener when RENDER env var is set (Render sets it automatically). Cache miss → admin-only alert + crypto/ETF picks continue; users see normal "no stock setups today" rendering.
+- Morning run WITH cache is light (~2-3 min, well under 512MB). The 10h cache TTL tolerates GH Actions peak-load delays.
+- Manual cache recovery: `python3 run_prescreener.py` locally, or `/trigger/prescreener?secret=…&force=true`.
+- An unmapped schedule in daily_run.yml defaults to prescreener, NEVER morning — must not send user-facing picks at odd hours.
+
+### Bug pattern: function-local datetime imports + bulk refactors
+- The Jun 8 utcnow() cleanup replaced `datetime.utcnow()` → `datetime.now(timezone.utc)` but missed adding `timezone` to FUNCTION-LOCAL `from datetime import …` lines in config_manager.py. The NameError was swallowed by catch-all excepts → `load_screener_cache` and `load_macro_cache` NEVER worked in production → every morning ran the full screener → OOM → no picks.
+- py_compile does NOT catch NameErrors inside function bodies. Catch-all `except Exception` around cache loaders hides them completely.
+- **Rule: every save/load cache pair MUST have a save→load round-trip test** (see TestScreenerCache / TestMacroCache in tests/test_config_manager.py).
+- **Rule: after any bulk find-replace refactor, grep every function-local import scope the replacement touched** — module-level imports are not enough.
+
+### Background jobs must fail silently to users
+- run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
+
+### Ops API access (Render/GitHub)
+- Render logs: `GET https://api.render.com/v1/logs?resource=<srv-id>&ownerId=<tea-id>` (ownerId required). Events: `/v1/services/<id>/events` — shows `oomKilled` with memory limit.
+- Render OOM kills destroy agent.py's buffered stdout — only stderr (yfinance noise) survives in logs. A run with yfinance lines but no `[agent]` lines = stdout buffer lost to a kill.
+- pip ResolutionImpossible on Render claiming "no matching distribution" for a transitive dep (httpx/httpcore) → add explicit top-level pins; verify the wheel exists with `pip download --python-version <ver> --no-deps` first.
+
 ## Development rules
 
 ### Scope — always apply changes everywhere
