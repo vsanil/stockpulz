@@ -11,8 +11,16 @@ name: StockPulz Scheduled Runs
 #   Private repos → 2000 min/month (these jobs use ~1400 min/month combined)
 
 on:
-  # All scheduled jobs have moved to cron-job.org → Render /trigger/<mode> endpoints.
-  # This workflow is kept for manual testing only.
+  # Light jobs are scheduled on cron-job.org → Render /trigger/<mode> endpoints.
+  # The PRESCREENER runs HERE: the 600-ticker screener needs more RAM than
+  # Render's 512MB instance (proven OOM) — GitHub runners have 7GB.
+  # Two shots nightly: 03:00 UTC primary + 07:00 UTC backup (cache save is
+  # idempotent; the 10h cache TTL tolerates GH Actions' peak-load delays).
+  # Render's /trigger/prescreener endpoint also relays here via workflow
+  # dispatch, giving a third, cron-job.org-driven redundant trigger.
+  schedule:
+    - cron: "0 3 * * 1-5"   # prescreener — primary (11 PM ET)
+    - cron: "0 7 * * 1-5"   # prescreener — backup  (3 AM ET)
   workflow_dispatch:
     inputs:
       run_mode:
@@ -65,6 +73,8 @@ jobs:
             MODE="$MANUAL"
           elif [[ "$SCHEDULE" == "0 3 * * 1-5" ]]; then
             MODE="prescreener"
+          elif [[ "$SCHEDULE" == "0 7 * * 1-5" ]]; then
+            MODE="prescreener"   # backup run — cache save is idempotent
           elif [[ "$SCHEDULE" == "45 12 * * 1-5" ]]; then
             MODE="premarket"
           elif [[ "$SCHEDULE" == "0 15 * * 1-5" ]]; then
@@ -100,8 +110,10 @@ jobs:
           elif [[ "$SCHEDULE" == "0 13 * * 1-5" ]]; then
             MODE="watchdog"
           else
-            echo "Unknown schedule '$SCHEDULE' — defaulting to morning"
-            MODE="morning"
+            # Default to prescreener, NOT morning — an unmapped schedule must
+            # never send user-facing picks at an unexpected hour.
+            echo "Unknown schedule '$SCHEDULE' — defaulting to prescreener"
+            MODE="prescreener"
           fi
 
           echo "RUN_MODE=$MODE" >> $GITHUB_ENV

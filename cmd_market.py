@@ -1316,8 +1316,8 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                 "<i>Log one with /bought — I'll give you a morning brief on it each day.</i>"
             )
 
-        send_message("🌅 <i>Building your morning digest…</i>", chat_id=chat_id)
-
+        # No "Building…" teaser: if the build then fails, the user is left
+        # with a dangling teaser (or worse, an error). Build first, send once.
         tickers = [t["ticker"] for t in open_t if t.get("ticker")]
         lines   = ["🌅 <b>Morning Digest</b>  ·  your positions\n"]
 
