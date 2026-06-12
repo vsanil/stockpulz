@@ -473,6 +473,32 @@ def run_prescreener(config: dict):
 
 # ── Morning run ───────────────────────────────────────────────────────────────
 
+def _screener_cache_with_retry(attempts: int = 3, delay_s: int = 4) -> dict | None:
+    """
+    Load the midnight screener cache, retrying transient Gist failures.
+    A single flaky GitHub API call must never cost users their morning picks.
+    """
+    for i in range(attempts):
+        try:
+            cache = load_screener_cache()
+            if cache:
+                return cache
+        except Exception as exc:
+            print(f"[agent] Screener cache load attempt {i + 1}/{attempts} failed: {exc}")
+        if i < attempts - 1:
+            time.sleep(delay_s)
+    return None
+
+
+def _can_run_live_screener() -> bool:
+    """
+    The full 600-ticker screener needs more RAM than Render's 512MB instance
+    (proven OOM). Render sets RENDER=true automatically — never run the live
+    screener there; GitHub Actions (7GB) is the only environment that can.
+    """
+    return not os.environ.get("RENDER")
+
+
 def run_morning(config: dict, now_et: datetime):
     """Full screener + Claude analysis + save picks + send morning message."""
     _log_cron_run("morning")
@@ -557,11 +583,7 @@ def run_morning(config: dict, now_et: datetime):
                 print(f"[agent] Macro context fetch failed (non-critical): {exc}")
 
             # ── Stock screener: use midnight cache if fresh, else run live ────
-            cache = None
-            try:
-                cache = load_screener_cache()
-            except Exception as exc:
-                print(f"[agent] Screener cache load failed (non-critical): {exc}")
+            cache = _screener_cache_with_retry()
 
             if cache:
                 print("[agent] Using midnight screener cache — skipping live screener.")
@@ -579,6 +601,19 @@ def run_morning(config: dict, now_et: datetime):
                 if _before != _after:
                     print(f"[agent] LT quality floor: dropped {_before - _after} "
                           f"cached candidates with lt_score < {_LT_FLOOR}.")
+            elif not _can_run_live_screener():
+                # 512MB OOM guard: degrade gracefully — users get crypto/ETF
+                # picks with the normal "no stock setups today" rendering;
+                # only the admin learns something went wrong.
+                print("[agent] No screener cache and live screener disabled on "
+                      "this host (512MB OOM guard) — stock picks skipped.")
+                _alert(
+                    "⚠️ <b>Screener cache missing</b> — stock picks omitted from "
+                    "this morning's brief (live screener disabled on Render). "
+                    "Re-run the GitHub Actions prescreener, then trigger "
+                    "/trigger/morning?force=true to recover.",
+                    admin_only=True,
+                )
             else:
                 print("[agent] No fresh screener cache — running live stock screener...")
                 try:
