@@ -2642,8 +2642,8 @@ body.tg-light { --hint: #4b5563; }
       <p class="sheet-hint" id="buypos-hint">Confirm your entry and stop — these power your price alerts.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
         <div>
-          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Entry Price</div>
-          <input type="number" id="buypos-entry" class="ticker-input" placeholder="e.g. 2.27"
+          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Entry Price <span style="font-weight:400;opacity:.7">(per share)</span></div>
+          <input type="number" id="buypos-entry" class="ticker-input" placeholder="price per share"
                  step="0.01" min="0"
                  oninput="_updateBuyCost()"
                  onkeydown="if(event.key==='Enter')document.getElementById('buypos-shares').focus()">

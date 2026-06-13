@@ -1252,18 +1252,30 @@ def run_eod_summary():
             watchlist      = cfg.get("watchlist", [])
             open_positions = log.get("open", [])
 
+            # Price the user's open positions too — get_current_prices only
+            # covers pick tickers, which silently dropped every non-pick
+            # position from the "Open positions vs entry" block.
+            user_prices = dict(current_prices)
+            missing = [p["ticker"] for p in open_positions
+                       if p.get("ticker") and p["ticker"] not in user_prices]
+            if missing:
+                try:
+                    user_prices.update(_download_prices(missing))
+                except Exception as _px_exc:
+                    print(f"[agent] EOD position price fetch failed for {uid} (non-critical): {_px_exc}")
+
             # ── EOD full summary (picks performance) ─────────────────────────
-            msg = format_eod_full_summary(picks, current_prices, open_positions, watchlist=watchlist)
+            msg = format_eod_full_summary(picks, user_prices, open_positions, watchlist=watchlist)
 
             # ── Hold/fold nudges ──────────────────────────────────────────────
             try:
-                _check_hold_or_fold(uid, current_prices)
+                _check_hold_or_fold(uid, user_prices)
             except Exception as _hf_exc:
                 print(f"[agent] Hold/fold nudge failed for {uid} (non-critical): {_hf_exc}")
 
             # ── Take-profit nudges ────────────────────────────────────────────
             try:
-                _check_take_profit_nudge(uid, current_prices)
+                _check_take_profit_nudge(uid, user_prices)
             except Exception as _tp_exc:
                 print(f"[agent] Take-profit nudge failed for {uid} (non-critical): {_tp_exc}")
 
@@ -1273,13 +1285,13 @@ def run_eod_summary():
                 eod_insights: list[str] = []
 
                 try:
-                    health_blocks = _check_portfolio_health(uid, current_prices)
+                    health_blocks = _check_portfolio_health(uid, user_prices)
                     eod_insights.extend(health_blocks or [])
                 except Exception as _h_exc:
                     print(f"[agent] health check failed for {uid}: {_h_exc}")
 
                 try:
-                    cash_note = _check_cash_position(uid, cfg, open_positions, current_prices)
+                    cash_note = _check_cash_position(uid, cfg, open_positions, user_prices)
                     if cash_note:
                         eod_insights.append(cash_note)
                 except Exception as _c_exc:

@@ -79,31 +79,49 @@ def _entry_window(entry, stop=None, budget=None,
         pct_label = "3%" if pct == 0.03 else "2%"
 
         # ── Position sizing suffix ────────────────────────────────────────────
+        # NEVER fabricate a whole share the budget can't afford (a $50 crypto
+        # budget used to show "1 share" of BTC with a $3k risk figure).
+        def _qty_label(budget_f: float) -> tuple[float, str] | None:
+            """Return (quantity, display) for the budget, or None if a stock
+            budget can't afford a single share."""
+            if is_crypto:
+                qty = budget_f / e
+                return qty, f"{qty:.4g} unit{'s' if qty != 1 else ''}"
+            whole = int(budget_f / e)
+            if whole < 1:
+                return None
+            return whole, f"{whole} share{'s' if whole != 1 else ''}"
+
         sizing = ""
         if is_long_term:
-            # LT picks have no stop — just show share count if budget set
+            # LT picks have no stop — just show position size if budget set
             if budget:
-                shares = max(1, int(float(budget) / e))
-                sizing = f"  ·  <code>${int(budget)}</code> → ~{shares} share{'s' if shares != 1 else ''}"
+                q = _qty_label(float(budget))
+                sizing = (f"  ·  <code>${int(budget)}</code> → ~{q[1]}" if q else
+                          f"  ·  <code>${int(budget)}</code> &lt; 1 share — use fractional or skip")
             return (
                 f"⏱ <i>Patient entry — up to <code>${_p(upper)}</code>  "
                 f"<b>(+{pct_label})</b>{sizing}</i>"
             )
         else:
-            # Short-term: always show risk/share; add share count if budget set
+            # Short-term: always show risk/share; add position size if budget set
             risk_str = ""
             if stop:
                 risk_per_share = round(e - float(stop), 2)
                 if risk_per_share > 0:
                     risk_str = f"  ·  risk <b>${_p(risk_per_share)}/share</b>"
                     if budget:
-                        shares    = max(1, int(float(budget) / e))
-                        total_risk = round(shares * risk_per_share, 2)
-                        sizing = (
-                            f"  ·  <code>${int(budget)}</code> → {shares} share{'s' if shares != 1 else ''}, "
-                            f"${_p(total_risk)} risk at stop"
-                        )
-                        risk_str = sizing   # replace plain risk_str with full sizing line
+                        q = _qty_label(float(budget))
+                        if q:
+                            qty, qty_str = q
+                            total_risk = round(qty * risk_per_share, 2)
+                            risk_str = (
+                                f"  ·  <code>${int(budget)}</code> → {qty_str}, "
+                                f"${_p(total_risk)} risk at stop"
+                            )
+                        else:
+                            risk_str += (f"  ·  <code>${int(budget)}</code> &lt; 1 share "
+                                         f"— use fractional or skip")
             return (
                 f"⏱ <i>Enter within {pct_label} — skip if above "
                 f"<code>${_p(upper)}</code>{risk_str}</i>"
@@ -633,10 +651,17 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
         stop   = pick.get("stop_loss")
         target = pick.get("target_price")
 
-        # Shares from budget
+        # Shares from budget — crypto is fractional; never log a whole coin
+        # the budget can't afford (a $50 budget must not log 1 BTC)
         budget_key = "crypto_budget" if asset_type == "crypto" else "stock_budget"
         budget = cfg.get(budget_key)
-        shares = max(1, int(float(budget) / float(entry))) if (budget and entry) else 1
+        if budget and entry:
+            if asset_type == "crypto":
+                shares = round(float(budget) / float(entry), 6)
+            else:
+                shares = max(1, int(float(budget) / float(entry)))
+        else:
+            shares = 1
 
         # Percentages — rounded to 1 decimal
         try:
@@ -1050,10 +1075,17 @@ def format_eod_full_summary(
         pnl_sign      = "+" if total_pnl >= 0 else "-"
         pnl_emoji     = "📈" if avg_port_pct >= 0 else "📉"
 
+        # The math is vs ENTRY, not vs yesterday's close — label it honestly.
+        # If some positions couldn't be priced, say so instead of presenting
+        # a partial average as the whole portfolio.
+        n_open    = len([h for h in all_holdings if h.get("ticker") and h.get("entry_price")])
+        coverage  = (f"  <i>({len(port_rows)} of {n_open} positions priced)</i>"
+                     if len(port_rows) < n_open else "")
+
         lines.append("")
-        lines.append(f"<b>{pnl_emoji} Portfolio P&amp;L today</b>")
+        lines.append(f"<b>{pnl_emoji} Open positions vs entry</b>{coverage}")
         lines.append(
-            f"Avg move: <b>{sign}{avg_port_pct:.1f}%</b>  "
+            f"Avg: <b>{sign}{avg_port_pct:.1f}%</b>  "
             f"·  {len(gainers)} up  ·  {len(losers)} down"
         )
         if total_pnl != 0:

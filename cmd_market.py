@@ -1185,23 +1185,30 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         risk_multiplier = {"conservative": 0.5, "moderate": 1.0, "aggressive": 1.5}.get(risk_profile, 1.0)
         max_risk_amt    = budget * (stop_pct / 100) * risk_multiplier
         shares          = max_risk_amt / (price * stop_pct / 100)
-        shares          = max(1, round(shares))
+        if is_crypto:
+            shares      = round(shares, 6)
+        else:
+            shares      = max(1, round(shares))
         total_cost      = round(shares * price, 2)
         stop_price      = round(price * (1 - stop_pct / 100), 2)
         target_price    = round(price * (1 + (stop_pct * 2) / 100), 2)   # 2:1 reward/risk
 
         # Cap to budget
         if total_cost > budget:
-            shares     = max(1, int(budget / price))
+            if is_crypto:
+                shares     = round(budget / price, 6)
+            else:
+                shares     = max(1, int(budget / price))
             total_cost = round(shares * price, 2)
 
         risk_amt   = round(shares * price * stop_pct / 100, 2)
         reward_amt = round(shares * (target_price - price), 2)
 
+        qty_label = f"{shares}" if is_crypto else f"{int(shares)} share{'s' if shares != 1 else ''}"
         return (
             f"💰 <b>Position Size — {ticker}</b>\n\n"
             f"Live price:    <code>${price:,.2f}</code>\n"
-            f"Suggested:     <b>{shares} share{'s' if shares != 1 else ''}</b>  (${total_cost:,.2f})\n\n"
+            f"Suggested:     <b>{qty_label}</b>  (${total_cost:,.2f})\n\n"
             f"🛑 Stop loss:  <code>${stop_price:,.2f}</code>  (−{stop_pct}%)\n"
             f"🎯 Target:     <code>${target_price:,.2f}</code>  (+{stop_pct*2}%)\n\n"
             f"Max risk:      <b>${risk_amt:,.2f}</b>  ·  Reward: <b>${reward_amt:,.2f}</b>\n"
