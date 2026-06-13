@@ -3812,7 +3812,7 @@ async function confirmAddPosition() {
 }
 
 // ── Buy confirmation sheet (from Picks tab) ───────────────────────────────
-let _buyposSym = '', _buyposType = '', _buyposTf = '';
+let _buyposSym = '', _buyposType = '', _buyposTf = '', _buyposLivePrice = null;
 
 function _lookupPickLevels(sym) {
   if (!picksCache) return {};
@@ -3843,8 +3843,9 @@ async function openBuySheet(sym, assetType, tf) {
   const costHintEl = document.getElementById('buypos-cost-hint');
   const btn        = document.getElementById('buypos-btn');
 
-  btn.disabled    = false;
-  btn.textContent = 'Log Position';
+  btn.disabled      = false;
+  btn.textContent   = 'Log Position';
+  _buyposLivePrice  = null;
   if (sharesEl)   sharesEl.value   = '';
   if (costHintEl) costHintEl.textContent = '';
 
@@ -3874,6 +3875,7 @@ async function openBuySheet(sym, assetType, tf) {
     const data = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(sym)}`);
     if (data && data.price) {
       const p = data.price;
+      _buyposLivePrice  = p;
       entryEl.value = fmtPriceInput(p);
       hintEl.textContent = `Live price $${fmtPrice(p)} pre-filled — adjust if needed.`;
       hintEl.style.color = 'var(--green)';
@@ -3908,6 +3910,13 @@ function _updateBuyCost() {
   if (!costHintEl) return;
   const entry  = parseFloat(entryEl?.value);
   const shares = parseFloat(sharesEl?.value);
+
+  if (_buyposLivePrice && entry > _buyposLivePrice * 1.5) {
+    costHintEl.style.color = 'var(--red, #fc8181)';
+    costHintEl.textContent = `⚠️ Looks like a total — current price is $${fmtPrice(_buyposLivePrice)} per share`;
+    return;
+  }
+  costHintEl.style.color = 'var(--hint)';
   if (shares > 0 && entry > 0) {
     const cost = (shares * entry).toFixed(2);
     costHintEl.textContent = `Est. cost: $${parseFloat(cost).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
