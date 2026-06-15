@@ -3798,6 +3798,69 @@ def _backtest_fetch_prices(ticker: str) -> tuple[list, list]:
     return [], []
 
 
+@app.route("/api/miniapp/close_on_date", methods=["GET"])
+def miniapp_close_on_date():
+    """
+    Return the closing price for a ticker on a given date — or the nearest
+    prior trading day for weekends/holidays/gaps.
+
+    Robinhood does dollar-based investing, so users remember the *total* they
+    invested and roughly *when* — not the per-share price or fractional share
+    count. Given total + date the Log Position sheet recovers
+    entry_price = close(date) and shares = total / close, which powers all the
+    %-based P&L and price alerts.
+
+    Query: ?ticker=LRCX&date=YYYY-MM-DD
+    Returns: {ok, ticker, price, actual_date, requested_date, is_estimate}
+      is_estimate is True when the close came from a prior trading day (weekend/
+      holiday) or the requested date predates our 1-year history window.
+    """
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+
+    ticker   = (request.args.get("ticker") or "").strip().upper()
+    date_str = (request.args.get("date") or "").strip()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    if not date_str:
+        return jsonify({"error": "date required"}), 400
+
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        target = _dt.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "date must be YYYY-MM-DD"}), 400
+
+    if target > _dt.now(_tz.utc).date():
+        return jsonify({"error": "date cannot be in the future"}), 400
+
+    dates, closes = _backtest_fetch_prices(ticker)
+    if not dates:
+        return jsonify({"error": f"No price history for {ticker}"}), 404
+
+    # dates are ascending — walk to the last trading day on or before the target
+    chosen_date = chosen_price = None
+    for d, c in zip(dates, closes):
+        if d <= date_str:
+            chosen_date, chosen_price = d, c
+        else:
+            break
+
+    if chosen_price is None:
+        # target predates our 1-year window → use the earliest close we have
+        chosen_date, chosen_price = dates[0], closes[0]
+
+    return jsonify({
+        "ok": True,
+        "ticker": ticker,
+        "price": chosen_price,
+        "actual_date": chosen_date,
+        "requested_date": date_str,
+        "is_estimate": chosen_date != date_str,
+    })
+
+
 @app.route("/api/miniapp/backtest_pick", methods=["GET"])
 def miniapp_backtest_pick():
     """

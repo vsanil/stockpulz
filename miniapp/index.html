@@ -1340,6 +1340,28 @@ body.tg-light .price-input { background: rgba(0,0,0,0.03); }
 }
 .btn-cancel:active { color: var(--text); }
 
+/* ── Log Position: input-mode toggle + date chips ────────────────────────── */
+.buypos-modes {
+  display: flex; gap: 6px; padding: 4px; margin-bottom: 14px;
+  background: rgba(0,0,0,0.22); border-radius: 12px;
+}
+body.tg-light .buypos-modes { background: rgba(0,0,0,0.04); }
+.buypos-mode-btn {
+  flex: 1; padding: 9px 8px; border: none; border-radius: 9px;
+  background: transparent; color: var(--hint);
+  font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.buypos-mode-btn.active { background: var(--accent); color: #fff; }
+.date-chip {
+  padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text); font-size: 13px; font-weight: 600;
+  font-family: inherit; cursor: pointer; white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.date-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 /* ── Add Position / Add Cash / Alert ticker inputs ───────────────────────── */
 .ticker-input {
   width: 100%; padding: 14px 16px; border-radius: 14px;
@@ -2639,38 +2661,68 @@ body.tg-light { --hint: #4b5563; }
       <button class="sheet-close" onclick="closeBuySheet()">✕</button>
     </div>
     <div class="sheet-body">
-      <p class="sheet-hint" id="buypos-hint">Confirm your entry and stop — these power your price alerts.</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
-        <div>
-          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Entry Price <span style="font-weight:400;opacity:.7">(per share)</span></div>
-          <input type="number" id="buypos-entry" class="ticker-input" placeholder="price per share"
-                 step="0.01" min="0"
-                 oninput="_updateBuyCost()"
-                 onkeydown="if(event.key==='Enter')document.getElementById('buypos-shares').focus()">
-        </div>
-        <div>
-          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Shares <span style="font-weight:400;opacity:.7">(opt)</span></div>
-          <input type="number" id="buypos-shares" class="ticker-input" placeholder="e.g. 10"
-                 step="any" min="0.0001"
-                 oninput="_updateBuyCost()"
-                 onkeydown="if(event.key==='Enter')document.getElementById('buypos-stop').focus()">
+      <p class="sheet-hint" id="buypos-hint">Most people just know the total they put in — that's all you need.</p>
+
+      <!-- How did you enter the values? -->
+      <div class="buypos-modes">
+        <button type="button" id="buypos-mode-total" class="buypos-mode-btn active" onclick="setBuyMode('total')">💵 Total invested</button>
+        <button type="button" id="buypos-mode-price" class="buypos-mode-btn" onclick="setBuyMode('price')">🎯 Exact $/share</button>
+      </div>
+
+      <!-- TOTAL MODE — the default for dollar / fractional buyers -->
+      <div id="buypos-total-pane">
+        <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Total invested $</div>
+        <input type="number" id="buypos-total" class="ticker-input" placeholder="e.g. 500"
+               step="0.01" min="0" inputmode="decimal" style="letter-spacing:.5px"
+               oninput="_recalcDerived()">
+        <div style="font-size:12px;color:var(--hint);margin:4px 0 8px;font-weight:600">When did you buy?</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="date-chip active" id="buypos-chip-0" onclick="setBuyDate(0,this)">Today</button>
+          <button type="button" class="date-chip" id="buypos-chip-1" onclick="setBuyDate(1,this)">Yesterday</button>
+          <button type="button" class="date-chip" id="buypos-chip-2" onclick="setBuyDate(2,this)">2 days ago</button>
+          <button type="button" class="date-chip" id="buypos-chip-pick" onclick="document.getElementById('buypos-date-input').showPicker?.();document.getElementById('buypos-date-input').click()">📅 Pick…</button>
+          <input type="date" id="buypos-date-input" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none" onchange="setBuyDateExact(this.value)">
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+
+      <!-- PRICE MODE — for intraday / active traders who know their fill -->
+      <div id="buypos-price-pane" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Entry $/share</div>
+            <input type="number" id="buypos-entry" class="ticker-input" placeholder="price"
+                   step="0.01" min="0" inputmode="decimal" style="letter-spacing:.5px"
+                   oninput="_recalcDerived()"
+                   onkeydown="if(event.key==='Enter')document.getElementById('buypos-shares').focus()">
+          </div>
+          <div>
+            <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Shares <span style="font-weight:400;opacity:.7">(opt)</span></div>
+            <input type="number" id="buypos-shares" class="ticker-input" placeholder="e.g. 10"
+                   step="any" min="0.000001" inputmode="decimal" style="letter-spacing:.5px"
+                   oninput="_recalcDerived()"
+                   onkeydown="if(event.key==='Enter')document.getElementById('buypos-stop').focus()">
+          </div>
+        </div>
+      </div>
+
+      <!-- Derived estimate / cost line -->
+      <div id="buypos-cost-hint" style="font-size:12.5px;color:var(--hint);margin:12px 0 2px;min-height:17px;text-align:center"></div>
+
+      <!-- Stop / Target — unchanged, optional, AI-prefilled -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
         <div>
           <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Stop Loss <span style="font-weight:400;opacity:.7">(opt)</span></div>
           <input type="number" id="buypos-stop" class="ticker-input" placeholder="e.g. 2.05"
-                 step="0.01" min="0"
+                 step="0.01" min="0" inputmode="decimal" style="letter-spacing:.5px"
                  onkeydown="if(event.key==='Enter')document.getElementById('buypos-target').focus()">
         </div>
         <div>
           <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Target <span style="font-weight:400;opacity:.7">(opt)</span></div>
           <input type="number" id="buypos-target" class="ticker-input" placeholder="e.g. 2.70"
-                 step="0.01" min="0"
+                 step="0.01" min="0" inputmode="decimal" style="letter-spacing:.5px"
                  onkeydown="if(event.key==='Enter')confirmBuyWithLevels()">
         </div>
       </div>
-      <div id="buypos-cost-hint" style="font-size:12px;color:var(--hint);margin-top:8px;min-height:16px;text-align:center"></div>
       <button class="btn-primary" id="buypos-btn" style="margin-top:10px" onclick="confirmBuyWithLevels()">Log Position</button>
       <button class="btn-cancel"  onclick="closeBuySheet()">Cancel</button>
     </div>
@@ -3813,6 +3865,12 @@ async function confirmAddPosition() {
 
 // ── Buy confirmation sheet (from Picks tab) ───────────────────────────────
 let _buyposSym = '', _buyposType = '', _buyposTf = '', _buyposLivePrice = null;
+// Log-position input state — two paths: 'total' (dollar/fractional buyers,
+// derive price+shares from total invested + buy date) or 'price' (intraday
+// traders who know their exact fill).
+let _buyposMode = 'total', _buyposOffsetDays = 0, _buyposExactDate = null;
+let _buyposDatePrice = null, _buyposDateLabel = 'today', _buyposIsEstimate = false;
+let _buyposCloseToken = 0;
 
 function _lookupPickLevels(sym) {
   if (!picksCache) return {};
@@ -3837,107 +3895,227 @@ async function openBuySheet(sym, assetType, tf) {
 
   const entryEl    = document.getElementById('buypos-entry');
   const sharesEl   = document.getElementById('buypos-shares');
+  const totalEl    = document.getElementById('buypos-total');
   const stopEl     = document.getElementById('buypos-stop');
   const targetEl   = document.getElementById('buypos-target');
   const hintEl     = document.getElementById('buypos-hint');
   const costHintEl = document.getElementById('buypos-cost-hint');
   const btn        = document.getElementById('buypos-btn');
 
+  // Reset all input state to the default (total + today)
   btn.disabled      = false;
   btn.textContent   = 'Log Position';
   _buyposLivePrice  = null;
-  if (sharesEl)   sharesEl.value   = '';
-  if (costHintEl) costHintEl.textContent = '';
+  _buyposDatePrice  = null;
+  _buyposDateLabel  = 'today';
+  _buyposIsEstimate = false;
+  _buyposOffsetDays = 0;
+  _buyposExactDate  = null;
+  if (totalEl)  totalEl.value  = '';
+  if (entryEl)  entryEl.value  = '';
+  if (sharesEl) sharesEl.value = '';
+  if (costHintEl) { costHintEl.textContent = ''; costHintEl.style.color = 'var(--hint)'; }
+  setBuyMode('total');
+  // Reset date chips to Today
+  document.querySelectorAll('#buypos-total-pane .date-chip').forEach(c => c.classList.remove('active'));
+  document.getElementById('buypos-chip-0')?.classList.add('active');
+  const pickChip = document.getElementById('buypos-chip-pick');
+  if (pickChip) pickChip.textContent = '📅 Pick…';
+  const dateInput = document.getElementById('buypos-date-input');
+  if (dateInput) { dateInput.max = _isoForOffset(0); dateInput.value = ''; }
 
   // Pre-fill stop/target from AI pick levels immediately
   stopEl.value   = pick.stop_loss    ? String(pick.stop_loss)    : '';
   targetEl.value = pick.target_price ? String(pick.target_price) : '';
 
-  // Open the sheet instantly — pre-fill entry from AI pick level so there's
-  // no delay. Then fetch live price in the background and update the field.
-  if (pick.entry_price) {
-    entryEl.value = String(pick.entry_price);
-    hintEl.textContent = `AI pick level pre-filled — fetching live price…`;
-    hintEl.style.color = 'var(--hint)';
-  } else {
-    entryEl.value = '';
-    hintEl.textContent = `Fetching live price for ${sym}…`;
-    hintEl.style.color = 'var(--hint)';
-  }
+  hintEl.textContent = `Most people just know the total they put in — that's all you need.`;
+  hintEl.style.color = 'var(--hint)';
 
   // Open immediately — don't wait for the network
   openOverlay('buypos-overlay');
   tg.HapticFeedback?.impactOccurred('light');
-  setTimeout(() => entryEl.focus(), 200);
+  setTimeout(() => totalEl?.focus(), 200);
 
-  // Fetch live price in background — update entry field and set price-relative placeholders
+  // Fetch live price in background — it's the "Today" price for total mode and
+  // pre-fills the exact-price field for intraday traders.
   try {
     const data = await api(`/api/miniapp/quote?ticker=${encodeURIComponent(sym)}`);
     if (data && data.price) {
       const p = data.price;
-      _buyposLivePrice  = p;
-      entryEl.value = fmtPriceInput(p);
-      hintEl.textContent = `Live price $${fmtPrice(p)} pre-filled — adjust if needed.`;
-      hintEl.style.color = 'var(--green)';
-      // Set price-relative placeholders so empty fields look sensible for any asset
-      entryEl.placeholder = fmtPriceInput(p);
+      _buyposLivePrice = p;
+      // Today is selected by default → today's price is the live price
+      if (_buyposOffsetDays === 0 && !_buyposExactDate) {
+        _buyposDatePrice  = p;
+        _buyposIsEstimate = false;
+      }
+      // Pre-fill the exact-price field so the intraday path opens ready
+      if (entryEl && !entryEl.value) entryEl.value = fmtPriceInput(p);
       if (!stopEl.value)   stopEl.placeholder   = fmtPriceInput(p * 0.93);
       if (!targetEl.value) targetEl.placeholder = fmtPriceInput(p * 1.15);
-    } else if (pick.entry_price) {
-      hintEl.textContent = `AI pick level pre-filled — edit if your actual entry differs.`;
-      hintEl.style.color = 'var(--hint)';
-    } else {
-      hintEl.textContent = `Enter the price you paid.`;
-      hintEl.style.color = 'var(--hint)';
+      _recalcDerived();
     }
   } catch (_) {
+    // Fall back to the AI pick level as the "today" price if the quote fails
     if (pick.entry_price) {
-      hintEl.textContent = `AI pick level pre-filled — edit if your actual entry differs.`;
-      hintEl.style.color = 'var(--hint)';
-    } else {
-      hintEl.textContent = `Enter the price you paid.`;
-      hintEl.style.color = 'var(--hint)';
+      _buyposLivePrice = parseFloat(pick.entry_price) || null;
+      if (_buyposOffsetDays === 0 && !_buyposExactDate) _buyposDatePrice = _buyposLivePrice;
+      if (entryEl && !entryEl.value && pick.entry_price) entryEl.value = String(pick.entry_price);
+      _recalcDerived();
     }
   }
 }
 
 function closeBuySheet() { closeOverlay('buypos-overlay'); }
 
-function _updateBuyCost() {
-  const entryEl    = document.getElementById('buypos-entry');
-  const sharesEl   = document.getElementById('buypos-shares');
-  const costHintEl = document.getElementById('buypos-cost-hint');
-  if (!costHintEl) return;
-  const entry  = parseFloat(entryEl?.value);
-  const shares = parseFloat(sharesEl?.value);
+// ── Input-mode + date helpers for the Log Position sheet ───────────────────
+function setBuyMode(mode) {
+  _buyposMode = mode;
+  document.getElementById('buypos-mode-total')?.classList.toggle('active', mode === 'total');
+  document.getElementById('buypos-mode-price')?.classList.toggle('active', mode === 'price');
+  const totalPane = document.getElementById('buypos-total-pane');
+  const pricePane = document.getElementById('buypos-price-pane');
+  if (totalPane) totalPane.style.display = mode === 'total' ? 'block' : 'none';
+  if (pricePane) pricePane.style.display = mode === 'price' ? 'block' : 'none';
+  _recalcDerived();
+}
 
-  if (_buyposLivePrice && entry > _buyposLivePrice * 1.5) {
-    costHintEl.style.color = 'var(--red, #fc8181)';
-    costHintEl.textContent = `⚠️ Looks like a total — current price is $${fmtPrice(_buyposLivePrice)} per share`;
+function _isoForOffset(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const m  = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${dd}`;
+}
+
+function _fmtShortDate(iso) {
+  const parts = String(iso).split('-');
+  const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(parts[1], 10) - 1] || '';
+  return `${mo} ${parseInt(parts[2], 10)}`;
+}
+
+function setBuyDate(days, el) {
+  _buyposOffsetDays = days;
+  _buyposExactDate  = null;
+  document.querySelectorAll('#buypos-total-pane .date-chip').forEach(c => c.classList.remove('active'));
+  el?.classList.add('active');
+  const pickChip = document.getElementById('buypos-chip-pick');
+  if (pickChip) pickChip.textContent = '📅 Pick…';
+  tg.HapticFeedback?.selectionChanged?.();
+  _fetchCloseForSelectedDate();
+}
+
+function setBuyDateExact(iso) {
+  if (!iso) return;
+  _buyposExactDate  = iso;
+  _buyposOffsetDays = null;
+  document.querySelectorAll('#buypos-total-pane .date-chip').forEach(c => c.classList.remove('active'));
+  const pickChip = document.getElementById('buypos-chip-pick');
+  if (pickChip) { pickChip.classList.add('active'); pickChip.textContent = '📅 ' + _fmtShortDate(iso); }
+  _fetchCloseForSelectedDate();
+}
+
+async function _fetchCloseForSelectedDate() {
+  // Today → reuse the live price we already fetched (no round-trip)
+  if (_buyposOffsetDays === 0 && !_buyposExactDate) {
+    _buyposDatePrice  = _buyposLivePrice;
+    _buyposDateLabel  = 'today';
+    _buyposIsEstimate = false;
+    _recalcDerived();
     return;
   }
-  costHintEl.style.color = 'var(--hint)';
-  if (shares > 0 && entry > 0) {
-    const cost = (shares * entry).toFixed(2);
-    costHintEl.textContent = `Est. cost: $${parseFloat(cost).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
-  } else {
-    costHintEl.textContent = '';
+  const iso = _buyposExactDate || _isoForOffset(_buyposOffsetDays);
+  _buyposDatePrice  = null;
+  _buyposDateLabel  = _buyposExactDate ? _fmtShortDate(iso)
+                    : (_buyposOffsetDays === 1 ? 'yesterday' : `${_buyposOffsetDays} days ago`);
+  _recalcDerived();  // shows "Fetching … price"
+  const token = ++_buyposCloseToken;
+  try {
+    const data = await api(`/api/miniapp/close_on_date?ticker=${encodeURIComponent(_buyposSym)}&date=${iso}`);
+    if (token !== _buyposCloseToken) return;  // a newer date tap superseded this
+    if (data && data.price) {
+      _buyposDatePrice  = data.price;
+      _buyposIsEstimate = !!data.is_estimate;
+    } else {
+      _buyposDatePrice = null;
+    }
+  } catch (_) {
+    if (token === _buyposCloseToken) _buyposDatePrice = null;
   }
+  _recalcDerived();
+}
+
+function _fmtShares(n) {
+  if (!(n > 0)) return '?';
+  return n >= 1 ? String(+n.toFixed(4)) : String(+n.toPrecision(4));
+}
+
+// Resolve the entry price + share count to log, based on the active mode.
+// Returns {entry, shares} or null if not enough info yet.
+function _resolveEntryShares() {
+  if (_buyposMode === 'price') {
+    const entry  = parseFloat(document.getElementById('buypos-entry').value)  || null;
+    const shares = parseFloat(document.getElementById('buypos-shares').value) || null;
+    return entry ? { entry, shares } : null;
+  }
+  const total = parseFloat(document.getElementById('buypos-total').value);
+  const price = _buyposDatePrice;
+  if (total > 0 && price > 0) {
+    return { entry: Math.round(price * 10000) / 10000, shares: Math.round((total / price) * 1e6) / 1e6 };
+  }
+  return null;
+}
+
+function _recalcDerived() {
+  const costEl = document.getElementById('buypos-cost-hint');
+  if (!costEl) return;
+  costEl.style.color = 'var(--hint)';
+
+  if (_buyposMode === 'price') {
+    const entry  = parseFloat(document.getElementById('buypos-entry').value);
+    const shares = parseFloat(document.getElementById('buypos-shares').value);
+    if (entry > 0 && shares > 0) {
+      costEl.textContent = `Cost: $${(entry * shares).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
+    } else if (entry > 0) {
+      costEl.textContent = `Entry $${fmtPrice(entry)}/share — add shares for $ P&L`;
+    } else {
+      costEl.textContent = '';
+    }
+    return;
+  }
+
+  // Total mode — derive shares + entry price from total invested + buy date
+  const total = parseFloat(document.getElementById('buypos-total').value);
+  if (!(total > 0)) { costEl.textContent = ''; return; }
+  const price = _buyposDatePrice;
+  if (!(price > 0)) { costEl.textContent = `Fetching ${_buyposDateLabel} price…`; return; }
+  const shares = total / price;
+  costEl.style.color = 'var(--green)';
+  costEl.textContent = `≈ ${_fmtShares(shares)} ${_buyposSym} @ $${fmtPrice(price)} (${_buyposDateLabel}${_buyposIsEstimate ? ' · est.' : ''})`;
 }
 
 async function confirmBuyWithLevels() {
   const btn    = document.getElementById('buypos-btn');
-  const entry  = parseFloat(document.getElementById('buypos-entry').value)  || null;
-  const shares = parseFloat(document.getElementById('buypos-shares').value) || null;
+  const sym    = _buyposSym;
+
+  const resolved = _resolveEntryShares();
+  if (!resolved || !resolved.entry) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    showToast(_buyposMode === 'total'
+      ? 'Enter the total you invested and pick a date'
+      : 'Enter your entry price', 'error');
+    return;
+  }
+  const entry  = resolved.entry;
+  const shares = resolved.shares || null;
   const stop   = parseFloat(document.getElementById('buypos-stop').value)   || null;
   const target = parseFloat(document.getElementById('buypos-target').value) || null;
-  const sym    = _buyposSym;
 
   const confirmed = await new Promise(resolve => {
     const cost = (entry && shares) ? ` · $${(entry * shares).toLocaleString('en-US', {maximumFractionDigits: 0})}` : '';
+    const est  = (_buyposMode === 'total' && _buyposIsEstimate) ? ' (est.)' : '';
     tg.showPopup({
       title: `Log ${sym || 'position'}?`,
-      message: `${shares || '?'} shares @ $${entry || '?'}${cost}`,
+      message: `${_fmtShares(shares)} @ $${fmtPrice(entry)}${est}${cost}`,
       buttons: [{ id: 'yes', type: 'default', text: 'Log it' }, { type: 'cancel' }]
     }, id => resolve(id === 'yes'));
   });
