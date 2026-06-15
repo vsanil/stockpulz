@@ -587,6 +587,82 @@ class TestMisc:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# close_on_date — total-invested + date → historical entry price recovery
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestCloseOnDate:
+    """
+    /api/miniapp/close_on_date powers the Log Position 'Total invested' path:
+    given a buy date it returns the close (or nearest prior trading day), from
+    which the frontend derives entry_price + fractional shares.
+    """
+
+    # A small ascending price history. Note Jun 7-8 (weekend) are absent, so a
+    # request for Jun 8 must fall back to Jun 6.
+    HIST = (
+        ["2026-06-05", "2026-06-06", "2026-06-10", "2026-06-12"],
+        [350.00, 360.00, 370.00, 380.00],
+    )
+
+    def test_exact_trading_day_returns_that_close(self, client):
+        from unittest.mock import patch
+        with patch("webhook._backtest_fetch_prices", return_value=self.HIST):
+            r = get(client, "/api/miniapp/close_on_date", ticker="LRCX", date="2026-06-10")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["price"] == 370.00
+        assert data["actual_date"] == "2026-06-10"
+        assert data["is_estimate"] is False
+
+    def test_weekend_falls_back_to_prior_trading_day(self, client):
+        from unittest.mock import patch
+        # Jun 8 is a weekend → nearest prior trading day is Jun 6
+        with patch("webhook._backtest_fetch_prices", return_value=self.HIST):
+            r = get(client, "/api/miniapp/close_on_date", ticker="LRCX", date="2026-06-08")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["price"] == 360.00
+        assert data["actual_date"] == "2026-06-06"
+        assert data["is_estimate"] is True
+
+    def test_date_before_window_uses_earliest_close(self, client):
+        from unittest.mock import patch
+        with patch("webhook._backtest_fetch_prices", return_value=self.HIST):
+            r = get(client, "/api/miniapp/close_on_date", ticker="LRCX", date="2025-01-01")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["price"] == 350.00
+        assert data["actual_date"] == "2026-06-05"
+        assert data["is_estimate"] is True
+
+    def test_future_date_rejected(self, client):
+        r = get(client, "/api/miniapp/close_on_date", ticker="LRCX", date="2099-01-01")
+        assert r.status_code == 400
+
+    def test_bad_date_format_rejected(self, client):
+        r = get(client, "/api/miniapp/close_on_date", ticker="LRCX", date="06/10/2026")
+        assert r.status_code == 400
+
+    def test_missing_ticker_rejected(self, client):
+        r = get(client, "/api/miniapp/close_on_date", date="2026-06-10")
+        assert r.status_code == 400
+
+    def test_missing_date_rejected(self, client):
+        r = get(client, "/api/miniapp/close_on_date", ticker="LRCX")
+        assert r.status_code == 400
+
+    def test_no_history_returns_404(self, client):
+        from unittest.mock import patch
+        with patch("webhook._backtest_fetch_prices", return_value=([], [])):
+            r = get(client, "/api/miniapp/close_on_date", ticker="ZZZZ", date="2026-06-10")
+        assert r.status_code == 404
+
+    def test_requires_auth(self, client):
+        r = client.get("/api/miniapp/close_on_date?ticker=LRCX&date=2026-06-10")
+        assert r.status_code == 403
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # NEW: update_position entry_price (Task #146 regression)
 # ══════════════════════════════════════════════════════════════════════════════
 

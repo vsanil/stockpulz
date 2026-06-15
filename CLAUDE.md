@@ -39,6 +39,18 @@ Rules:
 - Render OOM kills destroy agent.py's buffered stdout — only stderr (yfinance noise) survives in logs. A run with yfinance lines but no `[agent]` lines = stdout buffer lost to a kill.
 - pip ResolutionImpossible on Render claiming "no matching distribution" for a transitive dep (httpx/httpcore) → add explicit top-level pins; verify the wheel exists with `pip download --python-version <ver> --no-deps` first.
 
+## Position logging: total-invested is the primary input (settled Jun 15, 2026)
+
+- **Robinhood does dollar-based investing** — users buy "$500 of LRCX" / "$50 of BTC" and receive fractional shares (1.377, 0.0008). They remember the **total invested** and roughly **when**, NOT the per-share price or share count. Designing the Log Position form around per-share price was the root of the LRCX `entry_price=500` bug (a total typed into a price field poisons every %-based P&L and alert).
+- **The form has two paths** (`miniapp/index.html` buypos sheet):
+  - **Default — "💵 Total invested"**: total $ + buy-date chips (Today/Yesterday/2d/Pick…). Derives `entry_price = close(date)` and `shares = total / close`. Today reuses the live quote; past dates call `/api/miniapp/close_on_date`.
+  - **Toggle — "🎯 Exact $/share"**: per-share entry + optional shares. For intraday traders who know their fill.
+- **Why two paths, not one smart field**: a single field that accepts both "500 the total" and "362 the price" is ambiguous — that ambiguity WAS the bug. Forcing the user to declare which they mean is the fix.
+- **`/api/miniapp/close_on_date?ticker=X&date=YYYY-MM-DD`** (webhook.py): returns the close on that date or nearest prior trading day (weekend/holiday → `is_estimate=true`). Reuses `_backtest_fetch_prices` (yfinance + CoinGecko fallback, handles crypto suffix). Rejects future dates (400), missing history (404).
+- **Honest caveat baked into UI**: close ≠ exact fill (Robinhood fills at live intraday price). Total+date is a *good estimate* (off by intraday drift, usually <1-2%), labelled "· est." when derived from a non-exact day. The exact-price toggle is for anyone who wants precision.
+- **What actually needs entry_price**: every %-based alert/nudge (hold-fold, take-profit, EOD % P&L) needs only per-share entry price. Shares ONLY affects dollar figures ($ P&L, "$X at risk"). So the date-lookup's real job is recovering entry price for someone who knows only a total — it is load-bearing, not optional.
+- `cmd_market.py /size` and `formatters.py` build_picks_keyboard already use fractional crypto sizing (`round(budget/price, 6)`) — never `max(1, int(...))` which fabricates whole coins.
+
 ## Development rules
 
 ### Scope — always apply changes everywhere
