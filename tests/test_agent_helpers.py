@@ -673,3 +673,52 @@ class TestYfSymbolMap:
     def test_lowercase_crypto_still_suffixed(self):
         m = ag._yf_symbol_map(["btc"])
         assert m == {"btc-USD": "btc"}   # original case preserved, suffix applied
+
+
+class TestAutoSetPickAlertsEntryGuard:
+    """
+    _auto_set_pick_alerts — entry alerts must only arm when the pick trades
+    >=1% above its entry. Picks are issued at ~entry, so arming a "below entry"
+    alert at issue time would insta-fire the same morning on normal noise.
+    Stop alerts (well below current) always arm.
+    """
+
+    def _picks(self):
+        return {
+            "stocks": {
+                "short_term": [
+                    {"ticker": "ABOVE",   "entry_price": 100.0, "stop_loss": 90.0},  # cur 105  → arm entry
+                    {"ticker": "ATENTRY", "entry_price": 100.0, "stop_loss": 90.0},  # cur 100.5→ skip entry
+                    {"ticker": "BELOW",   "entry_price": 100.0, "stop_loss": 90.0},  # cur 98   → skip entry
+                ],
+                "long_term": [],
+            },
+        }
+
+    def _capture(self, monkeypatch, live):
+        calls = []
+        monkeypatch.setattr(ag, "add_alert",
+                            lambda uid, t, price, direction=None, auto=False: calls.append((t, round(price, 2), direction)))
+        monkeypatch.setattr(ag, "load_user_trade_log", lambda uid: {"open": []})
+        monkeypatch.setattr(ag, "_download_prices", lambda tickers, **kw: live)
+        return calls
+
+    def test_entry_alert_only_when_at_least_1pct_above(self, monkeypatch):
+        calls = self._capture(monkeypatch, {"ABOVE": 105.0, "ATENTRY": 100.5, "BELOW": 98.0})
+        ag._auto_set_pick_alerts(self._picks(), ["user1"])
+        stops   = [c for c in calls if c[1] == 90.0]
+        entries = [c for c in calls if c[1] == 100.0 and c[2] == "below"]
+        assert len(stops) == 3                  # stop armed for all three
+        assert [e[0] for e in entries] == ["ABOVE"]   # entry armed only for the one >=1% above
+
+    def test_no_live_price_skips_entry_but_keeps_stop(self, monkeypatch):
+        calls = self._capture(monkeypatch, {})   # price fetch failed
+        ag._auto_set_pick_alerts(self._picks(), ["user1"])
+        assert len(calls) == 3
+        assert all(c[1] == 90.0 for c in calls)  # only stop alerts, no entry insta-fire
+
+    def test_exactly_1pct_above_arms_entry(self, monkeypatch):
+        calls = self._capture(monkeypatch, {"ABOVE": 101.0, "ATENTRY": 100.0, "BELOW": 100.0})
+        ag._auto_set_pick_alerts(self._picks(), ["user1"])
+        entries = [c for c in calls if c[1] == 100.0 and c[2] == "below"]
+        assert [e[0] for e in entries] == ["ABOVE"]   # 101 == 100*1.01 boundary arms
