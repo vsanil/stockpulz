@@ -212,6 +212,48 @@ class TestCheckAlerts:
         assert check_alerts(CHAT) == []
 
 
+# ── non-positive price guard (HYPE "$0.00" false-trigger regression) ───────────
+
+class TestNonPositivePriceGuard:
+    """
+    A failed price fetch can return 0.0 / nan / None. Without a guard,
+    `0.00 <= target` made every "below" alert fire with "X is now $0.00"
+    (the HYPE bug). A non-positive price must never trigger an alert.
+    """
+    import price_alert_manager as _pam
+
+    def _set_price(self, monkeypatch, value):
+        monkeypatch.setattr(self._pam, "_current_price", lambda ticker: value)
+
+    def test_zero_price_does_not_trigger_below_alert(self, monkeypatch):
+        add_alert(CHAT, "AAPL", 67.46, direction="below")  # set while price is real
+        self._set_price(monkeypatch, 0.0)                   # fetch now fails → 0.0
+        assert check_alerts(CHAT) == []
+
+    def test_zero_price_leaves_alert_armed(self, monkeypatch):
+        add_alert(CHAT, "AAPL", 67.46, direction="below")
+        self._set_price(monkeypatch, 0.0)
+        check_alerts(CHAT)
+        assert "AAPL" in list_alerts(CHAT)   # not consumed by the false trigger
+
+    def test_nan_price_does_not_trigger(self, monkeypatch):
+        add_alert(CHAT, "AAPL", 67.46, direction="below")
+        self._set_price(monkeypatch, float("nan"))
+        assert check_alerts(CHAT) == []
+
+    def test_negative_price_does_not_trigger(self, monkeypatch):
+        add_alert(CHAT, "AAPL", 67.46, direction="below")
+        self._set_price(monkeypatch, -5.0)
+        assert check_alerts(CHAT) == []
+
+    def test_real_price_still_triggers(self, monkeypatch):
+        """Sanity: a valid price below target must still fire."""
+        add_alert(CHAT, "AAPL", 200.0, direction="below")
+        self._set_price(monkeypatch, 150.0)
+        fired = check_alerts(CHAT)
+        assert len(fired) == 1 and "AAPL" in fired[0]
+
+
 # ── clear_alerts ──────────────────────────────────────────────────────────────
 
 class TestClearAlerts:

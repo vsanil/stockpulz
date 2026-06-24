@@ -77,6 +77,16 @@ ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
 
 
+def _yf_symbol_map(tickers: list[str]) -> dict[str, str]:
+    """
+    Map original tickers → {yfinance_symbol: original_ticker}.
+    Crypto symbols get the -USD suffix (BTC → BTC-USD); without it yfinance
+    resolves a bare "BTC" to an unrelated instrument (the ~$28 BTC bug).
+    """
+    from price_checker import _SYMBOL_TO_CG_ID
+    return {(f"{t}-USD" if t.upper() in _SYMBOL_TO_CG_ID else t): t for t in tickers}
+
+
 def _download_prices(tickers: list[str], **yf_kwargs) -> dict[str, float]:
     """
     Fetch latest close prices for a list of tickers.
@@ -3775,16 +3785,20 @@ def run_price_alerts():
                 watch_tickers = log.get("watchlist", [])
                 if not watch_tickers:
                     continue
+                # Crypto tickers need the -USD suffix for yfinance (BTC → BTC-USD);
+                # without it "BTC" resolves to an unrelated instrument (~$28 bug).
+                yf_map = _yf_symbol_map(watch_tickers)
+                yf_tickers = list(yf_map.keys())
                 raw_w = yf.download(
-                    " ".join(watch_tickers), period="2d", interval="1d",
+                    " ".join(yf_tickers), period="2d", interval="1d",
                     progress=False, auto_adjust=True
                 )
                 if raw_w.empty:
                     continue
                 close = raw_w["Close"]
-                for t in watch_tickers:
+                for yf_t, t in yf_map.items():
                     try:
-                        col = close[t] if t in close.columns else close
+                        col = close[yf_t] if (hasattr(close, "columns") and yf_t in close.columns) else close
                         vals = col.dropna()
                         if len(vals) < 2:
                             continue

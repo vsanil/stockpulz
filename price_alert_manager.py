@@ -46,7 +46,7 @@ def _current_price(ticker: str) -> float | None:
     yf_symbol = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
     try:
         price = yf.Ticker(yf_symbol).fast_info.last_price
-        if price:
+        if price and price > 0:   # reject 0 / nan / negative (failed fetch)
             return float(price)
     except Exception:
         pass
@@ -54,7 +54,7 @@ def _current_price(ticker: str) -> float | None:
     if ticker not in _CRYPTO_SYMBOLS:
         try:
             price = yf.Ticker(f"{ticker}-USD").fast_info.last_price
-            if price:
+            if price and price > 0:   # reject 0 / nan / negative (failed fetch)
                 return float(price)
         except Exception:
             pass
@@ -84,7 +84,7 @@ def _current_price(ticker: str) -> float | None:
                 )
                 resp.raise_for_status()
                 price = resp.json().get(cg_id, {}).get("usd")
-                if price:
+                if price and price > 0:   # reject 0 / nan / negative (failed fetch)
                     return float(price)
         except Exception:
             pass
@@ -234,7 +234,7 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
     prices  = {}
     for t in tickers:
         p = _current_price(t)
-        if p is not None:
+        if p is not None and p > 0:   # a 0/nan price is a failed fetch, not a real quote
             prices[t] = p
 
     triggered = []
@@ -243,7 +243,7 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
     for a in chat_alerts:
         t       = a["ticker"]
         current = prices.get(t)
-        if current is None:
+        if current is None or current <= 0:   # no/failed price → never trigger ($0.00 bug)
             remaining.append(a)
             continue
 
