@@ -647,3 +647,29 @@ class TestCanRunLiveScreener:
     def test_allowed_elsewhere(self, monkeypatch):
         monkeypatch.delenv("RENDER", raising=False)
         assert ag._can_run_live_screener() is True
+
+
+class TestYfSymbolMap:
+    """
+    _yf_symbol_map — crypto tickers must get the -USD suffix for yfinance.
+    Regression: the watchlist big-move check downloaded a bare "BTC", which
+    yfinance resolved to an unrelated ~$28 instrument instead of BTC-USD.
+    """
+
+    def test_crypto_gets_usd_suffix(self):
+        m = ag._yf_symbol_map(["BTC", "ETH", "BNB"])
+        # keys are yfinance symbols, values are the original tickers
+        assert m == {"BTC-USD": "BTC", "ETH-USD": "ETH", "BNB-USD": "BNB"}
+
+    def test_equities_unchanged(self):
+        m = ag._yf_symbol_map(["AAPL", "LRCX", "NVDA"])
+        assert m == {"AAPL": "AAPL", "LRCX": "LRCX", "NVDA": "NVDA"}
+
+    def test_mixed_list_maps_back_to_originals(self):
+        m = ag._yf_symbol_map(["BTC", "AAPL"])
+        assert m["BTC-USD"] == "BTC"   # priced via BTC-USD, displayed as BTC
+        assert m["AAPL"] == "AAPL"
+
+    def test_lowercase_crypto_still_suffixed(self):
+        m = ag._yf_symbol_map(["btc"])
+        assert m == {"btc-USD": "btc"}   # original case preserved, suffix applied

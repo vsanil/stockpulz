@@ -31,6 +31,10 @@ Rules:
 - **Rule: every save/load cache pair MUST have a save→load round-trip test** (see TestScreenerCache / TestMacroCache in tests/test_config_manager.py).
 - **Rule: after any bulk find-replace refactor, grep every function-local import scope the replacement touched** — module-level imports are not enough.
 
+### Bug pattern: price-fetch failures must never reach price logic (Jun 23)
+- **Non-positive price = failed fetch, never a real quote.** yfinance `fast_info.last_price` can return `0.0` or `nan` on a bad/exotic symbol (e.g. HYPE). `if price:` rejects 0/None but **`nan` is truthy** — it slips through. A `$0.00` price made every "below" alert fire ("HYPE is now $0.00", because `0.00 <= target`). Guard with `price and price > 0` at EVERY return point in `_current_price`, AND at the trigger site (`price_alert_manager.py` check_alerts: skip `current is None or current <= 0`). Defense in depth — guard at both the source and the consumer.
+- **Crypto needs the `-USD` suffix in EVERY yfinance call that takes user tickers.** A bare `yf.download("BTC")` resolves to an unrelated ~$28 instrument, not BTC-USD (~$27k). The Jun 8 sweep converted "all 5 yf.download calls" but **missed the watchlist big-move check** (agent.py) → BTC priced at $28. Fixed by extracting `_yf_symbol_map(tickers)` (BTC→BTC-USD via `_SYMBOL_TO_CG_ID`) and routing the move-check through it. **Rule: any new `yf.download`/`yf.Ticker` on watchlist/position/user tickers MUST go through `_yf_symbol_map` or `_download_prices` — never raw `" ".join(tickers)`.** Note: position card uses `_download_prices` (correct); only standalone download sites are at risk.
+
 ### Background jobs must fail silently to users
 - run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
 
