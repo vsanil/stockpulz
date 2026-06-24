@@ -4131,6 +4131,19 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
             picks.get("commodities", {}).get("short_term", []) +
             picks.get("commodities", {}).get("long_term",  [])
         )
+        # Fetch live prices once so entry alerts are only armed when the pick is
+        # trading ABOVE its entry. Picks are issued at ~entry (within 2%), so a
+        # "below entry" alert set at issue time would insta-fire the same morning
+        # on normal noise — no real pullback. Require ≥1% of room so firing means
+        # the price genuinely dipped back into the buy zone.
+        ENTRY_ALERT_MIN_ABOVE = 1.01
+        pick_tickers = list({(p.get("ticker") or p.get("symbol") or "").upper()
+                             for p in all_sections if (p.get("ticker") or p.get("symbol"))})
+        try:
+            live_prices = _download_prices(pick_tickers, period="1d", interval="1m", auto_adjust=True)
+        except Exception:
+            live_prices = {}
+
         total_set = 0
         for uid in recipients:
             try:
@@ -4141,14 +4154,17 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
                     if not ticker or ticker in open_tickers:
                         continue
                     try:
-                        # Stop-loss alert — fires if pick drops to stop
+                        # Stop-loss alert — fires if pick drops to stop. Stop sits
+                        # well below current, so no insta-fire risk; always armed.
                         stop = pick.get("stop_loss")
                         if stop:
                             add_alert(uid, ticker, float(stop), direction="below", auto=True)
                             total_set += 1
-                        # Entry zone alert — fires when price dips to entry (for picks above zone)
+                        # Entry zone alert — only when price is ≥1% above entry, so
+                        # "below entry" firing means a genuine pullback into the zone.
                         entry = pick.get("entry_price")
-                        if entry:
+                        cur   = live_prices.get(ticker)
+                        if entry and cur and cur >= float(entry) * ENTRY_ALERT_MIN_ABOVE:
                             add_alert(uid, ticker, float(entry), direction="below", auto=True)
                             total_set += 1
                     except Exception as exc:
