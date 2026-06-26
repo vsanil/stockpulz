@@ -1688,11 +1688,8 @@ def miniapp_settings_update():
     return jsonify({"ok": True, "key": key, "value": value})
 
 
-_CHART_CRYPTO = {
-    "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
-    "LINK","UNI","ATOM","LTC","BCH","ALGO","XLM","VET","ICP","FIL",
-    "TRX","NEAR","OP","ARB","SUI","APT","INJ","SEI","TIA","HYPE",
-}
+# Canonical crypto set — single source of truth (was a local hardcoded list).
+from price_checker import CRYPTO_SYMBOLS as _CHART_CRYPTO
 
 
 @app.route("/api/miniapp/chart/<ticker>")
@@ -2742,7 +2739,9 @@ def miniapp_volume_spikes():
 
     def _check_volume(sym):
         try:
-            hist = _yf.Ticker(sym).history(period="1mo", interval="1d", auto_adjust=True)
+            # Crypto needs the -USD suffix or yfinance returns a wrong instrument.
+            yf_sym = f"{sym}-USD" if sym in _CHART_CRYPTO else sym
+            hist = _yf.Ticker(yf_sym).history(period="1mo", interval="1d", auto_adjust=True)
             if hist.empty or len(hist) < 5:
                 return None
             avg_vol  = float(hist["Volume"].iloc[:-1].mean())

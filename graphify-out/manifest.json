@@ -50,8 +50,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/webhook.py": {
-    "mtime": 1781511174.9577968,
-    "ast_hash": "495eb67087621e1e6b70dc0d6cc3ac03",
+    "mtime": 1782454235.7171352,
+    "ast_hash": "93a22e141c1a6290252d5affa0f645f6",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/congressional_tracker.py": {
@@ -75,8 +75,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/price_alert_manager.py": {
-    "mtime": 1782267603.0890362,
-    "ast_hash": "4b56d7a5c780d45560aa0ac65674366c",
+    "mtime": 1782454210.5085285,
+    "ast_hash": "e3fe35e552d7599ef365cf4f6b680e7a",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/cmd_trade_exec.py": {
@@ -85,8 +85,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/ai_analyzer.py": {
-    "mtime": 1780504409.4992056,
-    "ast_hash": "5b73f06e4b173cd66af3247aa2f156c4",
+    "mtime": 1782454307.9940898,
+    "ast_hash": "ceee67fbd83511509d8710bda7306b01",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/paper_trader.py": {
@@ -110,8 +110,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/price_checker.py": {
-    "mtime": 1780202827.9947984,
-    "ast_hash": "213dc3bc9b186df395e58f063807df8d",
+    "mtime": 1782454145.4443083,
+    "ast_hash": "82228cc8ce3dd5c461e572419f866496",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/test_commands.py": {
@@ -130,8 +130,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/market_data.py": {
-    "mtime": 1780457359.8691273,
-    "ast_hash": "9aeead616a9606b05b490a7b0849ff9f",
+    "mtime": 1782454178.1216471,
+    "ast_hash": "06ed1ce0758a80891b5f9329a3514785",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/cache_layer.py": {
@@ -170,8 +170,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/cmd_helpers.py": {
-    "mtime": 1780202827.999278,
-    "ast_hash": "e13b9f40444197f981f0657c0b0955d5",
+    "mtime": 1782454170.9795697,
+    "ast_hash": "a7a3f313b9deda4deab18c8a50dcff12",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/card_generator.py": {
@@ -190,8 +190,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/chart_generator.py": {
-    "mtime": 1780202828.0014963,
-    "ast_hash": "5ea0ebe913559e11f719166fcc9dad08",
+    "mtime": 1782454165.3037724,
+    "ast_hash": "0d8514ff70dfa234f090122e0b140f75",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/bot_commands.py": {
@@ -225,8 +225,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/cmd_market.py": {
-    "mtime": 1781320004.6216927,
-    "ast_hash": "9968dfbb324519100f1897df1bd30d49",
+    "mtime": 1782454248.20172,
+    "ast_hash": "76f72f8fb90adcab9f7204c0d45cfea8",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.githooks/post-push": {
@@ -330,8 +330,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.claude/settings.local.json": {
-    "mtime": 1782453740.7857249,
-    "ast_hash": "4b74fa9c19dc735376c458e4f34cf3d5",
+    "mtime": 1782454260.1951408,
+    "ast_hash": "7069d71062d382c3ad8fc09c02aaf319",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/on_push.py": {
@@ -467,6 +467,11 @@
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/dev_server.py": {
     "mtime": 1781277964.2654414,
     "ast_hash": "de9a54d78c4f91355928c5f03b71080e",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_crypto_symbols.py": {
+    "mtime": 1782454363.0812328,
+    "ast_hash": "68a143e5587b0c4d36e7850923109935",
     "semantic_hash": ""
   }
 }

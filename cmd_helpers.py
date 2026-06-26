@@ -25,10 +25,9 @@ def _is_number(s: str) -> bool:
 
 
 # Crypto tickers recognised by the bot (used to set asset_type on manual trades)
-_CRYPTO_SYMBOLS = {
-    "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
-    "LINK","UNI","ATOM","LTC","BCH","ALGO","XLM","VET","ICP","FIL",
-}
+# Canonical crypto set — single source of truth (was a 20-coin local list that
+# mispriced any crypto outside it in /size and /digest).
+from price_checker import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
 
 def _is_admin(chat_id: str | None = None) -> bool:
     """Return True if the given chat_id (or env TELEGRAM_CHAT_ID) is the bot owner."""

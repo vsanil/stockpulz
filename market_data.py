@@ -27,11 +27,8 @@ _ALPACA_HEADERS = {
     "APCA-API-SECRET-KEY": ALPACA_SECRET,
 }
 
-_CRYPTO_SYMBOLS = {
-    "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
-    "LINK","UNI","ATOM","LTC","BCH","ALGO","XLM","VET","ICP","FIL",
-    "TRX","NEAR","OP","ARB","SUI","APT","INJ","SEI","TIA","HYPE",
-}
+# Canonical crypto set — single source of truth (was a local hardcoded list).
+from price_checker import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
 
 _TIMEOUT = 6  # seconds for all external HTTP calls
 

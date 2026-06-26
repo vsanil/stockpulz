@@ -48,11 +48,8 @@ _STYLE = mpf.make_mpf_style(
 
 # ── Known crypto symbols (for yfinance -USD suffix) ───────────────────────────
 
-_CRYPTO_SYMBOLS = {
-    'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT',
-    'MATIC', 'LINK', 'UNI', 'ATOM', 'LTC', 'BCH', 'ALGO', 'XLM', 'VET',
-    'ICP', 'FIL', 'HYPE', 'SUI', 'APT', 'ARB', 'OP', 'INJ', 'TIA', 'SEI',
-}
+# Canonical crypto set — single source of truth (was a local hardcoded list).
+from price_checker import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
 
 
 def is_crypto(ticker: str) -> bool:
