@@ -1045,12 +1045,9 @@ def _strip_fences(raw: str) -> str:
 
 # ── Ticker validator ──────────────────────────────────────────────────────────
 
-# Known crypto symbols — don't validate these through yfinance stock lookup
-_KNOWN_CRYPTO = {
-    "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC",
-    "LINK","UNI","ATOM","LTC","BCH","ALGO","XLM","VET","ICP","FIL",
-    "TRX","NEAR","OP","ARB","SUI","APT","INJ","SEI","TIA","HYPE",
-}
+# Known crypto symbols — don't validate these through yfinance stock lookup.
+# Canonical set (was a local hardcoded list).
+from price_checker import CRYPTO_SYMBOLS as _KNOWN_CRYPTO
 
 
 def _is_valid_ticker(ticker: str) -> bool:

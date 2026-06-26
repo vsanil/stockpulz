@@ -1168,11 +1168,10 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         stop_pct     = float(cfg.get("stop_loss_pct") or 7)
         risk_profile = cfg.get("risk_profile", "moderate")
 
-        # Detect if crypto
-        is_crypto = len(ticker) <= 5 and ticker.isalpha() and ticker in (
-            "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","LINK",
-            "UNI","ATOM","LTC","BCH","ALGO","XLM","ICP","FIL","HYPE","SUI","ARB","OP"
-        )
+        # Detect if crypto — canonical set (was a 22-coin local list that
+        # mis-sized MATIC/APT/etc. as whole-share stocks).
+        from price_checker import CRYPTO_SYMBOLS
+        is_crypto = ticker in CRYPTO_SYMBOLS
         budget = crypto_budget if is_crypto else stock_budget
 
         send_typing_action(chat_id)

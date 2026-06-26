@@ -21,13 +21,10 @@ from config_manager import _load_gist_file, _write_gist_file
 
 ALERTS_FILENAME = "price_alerts.json"
 
-# Crypto symbols that need the -USD suffix for yfinance
-_CRYPTO_SYMBOLS = {
-    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "DOT", "MATIC",
-    "LINK", "UNI", "ATOM", "LTC", "BCH", "ALGO", "XLM", "VET", "ICP", "FIL",
-    "TRX", "NEAR", "OP", "ARB", "SUI", "APT", "INJ", "SEI", "TIA",
-    "SHIB", "PEPE", "BONK", "WLD", "FLOKI", "TON",
-}
+# Crypto symbols that need the -USD suffix for yfinance — canonical set
+# (re-exported so webhook's `from price_alert_manager import _CRYPTO_SYMBOLS`
+# keeps working). Single source of truth lives in price_checker.
+from price_checker import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
@@ -62,20 +59,8 @@ def _current_price(ticker: str) -> float | None:
     if ticker in _CRYPTO_SYMBOLS:
         try:
             import requests
-            _COINGECKO_IDS = {
-                "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana",
-                "BNB": "binancecoin", "XRP": "ripple", "ADA": "cardano",
-                "DOGE": "dogecoin", "AVAX": "avalanche-2", "DOT": "polkadot",
-                "MATIC": "matic-network", "LINK": "chainlink", "UNI": "uniswap",
-                "ATOM": "cosmos", "LTC": "litecoin", "BCH": "bitcoin-cash",
-                "ALGO": "algorand", "XLM": "stellar", "VET": "vechain",
-                "ICP": "internet-computer", "FIL": "filecoin", "TRX": "tron",
-                "NEAR": "near", "OP": "optimism", "ARB": "arbitrum",
-                "SUI": "sui", "APT": "aptos", "INJ": "injective-protocol",
-                "SHIB": "shiba-inu", "PEPE": "pepe", "BONK": "bonk",
-                "WLD": "worldcoin-wld", "FLOKI": "floki", "TON": "the-open-network",
-            }
-            cg_id = _COINGECKO_IDS.get(ticker)
+            from price_checker import _SYMBOL_TO_CG_ID  # canonical symbol→CG-id map
+            cg_id = _SYMBOL_TO_CG_ID.get(ticker)
             if cg_id:
                 resp = requests.get(
                     "https://api.coingecko.com/api/v3/simple/price",

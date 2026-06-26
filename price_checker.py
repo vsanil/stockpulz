@@ -42,7 +42,21 @@ _SYMBOL_TO_CG_ID = {
     "INJ":   "injective-protocol",
     "TIA":   "celestia",
     "SEI":   "sei-network",
+    "TON":   "the-open-network",
+    "TRX":   "tron",
+    "NEAR":  "near",
+    "SHIB":  "shiba-inu",
+    "PEPE":  "pepe",
+    "BONK":  "bonk",
+    "WLD":   "worldcoin-wld",
+    "FLOKI": "floki",
 }
+
+# Canonical crypto-symbol set — the single source of truth for "is this ticker a
+# crypto?" and for the yfinance -USD suffix decision. Every module that used to
+# keep its own hardcoded _CRYPTO_SYMBOLS list now imports this, so a coin the
+# screener picks can't work in one feature and break in another.
+CRYPTO_SYMBOLS = frozenset(_SYMBOL_TO_CG_ID)
 
 
 def get_current_prices(picks: dict) -> dict:
