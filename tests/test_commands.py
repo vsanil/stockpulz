@@ -354,6 +354,33 @@ class TestTradeLoggerUnit:
         assert trade["timeframe"] is None
         remove_holding("NVDA", chat)
 
+    def test_bought_falls_back_to_live_price_when_not_in_picks(self, monkeypatch):
+        """
+        /bought TICKER for a symbol not in today's picks must store a real
+        entry_price (the live price), not None — otherwise every %-based
+        alert/nudge for that position is dead. AAPL=189.50 in FAKE_PRICES.
+        """
+        import cmd_trade_exec
+        import trade_logger
+        import market_data
+
+        # add_holding returns a trade with NO entry (ticker not in today's picks).
+        fake_trade = {"ticker": "AAPL", "entry_price": None, "stop_loss": None, "target_price": None}
+        saved = {}
+        monkeypatch.setattr(cmd_trade_exec, "load_picks", lambda: {})
+        monkeypatch.setattr(cmd_trade_exec, "_resolve_ticker_candidates", lambda t: [])
+        monkeypatch.setattr(trade_logger, "add_holding",
+                            lambda ticker, chat_id, picks=None, **kw: (fake_trade, False))
+        monkeypatch.setattr(market_data, "validate_ticker", lambda t: True)
+        monkeypatch.setattr(market_data, "get_live_price", lambda t: 199.99)
+        monkeypatch.setattr(cmd_trade_exec, "load_user_trade_log", lambda cid: {"open": [fake_trade]})
+        monkeypatch.setattr(cmd_trade_exec, "save_user_trade_log", lambda cid, log: saved.update(log=log))
+
+        cmd_trade_exec._execute_bought("AAPL", "999")  # no explicit price
+
+        aapl = next(t for t in saved["log"]["open"] if t["ticker"] == "AAPL")
+        assert aapl["entry_price"] == 199.99            # live-price fallback, not None
+
     def test_add_holding_short_term_override(self):
         from trade_logger import add_holding, remove_holding
 

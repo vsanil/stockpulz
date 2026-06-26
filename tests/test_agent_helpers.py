@@ -675,6 +675,32 @@ class TestYfSymbolMap:
         assert m == {"btc-USD": "btc"}   # original case preserved, suffix applied
 
 
+class TestIsPos:
+    """
+    _is_pos — guards nudge/alert price logic. A non-positive or nan price is a
+    failed fetch, not a real quote. `if not x` rejects 0/None but NOT nan
+    (nan is truthy), which is the $0.00/bogus-alert bug class.
+    """
+
+    def test_rejects_none_zero_negative(self):
+        assert ag._is_pos(None) is False
+        assert ag._is_pos(0) is False
+        assert ag._is_pos(0.0) is False
+        assert ag._is_pos(-5) is False
+
+    def test_rejects_nan(self):
+        assert ag._is_pos(float("nan")) is False
+
+    def test_rejects_non_numeric(self):
+        assert ag._is_pos("abc") is False
+        assert ag._is_pos([]) is False
+
+    def test_accepts_positive(self):
+        assert ag._is_pos(0.0008) is True   # fractional crypto
+        assert ag._is_pos(27000) is True
+        assert ag._is_pos("363.21") is True  # numeric string
+
+
 class TestAutoSetPickAlertsEntryGuard:
     """
     _auto_set_pick_alerts — entry alerts must only arm when the pick trades

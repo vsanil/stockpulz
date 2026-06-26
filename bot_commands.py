@@ -844,7 +844,17 @@ def handle_callback_query(callback_query: dict) -> None:
             return
         try:
             entry      = float(entry_raw)
-            shares     = int(shares_raw) if shares_raw.isdigit() else 1
+            # Preserve fractional crypto sizing (e.g. 0.0008 BTC). The old
+            # `int(...) if .isdigit()` collapsed any non-integer string to 1,
+            # turning a $50 crypto buy into 1 whole coin (~$60k phantom position).
+            try:
+                shares = float(shares_raw)
+            except (ValueError, TypeError):
+                shares = 1.0
+            if shares <= 0:
+                shares = 1.0
+            # Whole numbers show as ints; crypto keeps fractional precision.
+            shares_disp = int(shares) if float(shares).is_integer() else round(shares, 6)
             sp         = float(stop_pct)
             tp         = float(target_pct)
             stop_price  = round(entry * (1 - sp / 100), 2)
@@ -876,11 +886,11 @@ def handle_callback_query(callback_query: dict) -> None:
                 "🛒 <b>Ready to log your buy?</b>\n"
                 + f"📌 <b>{ticker}</b>{company_suffix}\n"
                 + f"💰 Entry: <code>${_p(entry)}</code>\n"
-                + f"📦 Shares: {shares} (based on your budget)\n"
+                + f"📦 Shares: {shares_disp} (based on your budget)\n"
                 + f"🛡 Stop-loss: <code>${_p(stop_price)}</code> ({sp}% below entry)\n"
                 + f"🎯 Target: <code>${_p(target_price)}</code> ({tp}% above entry)"
             )
-            confirm_cb     = f"confirm_buy|{ticker}|{entry_raw}|{shares}|{asset_type}|{stop_price}|{target_price}"
+            confirm_cb     = f"confirm_buy|{ticker}|{entry_raw}|{shares_disp}|{asset_type}|{stop_price}|{target_price}"
             skip_cb        = f"skip_buy|{ticker}"
             change_amt_cb  = f"change_buy_amount|{ticker}|{entry_raw}|{asset_type}|{stop_pct}|{target_pct}"
             send_inline_keyboard(
