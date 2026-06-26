@@ -4577,8 +4577,12 @@ async function renderHistoryPicks() {
     const allP = [
       ...(dayPicks.stocks?.short_term || []).map(p => ({...p, _type:'stock',  _tf:'ST', _sym: p.ticker || ''})),
       ...(dayPicks.stocks?.long_term  || []).map(p => ({...p, _type:'stock',  _tf:'LT', _sym: p.ticker || ''})),
-      ...(dayPicks.crypto?.short_term || []).map(p => ({...p, _type:'crypto', _tf:'ST', _sym: p.symbol || ''})),
+      ...(dayPicks.crypto?.short_term || []).map(p => ({...p, _type:'crypto', _tf:'ST', _sym: p.symbol || p.ticker || ''})),
+      ...(dayPicks.crypto?.long_term  || []).map(p => ({...p, _type:'crypto', _tf:'LT', _sym: p.symbol || p.ticker || ''})),
       ...(dayPicks.etfs?.short_term   || []).map(p => ({...p, _type:'etf',   _tf:'ST', _sym: p.ticker || ''})),
+      ...(dayPicks.etfs?.long_term    || []).map(p => ({...p, _type:'etf',   _tf:'LT', _sym: p.ticker || ''})),
+      ...(dayPicks.commodities?.short_term || []).map(p => ({...p, _type:'commodity', _tf:'ST', _sym: p.ticker || p.symbol || ''})),
+      ...(dayPicks.commodities?.long_term  || []).map(p => ({...p, _type:'commodity', _tf:'LT', _sym: p.ticker || p.symbol || ''})),
     ];
     if (!allP.length) return;
 

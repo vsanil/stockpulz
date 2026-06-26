@@ -77,6 +77,19 @@ ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
 
 
+def _is_pos(x) -> bool:
+    """
+    True only for a real, positive number. Rejects None, 0, negatives, and nan.
+    `float(nan) > 0` is False and `float(None)` raises — so both are excluded.
+    Use at every nudge/alert guard: a non-positive/nan price is a failed fetch,
+    not a real quote, and `if not x` lets nan through (nan is truthy).
+    """
+    try:
+        return float(x) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _yf_symbol_map(tickers: list[str]) -> dict[str, str]:
     """
     Map original tickers → {yfinance_symbol: original_ticker}.
@@ -1779,25 +1792,17 @@ def run_midday_check():
             print("[agent] run_midday_check: no open positions — nothing to check.")
             return
 
-        # Fetch current prices via yfinance (same approach as run_price_alerts)
+        # Fetch current prices — route through _download_prices so crypto gets
+        # the -USD suffix (BTC→BTC-USD). A raw yf.download(" ".join(...)) here
+        # priced BTC at ~$28 and fired false "down 99%" hold/fold + drawdown
+        # alerts for any crypto holder at midday.
         ticker_list = list(all_tickers)
-        raw = yf.download(
-            " ".join(ticker_list), period="1d", interval="1m",
-            progress=False, auto_adjust=True,
+        current_prices = _download_prices(
+            ticker_list, period="1d", interval="1m", auto_adjust=True
         )
-        if raw.empty:
+        if not current_prices:
             print("[agent] run_midday_check: price fetch returned empty.")
             return
-
-        if hasattr(raw["Close"], "columns"):
-            current_prices = {
-                t: float(raw["Close"][t].dropna().iloc[-1])
-                for t in ticker_list if t in raw["Close"].columns
-            }
-        else:
-            current_prices = (
-                {ticker_list[0]: float(raw["Close"].dropna().iloc[-1])} if ticker_list else {}
-            )
 
         for uid in users:
             if _is_quiet_hours(uid):
@@ -1882,7 +1887,7 @@ def _check_stale_positions(uid: str, current_prices: dict) -> list:
         opened  = trade.get("opened_date") or trade.get("entry_date") or trade.get("bought_at")
         current = current_prices.get(ticker) if ticker else None
 
-        if not (ticker and entry and current and opened):
+        if not (ticker and _is_pos(entry) and _is_pos(current) and opened):
             continue
 
         try:
@@ -2777,7 +2782,7 @@ def _check_portfolio_health(uid: str, current_prices: dict) -> list:
         entry   = trade.get("entry_price")
         shares  = trade.get("shares") or trade.get("quantity")
         current = current_prices.get(ticker) if ticker else None
-        if not (ticker and entry and current):
+        if not (ticker and _is_pos(entry) and _is_pos(current)):
             continue
         alloc = trade.get("allocation") or trade.get("budget") or 0
         if shares:
@@ -2908,7 +2913,7 @@ def _check_portfolio_drawdown(uid: str, current_prices: dict) -> None:
             if not shares:
                 # Estimate shares from allocation if available
                 alloc = trade.get("allocation") or trade.get("budget")
-                if alloc and entry:
+                if alloc and _is_pos(entry):
                     shares = float(alloc) / float(entry)
             if not shares:
                 continue
@@ -3030,7 +3035,7 @@ def _check_trailing_stops(current_prices: dict, uid: str,
         target  = trade.get("target_price")
         current = current_prices.get(ticker) if ticker else None
 
-        if not (ticker and entry and current):
+        if not (ticker and _is_pos(entry) and _is_pos(current)):
             continue
 
         entry_f   = float(entry)
@@ -3237,10 +3242,10 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
         ticker = trade.get("ticker")
         entry  = trade.get("entry_price")
         stop   = trade.get("stop_loss")
-        if not (ticker and entry and stop):
+        if not (ticker and _is_pos(entry) and _is_pos(stop)):
             continue
         current = current_prices.get(ticker)
-        if not current:
+        if not _is_pos(current):
             continue
         entry_f, stop_f, curr_f = float(entry), float(stop), float(current)
         pct_from_entry = (curr_f - entry_f) / entry_f * 100

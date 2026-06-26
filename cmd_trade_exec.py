@@ -165,6 +165,19 @@ def _execute_bought(ticker: str, chat_id: str,
     if existed:
         return f"📌 <b>{ticker}</b> is already in your portfolio — I'm watching it."
 
+    # If no explicit price and the ticker isn't in today's picks, add_holding
+    # leaves entry_price=None — which kills every %-based alert/nudge and $ P&L
+    # for this position. Fall back to the live price as the entry (a typed
+    # /bought is logged near the actual buy, so live ≈ fill).
+    if price is None and not trade.get("entry_price"):
+        try:
+            from market_data import get_live_price
+            live = get_live_price(ticker)
+            if live and live > 0:
+                price = live
+        except Exception:
+            pass  # fail open — better to log with no entry than block the user
+
     # Override entry price if user provided one explicitly
     if price is not None:
         try:
