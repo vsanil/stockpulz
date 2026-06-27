@@ -53,6 +53,11 @@ Rules:
 - **Frontend crypto set auto-syncs**: picks `_meta.crypto_symbols` serves `price_checker.CRYPTO_SYMBOLS`; `isCryptoTicker()` overlays it on load. The hardcoded JS literal is only the pre-load fallback — to add a coin, just add it to `_SYMBOL_TO_CG_ID`.
 - **Fractional crypto in nudge text**: any "sell X of your Y shares" / partial-profit text must format shares fractional-safe (`int(x) if is_integer else %g`), never `max(1, int(...))` — that printed "Sell 1 of your 0 shares" for a 0.0008 BTC position.
 
+### Bug pattern: NaN/Infinity in an API response breaks the frontend (Jun 27)
+- Flask `jsonify` emits the literal `NaN`/`Infinity` (Python `json` allows them), but those are **invalid JSON** — the browser's `response.json()` throws, and the tab silently shows "Couldn't load data". This took down the Performance tab: `build_community_stats` returned `alpha`/`spy_return_30d = NaN` (SPY fetch produced a NaN close; `if x is not None` doesn't catch NaN — same class as `_is_pos`).
+- **Fix at source** (`x == x` is False for NaN; guard before `round()`) AND **at the boundary**: `webhook._clean_nan(payload)` recursively maps NaN/Inf → None before `jsonify`. **Rule: any endpoint returning computed floats (stats, %, alpha) must sanitize via `_clean_nan` or guarantee no NaN reaches jsonify.**
+- **Decorator gotcha**: never insert a helper `def` between `@app.route(...)` and its view function — the decorator then wraps the helper and the route 500s. Put module helpers ABOVE the decorator.
+
 ### Background jobs must fail silently to users
 - run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
 
