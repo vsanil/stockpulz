@@ -1162,9 +1162,10 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
         if not ticker:
             return "Usage: <code>/size TICKER</code>"
 
+        from config_manager import DEFAULT_STOCK_BUDGET, DEFAULT_CRYPTO_BUDGET
         cfg         = {**get_config(), **get_user_config(chat_id)}
-        stock_budget = float(cfg.get("stock_budget") or cfg.get("budget_per_trade") or 500)
-        crypto_budget= float(cfg.get("crypto_budget") or 100)
+        stock_budget = float(cfg.get("stock_budget") or cfg.get("budget_per_trade") or DEFAULT_STOCK_BUDGET)
+        crypto_budget= float(cfg.get("crypto_budget") or DEFAULT_CRYPTO_BUDGET)
         stop_pct     = float(cfg.get("stop_loss_pct") or 7)
         risk_profile = cfg.get("risk_profile", "moderate")
 
