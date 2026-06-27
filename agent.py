@@ -2537,10 +2537,12 @@ def _check_portfolio_correlation(uid: str, open_positions: list) -> str | None:
     """
     import yfinance as yf
 
-    # Filter to stock positions only
+    # Filter to stock positions only. For legacy positions with no asset_type,
+    # classify via the canonical crypto set (not an ad-hoc last-char-digit rule).
+    from price_checker import CRYPTO_SYMBOLS
     stock_positions = [p for p in open_positions if p.get("asset_type") == "stock" or
-                       (p.get("asset_type") is None and p.get("ticker") and
-                        not any(c.isdigit() for c in p.get("ticker", "")[-1:]))]
+                       (p.get("asset_type") is None and p.get("ticker")
+                        and p.get("ticker", "").upper() not in CRYPTO_SYMBOLS)]
     tickers = list(dict.fromkeys(p["ticker"] for p in stock_positions if p.get("ticker")))
 
     if len(tickers) < 3:
