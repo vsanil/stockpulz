@@ -1490,9 +1490,15 @@ def miniapp_positions():
     log      = load_user_trade_log(chat_id)
     open_pos = log.get("open", [])
 
-    # One batch call for all tickers — O(1) network round-trips regardless of count
+    # One batch call for all tickers — O(1) network round-trips regardless of count.
+    # Fail-safe: a price-fetch error must not 500 the whole portfolio tab — render
+    # the positions (structure) and let live prices overlay separately.
     all_syms = [t["ticker"] for t in open_pos]
-    live     = _prices_batch(all_syms) if all_syms else {}
+    try:
+        live = _prices_batch(all_syms) if all_syms else {}
+    except Exception as exc:
+        print(f"[webhook] /positions live price fetch failed (non-critical): {exc}")
+        live = {}
 
     result = []
     today  = _date.today()

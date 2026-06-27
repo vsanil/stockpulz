@@ -357,6 +357,24 @@ class TestPositions:
         assert "positions" in data
         assert isinstance(data["positions"], list)
 
+    def test_positions_survives_live_price_failure(self, client):
+        """
+        A live-price fetch error must not 500 the portfolio tab — positions
+        (structure) still render; live prices overlay separately.
+        """
+        from unittest.mock import patch
+        # Seed one position so there's something to render.
+        from trade_logger import add_holding, remove_holding
+        from tests.conftest import TEST_CHAT_ID
+        remove_holding("NVDA", TEST_CHAT_ID)
+        add_holding("NVDA", TEST_CHAT_ID, entry_override=200.0)
+        with patch("market_data.get_live_prices", side_effect=RuntimeError("boom")):
+            r = get(client, "/api/miniapp/positions")
+        assert r.status_code == 200          # not a 500
+        data = r.get_json()
+        assert any(p["ticker"] == "NVDA" for p in data["positions"])
+        remove_holding("NVDA", TEST_CHAT_ID)
+
     def test_close_position_no_open_position(self, client):
         """Closing a non-existent position should return an error gracefully."""
         r = post(client, "/api/miniapp/close_position",
