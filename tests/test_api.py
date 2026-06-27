@@ -175,6 +175,25 @@ class TestWatchlist:
         r = post(client, "/api/miniapp/watchlist/remove", {"ticker": "FAKEXYZ"})
         assert r.status_code == 200
 
+    def test_settings_and_watchtab_share_one_store(self, client):
+        """
+        Regression: the Settings-tab watchlist (user_config) and the Watch-tab
+        watchlist (trade_log) were separate stores — a ticker added in one
+        vanished from the other. They must now be unified.
+        """
+        # Added via the Watch-tab endpoint (trade_log store)...
+        post(client, "/api/miniapp/watchlist/add", {"ticker": "NVDA"})
+        # ...must appear in the Settings response (which used to read config).
+        settings_wl = get(client, "/api/miniapp/settings").get_json()["settings"]["watchlist"]
+        assert "NVDA" in settings_wl
+
+        # Added via the Settings/update endpoint (config path)...
+        post(client, "/api/miniapp/update_watchlist", {"action": "add", "ticker": "AMD"})
+        # ...must appear in the Watch-tab endpoint (which reads trade_log).
+        watch_wl = get(client, "/api/miniapp/watchlist").get_json()["tickers"]
+        assert "AMD" in watch_wl
+        assert "NVDA" in watch_wl   # both paths visible in one unified list
+
     def test_update_watchlist_add_action(self, client):
         r = post(client, "/api/miniapp/update_watchlist", {"action": "add", "ticker": "TSLA"})
         assert r.get_json()["ok"] is True
