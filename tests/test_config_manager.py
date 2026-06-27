@@ -53,6 +53,29 @@ def _mock_gist_get(stored: dict):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+class TestEtToday:
+    """et_today() returns the US/Eastern trading day, not server-local UTC."""
+
+    def test_returns_a_date(self):
+        from datetime import date as _date
+        from config_manager import et_today
+        assert isinstance(et_today(), _date)
+
+    def test_matches_eastern_date(self):
+        import pytz
+        from datetime import datetime as _dt
+        from config_manager import et_today
+        expected = _dt.now(pytz.timezone("America/New_York")).date()
+        assert et_today() == expected
+
+    def test_can_subtract_and_isoformat(self):
+        # Used in dedup keys and day-diffs — must behave like a date.
+        from datetime import date as _date, timedelta
+        from config_manager import et_today
+        assert isinstance(et_today().isoformat(), str)
+        assert (et_today() - (et_today() - timedelta(days=3))).days == 3
+
+
 class TestGetConfig:
     """get_config merges defaults with stored values."""
 

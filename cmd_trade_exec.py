@@ -8,7 +8,7 @@ import threading
 
 from datetime import date
 from telegram_api import send_message, send_photo, send_inline_keyboard
-from config_manager import load_picks, load_user_trade_log, save_user_trade_log
+from config_manager import load_picks, load_user_trade_log, save_user_trade_log, et_today
 from formatters import _p, _esc
 from cmd_helpers import _resolve_ticker_candidates, _fetch_live_price
 
@@ -473,7 +473,7 @@ def _execute_trim(ticker: str, chat_id: str,
                 "shares":       trim_s,
                 "return_pct":   round(ret_pct, 2),
                 "gain_usd":     round(pnl_usd, 2),
-                "closed_date":  str(_date.today()),
+                "closed_date":  str(et_today()),
                 "partial":      True,
             }
             log.setdefault("closed", []).append(partial_record)
@@ -546,7 +546,7 @@ def _execute_sold(ticker: str, chat_id: str,
                     if opened_str:
                         try:
                             opened_d = date.fromisoformat(str(opened_str)[:10])
-                            days_held = (date.today() - opened_d).days
+                            days_held = (et_today() - opened_d).days
                             # Determine pnl direction
                             entry_tax = t_tax.get("entry_price")
                             pnl_positive = entry_tax and exit_price_tax > float(entry_tax)

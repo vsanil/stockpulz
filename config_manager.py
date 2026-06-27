@@ -92,6 +92,20 @@ DEFAULT_USER_CONFIG = {
 DEFAULT_STOCK_BUDGET  = 200
 DEFAULT_CRYPTO_BUDGET = 50
 
+
+def et_today():
+    """
+    Today's date in US/Eastern — the trading day. Use for dedup keys, date
+    stamps, and day-diffs. Bare `date.today()` is server-local (UTC on Render),
+    so it rolls over at UTC midnight = 7–8 PM ET — making evening alerts double-
+    fire or wrongly suppress, and disagreeing with the ET-based picks date.
+    Returns a datetime.date.
+    """
+    import pytz
+    from datetime import datetime as _dt
+    return _dt.now(pytz.timezone("America/New_York")).date()
+
+
 GIST_FILENAME          = "config.json"
 PICKS_FILENAME         = "picks.json"           # Stores morning picks for 10:30 AM confirmation
 WEEKLY_PICKS_FILENAME  = "weekly_picks.json"    # Accumulates Mon–Fri picks for Saturday recap
@@ -323,9 +337,7 @@ def remove_pending_user(chat_id: str) -> None:
 
 def save_picks(picks: dict) -> None:
     """Save morning picks to Gist as picks.json for the confirmation run."""
-    import pytz
-    from datetime import datetime, timezone
-    picks["_saved_date"] = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+    picks["_saved_date"] = et_today().isoformat()
     url = f"https://api.github.com/gists/{_gist_id()}"
     payload = {
         "files": {
@@ -346,9 +358,7 @@ def load_picks() -> dict | None:
     """Load today's morning picks from Gist. Returns None if not found or stale.
     Date comparison uses US/Eastern timezone so picks stay valid until midnight ET
     (not midnight UTC which would expire them at 8 PM ET)."""
-    import pytz
-    from datetime import datetime, timezone
-    today_et = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+    today_et = et_today().isoformat()
     try:
         url = f"https://api.github.com/gists/{_gist_id()}"
         resp = requests.get(url, headers=_gist_headers(), timeout=10)

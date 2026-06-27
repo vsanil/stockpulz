@@ -56,7 +56,7 @@ from config_manager import (
     get_config, update_config, save_picks, load_picks, save_weekly_pick,
     get_dynamic_pick_counts, get_user_config,
     load_user_trade_log, save_user_trade_log,
-    save_screener_cache, load_screener_cache,
+    save_screener_cache, load_screener_cache, et_today,
 )
 from etf_screener import run_etf_screener
 from trade_logger import check_and_close_trades
@@ -936,7 +936,7 @@ def run_confirmation():
 
     # ── Idempotency guard — only send once per day ────────────────────────────
     # Render retries failed cron runs; without this each retry would re-send
-    today = date.today().isoformat()
+    today = et_today().isoformat()
     if picks.get("_confirmation_sent_date") == today:
         print("[agent] Confirmation already sent today — skipping duplicate.")
         return
@@ -1121,7 +1121,7 @@ def _check_picks_stop_loss(current_prices: dict, picks: dict, uid: str) -> None:
     in-memory otherwise) so a user sees at most one alert per ticker per day
     even across bot restarts.
     """
-    today_str = date.today().isoformat()
+    today_str = et_today().isoformat()
     cfg = get_user_config(uid)
     if cfg.get("paused"):
         return
@@ -1327,7 +1327,7 @@ def run_eod_summary():
                     print(f"[agent] cash check failed for {uid}: {_c_exc}")
 
                 # Correlation warning — Mondays only
-                if date.today().weekday() == 0:
+                if et_today().weekday() == 0:
                     try:
                         corr_note = _check_portfolio_correlation(uid, open_positions)
                         if corr_note:
@@ -1590,7 +1590,7 @@ def run_tax_loss_harvest_check():
     nudging them to consider year-end tax-loss harvesting.
     """
     _log_cron_run("tax_harvest")
-    today = date.today()
+    today = et_today()
     if today.month not in (11, 12):
         print("[agent] Tax harvest check — not November or December, skipping.")
         return
@@ -1688,7 +1688,7 @@ def _get_tomorrows_macro_events() -> list[dict]:
     import urllib.request
     import json
 
-    tomorrow = (date.today() + timedelta(days=1)).strftime("%m-%d-%Y")
+    tomorrow = (et_today() + timedelta(days=1)).strftime("%m-%d-%Y")
     try:
         url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
         req = urllib.request.Request(url, headers={"User-Agent": "StockPulz/1.0"})
@@ -1722,7 +1722,7 @@ def run_macro_alert_check():
         print("[agent] macro_alert: skipping — not Mon–Thu.")
         return
 
-    dedup_key = f"macroalert_{date.today().isoformat()}"
+    dedup_key = f"macroalert_{et_today().isoformat()}"
     if _is_alerted(dedup_key):
         print("[agent] macro_alert: already sent today — skipping.")
         return
@@ -1898,7 +1898,7 @@ def _check_stale_positions(uid: str, current_prices: dict) -> list:
 
         try:
             open_date = _date.fromisoformat(str(opened)[:10])
-            age_days  = (_date.today() - open_date).days
+            age_days  = (et_today() - open_date).days
         except Exception:
             continue
 
@@ -1963,7 +1963,7 @@ def run_vix_check():
     # Determine tier and dedup key — distinct keys per tier so an escalation
     # (e.g. VIX 26 high → 40 extreme same day) isn't suppressed by the lower tier.
     if vix >= 35:
-        dedup_key = f"vix_extreme_{date.today()}"
+        dedup_key = f"vix_extreme_{et_today()}"
         msg = (
             f"🚨 <b>Extreme Volatility — VIX {vix:.1f}</b>\n\n"
             f"Markets are in fear mode. Conditions like this are rare and usually short-lived.\n\n"
@@ -1972,7 +1972,7 @@ def run_vix_check():
             f"📊 Check /regime for current market conditions."
         )
     elif vix >= 25:
-        dedup_key = f"vix_high_{date.today()}"
+        dedup_key = f"vix_high_{et_today()}"
         msg = (
             f"⚠️ <b>High Volatility Alert — VIX {vix:.1f}</b>\n\n"
             f"Markets are getting nervous. The VIX fear index is above 25 — expect sharp intraday moves.\n\n"
@@ -1982,7 +1982,7 @@ def run_vix_check():
         )
     else:
         # 20 <= vix < 25
-        dedup_key = f"vix_mild_{date.today()}"
+        dedup_key = f"vix_mild_{et_today()}"
         msg = (
             f"📊 <b>Market Volatility Update</b>\n\n"
             f"The VIX fear index is at {vix:.1f} — slightly elevated. Markets may be choppier than usual.\n\n"
@@ -2112,7 +2112,7 @@ def run_news_check():
                     continue
                 # Take at most 2 stories per ticker to avoid wall-of-text
                 for title, publisher, link, published_ts in stories[:2]:
-                    dedup_key = f"news_{sym}_{hash(title) % 100000}_{date.today()}"
+                    dedup_key = f"news_{sym}_{hash(title) % 100000}_{et_today()}"
                     if _is_alerted(dedup_key):
                         continue
                     _mark_alerted(dedup_key)
@@ -2170,7 +2170,7 @@ def run_pre_earnings_guidance():
             all_tickers   = list(dict.fromkeys(open_tickers + watch_tickers))
 
             for sym in all_tickers:
-                dedup_key = f"preearnings_{sym}_{date.today()}"
+                dedup_key = f"preearnings_{sym}_{et_today()}"
                 if _is_alerted(dedup_key):
                     continue
                 try:
@@ -2510,7 +2510,7 @@ def _check_cash_position(uid: str, user_settings: dict, open_positions: list, cu
         return
 
     # Dedup: once per week
-    week_num  = date.today().isocalendar()[1]
+    week_num  = et_today().isocalendar()[1]
     dedup_key = f"cash_warning_{uid}_{week_num}"
     if _is_alerted(dedup_key):
         return
@@ -2542,7 +2542,7 @@ def _check_portfolio_correlation(uid: str, open_positions: list) -> str | None:
     if len(tickers) < 3:
         return
 
-    week_num  = date.today().isocalendar()[1]
+    week_num  = et_today().isocalendar()[1]
     dedup_key = f"correlation_{uid}_{week_num}"
     if _is_alerted(dedup_key):
         return
@@ -2666,7 +2666,7 @@ def _check_congressional_alert(uid: str, open_positions: list) -> str | None:
 
     signals = batch_congressional_signals(tickers)
     hits: list[str] = []
-    week_num = date.today().isocalendar()[1]
+    week_num = et_today().isocalendar()[1]
     for ticker, sig in signals.items():
         if not sig.get("is_cluster"):
             continue
@@ -2778,7 +2778,7 @@ def _check_portfolio_health(uid: str, current_prices: dict) -> list:
     if not trades:
         return []
 
-    today   = date.today()
+    today   = et_today()
     blocks: list[str] = []
 
     # Calculate total portfolio value based on current prices
@@ -2858,7 +2858,7 @@ def _check_portfolio_drawdown(uid: str, current_prices: dict) -> None:
     import yfinance as yf
     from datetime import date as _date
 
-    today_str = _date.today().isoformat()
+    today_str = et_today().isoformat()
     dedup_key = f"drawdown_{uid}_{today_str}"
     if _is_alerted(dedup_key):
         return
@@ -2972,7 +2972,7 @@ def _check_trade_reminders() -> None:
     Called daily from run_midday_check (12:30 PM ET).
     """
     from datetime import date as _date
-    today_str = _date.today().isoformat()
+    today_str = et_today().isoformat()
 
     for uid in _all_recipients():
         try:
@@ -3259,7 +3259,7 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
         pct_to_stop    = (curr_f - stop_f)  / curr_f  * 100
         # Only nudge when down 2–8% AND within 5% of stop
         if -8.0 <= pct_from_entry <= -2.0 and pct_to_stop <= 5.0:
-            key = f"holdfold_{uid}_{ticker}_{date.today()}"
+            key = f"holdfold_{uid}_{ticker}_{et_today()}"
             if _is_alerted(key):
                 continue
             _mark_alerted(key)
@@ -3352,7 +3352,7 @@ def _check_take_profit_nudge(uid: str, current_prices: dict) -> None:
         if progress < 0.85:
             continue
 
-        key = f"tp_nudge_{uid}_{ticker}_{date.today()}"
+        key = f"tp_nudge_{uid}_{ticker}_{et_today()}"
         if _is_alerted(key):
             continue
         _mark_alerted(key)
@@ -3771,7 +3771,7 @@ def run_price_alerts():
                     continue
                 gap_pct = (float(target) - float(current)) / float(current) * 100
                 if 0 < gap_pct <= 5:
-                    alert_key = f"target_approach_{uid}_{ticker}_{date.today().isoformat()}"
+                    alert_key = f"target_approach_{uid}_{ticker}_{et_today().isoformat()}"
                     from cache_layer import cache_get, cache_set
                     if not cache_get(alert_key):
                         cache_set(alert_key, "1", ttl_seconds=86400)
@@ -3818,7 +3818,7 @@ def run_price_alerts():
                         pct_chg = (curr - prev) / prev * 100
                         if abs(pct_chg) < 3:
                             continue
-                        key = f"watch_move_{uid}_{t}_{_date.today().isoformat()}"
+                        key = f"watch_move_{uid}_{t}_{et_today().isoformat()}"
                         if cache_get(key):
                             continue
                         cache_set(key, "1", ttl_seconds=86400)
@@ -4054,7 +4054,7 @@ def compute_pick_streaks(weekly_picks: dict) -> dict:
     """
     from datetime import date, timedelta
 
-    today     = date.today()
+    today     = et_today()
     today_str = today.isoformat()
 
     # Build {date_str: set(ticker)} from weekly picks
