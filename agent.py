@@ -77,6 +77,12 @@ ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
 
 
+# "Near stop" proximity — single definition for the NEAR STOP badge and the EOD
+# health insight (was 2% on the badge vs 3% in health). A position is "near stop"
+# when price is within this % above its stop.
+STOP_PROXIMITY_PCT = 3.0
+
+
 def _is_pos(x) -> bool:
     """
     True only for a real, positive number. Rejects None, 0, negatives, and nan.
@@ -1954,9 +1960,10 @@ def run_vix_check():
         print("[agent] vix_check: VIX below 20 — no alert needed.")
         return
 
-    # Determine tier and dedup key
+    # Determine tier and dedup key — distinct keys per tier so an escalation
+    # (e.g. VIX 26 high → 40 extreme same day) isn't suppressed by the lower tier.
     if vix >= 35:
-        dedup_key = f"vix_high_{date.today()}"
+        dedup_key = f"vix_extreme_{date.today()}"
         msg = (
             f"🚨 <b>Extreme Volatility — VIX {vix:.1f}</b>\n\n"
             f"Markets are in fear mode. Conditions like this are rare and usually short-lived.\n\n"
@@ -2817,7 +2824,7 @@ def _check_portfolio_health(uid: str, current_prices: dict) -> list:
         if stop:
             stop_f      = float(stop)
             pct_to_stop = (curr_f - stop_f) / curr_f * 100
-            if 0 < pct_to_stop <= 3:
+            if 0 < pct_to_stop <= STOP_PROXIMITY_PCT:
                 key = f"health_stop_{uid}_{ticker}_{today}"
                 if not _is_alerted(key):
                     _mark_alerted(key)
@@ -3234,8 +3241,8 @@ def _is_quiet_hours(uid: str) -> bool:
 
 def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
     """
-    For positions between -3% and the stop-loss: send a plain-English
-    hold/fold nudge. Once per position per day via cache dedup.
+    For positions down 2–8% from entry AND within 5% of their stop: send a
+    plain-English hold/fold nudge. Once per position per day via cache dedup.
     """
     log = load_user_trade_log(uid)
     for trade in log.get("open", []):
@@ -3571,7 +3578,7 @@ def run_premarket(config: dict):
                                 ve = (price - float(entry)) / float(entry) * 100
                                 vs_entry_str = f"  ·  {'+' if ve >= 0 else ''}{ve:.1f}% vs entry"
                             stop_badge = ""
-                            if stop and price <= float(stop) * 1.02:
+                            if stop and price <= float(stop) * (1 + STOP_PROXIMITY_PCT / 100):
                                 stop_badge = "  ⚠️ <b>NEAR STOP</b>"
                             position_lines.append(
                                 f"  ⚪ <b>{ticker}</b>  <code>${_p(price)}</code>"
@@ -3638,7 +3645,7 @@ def run_premarket(config: dict):
 
                     # Stop proximity
                     stop_badge = ""
-                    if stop and pre_price <= float(stop) * 1.02:
+                    if stop and pre_price <= float(stop) * (1 + STOP_PROXIMITY_PCT / 100):
                         stop_badge = "  ⚠️ <b>NEAR STOP</b>"
 
                     move_icon = "🔴" if vs_prev <= -3 else ("🟢" if vs_prev >= 3 else "⚪")
@@ -3819,7 +3826,7 @@ def run_price_alerts():
                         sign  = "+" if pct_chg > 0 else ""
                         send_inline_keyboard(
                             f"{emoji} <b>{t}</b> is moving <b>{sign}{pct_chg:.1f}%</b> today\n"
-                            f"Price: <code>${curr:.2f}</code>  (was <code>${prev:.2f}</code>)",
+                            f"Price: <code>${_p(curr)}</code>  (was <code>${_p(prev)}</code>)",
                             [[
                                 _miniapp_url_btn(f"📊 {t} Chart", f"?chart={t}", f"cmd|CHART {t}"),
                                 _miniapp_btn("🔔 Set Alert", "watchlist", f"alert|{t}"),
