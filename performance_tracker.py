@@ -280,9 +280,13 @@ def build_community_stats(user_trade_logs: list[dict]) -> dict | None:
     try:
         hist = yf.Ticker("SPY").history(period="1mo")
         if len(hist) >= 2:
-            spy_return_30d = round(
-                (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100, 1
-            )
+            first = float(hist["Close"].iloc[0])
+            last  = float(hist["Close"].iloc[-1])
+            # Guard against yfinance NaN closes — a NaN here propagates into
+            # alpha and then breaks the JSON response (NaN is invalid JSON).
+            # `x == x` is False for NaN.
+            if first > 0 and first == first and last == last:
+                spy_return_30d = round((last - first) / first * 100, 1)
     except Exception as exc:
         print(f"[performance_tracker] SPY 30d fetch failed: {exc}")
 

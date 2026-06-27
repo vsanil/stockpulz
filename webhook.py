@@ -2791,6 +2791,22 @@ _PERF_CACHE: dict = {}         # chat_id → {"payload": dict, "ts": float}
 _PERF_CACHE_TTL = 5 * 60       # 5 minutes
 
 
+def _clean_nan(obj):
+    """
+    Recursively replace NaN/Infinity floats with None. Flask's jsonify emits the
+    literal `NaN`, which is INVALID JSON — the browser's response.json() throws on
+    it and the tab silently shows "Couldn't load data". Sanitize before returning.
+    """
+    import math
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _clean_nan(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_clean_nan(v) for v in obj]
+    return obj
+
+
 @app.route("/api/miniapp/performance")
 def miniapp_performance():
     """Return bot track record for the Mini App performance tab.
@@ -2822,12 +2838,12 @@ def miniapp_performance():
             "60d": get_performance_stats(60),
             "90d": get_performance_stats(90),
         }
-        payload = {
+        payload = _clean_nan({
             "ok":           True,
             "stats":        stats,
             "context_30d":  ctx30,
             "period_stats": period_stats,
-        }
+        })
         _PERF_CACHE[chat_id] = {"payload": payload, "ts": now}
         return jsonify(payload)
     except Exception as e:

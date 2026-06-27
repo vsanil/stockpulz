@@ -458,6 +458,41 @@ class TestPerformance:
         assert r.status_code == 200
         assert r.get_json().get("ok") is True
 
+    def test_clean_nan_makes_valid_json(self):
+        """
+        NaN/Inf in a response is invalid JSON — the browser's response.json()
+        throws and the Performance tab shows "Couldn't load data". _clean_nan
+        must convert them to null so the payload always parses.
+        """
+        import json as _json
+        from webhook import _clean_nan
+        dirty = {"alpha": float("nan"), "spy": float("inf"),
+                 "nested": {"x": float("-inf"), "ok": 1.5}, "list": [float("nan"), 2]}
+        clean = _clean_nan(dirty)
+        # json.dumps with default allow_nan would emit NaN — assert it's gone.
+        s = _json.dumps(clean)
+        assert "NaN" not in s and "Infinity" not in s
+        assert clean["alpha"] is None and clean["spy"] is None
+        assert clean["nested"]["x"] is None and clean["nested"]["ok"] == 1.5
+        assert clean["list"] == [None, 2]
+
+    def test_performance_payload_has_no_nan(self, client):
+        """The live bug: build_community_stats emitted alpha/spy_return_30d=NaN."""
+        from unittest.mock import patch
+        import webhook
+        webhook._PERF_CACHE.clear()   # avoid a stale cached payload from another test
+        bad_stats = {"avg_return": 441.4, "alpha": float("nan"),
+                     "spy_return_30d": float("nan"), "win_rate": 100.0}
+        with patch("performance_tracker.build_community_stats", return_value=bad_stats):
+            r = get(client, "/api/miniapp/performance")
+        assert r.status_code == 200
+        # Flask test client get_json() parses strictly — NaN would raise here.
+        body = r.get_data(as_text=True)
+        assert "NaN" not in body and "Infinity" not in body
+        data = r.get_json()
+        assert data["stats"]["alpha"] is None
+        assert data["stats"]["spy_return_30d"] is None
+
     def test_history_returns_list(self, client):
         r = get(client, "/api/miniapp/history")
         assert r.status_code == 200
