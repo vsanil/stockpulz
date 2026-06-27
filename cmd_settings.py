@@ -204,7 +204,7 @@ def _send_settings_panel(chat_id: str) -> None:
     max_sec_label   = f"{max_sec_pct}%"
 
     # Conviction threshold
-    min_conv        = int(cfg.get("min_conviction", 4))
+    min_conv        = int(cfg.get("min_conviction", 3))   # match agent's DEFAULT_MIN_CONVICTION
     min_conv_label  = "★" * min_conv
 
     # Labels

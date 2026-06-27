@@ -2476,6 +2476,10 @@ def _check_cash_position(uid: str, user_settings: dict, open_positions: list, cu
         # Also check inside the nested settings structure
         total_portfolio = user_settings.get("settings", {}).get("total_portfolio_size")
     if not total_portfolio:
+        # Fall back to the /settings capital key (portfolio.portfolio_size) so the
+        # warning fires for users who set capital there instead of in onboarding.
+        total_portfolio = user_settings.get("portfolio", {}).get("portfolio_size")
+    if not total_portfolio:
         return
 
     try:

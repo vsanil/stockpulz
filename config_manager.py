@@ -80,6 +80,10 @@ DEFAULT_USER_CONFIG = {
     "stop_loss_pct":     None,         # % below entry to auto-close (None = use global default of 7%)
     "target_gain_pct":   None,         # % above entry as default target (None = use global default of 15%)
     "show_crypto":       True,         # False = hide all crypto sections from daily picks
+    "show_etfs":         True,         # False = hide ETF sections from daily picks
+    "assets":            "both",       # "stocks" | "crypto" | "both" (mini-app asset filter)
+    "min_conviction":    3,            # minimum conviction (1-5) for a pick to be shown
+    "portfolio":         {},           # {portfolio_size, risk_per_trade_pct, max_position_pct, max_sector_pct}
     # Notification opt-outs (all default on)
     "skip_confirmation":     False,    # True = skip 10:30 AM confirmation message
     "skip_eod":              False,    # True = skip 3:30 PM EOD portfolio summary
@@ -91,6 +95,28 @@ DEFAULT_USER_CONFIG = {
 # gets the same position size everywhere (was 500/100 in /size vs 200/50 elsewhere).
 DEFAULT_STOCK_BUDGET  = 200
 DEFAULT_CRYPTO_BUDGET = 50
+
+
+def shows_crypto(cfg: dict) -> bool:
+    """
+    Single resolver for "should this user see crypto?" — reconciles the mini-app
+    `assets` key ("stocks"|"crypto"|"both") with the bot's `show_crypto` toggle.
+    These were read independently, so a user who set "stocks only" in the app
+    still got crypto in the morning broadcast (which read show_crypto).
+    """
+    a = cfg.get("assets")
+    if a == "stocks":
+        return False
+    if a == "crypto":
+        return True
+    return bool(cfg.get("show_crypto", True))
+
+
+def shows_etfs(cfg: dict) -> bool:
+    """Should this user see ETFs? Crypto-only hides them; else the show_etfs toggle."""
+    if cfg.get("assets") == "crypto":
+        return False
+    return bool(cfg.get("show_etfs", True))
 
 
 def et_today():
@@ -431,12 +457,26 @@ def get_dynamic_pick_counts(config: dict) -> dict:
     sb = config.get("stock_budget")
     cb = config.get("crypto_budget")
 
-    return {
+    counts = {
         "max_short_picks":        _count(sb, 0.4, 12.0, 5, config.get("max_short_picks", 2)),
         "max_long_picks":         _count(sb, 0.6, 15.0, 6, config.get("max_long_picks",  3)),
         "max_crypto_short_picks": _count(cb, 0.5, 10.0, 4, config.get("max_crypto_short_picks", 2)),
         "max_crypto_long_picks":  _count(cb, 0.5, 10.0, 4, config.get("max_crypto_long_picks",  2)),
     }
+
+    # Honor the user's explicit total caps (were written but never consumed).
+    # max_stock_picks / max_crypto_picks bound the ST+LT total; trim ST first.
+    def _clamp_total(short_key, long_key, cap):
+        if not cap:
+            return
+        cap = int(cap)
+        if counts[short_key] + counts[long_key] > cap:
+            counts[short_key] = max(0, min(counts[short_key], cap))
+            counts[long_key]  = max(0, cap - counts[short_key])
+
+    _clamp_total("max_short_picks", "max_long_picks", config.get("max_stock_picks"))
+    _clamp_total("max_crypto_short_picks", "max_crypto_long_picks", config.get("max_crypto_picks"))
+    return counts
 
 
 # ── Signal cache (sentiment + insider, 5-day TTL) ────────────────────────────

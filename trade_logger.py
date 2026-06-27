@@ -299,6 +299,20 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
         except Exception:
             pass
 
+    # Fill a missing stop/target from the user's % settings — otherwise
+    # stop_loss_pct / target_gain_pct are written but never do anything. Only
+    # fills gaps; an AI pick stop or an explicit override always wins.
+    if entry:
+        try:
+            from config_manager import get_user_config
+            ucfg = get_user_config(chat_id)
+            if stop is None and ucfg.get("stop_loss_pct"):
+                stop = round(float(entry) * (1 - float(ucfg["stop_loss_pct"]) / 100), 2)
+            if target is None and ucfg.get("target_gain_pct"):
+                target = round(float(entry) * (1 + float(ucfg["target_gain_pct"]) / 100), 2)
+        except Exception:
+            pass
+
     # User-supplied overrides take priority over (or supplement) AI pick levels
     if entry_override is not None:
         entry = float(entry_override)

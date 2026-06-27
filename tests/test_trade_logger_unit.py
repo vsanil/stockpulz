@@ -13,8 +13,21 @@ All storage is mocked via conftest._gist_store (in-memory).
 import os
 import sys
 import pytest
-from datetime import date, timedelta
+from datetime import timedelta
 from unittest.mock import patch
+# trade_logger stamps/compares dates in US/Eastern (et_today), so tests must use
+# the same "today" or they mismatch near the UTC/ET day boundary.
+from config_manager import et_today as date_today
+
+
+class date:  # shim so existing `date.today()` / `date.fromisoformat` keep working
+    @staticmethod
+    def today():
+        return date_today()
+    @staticmethod
+    def fromisoformat(s):
+        from datetime import date as _d
+        return _d.fromisoformat(s)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
