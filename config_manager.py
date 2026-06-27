@@ -86,6 +86,12 @@ DEFAULT_USER_CONFIG = {
     "skip_watchlist_alerts": False,    # True = skip watchlist RSI/MACD signal alerts
 }
 
+# Canonical fallback budgets when a user hasn't set one. Single source of truth —
+# /size, onboarding, and settings all derive from these so a budget-unset user
+# gets the same position size everywhere (was 500/100 in /size vs 200/50 elsewhere).
+DEFAULT_STOCK_BUDGET  = 200
+DEFAULT_CRYPTO_BUDGET = 50
+
 GIST_FILENAME          = "config.json"
 PICKS_FILENAME         = "picks.json"           # Stores morning picks for 10:30 AM confirmation
 WEEKLY_PICKS_FILENAME  = "weekly_picks.json"    # Accumulates Mon–Fri picks for Saturday recap

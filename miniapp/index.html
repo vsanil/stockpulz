@@ -2484,20 +2484,39 @@ body.tg-light { --hint: #4b5563; }
              oninput="this.value=this.value.toUpperCase();_onPaperBuyTickerInput(this.value)"
              onkeydown="if(event.key==='Enter')document.getElementById('pbuy-price').focus()">
       <div id="pbuy-price-hint" style="font-size:11px;color:var(--hint);margin-top:5px;min-height:15px;line-height:1.3"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
-        <div>
-          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Entry price</div>
-          <input type="number" id="pbuy-price" class="ticker-input" placeholder="Live price"
-                 step="0.01" min="0"
-                 oninput="_updatePaperBuyCost()"
-                 onkeydown="if(event.key==='Enter')document.getElementById('pbuy-shares').focus()">
-        </div>
-        <div>
-          <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Shares <span style="font-weight:400;opacity:.7">(opt)</span></div>
-          <input type="number" id="pbuy-shares" class="ticker-input" placeholder="e.g. 10"
-                 step="any" min="0.0001"
-                 oninput="_updatePaperBuyCost()"
-                 onkeydown="if(event.key==='Enter')document.getElementById('pbuy-stop').focus()">
+
+      <!-- Same input model as Log Position: total-invested by default, exact $/share toggle.
+           No buy-date — a paper trade is always "buy now at the live price". -->
+      <div class="buypos-modes" style="margin-top:10px">
+        <button type="button" id="pbuy-mode-total" class="buypos-mode-btn active" onclick="setPaperMode('total')">💵 Total invested</button>
+        <button type="button" id="pbuy-mode-price" class="buypos-mode-btn" onclick="setPaperMode('price')">🎯 Exact $/share</button>
+      </div>
+
+      <!-- TOTAL MODE — derive shares from the live price -->
+      <div id="pbuy-total-pane">
+        <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Total invested $</div>
+        <input type="number" id="pbuy-total" class="ticker-input" placeholder="e.g. 500"
+               step="0.01" min="0" inputmode="decimal" style="letter-spacing:.5px"
+               oninput="_updatePaperBuyCost()">
+      </div>
+
+      <!-- PRICE MODE — exact entry + shares -->
+      <div id="pbuy-price-pane" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Entry price</div>
+            <input type="number" id="pbuy-price" class="ticker-input" placeholder="Live price"
+                   step="0.01" min="0"
+                   oninput="_updatePaperBuyCost()"
+                   onkeydown="if(event.key==='Enter')document.getElementById('pbuy-shares').focus()">
+          </div>
+          <div>
+            <div style="font-size:12px;color:var(--hint);margin-bottom:6px;font-weight:600">Shares <span style="font-weight:400;opacity:.7">(opt)</span></div>
+            <input type="number" id="pbuy-shares" class="ticker-input" placeholder="e.g. 10"
+                   step="any" min="0.000001"
+                   oninput="_updatePaperBuyCost()"
+                   onkeydown="if(event.key==='Enter')document.getElementById('pbuy-stop').focus()">
+          </div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
@@ -3254,6 +3273,19 @@ function _avatarBg(sym, assetType) {
   return `linear-gradient(135deg,rgba(${c1},0.36) 0%,rgba(${c2},0.20) 100%)`;
 }
 
+// ── Crypto detection ──────────────────────────────────────────────────────────
+// Single frontend source of truth — keep in sync with price_checker.CRYPTO_SYMBOLS.
+// (function declaration so it's hoisted; the Set is built on first call.)
+function isCryptoTicker(t) {
+  if (!t) return false;
+  if (!isCryptoTicker._set) {
+    isCryptoTicker._set = new Set(['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT',
+      'MATIC','LINK','UNI','ATOM','LTC','BCH','ALGO','XLM','VET','ICP','FIL','HYPE','SUI',
+      'APT','ARB','OP','INJ','TIA','SEI','TON','TRX','NEAR','SHIB','PEPE','BONK','WLD','FLOKI']);
+  }
+  return isCryptoTicker._set.has(String(t).toUpperCase());
+}
+
 // ── Price formatting ──────────────────────────────────────────────────────────
 function fmtPrice(v) {
   if (v == null || v === '') return '—';
@@ -3822,9 +3854,14 @@ function calcPositionSize() {
     return;
   }
   const riskPerShare = entry - stop;
-  const shares = Math.floor((account * riskPct / 100) / riskPerShare);
+  // Crypto is fractional (0.0008 BTC); never floor it to a whole coin.
+  const ticker = (document.getElementById('addpos-input')?.value || '').toUpperCase();
+  const crypto = isCryptoTicker(ticker);
+  let shares = (account * riskPct / 100) / riskPerShare;
+  shares = crypto ? Math.round(shares * 1e6) / 1e6 : Math.floor(shares);
   const cost   = (shares * entry).toFixed(2);
-  res.innerHTML = `<b>${shares} shares</b> @ $${entry.toFixed(2)}  ·  Cost ~<b>$${cost}</b>  ·  Risk <b>$${(shares * riskPerShare).toFixed(2)}</b>`;
+  const unit   = crypto ? '' : ' shares';
+  res.innerHTML = `<b>${_fmtShares(shares)}${unit}</b> @ $${fmtPrice(entry)}  ·  Cost ~<b>$${cost}</b>  ·  Risk <b>$${(shares * riskPerShare).toFixed(2)}</b>`;
   if (shares > 0) {
     document.getElementById('addpos-shares').value = shares;
   }
@@ -7473,11 +7510,8 @@ function _relTime(isoStr) {
 // ─── WATCHLIST ────────────────────────────────────────────────────────────────
 function _watchAssetType(ticker, assetTypesMap) {
   if (assetTypesMap && assetTypesMap[ticker]) return assetTypesMap[ticker];
-  // Client-side fallback using the same symbol set (kept in sync with price_checker.py)
-  const _cryptoSet = new Set(['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','MATIC',
-    'LINK','UNI','ATOM','LTC','BCH','ALGO','XLM','VET','ICP','FIL','HYPE','SUI','APT','ARB',
-    'OP','INJ','TIA','SEI']);
-  return _cryptoSet.has(ticker.toUpperCase()) ? 'crypto' : 'stock';
+  // Client-side fallback via the single canonical helper.
+  return isCryptoTicker(ticker) ? 'crypto' : 'stock';
 }
 
 async function loadWatchlist() {
@@ -8300,8 +8334,7 @@ async function searchTicker() {
     const d = await api('/api/miniapp/quote?ticker=' + encodeURIComponent(ticker));
     const sym   = (d.ticker || ticker).toUpperCase();
     const price = d.price != null ? '$' + Number(d.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
-    const isCrypto = /BTC|ETH|SOL|DOGE|ADA|XRP|AVAX|BNB|DOT|LINK|MATIC|UNI/.test(sym);
-    const assetType = isCrypto ? 'crypto' : 'stock';
+    const assetType = isCryptoTicker(sym) ? 'crypto' : 'stock';
     if (sym !== ticker) { input.value = sym; }
     result.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center">' +
@@ -9380,6 +9413,34 @@ function confirmResetPaper() {
 
 let _pbuyCurrentPrice = null;
 let _pbuyPriceFetchTimer = null;
+let _pbuyMode = 'total';   // 'total' (derive shares from live price) | 'price' (exact)
+
+function setPaperMode(mode) {
+  _pbuyMode = mode;
+  document.getElementById('pbuy-mode-total')?.classList.toggle('active', mode === 'total');
+  document.getElementById('pbuy-mode-price')?.classList.toggle('active', mode === 'price');
+  const tp = document.getElementById('pbuy-total-pane');
+  const pp = document.getElementById('pbuy-price-pane');
+  if (tp) tp.style.display = mode === 'total' ? 'block' : 'none';
+  if (pp) pp.style.display = mode === 'price' ? 'block' : 'none';
+  _updatePaperBuyCost();
+}
+
+// Resolve {entry, shares} from the active paper-buy mode, or null if incomplete.
+function _resolvePaperEntryShares() {
+  const price = parseFloat(document.getElementById('pbuy-price')?.value) || _pbuyCurrentPrice;
+  if (_pbuyMode === 'price') {
+    const entry  = parseFloat(document.getElementById('pbuy-price')?.value) || _pbuyCurrentPrice || null;
+    const shares = parseFloat(document.getElementById('pbuy-shares')?.value) || null;
+    return entry ? { entry, shares } : null;
+  }
+  // Total mode — paper buy is "now", so the live price is the entry.
+  const total = parseFloat(document.getElementById('pbuy-total')?.value);
+  if (total > 0 && price > 0) {
+    return { entry: Math.round(price * 10000) / 10000, shares: Math.round((total / price) * 1e6) / 1e6 };
+  }
+  return null;
+}
 
 // If picks are loaded open the picker so user can choose; otherwise fall back
 // to the blank buy sheet (e.g. on weekends when there are no picks yet).
@@ -9532,14 +9593,17 @@ function openPaperBuySheet(prefillTicker = '', prefillEntry = '', prefillStop = 
   const hint      = document.getElementById('pbuy-price-hint');
   const costHint  = document.getElementById('pbuy-cost-hint');
   const btn       = document.getElementById('pbuy-btn');
+  const totalInp  = document.getElementById('pbuy-total');
   if (tickerInp) tickerInp.value = prefillTicker.toUpperCase();
   if (sharesInp) sharesInp.value = '';
+  if (totalInp)  totalInp.value  = '';
   if (priceInp)  { priceInp.value = prefillEntry || ''; priceInp.placeholder = 'Live price'; }
   if (stopInp)   stopInp.value   = prefillStop   || '';
   if (targetInp) targetInp.value = prefillTarget || '';
   if (hint)      hint.textContent = '';
   if (costHint)  costHint.textContent = '';
   if (btn)       { btn.disabled = false; btn.textContent = 'Paper Buy'; }
+  setPaperMode('total');   // default to total-invested, matching Log Position
   openOverlay('paper-buy-overlay');
   setTimeout(() => {
     if (prefillTicker) {
@@ -9593,12 +9657,25 @@ async function _fetchPaperBuyPrice(ticker) {
 }
 
 function _updatePaperBuyCost() {
-  const sharesInp = document.getElementById('pbuy-shares');
-  const priceInp  = document.getElementById('pbuy-price');
-  const costHint  = document.getElementById('pbuy-cost-hint');
+  const costHint = document.getElementById('pbuy-cost-hint');
   if (!costHint) return;
-  const shares = parseFloat(sharesInp?.value);
-  const price  = parseFloat(priceInp?.value) || _pbuyCurrentPrice;
+  costHint.style.color = 'var(--hint)';
+  const ticker = (document.getElementById('pbuy-ticker')?.value || '').toUpperCase();
+
+  if (_pbuyMode === 'total') {
+    const total = parseFloat(document.getElementById('pbuy-total')?.value);
+    const price = parseFloat(document.getElementById('pbuy-price')?.value) || _pbuyCurrentPrice;
+    if (!(total > 0)) { costHint.textContent = ''; return; }
+    if (!(price > 0)) { costHint.textContent = 'Fetching live price…'; return; }
+    const shares = total / price;
+    const unit   = isCryptoTicker(ticker) ? '' : ' shares';
+    costHint.style.color = 'var(--green)';
+    costHint.textContent = `≈ ${_fmtShares(shares)}${unit} @ $${fmtPrice(price)} (live)`;
+    return;
+  }
+
+  const shares = parseFloat(document.getElementById('pbuy-shares')?.value);
+  const price  = parseFloat(document.getElementById('pbuy-price')?.value) || _pbuyCurrentPrice;
   if (shares > 0 && price > 0) {
     const cost = (shares * price).toFixed(2);
     costHint.textContent = `Est. cost: $${parseFloat(cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -9615,19 +9692,24 @@ async function confirmPaperBuy() {
   const targetInp = document.getElementById('pbuy-target');
   const btn       = document.getElementById('pbuy-btn');
   const ticker    = (tickerInp?.value || '').trim().toUpperCase();
-  const shares    = parseFloat(sharesInp?.value);
-  const priceVal  = parseFloat(priceInp?.value)  || null;
   const stopVal   = parseFloat(stopInp?.value)   || null;
   const targetVal = parseFloat(targetInp?.value) || null;
   if (!ticker) { showToast('Enter a ticker'); tickerInp?.focus(); return; }
 
+  const resolved = _resolvePaperEntryShares();
+  if (!resolved || !resolved.entry) {
+    tg.HapticFeedback?.notificationOccurred('error');
+    showToast(_pbuyMode === 'total' ? 'Enter the total you invested' : 'Enter your entry price');
+    return;
+  }
+  const priceVal = resolved.entry;
+  const shares   = resolved.shares;
+
   const confirmed = await new Promise(resolve => {
-    const price = priceVal || _pbuyCurrentPrice || 0;
-    const sharesDisplay = (shares > 0) ? shares : '?';
-    const cost = (price && shares > 0) ? ` · $${(price * shares).toLocaleString('en-US', {maximumFractionDigits: 0})}` : '';
+    const cost = (priceVal && shares > 0) ? ` · $${(priceVal * shares).toLocaleString('en-US', {maximumFractionDigits: 0})}` : '';
     tg.showPopup({
       title: `Paper buy ${ticker}?`,
-      message: `${sharesDisplay} shares @ $${price ? price.toFixed(2) : '?'}${cost}`,
+      message: `${_fmtShares(shares)} @ $${fmtPrice(priceVal)}${cost}`,
       buttons: [{ id: 'yes', type: 'default', text: 'Buy' }, { type: 'cancel' }]
     }, id => resolve(id === 'yes'));
   });
@@ -10038,12 +10120,12 @@ async function _obFinish() {
   try {
     await api('/api/miniapp/update_settings', 'POST', {
       risk_profile:  _obData.risk   || 'moderate',
-      stock_budget:  parseFloat(_obData.budget || '250'),
-      crypto_budget: parseFloat(_obData.budget || '250') * 0.2,
+      stock_budget:  parseFloat(_obData.budget || '200'),
+      crypto_budget: parseFloat(_obData.budget || '200') * 0.25,
       onboarded:     true,
     });
     _settCfg.risk_profile = _obData.risk || 'moderate';
-    _settCfg.stock_budget = parseFloat(_obData.budget || '250');
+    _settCfg.stock_budget = parseFloat(_obData.budget || '200');
     _settCfg.onboarded    = true;
   } catch(_) {}
   // Close overlay
