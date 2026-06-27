@@ -381,6 +381,33 @@ class TestTradeLoggerUnit:
         aapl = next(t for t in saved["log"]["open"] if t["ticker"] == "AAPL")
         assert aapl["entry_price"] == 199.99            # live-price fallback, not None
 
+    def test_add_holding_etf_pick_typed_etf(self):
+        """An ETF pick must log as asset_type='etf', not 'stock'."""
+        from trade_logger import add_holding, remove_holding
+        chat = self._chat()
+        remove_holding("SOXX", chat)
+        picks = {"etfs": {"short_term": [{"ticker": "SOXX", "entry_price": 200.0}]}}
+        trade, _ = add_holding("SOXX", chat, picks=picks)
+        assert trade["asset_type"] == "etf"
+        remove_holding("SOXX", chat)
+
+    def test_add_holding_crypto_not_in_picks_uses_canonical(self):
+        """A crypto ticker absent from picks must still classify as crypto."""
+        from trade_logger import add_holding, remove_holding
+        chat = self._chat()
+        remove_holding("BTC", chat)
+        trade, _ = add_holding("BTC", chat, picks={})   # not in any pick section
+        assert trade["asset_type"] == "crypto"          # via price_checker.CRYPTO_SYMBOLS
+        remove_holding("BTC", chat)
+
+    def test_add_holding_asset_type_override_wins(self):
+        from trade_logger import add_holding, remove_holding
+        chat = self._chat()
+        remove_holding("XYZ", chat)
+        trade, _ = add_holding("XYZ", chat, picks={}, asset_type_override="commodity")
+        assert trade["asset_type"] == "commodity"
+        remove_holding("XYZ", chat)
+
     def test_add_holding_short_term_override(self):
         from trade_logger import add_holding, remove_holding
 

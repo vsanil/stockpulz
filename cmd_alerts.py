@@ -35,7 +35,11 @@ def _cmd_alerts(text: str, original: str, chat_id: str) -> "str | None":
                 ticker, price_str = parts[0].upper(), parts[1]
             else:
                 raise ValueError("needs NL parse")
-            return add_alert(chat_id, ticker, float(price_str.replace(",", "")), direction)
+            price = float(price_str.replace(",", ""))   # parse error here → NL fallback
+            try:
+                return add_alert(chat_id, ticker, price, direction)
+            except ValueError as _dup:
+                return f"⚠️ {_dup}"   # e.g. "Alert already exists" — not a generic error
         except (ValueError, IndexError):
             # Fall back to Haiku NL parse
             parsed    = _nl_parse_trade("alert", raw)
@@ -61,7 +65,10 @@ def _cmd_alerts(text: str, original: str, chat_id: str) -> "str | None":
                     chat_id=chat_id,
                 )
                 return ""
-            return add_alert(chat_id, ticker, float(price_val), direction)
+            try:
+                return add_alert(chat_id, ticker, float(price_val), direction)
+            except ValueError as _dup:
+                return f"⚠️ {_dup}"
 
     if text == "UNALERT":
         _prompt_for_param("unalert", chat_id)
