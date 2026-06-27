@@ -51,7 +51,7 @@ from formatters import (
 
 # ── Import all extracted helpers and command handlers ─────────────────────────
 from cmd_helpers import (
-    _is_number, _CRYPTO_SYMBOLS, _is_admin,
+    _is_number, parse_money, _CRYPTO_SYMBOLS, _is_admin,
     _get_client,
     ADMIN_INVITE_TTL_HOURS, _make_admin_invite_token, _verify_admin_invite_token,
     _fetch_live_price, _resolve_ticker_candidates, _resolve_ticker_and_price,
@@ -1608,10 +1608,9 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
     # ── Single-step param commands ────────────────────────────────────────────
     if command == "change_buy_amount":
         # User typed their actual fill price per share — recalculate and re-show confirmation.
-        raw_price  = text.strip().replace(",", "").replace("$", "")
-        if not _is_number(raw_price):
+        new_entry  = parse_money(text)
+        if new_entry is None or new_entry <= 0:
             return "⚠️ Please send just the price per share, e.g. <code>61.50</code>"
-        new_entry  = float(raw_price)
         ticker     = data.get("ticker", "")
         entry_raw  = data.get("entry", "")
         asset_type = data.get("asset_type", "stock")
@@ -1937,7 +1936,9 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             send_message("✅ Stock budget cleared.", chat_id=chat_id)
         else:
             try:
-                val = float(raw.replace(",", "").rstrip("k")) * (1000 if raw.endswith("k") else 1)
+                val = parse_money(text)
+                if val is None:
+                    raise ValueError("unparseable")
                 update_user_config(chat_id, "stock_budget", val)
                 send_message(f"✅ Stock budget → <b>${int(val)}/trade</b>", chat_id=chat_id)
             except ValueError:
@@ -1952,7 +1953,9 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             send_message("✅ Crypto budget cleared.", chat_id=chat_id)
         else:
             try:
-                val = float(raw.replace(",", "").rstrip("k")) * (1000 if raw.endswith("k") else 1)
+                val = parse_money(text)
+                if val is None:
+                    raise ValueError("unparseable")
                 update_user_config(chat_id, "crypto_budget", val)
                 send_message(f"✅ Crypto budget → <b>${int(val)}/trade</b>", chat_id=chat_id)
             except ValueError:
@@ -1961,9 +1964,10 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return ""
 
     if command == "settings_stop":
-        raw = text.strip().replace("%", "")
         try:
-            val = float(raw)
+            val = parse_money(text)
+            if val is None:
+                raise ValueError("unparseable")
             update_user_config(chat_id, "stop_loss_pct", val)
             send_message(f"✅ Stop loss → <b>{val}%</b>", chat_id=chat_id)
         except ValueError:
@@ -1972,9 +1976,10 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return ""
 
     if command == "settings_target":
-        raw = text.strip().replace("%", "")
         try:
-            val = float(raw)
+            val = parse_money(text)
+            if val is None:
+                raise ValueError("unparseable")
             update_user_config(chat_id, "target_gain_pct", val)
             send_message(f"✅ Target gain → <b>{val}%</b>", chat_id=chat_id)
         except ValueError:
@@ -1991,7 +1996,9 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             send_message("✅ Portfolio capital cleared — position sizing disabled.", chat_id=chat_id)
         else:
             try:
-                val = float(raw.rstrip("k")) * (1000 if raw.endswith("k") else 1)
+                val = parse_money(text)
+                if val is None:
+                    raise ValueError("unparseable")
                 existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
                 update_user_config(chat_id, "portfolio", {**existing, "portfolio_size": val})
                 send_message(
@@ -2005,9 +2012,10 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return ""
 
     if command == "settings_portfolio_risk":
-        raw = text.strip().replace("%", "")
         try:
-            val = float(raw)
+            val = parse_money(text)
+            if val is None:
+                raise ValueError("unparseable")
             if not (0.1 <= val <= 5.0):
                 raise ValueError("out of range")
             existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
@@ -2019,9 +2027,10 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return ""
 
     if command == "settings_portfolio_max_pos":
-        raw = text.strip().replace("%", "")
         try:
-            val = float(raw)
+            val = parse_money(text)
+            if val is None:
+                raise ValueError("unparseable")
             if not (1.0 <= val <= 50.0):
                 raise ValueError("out of range")
             existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
@@ -2033,9 +2042,10 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         return ""
 
     if command == "settings_portfolio_max_sector":
-        raw = text.strip().replace("%", "")
         try:
-            val = float(raw)
+            val = parse_money(text)
+            if val is None:
+                raise ValueError("unparseable")
             if not (5.0 <= val <= 100.0):
                 raise ValueError("out of range")
             existing = get_user_config(chat_id).get("portfolio", {}) if isinstance(get_user_config(chat_id).get("portfolio"), dict) else {}
@@ -2099,9 +2109,8 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             price_raw = text.strip() or None
             price = None
             if price_raw:
-                try:
-                    price = float(price_raw.replace(",", ""))
-                except ValueError:
+                price = parse_money(price_raw)
+                if price is None:
                     # NL reply like "87.5 each" or "at 83 dollars" — extract price
                     parsed_p = _nl_parse_trade("paper_buy", price_raw)
                     price = parsed_p.get("price")
