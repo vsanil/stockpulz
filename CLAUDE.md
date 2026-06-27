@@ -43,6 +43,13 @@ Rules:
 - **`STOP_PROXIMITY_PCT` (agent.py, 3%): one "near stop" radius** for the NEAR STOP badge and EOD health insight.
 - Position entry: the bot `buy_pick` callback parses shares as `float` (was `int(...) if .isdigit() else 1`, which collapsed fractional crypto to 1 whole coin). Mini-app Position Sizer + Paper Trade use fractional crypto sizing. Both buy forms (Log Position + Paper Trade) use the total-invested/exact-$ toggle.
 
+### More single sources of truth (second audit, Jun 26)
+- **Dates: `config_manager.et_today()` (US/Eastern date) for ALL dedup keys, idempotency guards, date stamps, and day-diffs.** Bare `date.today()` is UTC on Render → rolls over at 7-8 PM ET, so evening alerts double-fired/suppressed and date stamps were off by one. Ranged historical lookbacks may stay on `date.today()`. **Rule: any new dedup key / date stamp / "days held" uses `et_today()`.**
+- **Crypto/ETF/commodity visibility: `config_manager.shows_crypto(cfg)` / `shows_etfs(cfg)`** reconcile the mini-app `assets` key with the bot's `show_crypto`/`show_etfs` toggles. Broadcast (formatters) AND the picks API use them, so app and morning message agree. Don't read `show_crypto`/`assets` raw.
+- **`asset_type` is stored, not re-derived.** `add_holding` takes an `asset_type` param (mini-app forwards it), types by pick section (stock/crypto/etf/commodity), and falls back to `CRYPTO_SYMBOLS` — never a blind "stock" default. Legacy `asset_type=None` positions classify via `CRYPTO_SYMBOLS`, not digit/length heuristics.
+- **`get_dynamic_pick_counts` honors `max_stock_picks`/`max_crypto_picks`** (total caps); `add_holding` fills a missing stop/target from `stop_loss_pct`/`target_gain_pct` (AI/explicit always wins). Settings that were written-but-ignored now do something.
+- **Callback bug class**: `be_stop` passed field `"stop"` (only `"stop_loss"` exists) + a string into `round()`. When wiring a callback to `_execute_update_level`, the field must be `"stop_loss"`/`"target_price"` and the price a float. Duplicate-alert ValueErrors must be caught and returned as `⚠️ {e}`, never left to the webhook catch-all ("Something went wrong").
+
 ### Background jobs must fail silently to users
 - run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
 
