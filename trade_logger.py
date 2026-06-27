@@ -16,7 +16,7 @@ Trades expire after 28 days if neither target nor stop is hit.
 from __future__ import annotations
 
 from datetime import date
-from config_manager import load_user_trade_log, save_user_trade_log
+from config_manager import load_user_trade_log, save_user_trade_log, et_today
 
 
 # ── Open trades (morning run) ─────────────────────────────────────────────────
@@ -26,7 +26,7 @@ def open_trades(picks: dict, chat_id: str) -> None:
     Add today's short-term and long-term picks (stocks + crypto) to a user's open trades list.
     Skips duplicates — safe to call multiple times.
     """
-    today = date.today().isoformat()
+    today = et_today().isoformat()
     log   = load_user_trade_log(chat_id)
 
     open_tickers = {t["ticker"] for t in log["open"]}
@@ -90,7 +90,7 @@ def check_and_close_trades(current_prices: dict, chat_id: str) -> list[dict]:
     Closes trades where target hit, stop hit, or open > 28 days.
     Returns list of newly closed trades (empty if none).
     """
-    today = date.today().isoformat()
+    today = et_today().isoformat()
     log   = load_user_trade_log(chat_id)
 
     if not log["open"]:
@@ -125,7 +125,7 @@ def check_and_close_trades(current_prices: dict, chat_id: str) -> list[dict]:
         else:
             # Expire after 28 calendar days
             try:
-                days_open = (date.today() - date.fromisoformat(trade["opened_date"])).days
+                days_open = (et_today() - date.fromisoformat(trade["opened_date"])).days
                 if days_open >= 28:
                     outcome = "expired"
             except Exception:
@@ -237,7 +237,7 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
     the Mini App that take priority over (or fill in for) AI pick levels.
     Returns (trade_dict, already_existed).
     """
-    today  = date.today().isoformat()
+    today  = et_today().isoformat()
     log    = load_user_trade_log(chat_id)
     ticker = ticker.upper()
 
@@ -332,7 +332,7 @@ def close_trade(ticker: str, chat_id: str, exit_price: float | None = None) -> d
     Returns the closed trade dict, or None if ticker not found in open trades.
     Called by the Mini App sell flow.
     """
-    today  = date.today().isoformat()
+    today  = et_today().isoformat()
     log    = load_user_trade_log(chat_id)
     ticker = ticker.upper()
 
@@ -380,7 +380,7 @@ def remove_holding(ticker: str, chat_id: str) -> bool:
 def get_weekly_closed_trades(chat_id: str) -> list[dict]:
     """Return trades closed this calendar week (Mon–today) for a specific user."""
     from datetime import timedelta
-    today    = date.today()
+    today    = et_today()
     week_start = today - timedelta(days=today.weekday())   # Monday
 
     log    = load_user_trade_log(chat_id)

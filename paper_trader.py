@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import date
 import yfinance as yf
-from config_manager import load_user_paper, save_user_paper
+from config_manager import load_user_paper, save_user_paper, et_today
 
 
 def _live_price(ticker: str) -> float | None:
@@ -89,7 +89,7 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
             "avg_price":   round(buy_price, 2),
             "entry_price": round(buy_price, 2),
             "cost_basis":  cost,
-            "bought_date": date.today().isoformat(),
+            "bought_date": et_today().isoformat(),
         }
         if stop_loss   is not None: pos["stop_loss"]    = round(stop_loss, 4)
         if target_price is not None: pos["target_price"] = round(target_price, 4)
@@ -150,7 +150,7 @@ def paper_sell(ticker: str, chat_id: str, shares: float | None = None,
         "sell_price":  round(sell_price, 2),
         "gain":        gain,
         "gain_pct":    gain_pct,
-        "closed_date": date.today().isoformat(),
+        "closed_date": et_today().isoformat(),
     })
 
     # Update position
