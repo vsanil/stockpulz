@@ -1592,6 +1592,7 @@ def miniapp_log_bought():
     target_override    = body.get("target_price")
     shares_override    = body.get("shares")
     timeframe_override = body.get("timeframe")  # 'short_term' | 'long_term' | None
+    asset_type_override = body.get("asset_type")  # 'stock'|'crypto'|'etf'|'commodity'
 
     from trade_logger import add_holding
     from config_manager import load_picks
@@ -1601,7 +1602,8 @@ def miniapp_log_bought():
                                  stop_override=stop_override,
                                  target_override=target_override,
                                  shares_override=shares_override,
-                                 timeframe_override=timeframe_override)
+                                 timeframe_override=timeframe_override,
+                                 asset_type_override=asset_type_override)
 
     # Auto-create a stop-loss alert if a stop is set on the new position
     if not existed:

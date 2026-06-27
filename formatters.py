@@ -738,8 +738,8 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     _add_section(st_picks,  lambda s: s["ticker"], "stock",  "── 📈 Short Term ──",  "📈")
     _add_section(lt_picks,  lambda s: s["ticker"], "stock",  "── 🏛 Long Term ──",   "🏛")
     _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──",      "✅")
-    _add_section(etf_picks, lambda e: e["ticker"], "stock",  "── 📦 ETFs ──",        "📦")
-    _add_section(comm_picks, lambda c: c["ticker"], "stock", "── 🛢 Commodities ──", "🛢")
+    _add_section(etf_picks, lambda e: e["ticker"], "etf",       "── 📦 ETFs ──",        "📦")
+    _add_section(comm_picks, lambda c: c["ticker"], "commodity", "── 🛢 Commodities ──", "🛢")
 
     return buttons
 

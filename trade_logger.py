@@ -229,7 +229,7 @@ def get_performance_stats(chat_id: str, asset_type: str | None = None) -> dict |
 def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
                 entry_override=None, stop_override=None,
                 shares_override=None, timeframe_override=None,
-                target_override=None) -> tuple[dict, bool]:
+                target_override=None, asset_type_override=None) -> tuple[dict, bool]:
     """
     Add a ticker to a user's portfolio (no price/qty needed).
     Uses today's pick levels for target/stop alerts if available.
@@ -263,10 +263,12 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
     entry = target = stop = None
     asset_type = "stock"
     timeframe  = None
+    _SECTION_TYPE = {"stocks": "stock", "crypto": "crypto", "etfs": "etf", "commodities": "commodity"}
     if picks:
         for section_name, section in [("stocks", picks.get("stocks", {})),
                                        ("crypto", picks.get("crypto", {})),
-                                       ("etfs",   picks.get("etfs",   {}))]:
+                                       ("etfs",   picks.get("etfs",   {})),
+                                       ("commodities", picks.get("commodities", {}))]:
             for tf in ("short_term", "long_term"):
                 for p in section.get(tf, []):
                     sym = (p.get("ticker") or p.get("symbol", "")).upper()
@@ -275,13 +277,27 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
                         target    = p.get("target_price")
                         stop      = p.get("stop_loss")
                         timeframe = tf
-                        if p.get("symbol"):   # crypto picks use "symbol" key
-                            asset_type = "crypto"
+                        # Trust the pick's own asset_type, else map by section —
+                        # not a blind "stock" default that mislabels etf/commodity.
+                        asset_type = p.get("asset_type") or _SECTION_TYPE.get(section_name, "stock")
                         break
                 if timeframe:
                     break
             if timeframe:
                 break
+
+    # Caller-supplied type (mini-app sends asset_type) wins; otherwise, for a
+    # ticker not in today's picks, classify crypto via the canonical set rather
+    # than defaulting to "stock".
+    if asset_type_override:
+        asset_type = asset_type_override
+    elif not timeframe:
+        try:
+            from price_checker import CRYPTO_SYMBOLS
+            if ticker in CRYPTO_SYMBOLS:
+                asset_type = "crypto"
+        except Exception:
+            pass
 
     # User-supplied overrides take priority over (or supplement) AI pick levels
     if entry_override is not None:

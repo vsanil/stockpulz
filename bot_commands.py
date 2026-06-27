@@ -791,7 +791,9 @@ def handle_callback_query(callback_query: dict) -> None:
             return
         try:
             from cmd_trade_exec import _execute_update_level
-            result = _execute_update_level(ticker, "stop", entry_str, chat_id)
+            # field must be "stop_loss" (not "stop"), and the price must be a float —
+            # passing the raw string crashed round() so the stop never moved.
+            result = _execute_update_level(ticker, "stop_loss", float(entry_str), chat_id)
             send_message(
                 result or f"✅ Stop for <b>{ticker}</b> moved to break-even (<code>${entry_str}</code>). "
                 f"You can't lose on this trade now.",
@@ -1345,7 +1347,10 @@ def handle_callback_query(callback_query: dict) -> None:
         # Re-set a fired alert at the same price + direction
         # callback_data: rearm_alert|TICKER|TARGET|DIRECTION
         ticker    = parts[1].upper() if len(parts) > 1 else ""
-        target    = float(parts[2])  if len(parts) > 2 else None
+        try:
+            target = float(parts[2]) if len(parts) > 2 else None
+        except (ValueError, TypeError):
+            target = None
         direction = parts[3]         if len(parts) > 3 else "auto"
         if not ticker or target is None:
             send_message("⚠️ Could not re-arm alert — missing parameters.", chat_id=chat_id)
