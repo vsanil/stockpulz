@@ -3177,13 +3177,18 @@ def _check_trailing_stops(current_prices: dict, uid: str,
                     shares_held = trade.get("shares") or trade.get("quantity")
                     if shares_held:
                         sh = float(shares_held)
-                        half = max(1, int(sh / 2))
+                        # Fractional-safe: a crypto position (0.0008 BTC) must not
+                        # round to "1 of your 0 shares". Sell half, keep precision.
+                        half = round(sh / 2, 6)
+                        rem  = round(sh - half, 6)
                         profit_on_half = round(half * (current_f - entry_f), 2)
+                        def _q(x):
+                            return str(int(x)) if float(x).is_integer() else ("%g" % x)
                         specific = (
-                            f"Sell <b>{half} of your {int(sh)} shares</b> at "
+                            f"Sell <b>{_q(half)} of your {_q(sh)} shares</b> at "
                             f"<code>${_p(current_f)}</code> → locks in "
                             f"<b>${profit_on_half:,.2f}</b> profit. "
-                            f"The remaining {int(sh - half)} ride to target "
+                            f"The remaining {_q(rem)} ride to target "
                             f"(<code>${_p(target_f)}</code>) risk-free."
                         )
                     else:
