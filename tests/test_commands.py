@@ -381,6 +381,20 @@ class TestTradeLoggerUnit:
         aapl = next(t for t in saved["log"]["open"] if t["ticker"] == "AAPL")
         assert aapl["entry_price"] == 199.99            # live-price fallback, not None
 
+    def test_parse_money_unifies_input_formats(self):
+        """parse_money tolerates $ , % and k/m suffixes — one parser everywhere."""
+        from cmd_helpers import parse_money
+        assert parse_money("1,500") == 1500.0
+        assert parse_money("$7") == 7.0
+        assert parse_money("7%") == 7.0
+        assert parse_money("1.5k") == 1500.0
+        assert parse_money("25k") == 25000.0
+        assert parse_money("2m") == 2_000_000.0
+        assert parse_money("  88.5  ") == 88.5
+        assert parse_money("abc") is None
+        assert parse_money("") is None
+        assert parse_money(None) is None
+
     def test_add_holding_etf_pick_typed_etf(self):
         """An ETF pick must log as asset_type='etf', not 'stock'."""
         from trade_logger import add_holding, remove_holding

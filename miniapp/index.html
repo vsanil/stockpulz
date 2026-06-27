@@ -3286,6 +3286,15 @@ function isCryptoTicker(t) {
   return isCryptoTicker._set.has(String(t).toUpperCase());
 }
 
+// Overlay the canonical crypto set served by the backend (picks _meta) so the
+// frontend never drifts from price_checker.CRYPTO_SYMBOLS. The literal above is
+// just the pre-load fallback.
+function _syncCryptoSet(meta) {
+  if (meta && Array.isArray(meta.crypto_symbols) && meta.crypto_symbols.length) {
+    isCryptoTicker._set = new Set(meta.crypto_symbols.map(s => String(s).toUpperCase()));
+  }
+}
+
 // ── Price formatting ──────────────────────────────────────────────────────────
 function fmtPrice(v) {
   if (v == null || v === '') return '—';
@@ -4245,6 +4254,7 @@ async function loadPicks(isRetry = false) {
     if (cached._meta && Array.isArray(cached._meta.bought_tickers)) {
       cached._meta.bought_tickers.forEach(t => boughtSet.add(t));
     }
+    _syncCryptoSet(cached._meta);
     try {
       renderPicksView();        // instant render from cache
       // Kick off background prefetch of other tabs now that picks are on screen
@@ -4293,6 +4303,7 @@ async function loadPicks(isRetry = false) {
       data._meta.bought_tickers.forEach(t => boughtSet.add(t));
       sessionStorage.setItem('sp_bought', JSON.stringify([...boughtSet]));
     }
+    _syncCryptoSet(data._meta);
   } catch (e) {
     clearTimeout(_skelTimer);
     if (hadCache) return;         // already showing stale data — don't show error

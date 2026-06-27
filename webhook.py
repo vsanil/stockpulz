@@ -1441,6 +1441,9 @@ def miniapp_picks():
             "picks_date":     picks_date,       # ISO date string or None
             "today":          now_et.strftime("%Y-%m-%d"),
             "bought_tickers": bought_tickers,   # open positions — restores boughtSet on reload
+            # Canonical crypto set, served so the frontend isCryptoTicker() stays
+            # in sync with price_checker.CRYPTO_SYMBOLS without a hand-copied list.
+            "crypto_symbols": sorted(_CHART_CRYPTO),
         }
 
         return jsonify(picks)
@@ -1683,7 +1686,9 @@ def miniapp_settings_update():
     body  = request.get_json(silent=True) or {}
     key   = (body.get("key") or "").strip()
     value = body.get("value")
-    # Allowlist of keys the Mini App is allowed to set
+    # Allowlist of keys the Mini App is allowed to set. Superset of the bulk
+    # /update_settings endpoint so a single setting is reachable from either
+    # path (the two used to diverge — e.g. `assets` was rejected here).
     _allowed = {
         "notif_target_hit", "notif_target_approach", "notif_watchlist_move",
         "notif_weekly_recap", "notif_morning_picks", "auto_stop_alerts",
@@ -1691,9 +1696,14 @@ def miniapp_settings_update():
         "stop_loss_pct", "target_gain_pct",
         "quiet_hours_enabled", "quiet_from", "quiet_to",
         "display_name",
+        "assets", "show_crypto", "show_etfs", "min_conviction", "pick_mode",
     }
     if not key or key not in _allowed:
         return jsonify({"error": f"key '{key}' not allowed"}), 400
+    if key == "assets" and value not in ("stocks", "crypto", "both"):
+        return jsonify({"error": "assets must be stocks|crypto|both"}), 400
+    if key in ("show_crypto", "show_etfs"):
+        value = bool(value)
     update_user_config(chat_id, key, value)
     return jsonify({"ok": True, "key": key, "value": value})
 

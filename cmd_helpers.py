@@ -24,6 +24,30 @@ def _is_number(s: str) -> bool:
         return False
 
 
+def parse_money(raw) -> float | None:
+    """
+    Lenient numeric parse for user-typed amounts. Single source of truth for the
+    many command handlers that each stripped a different subset of $ , % — so
+    "1,500", "$7", "7%", and "1.5k" all parse the same everywhere. Handles k/m
+    suffixes (1.5k → 1500). Returns a float, or None if unparseable.
+    """
+    if raw is None:
+        return None
+    s = (str(raw).strip().lower()
+         .replace(",", "").replace("$", "").replace("%", "").replace(" ", ""))
+    if not s:
+        return None
+    mult = 1.0
+    if s.endswith("k"):
+        mult, s = 1_000.0, s[:-1]
+    elif s.endswith("m"):
+        mult, s = 1_000_000.0, s[:-1]
+    try:
+        return float(s) * mult
+    except (ValueError, TypeError):
+        return None
+
+
 # Crypto tickers recognised by the bot (used to set asset_type on manual trades)
 # Canonical crypto set — single source of truth (was a 20-coin local list that
 # mispriced any crypto outside it in /size and /digest).
