@@ -11,6 +11,7 @@ import html
 import os
 from datetime import date, datetime
 import pytz
+from config_manager import shows_crypto as _shows_crypto
 
 
 # ── Shared text helpers ───────────────────────────────────────────────────────
@@ -237,7 +238,7 @@ def format_daily_message(picks: dict, config: dict,
     pick_mode    = config.get("pick_mode", "both")
     show_st      = pick_mode in ("st", "both")
     show_lt      = pick_mode in ("lt", "both")
-    show_crypto  = config.get("show_crypto", True)
+    show_crypto  = _shows_crypto(config)   # honors both `assets` and `show_crypto`
     first_name   = config.get("first_name", "")
     risk_profile = config.get("risk_profile", "moderate")
     watchlist    = [t.upper() for t in (config.get("watchlist") or [])]
@@ -632,7 +633,7 @@ def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[d
     pre-filled to log the position and auto-create stop-loss / target alerts.
     """
     cfg         = config or {}
-    show_crypto = cfg.get("show_crypto", True)
+    show_crypto = _shows_crypto(cfg)   # honors both `assets` and `show_crypto`
 
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
@@ -872,7 +873,7 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
 
     pick_mode    = (config or {}).get("pick_mode", "both")
     show_stocks  = True                                           # stocks always shown in recap
-    show_crypto  = (config or {}).get("show_crypto", True)       # respect per-user setting
+    show_crypto  = _shows_crypto(config or {})       # honors both `assets` and `show_crypto`
 
     lines = [f"<u><b>📅 Week of {week_end} — Recap</b></u>", ""]
 

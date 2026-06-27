@@ -1398,13 +1398,15 @@ def miniapp_picks():
 
         ucfg  = get_user_config(chat_id)
 
-        # Filter assets based on user preference
-        assets = ucfg.get("assets", "both")
-        if assets == "stocks":
+        # Filter assets based on user preference — same resolver the broadcast
+        # uses, so the app and the morning message always agree.
+        from config_manager import shows_crypto as _sc, shows_etfs as _se
+        if not _sc(ucfg):
             picks.pop("crypto", None)
-        elif assets == "crypto":
-            picks.pop("stocks", None)
+        if not _se(ucfg):
             picks.pop("etfs", None)
+        if ucfg.get("assets") == "crypto":
+            picks.pop("stocks", None)
 
         # Attach meta so the frontend can distinguish weekends/no-picks from errors
         now_et     = _dt.now(pytz.timezone("US/Eastern"))

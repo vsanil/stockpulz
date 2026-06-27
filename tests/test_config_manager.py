@@ -76,6 +76,34 @@ class TestEtToday:
         assert (et_today() - (et_today() - timedelta(days=3))).days == 3
 
 
+class TestSettingsWiredUp:
+    """Settings that used to be written but never honored."""
+
+    def test_shows_crypto_respects_assets(self):
+        from config_manager import shows_crypto
+        assert shows_crypto({"assets": "stocks"}) is False
+        assert shows_crypto({"assets": "crypto"}) is True
+        assert shows_crypto({"assets": "both", "show_crypto": False}) is False
+        assert shows_crypto({"show_crypto": True}) is True   # default both
+
+    def test_shows_etfs_hidden_for_crypto_only(self):
+        from config_manager import shows_etfs
+        assert shows_etfs({"assets": "crypto"}) is False
+        assert shows_etfs({"assets": "both", "show_etfs": False}) is False
+        assert shows_etfs({}) is True
+
+    def test_max_stock_picks_clamps_total(self):
+        from config_manager import get_dynamic_pick_counts
+        # Big budget would yield several picks; user caps total stocks at 1.
+        c = get_dynamic_pick_counts({"stock_budget": 1000, "max_stock_picks": 1})
+        assert c["max_short_picks"] + c["max_long_picks"] <= 1
+
+    def test_max_crypto_picks_clamps_total(self):
+        from config_manager import get_dynamic_pick_counts
+        c = get_dynamic_pick_counts({"crypto_budget": 1000, "max_crypto_picks": 2})
+        assert c["max_crypto_short_picks"] + c["max_crypto_long_picks"] <= 2
+
+
 class TestGetConfig:
     """get_config merges defaults with stored values."""
 
