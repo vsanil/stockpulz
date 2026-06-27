@@ -1170,7 +1170,7 @@ def admin_user_detail(chat_id):
         "open_positions":        log.get("open", []),
         "closed_positions_count": len(log.get("closed", [])),
         "alerts":    alerts,
-        "watchlist": ucfg.get("watchlist", []),
+        "watchlist": _load_watchlist(chat_id),   # unified store (trade_log ∪ config)
         "feedback":  user_fb[:10],
         "logs":      user_logs,
     })
@@ -1656,7 +1656,7 @@ def miniapp_settings():
         "paused":          ucfg.get("paused", False),
         "stop_loss_pct":   ucfg.get("stop_loss_pct"),
         "target_gain_pct": ucfg.get("target_gain_pct"),
-        "watchlist":       ucfg.get("watchlist", []),
+        "watchlist":       _load_watchlist(chat_id),   # unified store (trade_log ∪ config)
         "excluded_sectors": ucfg.get("excluded_sectors", []),
         "onboarded":       ucfg.get("onboarded", False),
         **notif_prefs,
@@ -3319,15 +3319,61 @@ def miniapp_earnings():
     return jsonify({"ok": True, "earnings": results})
 
 
+def _load_watchlist(chat_id) -> list:
+    """
+    Single source of truth for a user's watchlist. Returns the de-duped union of
+    the trade-log store (the one the big-move monitor reads) and any legacy
+    user_config entries — so a ticker added via the Settings tab (config) and one
+    added via the Watch tab (trade_log) both appear everywhere. Order-preserving.
+    """
+    from config_manager import load_user_trade_log, get_user_config
+    seen, out = set(), []
+    try:
+        sources = [load_user_trade_log(chat_id).get("watchlist", []) or [],
+                   get_user_config(chat_id).get("watchlist", []) or []]
+    except Exception:
+        sources = [load_user_trade_log(chat_id).get("watchlist", []) or []]
+    for src in sources:
+        for t in src:
+            u = (t or "").upper()
+            if u and u not in seen:
+                seen.add(u); out.append(u)
+    return out
+
+
+def _save_watchlist(chat_id, tickers: list) -> list:
+    """
+    Write the watchlist to BOTH stores so the Watch tab (trade_log) and the
+    Settings tab (user_config) never diverge. trade_log is the monitored source;
+    user_config is mirrored so legacy readers stay consistent. Returns the
+    cleaned list actually stored.
+    """
+    from config_manager import (load_user_trade_log, save_user_trade_log,
+                                 get_user_config, save_user_config)
+    clean, seen = [], set()
+    for t in tickers:
+        u = (t or "").upper()
+        if u and u not in seen:
+            seen.add(u); clean.append(u)
+    log = load_user_trade_log(chat_id)
+    log["watchlist"] = clean
+    save_user_trade_log(chat_id, log)
+    try:
+        ucfg = get_user_config(chat_id)
+        ucfg["watchlist"] = clean
+        save_user_config(chat_id, ucfg)
+    except Exception as exc:
+        print(f"[webhook] watchlist config mirror failed (non-critical): {exc}")
+    return clean
+
+
 @app.route("/api/miniapp/watchlist")
 def miniapp_watchlist():
     """Return user's watchlist tickers with asset_type classification."""
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
-    from config_manager import load_user_trade_log
     from price_checker import _SYMBOL_TO_CG_ID
-    log = load_user_trade_log(chat_id)
-    tickers = log.get("watchlist", [])
+    tickers = _load_watchlist(chat_id)
     _crypto_syms = {s.upper() for s in _SYMBOL_TO_CG_ID}
     asset_types  = {t: ("crypto" if t.upper() in _crypto_syms else "stock") for t in tickers}
     return jsonify({"ok": True, "tickers": tickers, "asset_types": asset_types})
@@ -3390,13 +3436,10 @@ def miniapp_watchlist_add():
         if crypto_sym and _current_price(crypto_sym) is not None:
             ticker = crypto_sym
 
-    log = load_user_trade_log(chat_id)
-    watchlist = log.get("watchlist", [])
+    watchlist = _load_watchlist(chat_id)
     if ticker in watchlist:
         return jsonify({"ok": False, "error": f"{ticker} already on watchlist"}), 200
-    watchlist.append(ticker)
-    log["watchlist"] = watchlist
-    save_user_trade_log(chat_id, log)
+    watchlist = _save_watchlist(chat_id, watchlist + [ticker])
     return jsonify({"ok": True, "ticker": ticker, "count": len(watchlist)})
 
 
@@ -3409,10 +3452,7 @@ def miniapp_watchlist_remove():
     body   = request.get_json(silent=True) or {}
     ticker = (body.get("ticker") or "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400
-    log = load_user_trade_log(chat_id)
-    watchlist = [t for t in log.get("watchlist", []) if t != ticker]
-    log["watchlist"] = watchlist
-    save_user_trade_log(chat_id, log)
+    watchlist = _save_watchlist(chat_id, [t for t in _load_watchlist(chat_id) if t != ticker])
     return jsonify({"ok": True, "ticker": ticker, "count": len(watchlist)})
 
 
@@ -3565,16 +3605,14 @@ def _resolve_watchlist_ticker(raw: str) -> str:
 def miniapp_update_watchlist():
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
-    from config_manager import get_user_config, save_user_config
     body    = request.get_json(silent=True) or {}
-    ucfg    = get_user_config(chat_id)
     # action: "add" | "remove" | "set"
     action  = body.get("action", "set")
     ticker  = (body.get("ticker") or "").strip().upper()
     tickers = body.get("tickers")   # for "set" action
 
     added_as = ticker
-    current = ucfg.get("watchlist", [])
+    current = _load_watchlist(chat_id)   # unified store (trade_log ∪ config)
     if action == "add" and ticker:
         # Resolve company name → ticker (e.g. COSTCO → COST, NVIDEA → NVDA)
         resolved = _resolve_watchlist_ticker(ticker)
@@ -3586,8 +3624,7 @@ def miniapp_update_watchlist():
     elif action == "set" and isinstance(tickers, list):
         current = [_resolve_watchlist_ticker(t) for t in tickers if t.strip()]
 
-    ucfg["watchlist"] = current
-    save_user_config(chat_id, ucfg)
+    current = _save_watchlist(chat_id, current)
     return jsonify({"ok": True, "watchlist": current, "added_as": added_as})
 
 
