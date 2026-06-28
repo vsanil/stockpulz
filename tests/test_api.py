@@ -670,6 +670,25 @@ class TestRateLimiter:
         assert webhook._rate_limited("u1", "other", 20, 60) is False
 
 
+class TestUpdateDedup:
+    """Telegram retries of a slow handler must not double-process the command."""
+
+    def test_duplicate_update_id_detected(self):
+        import webhook
+        webhook._SEEN_UPDATES.clear()
+        assert webhook._is_duplicate_update(12345) is False   # first time
+        assert webhook._is_duplicate_update(12345) is True    # retry → duplicate
+        assert webhook._is_duplicate_update(99999) is False   # different update
+        assert webhook._is_duplicate_update(None)  is False   # no id → never a dup
+
+    def test_seen_set_is_bounded(self):
+        import webhook
+        webhook._SEEN_UPDATES.clear()
+        for i in range(webhook._SEEN_UPDATES_MAX + 50):
+            webhook._is_duplicate_update(i)
+        assert len(webhook._SEEN_UPDATES) <= webhook._SEEN_UPDATES_MAX
+
+
 class TestReleaseHardening:
     """Pre-public-launch hardening: no config leak, JSON (never HTML) errors."""
 

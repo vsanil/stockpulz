@@ -333,6 +333,30 @@ def trigger_mode(mode: str):
 
 # ── Telegram webhook receiver ─────────────────────────────────────────────────
 
+_SEEN_UPDATES: dict = {}          # update_id -> None, insertion-ordered (LRU-ish)
+_SEEN_UPDATES_MAX = 1000
+_SEEN_UPDATES_LOCK = threading.Lock()
+
+
+def _is_duplicate_update(update_id) -> bool:
+    """
+    True if this Telegram update_id was already handled. Telegram retries the
+    webhook when a handler is slow to ack (e.g. an LLM command), which would
+    otherwise process the command twice — a double position log, a double reply.
+    In-process is authoritative under gunicorn --workers 1.
+    """
+    if update_id is None:
+        return False
+    with _SEEN_UPDATES_LOCK:
+        if update_id in _SEEN_UPDATES:
+            return True
+        _SEEN_UPDATES[update_id] = None
+        if len(_SEEN_UPDATES) > _SEEN_UPDATES_MAX:
+            # Drop the oldest (dict preserves insertion order in 3.7+)
+            del _SEEN_UPDATES[next(iter(_SEEN_UPDATES))]
+        return False
+
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     """Receive Telegram update (message from user to bot)."""
@@ -348,6 +372,11 @@ def webhook():
             return jsonify({"status": "forbidden"}), 403
 
     data = request.get_json(silent=True) or {}
+
+    # Ignore Telegram retries of an update we've already handled (slow handlers
+    # otherwise get processed twice — duplicate logs/replies).
+    if _is_duplicate_update(data.get("update_id")):
+        return jsonify({"status": "ok", "dedup": True}), 200
 
     # Extract message text and chat_id from Telegram update format
     # ── Inline keyboard button tap ────────────────────────────────────────────

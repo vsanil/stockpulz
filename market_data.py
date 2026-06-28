@@ -293,15 +293,28 @@ def get_company_names(tickers: list[str]) -> dict[str, str]:
     return result
 
 
+_OHLCV_CACHE: dict[tuple, tuple] = {}   # (ticker, days) -> (data, ts)
+_OHLCV_TTL = 600   # 10 min — daily bars don't move intraday, and chart callers
+                   # fetch the live price separately, so this never staless a quote.
+
+
 def get_ohlcv(ticker: str, days: int = 92) -> list | None:
     """Fetch daily OHLCV bars for the past `days` days.
 
     Returns list of {time, open, high, low, close, volume} sorted ascending,
     or None if all sources fail.
 
-    Tries Polygon.io first; falls back to yfinance.
+    Tries Polygon.io first; falls back to yfinance. Results are cached per
+    (ticker, days) for _OHLCV_TTL so repeated chart opens (same or multiple
+    users) don't re-hit the price API. The live price footer is fetched
+    elsewhere, so cached historical bars never show a stale current price.
     """
     ticker    = ticker.upper()
+    _ck  = (ticker, days)
+    _hit = _OHLCV_CACHE.get(_ck)
+    if _hit is not None and (time.time() - _hit[1]) < _OHLCV_TTL:
+        return _hit[0]
+
     is_crypto = ticker in _CRYPTO_SYMBOLS
     end_date  = date.today().isoformat()
     start_date = (date.today() - timedelta(days=days)).isoformat()
@@ -322,7 +335,7 @@ def get_ohlcv(ticker: str, days: int = 92) -> list | None:
             if r.ok:
                 results = r.json().get("results", [])
                 if results:
-                    return [
+                    bars = [
                         {
                             "time":   _ms_to_date(bar["t"]),
                             "open":   round(bar["o"], 4),
@@ -333,7 +346,12 @@ def get_ohlcv(ticker: str, days: int = 92) -> list | None:
                         }
                         for bar in results
                     ]
+                    _OHLCV_CACHE[_ck] = (bars, time.time())
+                    return bars
         except Exception:
             pass
 
-    return _yf_ohlcv(ticker, days)
+    bars = _yf_ohlcv(ticker, days)
+    if bars:
+        _OHLCV_CACHE[_ck] = (bars, time.time())
+    return bars
