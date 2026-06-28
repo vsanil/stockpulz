@@ -476,6 +476,34 @@ class TestPerformance:
         assert clean["nested"]["x"] is None and clean["nested"]["ok"] == 1.5
         assert clean["list"] == [None, 2]
 
+    def test_json_provider_sanitizes_nan_app_wide(self):
+        """Every jsonify response is NaN-safe — not just endpoints we remember."""
+        import webhook
+        from flask import jsonify
+        with webhook.app.test_request_context():
+            body = jsonify({"x": float("nan"), "d": {"y": float("inf")},
+                            "lst": [float("-inf"), 1]}).get_data(as_text=True)
+        assert "NaN" not in body and "Infinity" not in body
+        assert '"x":null' in body.replace(" ", "")
+
+    def test_spy_return_drops_nan_closes(self):
+        """yfinance often returns a trailing NaN bar — _spy_return must drop it
+        and never return NaN (which would blank the benchmark / break JSON)."""
+        import pandas as pd
+        from unittest.mock import patch, MagicMock
+        import performance_tracker as pt
+
+        # Only one valid close after dropna → not enough → None (not NaN)
+        fake = MagicMock(); fake.history.return_value = pd.DataFrame({"Close": [500.0, float("nan")]})
+        with patch.object(pt.yf, "Ticker", return_value=fake):
+            assert pt._spy_return("1mo") is None
+
+        # Two valid closes + a trailing NaN → computes from the valid ones
+        fake2 = MagicMock(); fake2.history.return_value = pd.DataFrame({"Close": [500.0, 505.0, float("nan")]})
+        with patch.object(pt.yf, "Ticker", return_value=fake2):
+            r = pt._spy_return("1mo")
+            assert r is not None and abs(r - 1.0) < 0.01   # (505-500)/500 = +1.0%
+
     def test_performance_payload_has_no_nan(self, client):
         """The live bug: build_community_stats emitted alpha/spy_return_30d=NaN."""
         from unittest.mock import patch
