@@ -18,6 +18,30 @@ TELEGRAM_API       = "https://api.telegram.org/bot{token}/{method}"
 MAX_MESSAGE_LENGTH = 4096   # Telegram hard limit
 MAX_RETRIES        = 3
 RETRY_DELAY        = 5      # seconds between retries
+MAX_RETRY_AFTER    = 30     # cap a 429 cool-off so a single send never hangs a worker
+
+
+def _retry_after_secs(resp) -> int:
+    """
+    Extract Telegram's requested 429 cool-off. Telegram puts it in the JSON body
+    (parameters.retry_after); fall back to the Retry-After header, then
+    RETRY_DELAY. Capped at MAX_RETRY_AFTER so one slow user can't stall a worker.
+    """
+    secs = None
+    try:
+        secs = resp.json().get("parameters", {}).get("retry_after")
+    except Exception:
+        secs = None
+    if secs is None:
+        try:
+            secs = int(resp.headers.get("Retry-After", ""))
+        except (ValueError, TypeError):
+            secs = None
+    try:
+        secs = int(secs)
+    except (ValueError, TypeError):
+        secs = RETRY_DELAY
+    return max(1, min(secs, MAX_RETRY_AFTER))
 
 
 def _strip_html(text: str) -> str:
@@ -105,6 +129,14 @@ def send_message(text: str, chat_id: str | None = None) -> bool:
                     else:
                         print(f"[telegram] Plain text fallback also failed: {resp2.status_code}")
                     break   # don't retry after HTML fallback attempt
+                elif resp.status_code == 429:
+                    # Telegram backpressure — honor its requested cool-off instead
+                    # of burning the fixed-delay retries too fast.
+                    wait = _retry_after_secs(resp)
+                    print(f"[telegram] 429 rate-limited — waiting {wait}s (attempt {attempt}).")
+                    if attempt < MAX_RETRIES:
+                        time.sleep(wait)
+                    continue
                 else:
                     print(f"[telegram] Attempt {attempt} failed: HTTP {resp.status_code} — {resp.text}")
             except Exception as exc:
@@ -143,6 +175,12 @@ def send_inline_keyboard(text: str, buttons: list[list[dict]],
                 payload.pop("parse_mode", None)
                 resp2 = requests.post(url, json=payload, timeout=15)
                 return resp2.status_code == 200
+            elif resp.status_code == 429:
+                wait = _retry_after_secs(resp)
+                print(f"[telegram] send_inline_keyboard 429 — waiting {wait}s (attempt {attempt}).")
+                if attempt < MAX_RETRIES:
+                    time.sleep(wait)
+                continue
             print(f"[telegram] send_inline_keyboard attempt {attempt} failed: HTTP {resp.status_code}")
         except Exception as exc:
             print(f"[telegram] send_inline_keyboard attempt {attempt} exception: {exc}")
@@ -211,6 +249,12 @@ def send_photo(photo_bytes: bytes, caption: str = "", chat_id: str | None = None
             if resp.status_code == 200:
                 print(f"[telegram] Photo sent ({len(photo_bytes)//1024}KB).")
                 return True
+            elif resp.status_code == 429:
+                wait = _retry_after_secs(resp)
+                print(f"[telegram] send_photo 429 — waiting {wait}s (attempt {attempt}).")
+                if attempt < MAX_RETRIES:
+                    time.sleep(wait)
+                continue
             print(f"[telegram] send_photo attempt {attempt} failed: HTTP {resp.status_code} — {resp.text[:120]}")
         except Exception as exc:
             print(f"[telegram] send_photo attempt {attempt} exception: {exc}")
@@ -354,6 +398,23 @@ def broadcast_all(payloads: list[dict]) -> dict[str, bool]:
                                 break
                             body = await resp.text()
                             print(f"[telegram/async] {chat_id} attempt {attempt}: HTTP {resp.status} — {body[:120]}")
+                            if resp.status == 429:
+                                # Telegram backpressure — honor its cool-off so the
+                                # broadcast doesn't keep hammering and failing.
+                                wait = RETRY_DELAY
+                                try:
+                                    import json as _json
+                                    wait = int(_json.loads(body).get("parameters", {}).get("retry_after", RETRY_DELAY))
+                                except Exception:
+                                    try:
+                                        wait = int(resp.headers.get("Retry-After", RETRY_DELAY))
+                                    except (ValueError, TypeError):
+                                        wait = RETRY_DELAY
+                                wait = max(1, min(wait, MAX_RETRY_AFTER))
+                                print(f"[telegram/async] {chat_id} 429 — waiting {wait}s (attempt {attempt}).")
+                                if attempt < MAX_RETRIES:
+                                    await asyncio.sleep(wait)
+                                continue
                             if resp.status == 400 and "parse entities" in body:
                                 # HTML rejected — log the bad chunk for debugging
                                 print(f"[telegram/async] HTML rejected for {chat_id} — bad chunk (first 300 chars): {chunk[:300]!r}")

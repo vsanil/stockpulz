@@ -233,3 +233,34 @@ class TestBroadcastAll:
     def test_returns_dict(self):
         result = broadcast_all([])
         assert isinstance(result, dict)
+
+
+class TestRetryAfter:
+    """429 backpressure: honor Telegram's requested cool-off, capped."""
+
+    class _Resp:
+        def __init__(self, body=None, headers=None, raise_json=False):
+            self._body = body or {}
+            self.headers = headers or {}
+            self._raise = raise_json
+        def json(self):
+            if self._raise:
+                raise ValueError("no json")
+            return self._body
+
+    def test_from_json_body(self):
+        from telegram_api import _retry_after_secs
+        assert _retry_after_secs(self._Resp(body={"parameters": {"retry_after": 7}})) == 7
+
+    def test_from_header_when_body_missing(self):
+        from telegram_api import _retry_after_secs
+        assert _retry_after_secs(self._Resp(body={}, headers={"Retry-After": "12"})) == 12
+
+    def test_capped_at_max(self):
+        from telegram_api import _retry_after_secs, MAX_RETRY_AFTER
+        assert _retry_after_secs(self._Resp(body={"parameters": {"retry_after": 9999}})) == MAX_RETRY_AFTER
+
+    def test_falls_back_to_default(self):
+        from telegram_api import _retry_after_secs, RETRY_DELAY
+        got = _retry_after_secs(self._Resp(raise_json=True))
+        assert got == max(1, min(RETRY_DELAY, 30))
