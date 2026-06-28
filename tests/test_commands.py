@@ -205,6 +205,33 @@ class TestSettingsDisplayName:
             assert r.status_code == 200, f"Existing key {key!r} rejected"
 
 
+class TestUpdateSettingsParse:
+    """
+    /update_settings used float() + bare-except, so "$1.5k"/"5%" silently dropped
+    while the response still said ok:true. Now parse_money handles them and any
+    unparseable field is reported.
+    """
+
+    def test_money_string_with_symbols_saves(self, client):
+        from config_manager import get_user_config
+        from tests.conftest import TEST_CHAT_ID
+        r = post(client, "/api/miniapp/update_settings", {"stock_budget": "$1.5k"})
+        assert r.status_code == 200 and r.get_json().get("ok") is True
+        assert get_user_config(TEST_CHAT_ID)["stock_budget"] == 1500.0
+
+    def test_percent_string_saves(self, client):
+        from config_manager import get_user_config
+        from tests.conftest import TEST_CHAT_ID
+        r = post(client, "/api/miniapp/update_settings", {"stop_loss_pct": "8%"})
+        assert r.status_code == 200
+        assert get_user_config(TEST_CHAT_ID)["stop_loss_pct"] == 8.0
+
+    def test_unparseable_value_reported_not_silently_dropped(self, client):
+        r = post(client, "/api/miniapp/update_settings", {"crypto_budget": "abc"})
+        assert r.status_code == 200
+        assert "crypto_budget" in (r.get_json().get("warning") or "")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # BUG FIX: log_bought stores timeframe so LT/ST portfolio filter works
 # ══════════════════════════════════════════════════════════════════════════════

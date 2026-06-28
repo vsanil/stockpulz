@@ -2372,22 +2372,26 @@ def miniapp_update_settings():
         ucfg["risk_profile"] = body["risk_profile"]
     if "assets" in body and body["assets"] in allowed_assets:
         ucfg["assets"] = body["assets"]
-    if "stock_budget" in body:
-        try: ucfg["stock_budget"] = float(body["stock_budget"])
-        except: pass
-    if "crypto_budget" in body:
-        try: ucfg["crypto_budget"] = float(body["crypto_budget"])
-        except: pass
-    if "stop_loss_pct" in body:
-        try: ucfg["stop_loss_pct"] = float(body["stop_loss_pct"])
-        except: pass
-    if "target_gain_pct" in body:
-        try: ucfg["target_gain_pct"] = float(body["target_gain_pct"])
-        except: pass
+    # Tolerant money parse so "$500", "5%", "1.5k" all save (float() rejected
+    # them and the old bare-except silently dropped the value while still
+    # returning ok:true — the setting looked saved but wasn't). Report any field
+    # we couldn't parse instead of lying.
+    from cmd_helpers import parse_money
+    invalid = []
+    for key in ("stock_budget", "crypto_budget", "stop_loss_pct", "target_gain_pct"):
+        if key in body:
+            val = parse_money(body[key])
+            if val is None:
+                invalid.append(key)
+            else:
+                ucfg[key] = val
     if "onboarded" in body:
         ucfg["onboarded"] = bool(body["onboarded"])
     save_user_config(chat_id, ucfg)
-    return jsonify({"ok": True})
+    resp = {"ok": True}
+    if invalid:
+        resp["warning"] = "Couldn't read: " + ", ".join(invalid)
+    return jsonify(resp)
 
 
 @app.route("/api/miniapp/live_prices")
