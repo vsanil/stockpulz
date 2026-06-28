@@ -3,9 +3,11 @@
   "configurations": [
     {
       "name": "stockpulz",
-      "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "set -a && source /Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.env && set +a && python3 /Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/webhook.py"],
-      "port": 5000
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "dev_server.py"
+      ],
+      "port": 5050
     }
   ]
 }
