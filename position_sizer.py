@@ -64,6 +64,17 @@ _MIN_STOP_PCT = 0.02   # never use a stop tighter than 2%
 _MAX_STOP_PCT = 0.20   # never use a stop wider than 20%
 
 
+def _as_fraction(v) -> float:
+    """
+    Normalize a stop/ATR value to a 0-1 fraction. The screener writes
+    atr_pct / suggested_stop_pct as PERCENTS (e.g. 7.5 == 7.5%), but the sizing
+    math needs a fraction. A value already < 1 is assumed to be a fraction.
+    Without this every ATR-fallback stop (e.g. 7.5) was clamped to _MAX_STOP_PCT.
+    """
+    v = float(v or 0)
+    return v / 100.0 if v > 1 else v
+
+
 # ── Portfolio config helpers ──────────────────────────────────────────────────
 
 def _portfolio_cfg(config: dict) -> dict:
@@ -88,8 +99,8 @@ def size_pick(pick: dict, config: dict, is_crypto: bool = False) -> dict:
     pick fields used:
       entry_price / current_price
       stop_loss (absolute price)            — preferred
-      suggested_stop_pct (0-1 fraction)     — fallback 1
-      atr_pct (0-1 fraction)                — fallback 2
+      suggested_stop_pct (percent or fraction; normalized) — fallback 1
+      atr_pct (percent or fraction; normalized)            — fallback 2
       conviction (1-5 int or float)
       ticker / symbol
       sector                                — for portfolio checks
@@ -109,8 +120,9 @@ def size_pick(pick: dict, config: dict, is_crypto: bool = False) -> dict:
     if stop_abs and stop_abs > 0 and stop_abs < entry:
         stop_pct = (entry - stop_abs) / entry
     else:
-        # Fallback to ATR-based stop from screener
-        stop_pct = (
+        # Fallback to ATR-based stop from screener. These arrive as PERCENTS
+        # (screener writes atr_pct = atr/price*100), so normalize to a fraction.
+        stop_pct = _as_fraction(
             pick.get("suggested_stop_pct") or
             (pick.get("atr_pct", 0) * 1.5) or
             _DEFAULT_STOP_PCT

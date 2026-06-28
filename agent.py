@@ -3325,7 +3325,11 @@ def _get_rsi(ticker: str, period: int = 14) -> float | None:
         return cached[0]
     try:
         import yfinance as yf
-        hist = yf.Ticker(ticker).history(period=f"{period + 6}d", interval="1d", auto_adjust=True)
+        from price_checker import _SYMBOL_TO_CG_ID
+        # Crypto needs the -USD suffix or yf resolves to an unrelated instrument
+        # (e.g. bare "BTC" ≠ BTC-USD) → garbage RSI in the take-profit nudge.
+        yf_t = f"{ticker}-USD" if ticker.upper() in _SYMBOL_TO_CG_ID else ticker
+        hist = yf.Ticker(yf_t).history(period=f"{period + 6}d", interval="1d", auto_adjust=True)
         if len(hist) < period + 1:
             return None
         closes = hist["Close"].tolist()
