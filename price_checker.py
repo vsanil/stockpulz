@@ -88,7 +88,7 @@ def get_current_prices(picks: dict) -> dict:
         try:
             info  = yf.Ticker(ticker).fast_info
             price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
-            if price:
+            if price and price > 0:   # reject 0 / nan / negative (nan is truthy)
                 return ticker, round(float(price), 2)
         except Exception:
             pass
@@ -155,7 +155,7 @@ def get_current_prices(picks: dict) -> dict:
             data = resp.json()
             for sym, cid in symbol_to_id.items():
                 price = data.get(cid, {}).get("usd")
-                if price:
+                if price and price > 0:   # reject 0 / nan / negative
                     prices[sym] = float(price)
                     crypto_symbols.discard(sym)   # mark as resolved
             print(f"[price_checker] CoinGecko returned prices for: {list(symbol_to_id.keys())}")
@@ -169,7 +169,7 @@ def get_current_prices(picks: dict) -> dict:
             yf_ticker = f"{sym}-USD"
             data  = yf.Ticker(yf_ticker).fast_info
             price = getattr(data, "last_price", None) or getattr(data, "regular_market_price", None)
-            if price:
+            if price and price > 0:   # reject 0 / nan / negative (nan is truthy)
                 prices[sym] = round(float(price), 2)
                 print(f"[price_checker] yfinance fallback: {sym} = ${price:.2f}")
             else:

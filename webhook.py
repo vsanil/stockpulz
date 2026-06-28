@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import hmac
 import threading
 import secrets as _sec
 from datetime import datetime as _dt, timedelta as _td, timezone as _tz
@@ -67,6 +68,21 @@ class _NanSafeJSONProvider(_DefaultJSONProvider):
 
 
 app.json = _NanSafeJSONProvider(app)
+
+
+@app.errorhandler(Exception)
+def _json_error_handler(e):
+    """
+    Always return JSON, never Flask's default 500 HTML — the mini-app does
+    response.json() on every call and chokes on an HTML body ("Couldn't load
+    data"). HTTP errors keep their status; unhandled errors are 500 + logged.
+    """
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return jsonify({"ok": False, "error": e.name, "code": e.code}), e.code
+    import traceback
+    print(f"[webhook] unhandled exception: {e}\n{traceback.format_exc()}")
+    return jsonify({"ok": False, "error": "server_error"}), 500
 
 # ── Admin magic-link token store (Gist-backed, survives Render restarts) ──────
 _ADMIN_TOKEN_FILE = "admin_tokens.json"
@@ -126,7 +142,7 @@ def trigger_morning():
     """
     secret   = os.environ.get("CRON_SECRET", "")
     provided = request.args.get("secret", "") or (request.get_json(silent=True) or {}).get("secret", "")
-    if not secret or provided != secret:
+    if not secret or not hmac.compare_digest(str(provided), str(secret)):
         return jsonify({"error": "unauthorized"}), 403
 
     # Duplicate-run guard — skip if morning already ran today (ET)
@@ -194,7 +210,7 @@ def trigger_prescreener():
     """
     secret   = os.environ.get("CRON_SECRET", "")
     provided = request.args.get("secret", "") or (request.get_json(silent=True) or {}).get("secret", "")
-    if not secret or provided != secret:
+    if not secret or not hmac.compare_digest(str(provided), str(secret)):
         return jsonify({"error": "unauthorized"}), 403
 
     # Duplicate guard — skip if prescreener already ran tonight
@@ -267,7 +283,7 @@ def trigger_mode(mode: str):
 
     secret   = os.environ.get("CRON_SECRET", "")
     provided = request.args.get("secret", "") or (request.get_json(silent=True) or {}).get("secret", "")
-    if not secret or provided != secret:
+    if not secret or not hmac.compare_digest(str(provided), str(secret)):
         return jsonify({"error": "unauthorized"}), 403
 
     # Per-mode duplicate guard — skip if this mode already ran today (ET).
@@ -409,12 +425,9 @@ def webhook():
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check — returns current config."""
-    try:
-        config = get_config()
-        return jsonify({"status": "ok", "config": config}), 200
-    except Exception as exc:
-        return jsonify({"status": "error", "detail": str(exc)}), 500
+    """Health check — unauthenticated, so it must NOT leak the config dict
+    (allowlist, admin chat_id, operational internals). Liveness only."""
+    return jsonify({"status": "ok"}), 200
 
 
 # ── One-time webhook registration ─────────────────────────────────────────────
@@ -1583,9 +1596,10 @@ def miniapp_seed_backtest():
     if not chat_id:
         return jsonify({"error": "unauthorised"}), 403
 
-    # Only admin can seed for other users; regular users can only seed themselves
+    # IDOR fix: always seed the AUTHENTICATED user — never a client-supplied
+    # chat_id, which let any caller pollute another user's performance history.
     body      = request.get_json(silent=True) or {}
-    target_id = str(body.get("chat_id", chat_id))
+    target_id = str(chat_id)
     days_back = int(body.get("days_back", 60))
 
     def _run():
