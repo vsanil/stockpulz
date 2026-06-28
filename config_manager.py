@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import json
 import time
+import threading
 import requests
 
 # ── In-memory Gist read cache ─────────────────────────────────────────────────
@@ -246,16 +247,12 @@ def update_user_config_multi(chat_id: str, updates: dict) -> dict:
 
 def save_user_config(chat_id: str, ucfg: dict) -> None:
     """Persist the full user config dict (replaces existing entry)."""
-    all_configs = _load_gist_file(USER_CONFIGS_FILE) or {}
-    all_configs[str(chat_id)] = ucfg
-    _write_gist_file(USER_CONFIGS_FILE, all_configs)
+    _update_user_keyed_file(USER_CONFIGS_FILE, chat_id, ucfg)
 
 
 def reset_user_config(chat_id: str) -> dict:
     """Reset a user's config to DEFAULT_USER_CONFIG."""
-    all_configs = _load_gist_file(USER_CONFIGS_FILE) or {}
-    all_configs[str(chat_id)] = dict(DEFAULT_USER_CONFIG)
-    _write_gist_file(USER_CONFIGS_FILE, all_configs)
+    _update_user_keyed_file(USER_CONFIGS_FILE, chat_id, dict(DEFAULT_USER_CONFIG))
     return dict(DEFAULT_USER_CONFIG)
 
 
@@ -271,10 +268,8 @@ def load_user_trade_log(chat_id: str) -> dict:
 
 
 def save_user_trade_log(chat_id: str, log: dict) -> None:
-    """Save trade log for a specific user."""
-    all_logs = _load_gist_file(USER_TRADES_FILE) or {}
-    all_logs[str(chat_id)] = log
-    _write_gist_file(USER_TRADES_FILE, all_logs)
+    """Save trade log for a specific user (clobber-safe, concurrency-safe)."""
+    _update_user_keyed_file(USER_TRADES_FILE, chat_id, log)
 
 
 # ── Per-user paper portfolio ──────────────────────────────────────────────────
@@ -291,10 +286,8 @@ def load_user_paper(chat_id: str) -> dict:
 
 
 def save_user_paper(chat_id: str, data: dict) -> None:
-    """Save paper portfolio for a specific user."""
-    all_paper = _load_gist_file(USER_PAPER_FILE) or {}
-    all_paper[str(chat_id)] = data
-    _write_gist_file(USER_PAPER_FILE, all_paper)
+    """Save paper portfolio for a specific user (clobber-safe, concurrency-safe)."""
+    _update_user_keyed_file(USER_PAPER_FILE, chat_id, data)
 
 
 # ── Multi-user allowlist helpers ─────────────────────────────────────────────
@@ -764,6 +757,64 @@ def _write_gist_file(filename: str, data: dict) -> None:
     _cache_invalidate(filename)   # invalidate before write so stale data is never served
     from storage import GistBackend
     GistBackend().write(filename, data)
+
+
+# ── Safe per-user write (concurrency + clobber protection) ───────────────────
+_FILE_LOCKS: dict[str, threading.Lock] = {}
+_FILE_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(filename: str) -> threading.Lock:
+    with _FILE_LOCKS_GUARD:
+        lk = _FILE_LOCKS.get(filename)
+        if lk is None:
+            lk = _FILE_LOCKS[filename] = threading.Lock()
+        return lk
+
+
+def _update_user_keyed_file(filename: str, chat_id: str, value) -> None:
+    """
+    Safely set all_data[chat_id] = value in a chat_id-keyed multi-user file.
+
+    Two protections that the old `load() or {} ; all[id]=v ; write()` lacked:
+    1. Re-reads the file FRESH under a per-file lock and merges only this user's
+       slot — so a concurrent save for a DIFFERENT user can't clobber it (with
+       gunicorn at --workers 1, the lock serializes all web-side mutations).
+    2. Uses read_strict, which RAISES on a fetch error — so a transient Gist
+       failure aborts the write instead of persisting `{}` and erasing everyone.
+    (A same-user concurrent mutation across processes is still last-writer-wins —
+    the full fix is etag/If-Match or a row store; this kills the data-loss cases.)
+    """
+    from storage import GistBackend
+    with _lock_for(filename):
+        current  = GistBackend().read_strict(filename)   # raises on fetch error → no clobber
+        all_data = current if isinstance(current, dict) else {}
+        all_data[str(chat_id)] = value
+        _cache_invalidate(filename)
+        GistBackend().write(filename, all_data)
+        _cache_set(filename, all_data)   # keep cache coherent with what we just wrote
+
+
+def mutate_gist_file(filename: str, mutator, default=None):
+    """
+    Atomically read-modify-write a whole Gist file under a per-file lock.
+
+    `mutator(current)` receives the FRESH file contents (or `default` if the
+    file doesn't exist) and returns (new_contents, result). The new contents are
+    written and `result` is returned to the caller. Read failures RAISE (no
+    clobber). Use for shared multi-user files (e.g. price_alerts) where the whole
+    blob is rewritten so a naive load→mutate→save loses concurrent edits.
+    """
+    from storage import GistBackend
+    with _lock_for(filename):
+        current = GistBackend().read_strict(filename)
+        if current is None:
+            current = {} if default is None else default
+        new_contents, result = mutator(current)
+        _cache_invalidate(filename)
+        GistBackend().write(filename, new_contents)
+        _cache_set(filename, new_contents)
+        return result
 
 
 # ── Pending conversation state (multi-step commands) ─────────────────────────

@@ -131,6 +131,13 @@ def _gist_store(monkeypatch):
     monkeypatch.setattr(price_alert_manager, "_load_gist_file", _store.load)  # type: ignore
     monkeypatch.setattr(price_alert_manager, "_write_gist_file", _store.write)  # type: ignore
 
+    # The new clobber-safe helpers (_update_user_keyed_file / mutate_gist_file)
+    # call GistBackend() directly, so mock it at that level too.
+    import storage
+    monkeypatch.setattr(storage.GistBackend, "read",        lambda self, fn: _store.load(fn))
+    monkeypatch.setattr(storage.GistBackend, "read_strict", lambda self, fn: _store.load(fn))
+    monkeypatch.setattr(storage.GistBackend, "write",       lambda self, fn, data: _store.write(fn, data))
+
     # Seed a minimal config so get_allowed_users() returns TEST_CHAT_ID
     _store.write("config.json", {
         "allowed_users": [TEST_CHAT_ID],
