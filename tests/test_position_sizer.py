@@ -140,6 +140,24 @@ class TestStopDerivation:
         result = size_pick(p, _cfg())
         assert result["stop_pct"] <= 20.0
 
+    def test_screener_percent_suggested_stop_normalized(self):
+        """Screener emits suggested_stop_pct as a PERCENT (7.5 == 7.5%); it must
+        normalize to ~7.5%, not get clamped to the 20% ceiling (the old bug)."""
+        p = _pick(entry=100, stop=None)
+        p["stop_loss"] = None
+        p["suggested_stop_pct"] = 7.5            # percent, as the screener writes it
+        result = size_pick(p, _cfg())
+        assert abs(result["stop_price"] - 92.5) < 0.6   # 100 * (1 - 0.075)
+        assert result["stop_pct"] < 20.0                # NOT pinned to the ceiling
+
+    def test_screener_percent_atr_normalized(self):
+        """atr_pct is a PERCENT too (5.0 == 5%) → 5 * 1.5 = 7.5% stop."""
+        p = _pick(entry=100, stop=None)
+        p["stop_loss"] = None
+        p["atr_pct"] = 5.0
+        result = size_pick(p, _cfg())
+        assert abs(result["stop_price"] - 92.5) < 1.0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 class TestConvictionScaling:
