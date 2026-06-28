@@ -15,6 +15,7 @@ gracefully if the key is absent or a call fails.
 from __future__ import annotations
 
 import os
+import re
 import time
 import warnings
 from io import StringIO
@@ -121,6 +122,38 @@ _BROWSER_UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 
 
+# Plain US equity ticker: 1-5 letters, optional .CLASS (e.g. BRK.B). Excludes
+# crypto (BTC-USD), futures (GC=F), and other non-equity Yahoo symbols.
+_TICKER_RE = re.compile(r"^[A-Z]{1,5}(\.[A-Z])?$")
+_HIGH_INTEREST_SCREENS = ("most_actives", "day_gainers")
+
+
+def _high_interest_tickers() -> list[str]:
+    """
+    High-volume / high-interest US equities from Yahoo's predefined screens.
+    Surfaces hot new listings — e.g. a heavily-traded recent IPO like SPCX —
+    BEFORE they're added to an index, so the screener isn't limited to fixed
+    index membership (which lags an IPO by weeks/months). Dynamic, no API key,
+    no model-cutoff dependence. Fail-graceful → [] (and degrades to [] on a
+    yfinance without screen()).
+    """
+    if not hasattr(yf, "screen"):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for scr in _HIGH_INTEREST_SCREENS:
+        try:
+            res = yf.screen(scr, count=100) or {}
+            for q in res.get("quotes", []):
+                sym = (q.get("symbol") or "").upper().strip()
+                if _TICKER_RE.match(sym) and sym not in seen:
+                    seen.add(sym)
+                    out.append(sym)
+        except Exception as exc:
+            print(f"[screener] high-interest screen '{scr}' failed: {exc}")
+    return out
+
+
 def _wiki_symbols(url: str) -> list[str]:
     """
     Fetch a Wikipedia constituents page (with a browser UA so it doesn't 403) and
@@ -192,6 +225,13 @@ def get_stock_universe() -> list[str]:
     before = len(tickers)
     _add(_wiki_symbols("https://en.wikipedia.org/wiki/Nasdaq-100"))
     print(f"[screener] NASDAQ 100: added {len(tickers)-before} new tickers.")
+
+    # ── Source 3.5: high-interest / recent listings (volume-driven) ──────────
+    # Added BEFORE MidCap 400 so hot new names (e.g. a recent IPO) survive the
+    # MAX_TICKERS cap instead of being crowded out by the 400th mid-cap.
+    before = len(tickers)
+    _add(_high_interest_tickers())
+    print(f"[screener] High-interest: added {len(tickers)-before} new tickers.")
 
     # ── Source 4: S&P MidCap 400 via Wikipedia ───────────────────────────────
     before = len(tickers)

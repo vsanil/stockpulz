@@ -50,6 +50,25 @@ class TestUniverseFetch:
             assert screener._wiki_symbols("https://en.wikipedia.org/x") == []
 
 
+class TestHighInterestTickers:
+    """Recent IPOs / high-volume names get scanned before index inclusion."""
+
+    def test_extracts_equities_and_filters_non_equity(self):
+        import screener
+        fake = {"quotes": [{"symbol": "SPCX"}, {"symbol": "NVDA"}, {"symbol": "BRK.B"},
+                           {"symbol": "BTC-USD"}, {"symbol": "GC=F"}, {"symbol": ""}]}
+        with patch.object(screener.yf, "screen", return_value=fake, create=True):
+            syms = screener._high_interest_tickers()
+        assert "SPCX" in syms and "NVDA" in syms and "BRK.B" in syms   # equities kept
+        assert "BTC-USD" not in syms and "GC=F" not in syms            # crypto/futures dropped
+        assert "" not in syms
+
+    def test_fail_graceful_on_exception(self):
+        import screener
+        with patch.object(screener.yf, "screen", side_effect=Exception("boom"), create=True):
+            assert screener._high_interest_tickers() == []
+
+
 # ── _deduplicate_by_correlation ───────────────────────────────────────────────
 
 class TestDeduplicateByCorrelation:
