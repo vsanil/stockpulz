@@ -55,7 +55,8 @@ Rules:
 
 ### Bug pattern: NaN/Infinity in an API response breaks the frontend (Jun 27)
 - Flask `jsonify` emits the literal `NaN`/`Infinity` (Python `json` allows them), but those are **invalid JSON** — the browser's `response.json()` throws, and the tab silently shows "Couldn't load data". This took down the Performance tab: `build_community_stats` returned `alpha`/`spy_return_30d = NaN` (SPY fetch produced a NaN close; `if x is not None` doesn't catch NaN — same class as `_is_pos`).
-- **Fix at source** (`x == x` is False for NaN; guard before `round()`) AND **at the boundary**: `webhook._clean_nan(payload)` recursively maps NaN/Inf → None before `jsonify`. **Rule: any endpoint returning computed floats (stats, %, alpha) must sanitize via `_clean_nan` or guarantee no NaN reaches jsonify.**
+- **Fix is app-wide**: `webhook._NanSafeJSONProvider` (set as `app.json`) runs `_clean_nan` on EVERY jsonify response, mapping NaN/Inf → null — so no endpoint can leak NaN, not just the ones we remember to guard. Also fix at source where practical (`math.isfinite`/`x == x` before `round()`).
+- **SPY benchmark: `performance_tracker._spy_return(period)`** is the one NaN-safe SPY fetch — `.dropna()` skips yfinance's trailing NaN bar (the actual cause of the blank `alpha`/`spy_return_30d`). All 3 SPY fetch sites route through it.
 - **Decorator gotcha**: never insert a helper `def` between `@app.route(...)` and its view function — the decorator then wraps the helper and the route 500s. Put module helpers ABOVE the decorator.
 
 ### Background jobs must fail silently to users

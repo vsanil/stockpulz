@@ -15,6 +15,24 @@ from config_manager import load_weekly_picks
 COINGECKO_SIMPLE = "https://api.coingecko.com/api/v3/simple/price"
 
 
+def _spy_return(period: str) -> float | None:
+    """
+    SPY % return over the period, NaN-safe. Drops NaN closes (yfinance often
+    returns a trailing NaN/partial bar) so a flaky fetch doesn't blank the
+    benchmark — and never returns NaN, which would break the JSON response.
+    Returns the raw float (caller rounds) or None.
+    """
+    try:
+        closes = yf.Ticker("SPY").history(period=period)["Close"].dropna()
+        if len(closes) >= 2:
+            first, last = float(closes.iloc[0]), float(closes.iloc[-1])
+            if first > 0 and math.isfinite(first) and math.isfinite(last):
+                return (last - first) / first * 100
+    except Exception as exc:
+        print(f"[performance_tracker] SPY fetch failed ({period}): {exc}")
+    return None
+
+
 def build_weekly_recap() -> dict | None:
     """
     Returns a recap dict, or None if there are no picks this week.
@@ -73,13 +91,7 @@ def build_weekly_recap() -> dict | None:
             print(f"[performance_tracker] Could not fetch {ticker}: {exc}")
 
     # S&P 500 weekly return (5-day window)
-    spy_return = None
-    try:
-        hist = yf.Ticker("SPY").history(period="5d")
-        if len(hist) >= 2:
-            spy_return = (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100
-    except Exception as exc:
-        print(f"[performance_tracker] SPY benchmark failed: {exc}")
+    spy_return = _spy_return("5d")
 
     # Crypto via CoinGecko bulk call
     if crypto_entries:
@@ -222,15 +234,8 @@ def get_recent_stats(trade_logs: list[dict], days: int = 30) -> dict | None:
     stocks = [t for t in all_closed if t.get("asset_type") == "stock"]
     crypto = [t for t in all_closed if t.get("asset_type") == "crypto"]
 
-    spy_return = None
-    try:
-        hist = yf.Ticker("SPY").history(period=f"{min(days, 59)}d")
-        if len(hist) >= 2:
-            spy_return = round(
-                (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100, 1
-            )
-    except Exception:
-        pass
+    _sr = _spy_return(f"{min(days, 59)}d")
+    spy_return = round(_sr, 1) if _sr is not None else None
 
     return {
         "days":       days,
@@ -275,20 +280,9 @@ def build_community_stats(user_trade_logs: list[dict]) -> dict | None:
     if not all_closed:
         return None
 
-    # Fetch SPY 30-day return as benchmark
-    spy_return_30d = None
-    try:
-        hist = yf.Ticker("SPY").history(period="1mo")
-        if len(hist) >= 2:
-            first = float(hist["Close"].iloc[0])
-            last  = float(hist["Close"].iloc[-1])
-            # Guard against yfinance NaN closes — a NaN here propagates into
-            # alpha and then breaks the JSON response (NaN is invalid JSON).
-            # `x == x` is False for NaN.
-            if first > 0 and first == first and last == last:
-                spy_return_30d = round((last - first) / first * 100, 1)
-    except Exception as exc:
-        print(f"[performance_tracker] SPY 30d fetch failed: {exc}")
+    # Fetch SPY 30-day return as benchmark (NaN-safe, drops NaN closes)
+    _sr30 = _spy_return("1mo")
+    spy_return_30d = round(_sr30, 1) if _sr30 is not None else None
 
     returns  = [float(t["return_pct"]) for t in all_closed]
     wins     = [r for r in returns if r > 0]

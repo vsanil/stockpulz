@@ -38,6 +38,36 @@ from telegram_notifier import handle_incoming_command, handle_callback_query, se
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or _sec.token_hex(32)
 
+
+def _clean_nan(obj):
+    """
+    Recursively replace NaN/Infinity floats with None. Flask's default JSON
+    serializer emits the literal `NaN`/`Infinity` (Python json allows them), but
+    those are INVALID JSON — the browser's response.json() throws on them and the
+    tab silently shows "Couldn't load data". Used by the JSON provider below so
+    EVERY jsonify response is safe, not just the ones we remember to guard.
+    """
+    import math
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _clean_nan(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_clean_nan(v) for v in obj]
+    return obj
+
+
+from flask.json.provider import DefaultJSONProvider as _DefaultJSONProvider
+
+
+class _NanSafeJSONProvider(_DefaultJSONProvider):
+    """App-wide guard: sanitize NaN/Inf → null before serializing any response."""
+    def dumps(self, obj, **kwargs):
+        return super().dumps(_clean_nan(obj), **kwargs)
+
+
+app.json = _NanSafeJSONProvider(app)
+
 # ── Admin magic-link token store (Gist-backed, survives Render restarts) ──────
 _ADMIN_TOKEN_FILE = "admin_tokens.json"
 
@@ -2791,22 +2821,6 @@ _PERF_CACHE: dict = {}         # chat_id → {"payload": dict, "ts": float}
 _PERF_CACHE_TTL = 5 * 60       # 5 minutes
 
 
-def _clean_nan(obj):
-    """
-    Recursively replace NaN/Infinity floats with None. Flask's jsonify emits the
-    literal `NaN`, which is INVALID JSON — the browser's response.json() throws on
-    it and the tab silently shows "Couldn't load data". Sanitize before returning.
-    """
-    import math
-    if isinstance(obj, float):
-        return obj if math.isfinite(obj) else None
-    if isinstance(obj, dict):
-        return {k: _clean_nan(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_clean_nan(v) for v in obj]
-    return obj
-
-
 @app.route("/api/miniapp/performance")
 def miniapp_performance():
     """Return bot track record for the Mini App performance tab.
@@ -2838,14 +2852,14 @@ def miniapp_performance():
             "60d": get_performance_stats(60),
             "90d": get_performance_stats(90),
         }
-        payload = _clean_nan({
+        payload = {
             "ok":           True,
             "stats":        stats,
             "context_30d":  ctx30,
             "period_stats": period_stats,
-        })
+        }
         _PERF_CACHE[chat_id] = {"payload": payload, "ts": now}
-        return jsonify(payload)
+        return jsonify(payload)   # NaN sanitized app-wide by _NanSafeJSONProvider
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 

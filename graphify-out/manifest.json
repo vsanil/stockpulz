@@ -50,8 +50,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/webhook.py": {
-    "mtime": 1782602407.5220394,
-    "ast_hash": "35ba8d37c6dc509fe19973c6c739dd39",
+    "mtime": 1782608870.8615763,
+    "ast_hash": "ca2fe2532ea64aef59ad3a1d220e8810",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/congressional_tracker.py": {
@@ -155,8 +155,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/performance_tracker.py": {
-    "mtime": 1782600232.4779444,
-    "ast_hash": "7580cf521f21a73f7b75bdb22c61d096",
+    "mtime": 1782608961.2980871,
+    "ast_hash": "8e9fd0a533b759bd8da80f44fc7a520c",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/earnings_checker.py": {
@@ -310,8 +310,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_api.py": {
-    "mtime": 1782602276.4629195,
-    "ast_hash": "1a222ab5f76d9b59311a3e7b896678e9",
+    "mtime": 1782619647.2035534,
+    "ast_hash": "4d5044b245498206622a1e18fac9a2c6",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_formatters.py": {
@@ -330,8 +330,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.claude/settings.local.json": {
-    "mtime": 1782602378.2339916,
-    "ast_hash": "6056c09b088b9cd3fd3528602395cd79",
+    "mtime": 1782608799.372012,
+    "ast_hash": "f9a6bf8f987d3dc99b1ebd02c8b40584",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/on_push.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/CLAUDE.md": {
-    "mtime": 1782602470.745359,
-    "ast_hash": "7a11da4f7fceb27d71d2b97e192accc8",
+    "mtime": 1782619668.348422,
+    "ast_hash": "0b08d653bc13aab90145f434430b02e5",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/docs/index.html": {
