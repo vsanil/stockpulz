@@ -2951,8 +2951,14 @@ document.getElementById('hdr-date').textContent =
   if (!avatarEl) return;
 
   if (u.photo_url) {
-    // Show actual Telegram profile photo
-    avatarEl.innerHTML = `<img src="${u.photo_url}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.textContent='${initials}'" />`;
+    // Show actual Telegram profile photo. Build via DOM (not innerHTML) so a
+    // quote/markup in the user's name or photo_url can't break out and inject.
+    const img = document.createElement('img');
+    img.src = u.photo_url;
+    img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+    img.onerror = () => { avatarEl.textContent = initials; };
+    avatarEl.innerHTML = '';
+    avatarEl.appendChild(img);
   } else {
     // Fallback: colorful initials circle
     const colors = ['#4f8ef7','#00d4aa','#a78bfa','#ffb800','#ff5a5a'];
