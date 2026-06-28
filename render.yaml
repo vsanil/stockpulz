@@ -6,7 +6,9 @@ services:
     name: stock-agent-webhook
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 4 --timeout 120 webhook:app
+    # 1 worker + threads: one copy of pandas/yfinance (avoids 512MB OOM) but
+    # real concurrency for the I/O-bound handlers, and coherent in-memory caches.
+    startCommand: gunicorn --workers 1 --threads 8 --timeout 120 webhook:app
     plan: free
     envVars:
       - key: ANTHROPIC_API_KEY

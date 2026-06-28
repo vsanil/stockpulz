@@ -615,6 +615,25 @@ class TestDefine:
 # MISC
 # ══════════════════════════════════════════════════════════════════════════════
 
+class TestReleaseHardening:
+    """Pre-public-launch hardening: no config leak, JSON (never HTML) errors."""
+
+    def test_health_does_not_leak_config(self, client):
+        r = client.get("/health")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data == {"status": "ok"}          # no "config" dict leaked
+        assert "config" not in data
+
+    def test_unknown_route_returns_json_not_html(self, client):
+        # The global error handler must return JSON so the mini-app's
+        # response.json() never chokes on an HTML 404/500 body.
+        r = client.get("/api/miniapp/this_route_does_not_exist")
+        assert r.status_code == 404
+        assert r.is_json
+        assert r.get_json().get("ok") is False
+
+
 class TestMisc:
     def test_status_returns_ok(self, client):
         r = get(client, "/api/miniapp/status")

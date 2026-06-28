@@ -1811,11 +1811,19 @@ def run_midday_check():
             return
 
         for uid in users:
-            if _is_quiet_hours(uid):
-                continue   # non-urgent nudges suppressed during user's quiet window
+            try:
+                if _is_quiet_hours(uid):
+                    continue   # non-urgent nudges suppressed during user's quiet window
+            except Exception as _q_exc:
+                print(f"[agent] quiet-hours check failed for {uid} (non-critical): {_q_exc}")
+                continue
 
-            # Timely alerts — fire immediately
-            _check_hold_or_fold(uid, current_prices)
+            # Timely alerts — fire immediately (per-user guarded so one user's
+            # failure can't abort the rest of the midday loop).
+            try:
+                _check_hold_or_fold(uid, current_prices)
+            except Exception as _hf_exc:
+                print(f"[agent] hold/fold check failed for {uid} (non-critical): {_hf_exc}")
             try:
                 _check_portfolio_drawdown(uid, current_prices)
             except Exception as _dd_exc:

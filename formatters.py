@@ -1062,6 +1062,13 @@ def format_eod_full_summary(
         try:
             pct = (float(price) - float(entry)) / float(entry) * 100
             qty = float(h.get("shares") or 0)
+            if not qty:
+                # Many positions are logged via "Total invested" and store no
+                # share count — derive it from allocation/total so they're not
+                # silently dropped from the dollar total (the +$120-vs-$2,000 bug).
+                alloc = h.get("allocation") or h.get("total_invested") or h.get("budget")
+                if alloc:
+                    qty = float(alloc) / float(entry)
             pnl_usd = (float(price) - float(entry)) * qty if qty else None
             port_rows.append((tk, pct, pnl_usd))
         except Exception:
@@ -1089,9 +1096,12 @@ def format_eod_full_summary(
             f"Avg: <b>{sign}{avg_port_pct:.1f}%</b>  "
             f"·  {len(gainers)} up  ·  {len(losers)} down"
         )
+        n_dollar = len([r for r in port_rows if r[2] is not None])
         if total_pnl != 0:
+            dollar_cov = (f"  <i>({n_dollar} of {len(port_rows)})</i>"
+                          if n_dollar < len(port_rows) else "")
             lines.append(
-                f"Est. gain/loss: <b>{pnl_sign}${abs(total_pnl):,.2f}</b>"
+                f"Est. gain/loss: <b>{pnl_sign}${abs(total_pnl):,.2f}</b>{dollar_cov}"
             )
 
     # ── Day averages ──────────────────────────────────────────────────────────

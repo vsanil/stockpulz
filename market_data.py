@@ -53,7 +53,7 @@ def _yf_price(ticker: str) -> float | None:
         yf_sym    = f"{ticker}-USD" if is_crypto else ticker
         fi        = _yf.Ticker(yf_sym).fast_info
         p         = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
-        return float(p) if p else None
+        return float(p) if (p and p > 0) else None   # reject 0 / nan / negative
     except Exception:
         return None
 

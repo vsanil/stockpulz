@@ -65,6 +65,17 @@ Rules:
 - **Rule: any `pd.read_html`/`read_csv` on a public site must send `_BROWSER_UA` (Wikipedia/most sites 403 the default UA) and select tables by COLUMN content, never a hardcoded index. A silent fallback to a static list = stale picks; log loudly and keep a mocked test.**
 - **Recent IPOs / hot names surface before index inclusion** via `screener._high_interest_tickers()` — Yahoo predefined screens (`most_actives` + `day_gainers`, via `yf.screen()`), filtered to plain equities (`_TICKER_RE`, drops crypto/futures). Injected BEFORE MidCap-400 so they survive the 600 cap. This is why a just-IPO'd name (e.g. SPCX) gets scanned without waiting weeks for S&P/Nasdaq membership. Needs yfinance with `screen()` (≥0.2.54; the `hasattr` guard degrades to [] otherwise). **The whole point: discovery is dynamic and NOT tied to the model's training cutoff — never hardcode "current" tickers.**
 
+### Release-hardening (5-agent pre-public audit, Jun 28) — batch 1 done
+- **Global JSON error handler**: `webhook.py @app.errorhandler(Exception)` returns JSON (HTTPException keeps its code; else 500 + logged) so the mini-app's `response.json()` never hits HTML. Rule: never let an endpoint return Flask's default HTML error.
+- **`nan` price guard at the SOURCE modules too**: `price_checker.py` (3 sites) + `market_data._yf_price` now use `if price and price > 0` (the `_is_pos` guard wasn't only an alert-layer concern). Any new `fast_info.last_price` read must do this — `nan` is truthy.
+- **`/health` returns `{"status":"ok"}` only** — it's unauthenticated; never serialize the config dict (allowlist/admin id) to it.
+- **IDOR rule: mutating endpoints use the AUTHENTICATED chat_id, never a client-supplied `chat_id` body/param** (seed_backtest was overriding it). Same root cause as the auth gap below.
+- **Anthropic client**: `anthropic.Anthropic(timeout=60, max_retries=2)` — the SDK default (~600s×2) can hang the whole morning run.
+- **Cron-secret compares use `hmac.compare_digest`** (timing-safe).
+- **Every per-user broadcast loop body must be try/except-wrapped** so one user's failure can't abort delivery for the rest (run_midday_check was missing it).
+- **Gunicorn: `--workers 1 --threads 8`** (Procfile + render.yaml were 1 vs 4) — one copy of pandas avoids 512MB OOM; threads give concurrency for I/O-bound handlers + coherent in-memory caches.
+- **STILL OPEN (top launch-blockers, in progress)**: (1) mini-app auth doesn't verify Telegram `initData` HMAC → any user can pass `?chat_id=victim` and act as them; (2) Gist whole-file read-modify-write has no locking/optimistic-concurrency → multi-user data loss + cross-user clobber on the shared `price_alerts.json`/`buy_counts.json`. Do NOT go public until both are fixed.
+
 ### Background jobs must fail silently to users
 - run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
 
