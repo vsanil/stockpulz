@@ -1848,6 +1848,29 @@ def miniapp_chart(ticker):
         return jsonify({"error": str(exc)}), 500
 
 
+_RATE_BUCKETS: dict[tuple, list] = {}
+_RATE_LOCK = threading.Lock()
+
+
+def _rate_limited(chat_id: str, bucket: str, max_calls: int, window_sec: int) -> bool:
+    """
+    Per-user sliding-window limiter. Returns True if this call is OVER the limit
+    and should be blocked. In-process state is authoritative because Render runs
+    a single gunicorn worker (--workers 1). Guards cost-bearing LLM endpoints so
+    a public user can't drain the Anthropic key by scripting requests.
+    """
+    now = time.time()
+    key = (str(chat_id), bucket)
+    with _RATE_LOCK:
+        hits = _RATE_BUCKETS.setdefault(key, [])
+        cutoff = now - window_sec
+        hits[:] = [t for t in hits if t > cutoff]
+        if len(hits) >= max_calls:
+            return True
+        hits.append(now)
+        return False
+
+
 @app.route("/api/miniapp/define")
 def miniapp_define():
     """Plain-English definition of a financial term via Haiku."""
@@ -1855,13 +1878,19 @@ def miniapp_define():
     if not chat_id:
         return jsonify({"error": "unauthorised"}), 403
 
+    # 20 definitions/minute is generous for a human, blocks scripted key-drain.
+    if _rate_limited(chat_id, "define", max_calls=20, window_sec=60):
+        return jsonify({"error": "rate_limited",
+                        "message": "Too many requests — give it a minute."}), 429
+
     term = request.args.get("term", "").strip()
     if not term or len(term) > 80:
         return jsonify({"error": "invalid term"}), 400
 
     try:
         import anthropic as _ant
-        client = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client = _ant.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"],
+                                timeout=30.0, max_retries=2)
         resp   = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,

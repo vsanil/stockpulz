@@ -619,7 +619,7 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             alpha_str = ""
             if stats.get("alpha") is not None:
                 sign = "+" if stats["alpha"] >= 0 else ""
-                alpha_str = f"\n<b>Alpha vs S&P:</b>  <b>{sign}{stats['alpha']}%</b>"
+                alpha_str = f"\n<b>vs S&P 500:</b>  <b>{sign}{stats['alpha']}%</b>"
             spy_str = ""
             if stats.get("spy_return_30d") is not None:
                 s = stats["spy_return_30d"]
@@ -693,7 +693,7 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             alpha_str = ""
             if stats.get("alpha") is not None:
                 sign = "+" if stats["alpha"] >= 0 else ""
-                alpha_str = f"\n⚡ <b>Alpha vs S&P:</b>  <b>{sign}{stats['alpha']:.1f}%</b>"
+                alpha_str = f"\n⚡ <b>vs S&P 500:</b>  <b>{sign}{stats['alpha']:.1f}%</b>"
 
             # Best / worst
             best_str = worst_str = ""
