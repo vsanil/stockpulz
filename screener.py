@@ -55,6 +55,26 @@ LT_CANDIDATE_N = 50    # Top N (by dollar volume, after liquidity gate) → long
 MIN_LT_DOLLAR_VOL = 50_000_000  # $50M/day avg — filters out small/micro-caps from LT pool
 SLEEP_INFO     = 0.1   # Delay between individual .info calls
 
+# History thresholds. A young IPO (public for a week or two — e.g. SPCX) has too
+# few bars for trustworthy technicals, but the LT path is fundamentals-driven and
+# doesn't need them. So admit such names for LT scoring while skipping their ST
+# score, instead of dropping them entirely (the old hard `len(hist) < 30` gate).
+MIN_BARS_ADMIT = 10    # bars needed for a price/liquidity read at all
+MIN_BARS_ST    = 30    # bars needed for a trustworthy short-term technical score
+
+
+def _bar_eligibility(n_bars: int) -> tuple[bool, bool]:
+    """
+    Return (admit, compute_st) for a ticker with n_bars of price history.
+      admit      — include it in the scored pool (LT-eligible)
+      compute_st — also compute the technical short-term score
+    Young IPOs (MIN_BARS_ADMIT..MIN_BARS_ST bars) are admitted for fundamentals
+    LT scoring but skip ST technicals.
+    """
+    if n_bars < MIN_BARS_ADMIT:
+        return False, False
+    return True, n_bars >= MIN_BARS_ST
+
 
 # ── Broad US stock universe ───────────────────────────────────────────────────
 # Fallback list: S&P 500 core + NASDAQ 100 extras + S&P MidCap 400 highlights
@@ -1152,7 +1172,8 @@ def run_screener(
                 if ticker not in _raw:
                     continue
                 hist = _raw[ticker].dropna(how="all")
-                if len(hist) < 30:
+                admit, compute_st = _bar_eligibility(len(hist))
+                if not admit:
                     continue
                 current_price = float(hist["Close"].iloc[-1])
                 if pd.isna(current_price) or current_price <= 0:
@@ -1163,7 +1184,13 @@ def run_screener(
                 if median_price > 0 and (current_price > median_price * 3 or current_price < median_price / 3):
                     continue
 
-                st_score, st_metrics = _short_term_score(hist)
+                if compute_st:
+                    st_score, st_metrics = _short_term_score(hist)
+                else:
+                    # Young IPO: too few bars for trustworthy technicals. Admit it
+                    # with a zero ST score (won't surface as an ST momentum pick)
+                    # so the fundamentals-driven LT scorer can still evaluate it.
+                    st_score, st_metrics = 0, {"young_ipo": True}
 
                 # Relative strength vs SPY
                 if spy_20d_return is not None:
