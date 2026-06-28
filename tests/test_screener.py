@@ -69,6 +69,27 @@ class TestHighInterestTickers:
             assert screener._high_interest_tickers() == []
 
 
+class TestBarEligibility:
+    """Young IPOs (e.g. SPCX, public ~2 weeks) must be LT-eligible, not dropped."""
+
+    def test_too_thin_is_rejected(self):
+        from screener import _bar_eligibility
+        assert _bar_eligibility(5) == (False, False)
+        assert _bar_eligibility(9) == (False, False)
+
+    def test_young_ipo_admitted_without_st(self):
+        from screener import _bar_eligibility
+        # 10-29 bars: admitted for fundamentals LT scoring, but no ST technicals.
+        assert _bar_eligibility(10) == (True, False)
+        assert _bar_eligibility(15) == (True, False)
+        assert _bar_eligibility(29) == (True, False)
+
+    def test_established_gets_full_scoring(self):
+        from screener import _bar_eligibility
+        assert _bar_eligibility(30)  == (True, True)
+        assert _bar_eligibility(250) == (True, True)
+
+
 # ── _deduplicate_by_correlation ───────────────────────────────────────────────
 
 class TestDeduplicateByCorrelation:
