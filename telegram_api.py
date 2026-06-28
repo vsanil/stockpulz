@@ -251,9 +251,15 @@ def _get_bot_username() -> str:
 
 def set_webhook(webhook_url: str) -> bool:
     """Register a Telegram webhook URL (call once after deploying to Render)."""
-    token = _bot_token()
-    url   = TELEGRAM_API.format(token=token, method="setWebhook")
-    resp  = requests.post(url, json={"url": webhook_url}, timeout=10)
+    token   = _bot_token()
+    url     = TELEGRAM_API.format(token=token, method="setWebhook")
+    payload = {"url": webhook_url}
+    # Register the secret token so /webhook can verify inbound updates are really
+    # from Telegram (set TELEGRAM_WEBHOOK_SECRET, then call /register).
+    secret  = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+    if secret:
+        payload["secret_token"] = secret
+    resp  = requests.post(url, json=payload, timeout=10)
     data  = resp.json()
     if data.get("ok"):
         print(f"[telegram] Webhook set to {webhook_url}")

@@ -615,6 +615,45 @@ class TestDefine:
 # MISC
 # ══════════════════════════════════════════════════════════════════════════════
 
+class TestMiniappAuthSecurity:
+    """
+    The real Telegram initData HMAC verification (auth is bypassed elsewhere via
+    the conftest fixture, so this tests _verify_init_data directly). This is the
+    control that stops one user from passing ?chat_id=victim and acting as them.
+    """
+    def _signed(self, chat_id, token="fake_bot_token"):
+        import hmac, hashlib, json as _json
+        from urllib.parse import urlencode
+        user   = _json.dumps({"id": chat_id}, separators=(",", ":"))
+        fields = {"auth_date": "1700000000", "user": user}
+        dcs    = "\n".join(f"{k}={fields[k]}" for k in sorted(fields))
+        secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+        h      = hmac.new(secret, dcs.encode(), hashlib.sha256).hexdigest()
+        return urlencode({**fields, "hash": h})
+
+    def test_valid_signature_returns_user_id(self):
+        import webhook
+        assert webhook._verify_init_data(self._signed(12345), "fake_bot_token") == "12345"
+
+    def test_forged_user_id_rejected(self):
+        import webhook
+        import json as _json
+        from urllib.parse import urlencode, parse_qsl
+        pairs = dict(parse_qsl(self._signed(12345)))
+        pairs["user"] = _json.dumps({"id": 99999}, separators=(",", ":"))  # tamper, keep old hash
+        assert webhook._verify_init_data(urlencode(pairs), "fake_bot_token") is None
+
+    def test_wrong_token_rejected(self):
+        import webhook
+        assert webhook._verify_init_data(self._signed(12345), "different_token") is None
+
+    def test_missing_or_empty_rejected(self):
+        import webhook
+        assert webhook._verify_init_data("", "fake_bot_token") is None
+        assert webhook._verify_init_data("user=x", "fake_bot_token") is None   # no hash
+        assert webhook._verify_init_data(self._signed(12345), "") is None      # no token
+
+
 class TestReleaseHardening:
     """Pre-public-launch hardening: no config leak, JSON (never HTML) errors."""
 

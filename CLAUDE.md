@@ -74,7 +74,8 @@ Rules:
 - **Cron-secret compares use `hmac.compare_digest`** (timing-safe).
 - **Every per-user broadcast loop body must be try/except-wrapped** so one user's failure can't abort delivery for the rest (run_midday_check was missing it).
 - **Gunicorn: `--workers 1 --threads 8`** (Procfile + render.yaml were 1 vs 4) — one copy of pandas avoids 512MB OOM; threads give concurrency for I/O-bound handlers + coherent in-memory caches.
-- **STILL OPEN (top launch-blockers, in progress)**: (1) mini-app auth doesn't verify Telegram `initData` HMAC → any user can pass `?chat_id=victim` and act as them; (2) Gist whole-file read-modify-write has no locking/optimistic-concurrency → multi-user data loss + cross-user clobber on the shared `price_alerts.json`/`buy_counts.json`. Do NOT go public until both are fixed.
+- **Auth (FIXED batch 2)**: `_miniapp_auth` now verifies the Telegram `initData` HMAC (`_verify_init_data`: secret=HMAC("WebAppData", bot_token), compare to `hash`) and trusts ONLY the verified user id — never a client `chat_id` param (which was forgeable → account takeover). Enforced in production (bot token set); param fallback only in dev/tests (no token). Emergency valve `MINIAPP_AUTH_DISABLED=1` reverts to param auth without a redeploy. Webhook secret-token verification is opt-in via `TELEGRAM_WEBHOOK_SECRET` (set it + re-register via /register). Tests bypass HMAC via a conftest fixture (the real verifier is tested directly in TestMiniappAuthSecurity).
+- **STILL OPEN (top launch-blocker, next)**: Gist whole-file read-modify-write has no locking/optimistic-concurrency → multi-user data loss + cross-user clobber on shared `price_alerts.json`/`buy_counts.json`. Do NOT go fully public until fixed.
 
 ### Background jobs must fail silently to users
 - run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
