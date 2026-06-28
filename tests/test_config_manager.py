@@ -53,6 +53,36 @@ def _mock_gist_get(stored: dict):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+class TestStorageConcurrencySafety:
+    """Per-user saves must not clobber other users, and must abort on read failure."""
+
+    def test_save_does_not_clobber_other_user(self, _gist_store):
+        from config_manager import save_user_trade_log, load_user_trade_log
+        save_user_trade_log("111", {"open": [{"ticker": "AAA"}], "closed": []})
+        save_user_trade_log("222", {"open": [{"ticker": "BBB"}], "closed": []})
+        # Saving 222 re-reads fresh and merges only its slot — 111 survives.
+        assert load_user_trade_log("111")["open"][0]["ticker"] == "AAA"
+        assert load_user_trade_log("222")["open"][0]["ticker"] == "BBB"
+
+    def test_save_aborts_on_read_failure_no_clobber(self, _gist_store, monkeypatch):
+        import pytest as _pt
+        import storage
+        from config_manager import save_user_trade_log, load_user_trade_log
+        save_user_trade_log("111", {"open": [{"ticker": "AAA"}], "closed": []})
+
+        # Simulate a transient Gist read failure during the next save.
+        def _boom(self, fn):
+            raise RuntimeError("gist down")
+        monkeypatch.setattr(storage.GistBackend, "read_strict", _boom)
+
+        with _pt.raises(Exception):
+            save_user_trade_log("222", {"open": [{"ticker": "BBB"}], "closed": []})
+
+        # The failed save must have written NOTHING — 111's data is intact
+        # (the old `_load_gist_file() or {}` would have erased it).
+        assert load_user_trade_log("111")["open"][0]["ticker"] == "AAA"
+
+
 class TestEtToday:
     """et_today() returns the US/Eastern trading day, not server-local UTC."""
 

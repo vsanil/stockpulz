@@ -84,6 +84,21 @@ class GistBackend(StorageBackend):
             print(f"[storage/gist] read({filename}) failed: {exc}")
             return None
 
+    def read_strict(self, filename: str) -> dict | list | None:
+        """
+        Like read() but RAISES on a fetch/transport error instead of returning
+        None — so a caller doing read-modify-write never mistakes a failed read
+        for "empty" and clobbers everyone else's data. Returns None only when the
+        file legitimately doesn't exist yet.
+        """
+        resp = requests.get(self._url(), headers=self._headers(), timeout=10)
+        resp.raise_for_status()
+        files = resp.json().get("files", {})
+        if filename not in files:
+            return None
+        raw = files[filename].get("content", "")
+        return json.loads(raw) if raw else None
+
     def write(self, filename: str, data: dict | list) -> None:
         payload = {"files": {filename: {"content": json.dumps(data, indent=2)}}}
         try:

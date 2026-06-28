@@ -99,26 +99,6 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
     if direction == "auto":
         direction = "above" if target_price > current else "below"
 
-    alerts      = _load_alerts()
-    chat_alerts = alerts.setdefault(str(chat_id), [])
-
-    if auto:
-        # For system-generated stops: replace any existing auto alert for same
-        # ticker+direction rather than stacking duplicates. Manual alerts untouched.
-        chat_alerts[:] = [
-            a for a in chat_alerts
-            if not (a["ticker"] == ticker
-                    and a["direction"] == direction
-                    and a.get("auto"))
-        ]
-    else:
-        # Manual alert: prevent exact-price duplicate (raise so UI returns 400)
-        for a in chat_alerts:
-            if (a["ticker"] == ticker
-                    and abs(a["target"] - target_price) < 0.005
-                    and a["direction"] == direction):
-                raise ValueError(f"Alert already exists: {ticker} {direction} ${target_price:,.2f}")
-
     entry: dict = {
         "ticker":       ticker,
         "target":       target_price,
@@ -130,8 +110,30 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
         entry["recurring"] = True
     if auto:
         entry["auto"] = True
-    chat_alerts.append(entry)
-    _save_alerts(alerts)
+
+    def _mut(alerts):
+        chat_alerts = alerts.setdefault(str(chat_id), [])
+        if auto:
+            # System stop: replace any existing auto alert for same ticker+direction.
+            chat_alerts[:] = [
+                a for a in chat_alerts
+                if not (a["ticker"] == ticker and a["direction"] == direction and a.get("auto"))
+            ]
+        else:
+            # Manual: reject exact-price duplicate (raise → UI 400). Raised inside
+            # the lock; mutate_gist_file propagates it and writes nothing.
+            for a in chat_alerts:
+                if (a["ticker"] == ticker
+                        and abs(a["target"] - target_price) < 0.005
+                        and a["direction"] == direction):
+                    raise ValueError(f"Alert already exists: {ticker} {direction} ${target_price:,.2f}")
+        chat_alerts.append(entry)
+        return alerts, None
+
+    # Atomic read-modify-write under a per-file lock so a concurrent add/remove
+    # (or a transient read failure) can't drop another user's alerts.
+    from config_manager import mutate_gist_file
+    mutate_gist_file(ALERTS_FILENAME, _mut, default={})
 
     pct  = abs(target_price - current) / current * 100
     arrow = "📈" if direction == "above" else "📉"
@@ -145,24 +147,23 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
 
 def remove_alert(chat_id: str, ticker: str, target_price: float | None = None) -> str:
     """Remove alert(s) for a ticker. If target_price given, removes only that one."""
-    ticker      = ticker.upper()
-    alerts      = _load_alerts()
-    chat_alerts = alerts.get(str(chat_id), [])
-    before      = len(chat_alerts)
+    ticker = ticker.upper()
 
-    if target_price is not None:
-        # Use tolerance comparison so decimal prices like 199.99 match correctly
-        chat_alerts = [
-            a for a in chat_alerts
-            if not (a["ticker"] == ticker and abs(a["target"] - target_price) < 0.005)
-        ]
-    else:
-        chat_alerts = [a for a in chat_alerts if a["ticker"] != ticker]
+    def _mut(alerts):
+        chat_alerts = alerts.get(str(chat_id), [])
+        before = len(chat_alerts)
+        if target_price is not None:
+            # tolerance compare so decimal prices like 199.99 match correctly
+            kept = [a for a in chat_alerts
+                    if not (a["ticker"] == ticker and abs(a["target"] - target_price) < 0.005)]
+        else:
+            kept = [a for a in chat_alerts if a["ticker"] != ticker]
+        alerts[str(chat_id)] = kept
+        return alerts, (before - len(kept))
 
-    removed = before - len(chat_alerts)
+    from config_manager import mutate_gist_file
+    removed = mutate_gist_file(ALERTS_FILENAME, _mut, default={})
     if removed:
-        alerts[str(chat_id)] = chat_alerts
-        _save_alerts(alerts)
         return f"✅ Removed {removed} alert(s) for <b>{ticker}</b>."
     return f"⚠️ No active alerts found for <b>{ticker}</b>."
 
