@@ -283,8 +283,8 @@ body.tg-light .bottom-nav { background: rgba(255,255,255,0.86); }
 
 /* ── Filter pills ─────────────────────────────────────────────────────────── */
 .filter-row {
-  display: flex; gap: 8px;
-  overflow-x: auto; padding: 14px 0 12px;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 14px 0 12px;
   scrollbar-width: none;
 }
 .filter-row::-webkit-scrollbar { display: none; }
@@ -4904,7 +4904,7 @@ function renderPicks(filter) {
   pillDefs.forEach(([f, lbl]) => {
     html += `<button class="pill${filter === f ? ' on' : ''}" onclick="renderPicks('${f}')">${lbl}</button>`;
   });
-  html += `<button onclick="openPrefsSheet()" style="margin-left:auto;flex-shrink:0;padding:6px 12px;border-radius:20px;border:1.5px solid;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;${sectorChipStyle}">${sectorChipLbl}</button>`;
+  html += `<button onclick="openPrefsSheet()" style="flex-shrink:0;padding:6px 12px;border-radius:20px;border:1.5px solid;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;${sectorChipStyle}">${sectorChipLbl}</button>`;
   html += '</div>';
 
   // Define collapsible sections per filter
