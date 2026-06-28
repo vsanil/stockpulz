@@ -654,6 +654,22 @@ class TestMiniappAuthSecurity:
         assert webhook._verify_init_data(self._signed(12345), "") is None      # no token
 
 
+class TestRateLimiter:
+    """Per-user limiter guards the cost-bearing LLM endpoints from key-drain."""
+
+    def test_blocks_after_max_then_isolates_per_user(self):
+        import webhook
+        webhook._RATE_BUCKETS.clear()
+        for _ in range(20):
+            assert webhook._rate_limited("u1", "define", 20, 60) is False
+        # 21st call within the window is blocked
+        assert webhook._rate_limited("u1", "define", 20, 60) is True
+        # a different user has their own bucket
+        assert webhook._rate_limited("u2", "define", 20, 60) is False
+        # a different bucket for the same user is independent
+        assert webhook._rate_limited("u1", "other", 20, 60) is False
+
+
 class TestReleaseHardening:
     """Pre-public-launch hardening: no config leak, JSON (never HTML) errors."""
 

@@ -7444,7 +7444,7 @@ async function loadPerformance(isRetry = false) {
       : '';
 
     const spyRow      = spy30  != null ? `<div class="stat-row"><span>S&P 500 (30d)</span><span>${sign(spy30)}${spy30}%</span></div>` : '';
-    const alphaRow    = alpha  != null ? `<div class="stat-row"><span>Alpha vs S&P</span><span style="color:${parseFloat(alpha)>=0?'var(--green)':'var(--red)'}"><b>${sign(alpha)}${alpha}%</b></span></div>` : '';
+    const alphaRow    = alpha  != null ? `<div class="stat-row"><span>vs S&P 500</span><span style="color:${parseFloat(alpha)>=0?'var(--green)':'var(--red)'}"><b>${sign(alpha)}${alpha}%</b></span></div>` : '';
     const botBestRow  = best   ? `<div class="stat-row"><span>🏆 Best pick</span><span style="color:var(--green)"><b>${best[0]}</b> ${sign(best[1])}${best[1].toFixed(1)}%</span></div>` : '';
     const botWorstRow = worst  ? `<div class="stat-row"><span>💔 Worst pick</span><span style="color:var(--red)"><b>${worst[0]}</b> ${sign(worst[1])}${worst[1].toFixed(1)}%</span></div>` : '';
 
