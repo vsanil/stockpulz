@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import time
 import warnings
+from io import StringIO
 import requests
 import pandas as pd
 import yfinance as yf
@@ -115,6 +116,32 @@ _UNIVERSE_CACHE_KEY = "ticker_universe"
 _UNIVERSE_CACHE_TTL = 7 * 24 * 3600  # 7 days — tickers change slowly
 
 
+# Wikipedia 403s any request without a browser User-Agent — set one explicitly.
+_BROWSER_UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+
+def _wiki_symbols(url: str) -> list[str]:
+    """
+    Fetch a Wikipedia constituents page (with a browser UA so it doesn't 403) and
+    return the Symbol/Ticker column. Scans ALL tables for the one with a
+    symbol/ticker column and >50 rows, so it's robust to table-index changes
+    (the old code hardcoded [0]/[4], which silently broke when the page layout
+    shifted). pd.read_html needs StringIO in pandas 2.x.
+    """
+    try:
+        resp = requests.get(url, headers=_BROWSER_UA, timeout=15)
+        resp.raise_for_status()
+        for df in pd.read_html(StringIO(resp.text)):
+            col = next((c for c in df.columns
+                        if "symbol" in str(c).lower() or "ticker" in str(c).lower()), None)
+            if col is not None and len(df) > 50:   # the constituents table, not a sidebar
+                return [str(t) for t in df[col].tolist()]
+    except Exception as exc:
+        print(f"[screener] Wikipedia fetch failed ({url.rsplit('/', 1)[-1]}): {exc}")
+    return []
+
+
 def get_stock_universe() -> list[str]:
     """
     Build a broad US stock universe: S&P 500 + NASDAQ 100 + S&P MidCap 400.
@@ -139,52 +166,37 @@ def get_stock_universe() -> list[str]:
                 seen.add(t)
                 tickers.append(t)
 
-    # ── Source 1: S&P 500 via datahub.io ─────────────────────────────────────
+    # ── Source 1: S&P 500 via the datasets GitHub CSV mirror ─────────────────
+    # (the old datahub.io URL 404s now). Stable raw CSV, current constituents.
     try:
         resp = requests.get(
-            "https://datahub.io/core/s-and-p-500-companies/r/constituents.csv",
-            timeout=10,
+            "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv",
+            headers=_BROWSER_UA, timeout=15,
         )
         resp.raise_for_status()
-        lines = resp.text.strip().splitlines()
-        sp500 = [l.split(",")[0].strip() for l in lines[1:] if l.strip()]
-        sp500 = [t for t in sp500 if t and not t.startswith('"')]
+        df = pd.read_csv(StringIO(resp.text))
+        sp500 = [str(t) for t in df["Symbol"].tolist()]
         if len(sp500) > 100:
             _add(sp500)
-            print(f"[screener] S&P 500: {len(sp500)} tickers from datahub.io.")
+            print(f"[screener] S&P 500: {len(sp500)} tickers from GitHub CSV.")
     except Exception as exc:
-        print(f"[screener] S&P 500 datahub.io failed ({exc}).")
+        print(f"[screener] S&P 500 GitHub CSV failed ({exc}).")
 
     # ── Source 2: S&P 500 via Wikipedia (fallback) ────────────────────────────
     if len(tickers) < 100:
-        try:
-            df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
-            _add(df["Symbol"].tolist())
-            print(f"[screener] S&P 500: loaded from Wikipedia.")
-        except Exception as exc:
-            print(f"[screener] S&P 500 Wikipedia failed ({exc}).")
+        before = len(tickers)
+        _add(_wiki_symbols("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"))
+        print(f"[screener] S&P 500 Wikipedia: added {len(tickers)-before} tickers.")
 
     # ── Source 3: NASDAQ 100 via Wikipedia ────────────────────────────────────
-    try:
-        df = pd.read_html("https://en.wikipedia.org/wiki/Nasdaq-100")[4]
-        col = next((c for c in df.columns if "ticker" in c.lower() or "symbol" in c.lower()), None)
-        if col:
-            before = len(tickers)
-            _add(df[col].tolist())
-            print(f"[screener] NASDAQ 100: added {len(tickers)-before} new tickers.")
-    except Exception as exc:
-        print(f"[screener] NASDAQ 100 Wikipedia failed ({exc}) — skipping.")
+    before = len(tickers)
+    _add(_wiki_symbols("https://en.wikipedia.org/wiki/Nasdaq-100"))
+    print(f"[screener] NASDAQ 100: added {len(tickers)-before} new tickers.")
 
     # ── Source 4: S&P MidCap 400 via Wikipedia ───────────────────────────────
-    try:
-        df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies")[0]
-        col = next((c for c in df.columns if "ticker" in c.lower() or "symbol" in c.lower()), None)
-        if col:
-            before = len(tickers)
-            _add(df[col].tolist())
-            print(f"[screener] MidCap 400: added {len(tickers)-before} new tickers.")
-    except Exception as exc:
-        print(f"[screener] MidCap 400 Wikipedia failed ({exc}) — skipping.")
+    before = len(tickers)
+    _add(_wiki_symbols("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies"))
+    print(f"[screener] MidCap 400: added {len(tickers)-before} new tickers.")
 
     # ── Live fetch succeeded — persist to cache and return ────────────────────
     if len(tickers) > 100:

@@ -59,6 +59,11 @@ Rules:
 - **SPY benchmark: `performance_tracker._spy_return(period)`** is the one NaN-safe SPY fetch — `.dropna()` skips yfinance's trailing NaN bar (the actual cause of the blank `alpha`/`spy_return_30d`). All 3 SPY fetch sites route through it.
 - **Decorator gotcha**: never insert a helper `def` between `@app.route(...)` and its view function — the decorator then wraps the helper and the route 500s. Put module helpers ABOVE the decorator.
 
+### Bug pattern: the "dynamic" stock universe was silently frozen (Jun 28)
+- `screener.get_stock_universe()` is meant to fetch the LIVE S&P 500 + Nasdaq-100 + MidCap 400 constituents so new public companies (e.g. SPCX after its Jun 2026 IPO) auto-enter the screener — the app's freshness does NOT depend on the model's training cutoff. But all sources had broken: the datahub.io CSV URL 404s, and **Wikipedia 403s any request without a browser `User-Agent`**. So it silently fell back to the 423-ticker hardcoded `FALLBACK_TICKERS` — the universe was frozen.
+- Fix: S&P 500 from the GitHub mirror `raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv`; Wikipedia via `_wiki_symbols(url)` which sets `_BROWSER_UA` and **scans all tables for the one with a symbol/ticker column + >50 rows** (the old code hardcoded table index `[0]`/`[4]`, which breaks when the page layout shifts). Now returns 600 live tickers, cached 7d.
+- **Rule: any `pd.read_html`/`read_csv` on a public site must send `_BROWSER_UA` (Wikipedia/most sites 403 the default UA) and select tables by COLUMN content, never a hardcoded index. A silent fallback to a static list = stale picks; log loudly and keep a mocked test.**
+
 ### Background jobs must fail silently to users
 - run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
 

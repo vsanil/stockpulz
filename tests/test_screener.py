@@ -16,6 +16,40 @@ if ROOT not in sys.path:
 from screener import _deduplicate_by_correlation
 
 
+# ── universe fetch (S&P500 GitHub CSV + Wikipedia w/ browser UA) ───────────────
+
+class TestUniverseFetch:
+    """
+    Regression for the silent freeze: Wikipedia 403'd without a browser UA and the
+    datahub URL 404'd, so get_stock_universe fell back to a stale hardcoded list.
+    """
+
+    def _wiki_html(self):
+        # A decoy small table + the real >50-row constituents table with a Symbol col.
+        decoy = "<table><tr><th>Symbol</th></tr><tr><td>XX</td></tr></table>"
+        rows = "".join(f"<tr><td>SYM{i}</td><td>Co {i}</td></tr>" for i in range(60))
+        real = f"<table><tr><th>Symbol</th><th>Security</th></tr>{rows}</table>"
+        return f"<html><body>{decoy}{real}</body></html>"
+
+    def test_wiki_symbols_sets_browser_ua_and_picks_right_table(self):
+        import screener
+        captured = {}
+        def fake_get(url, headers=None, timeout=None):
+            captured["headers"] = headers
+            m = MagicMock(); m.text = self._wiki_html(); m.raise_for_status = lambda: None
+            return m
+        with patch.object(screener.requests, "get", side_effect=fake_get):
+            syms = screener._wiki_symbols("https://en.wikipedia.org/wiki/Whatever")
+        assert len(syms) == 60 and syms[0] == "SYM0"   # picked the 60-row table, not the decoy
+        assert "User-Agent" in (captured["headers"] or {})   # Wikipedia 403s without one
+        assert "Mozilla" in captured["headers"]["User-Agent"]
+
+    def test_wiki_symbols_returns_empty_on_failure(self):
+        import screener
+        with patch.object(screener.requests, "get", side_effect=Exception("boom")):
+            assert screener._wiki_symbols("https://en.wikipedia.org/x") == []
+
+
 # ── _deduplicate_by_correlation ───────────────────────────────────────────────
 
 class TestDeduplicateByCorrelation:
