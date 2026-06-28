@@ -83,6 +83,40 @@ def _env_vars():
         yield
 
 
+# ── Mini-app auth bypass ──────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _miniapp_auth_bypass(monkeypatch):
+    """
+    Tests authenticate by passing chat_id directly (the get/post helpers inject
+    TEST_CHAT_ID). Bypass the Telegram initData HMAC check, but KEEP the allowlist
+    gate so the rejection tests (no/invalid chat_id → 403) still pass. The real
+    HMAC verification is covered directly by TestMiniappAuthSecurity.
+    """
+    try:
+        import webhook
+    except Exception:
+        yield
+        return
+    from flask import request as _req
+
+    def _fake_auth():
+        if _req.method == "POST":
+            body = _req.get_json(silent=True) or {}
+            cid  = str(body.get("chat_id", "") or _req.args.get("chat_id", "")).strip()
+        else:
+            cid = str(_req.args.get("chat_id", "")).strip()
+        if not cid or cid == "0":
+            return None
+        allowed = webhook.get_allowed_users()
+        owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
+        if cid not in allowed and cid != owner:
+            return None
+        return cid
+
+    monkeypatch.setattr(webhook, "_miniapp_auth", _fake_auth)
+    yield
+
+
 # ── Storage patches ───────────────────────────────────────────────────────────
 @pytest.fixture(autouse=True)
 def _gist_store(monkeypatch):

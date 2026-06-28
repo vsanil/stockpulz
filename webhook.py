@@ -12,6 +12,7 @@ import os
 import sys
 import time
 import hmac
+import hashlib
 import threading
 import secrets as _sec
 from datetime import datetime as _dt, timedelta as _td, timezone as _tz
@@ -335,6 +336,17 @@ def trigger_mode(mode: str):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     """Receive Telegram update (message from user to bot)."""
+    # Verify Telegram's secret token so randoms can't POST forged updates and act
+    # as any user. Opt-in: enforced only when TELEGRAM_WEBHOOK_SECRET is set AND
+    # the webhook was (re-)registered with it via /register — so enabling it is a
+    # deliberate, zero-downtime step (no secret env → no enforcement).
+    _wh_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+    if _wh_secret:
+        _hdr = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(_hdr, _wh_secret):
+            print("[webhook] rejected — bad/missing secret token")
+            return jsonify({"status": "forbidden"}), 403
+
     data = request.get_json(silent=True) or {}
 
     # Extract message text and chat_id from Telegram update format
@@ -1369,38 +1381,70 @@ def miniapp_manifest():
                                mimetype="application/manifest+json")
 
 
+def _verify_init_data(init_data: str, bot_token: str) -> str | None:
+    """
+    Cryptographically verify Telegram WebApp initData and return the signed
+    user id, or None if the signature is missing/invalid.
+
+    Per Telegram's spec: secret = HMAC_SHA256("WebAppData", bot_token);
+    expected = HMAC_SHA256(secret, data_check_string) where data_check_string is
+    the URL-decoded "key=value" pairs (minus `hash`) sorted and joined by "\n".
+    This is what makes the chat_id trustworthy — without it, a client can claim
+    to be any user.
+    """
+    if not init_data or not bot_token:
+        return None
+    try:
+        from urllib.parse import parse_qsl
+        import json as _json
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        recv_hash = pairs.pop("hash", "")
+        if not recv_hash:
+            return None
+        data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
+        secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        calc   = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(calc, recv_hash):
+            return None
+        user = _json.loads(pairs.get("user", "{}"))
+        uid  = str(user.get("id", "")).strip()
+        return uid or None
+    except Exception as exc:
+        print(f"[miniapp_auth] init_data verify error: {exc}")
+        return None
+
+
 def _miniapp_auth() -> str | None:
     """
-    Extract and validate chat_id from the Mini App request.
-    Returns chat_id string if authorised, None otherwise.
+    Return the authenticated chat_id, or None.
 
-    Priority:
-    1. chat_id param passed explicitly from JS (initDataUnsafe.user.id)
-    2. Parse user.id out of the raw init_data string (URL-encoded, Telegram-signed)
+    Security: in production (TELEGRAM_BOT_TOKEN set), identity comes ONLY from a
+    cryptographically verified Telegram initData signature — never a client-
+    supplied chat_id param (which was forgeable → cross-user account takeover).
+    The chat_id param is honored only in local dev / tests where no bot token is
+    configured.
     """
     if request.method == "POST":
         body      = request.get_json(silent=True) or {}
-        # JS api() helper always appends auth to the URL; body.get() is primary,
-        # request.args fallback handles bodyless POSTs (e.g. clear_alerts).
         chat_id   = str(body.get("chat_id", "") or request.args.get("chat_id", "")).strip()
         init_data = body.get("init_data", "") or request.args.get("init_data", "")
     else:
         chat_id   = str(request.args.get("chat_id", "")).strip()
         init_data = request.args.get("init_data", "")
 
-    # Fallback: parse user id from initData if chat_id missing/zero
-    if (not chat_id or chat_id == "0") and init_data:
-        try:
-            from urllib.parse import parse_qs
-            import json as _json
-            params    = parse_qs(init_data)
-            user_json = params.get("user", ["{}"])[0]
-            user_obj  = _json.loads(user_json)
-            chat_id   = str(user_obj.get("id", "")).strip()
-        except Exception as exc:
-            print(f"[miniapp_auth] init_data parse failed: {exc}")
-
-    print(f"[miniapp_auth] chat_id={chat_id!r}")
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    # Emergency valve: set MINIAPP_AUTH_DISABLED=1 on Render to instantly fall
+    # back to param-based auth WITHOUT a redeploy, if HMAC verification ever
+    # wrongly locks out real users. Leave UNSET in normal operation — it disables
+    # the cross-user-takeover protection.
+    if bot_token and not os.environ.get("MINIAPP_AUTH_DISABLED"):
+        # Production: require a valid signature; trust ONLY the verified id.
+        verified = _verify_init_data(init_data, bot_token)
+        if not verified:
+            print("[miniapp_auth] rejected — missing/invalid initData signature")
+            return None
+        chat_id = verified
+    # else: local dev / tests (no bot token) — fall back to the chat_id param.
 
     if not chat_id or chat_id == "0":
         return None
