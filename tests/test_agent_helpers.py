@@ -748,3 +748,49 @@ class TestAutoSetPickAlertsEntryGuard:
         ag._auto_set_pick_alerts(self._picks(), ["user1"])
         entries = [c for c in calls if c[1] == 100.0 and c[2] == "below"]
         assert [e[0] for e in entries] == ["ABOVE"]   # 101 == 100*1.01 boundary arms
+
+
+class TestWatchMoveQuote:
+    """
+    Watchlist "moving X% today" must use the live price + previous_close (the
+    method the positions card uses), not lagging daily bars — which showed a
+    stale pre-market close as the price and repeated the same "was $X" across
+    days. yfinance is imported inside the helper, so patch yfinance.Ticker.
+    """
+
+    def _ticker(self, prev_close, closes):
+        import pandas as pd
+        from unittest.mock import MagicMock
+        tkr = MagicMock()
+        fi  = MagicMock()
+        fi.previous_close = prev_close
+        tkr.fast_info = fi
+        tkr.history.return_value = pd.DataFrame({"Close": closes})
+        return tkr
+
+    def test_uses_prepost_live_and_prev_close(self, monkeypatch):
+        import agent as ag
+        tkr = self._ticker(100.0, [101.0, 105.0])
+        monkeypatch.setattr("yfinance.Ticker", lambda s: tkr)
+        live, prev = ag._watch_move_quote("AAPL")
+        assert live == 105.0 and prev == 100.0      # +5% from the live bar, not a daily close
+
+    def test_falls_back_to_get_live_price_when_no_prepost(self, monkeypatch):
+        import agent as ag, market_data
+        tkr = self._ticker(200.0, [])               # empty prepost history
+        monkeypatch.setattr("yfinance.Ticker", lambda s: tkr)
+        monkeypatch.setattr(market_data, "get_live_price", lambda t: 210.0)
+        live, prev = ag._watch_move_quote("MSFT")
+        assert live == 210.0 and prev == 200.0
+
+    def test_crypto_routed_through_usd_symbol(self, monkeypatch):
+        import agent as ag
+        seen = {}
+        tkr = self._ticker(27000.0, [27500.0])
+        def _mk(sym):
+            seen["sym"] = sym
+            return tkr
+        monkeypatch.setattr("yfinance.Ticker", _mk)
+        live, prev = ag._watch_move_quote("BTC")
+        assert seen["sym"] == "BTC-USD"             # crypto suffix applied
+        assert live == 27500.0 and prev == 27000.0

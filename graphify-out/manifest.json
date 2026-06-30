@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/agent.py": {
-    "mtime": 1782652580.9281518,
-    "ast_hash": "c5f528564408ebab836c94de0f9cf642",
+    "mtime": 1782857255.6660428,
+    "ast_hash": "c273f31fc5636745b690d66b4c493755",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/market_data.py": {
@@ -285,8 +285,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_agent_helpers.py": {
-    "mtime": 1782452784.452178,
-    "ast_hash": "c8cd8f09374fbea206aa7a93200490e8",
+    "mtime": 1782857294.2625482,
+    "ast_hash": "51594800e1002d6557259df34391914e",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_paper_trader.py": {
@@ -330,8 +330,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.claude/settings.local.json": {
-    "mtime": 1782628720.7392304,
-    "ast_hash": "dc41b1bb6b190b2c80aff7b9c4bcbd59",
+    "mtime": 1782667278.522899,
+    "ast_hash": "08af7d7af1e27e244546f1a8ccbcbac6",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/on_push.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/CLAUDE.md": {
-    "mtime": 1782663392.7973673,
-    "ast_hash": "09906ce630b5b0475636521b234c3431",
+    "mtime": 1782857364.63543,
+    "ast_hash": "5930b874d461ca9fb773310f710f9ed4",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/docs/index.html": {
@@ -477,6 +477,11 @@
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_market_data.py": {
     "mtime": 1782663246.4047008,
     "ast_hash": "b403f7bf81780388bb1e6e7f4180374b",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/LAUNCH_CHECKLIST.md": {
+    "mtime": 1782668382.5210903,
+    "ast_hash": "cca20880bd3a3e6fe943c63dd015e6e0",
     "semantic_hash": ""
   }
 }

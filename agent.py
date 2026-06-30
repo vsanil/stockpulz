@@ -3750,6 +3750,43 @@ def run_premarket(config: dict):
 
 # ── Intraday price-alert-only run (every 30 min during market hours) ─────────
 
+def _watch_move_quote(ticker: str) -> tuple[float | None, float | None]:
+    """
+    (live_price, previous_close) for a watchlist "moving X% today" check.
+
+    Uses the live price (prepost 1-minute bar → get_live_price fallback) plus
+    fast_info.previous_close — the SAME method as the pre-market positions card —
+    instead of lagging daily bars. The old `yf.download(period="2d", interval="1d")`
+    read whole-day close bars: pre-market / at the open the "today" bar isn't
+    formed, so it showed a stale close as the price and could report yesterday's
+    move as today's (e.g. the same "was $X" two days running). Crypto routes
+    through the -USD yfinance symbol.
+    """
+    import yfinance as yf   # agent.py imports yfinance only inside functions
+    from market_data import get_live_price
+    yf_t = next(iter(_yf_symbol_map([ticker])))   # BTC → BTC-USD; equities unchanged
+    live = None
+    prev = None
+    try:
+        tkr = yf.Ticker(yf_t)
+        try:
+            prev = getattr(tkr.fast_info, "previous_close", None)
+        except Exception:
+            prev = None
+        try:
+            hist = tkr.history(period="1d", interval="1m", prepost=True)
+            if not hist.empty:
+                live = float(hist["Close"].iloc[-1])
+        except Exception:
+            live = None
+    except Exception:
+        pass
+    if not (live and live > 0):
+        live = get_live_price(ticker)   # handles crypto + Alpaca/yfinance fallback
+    return (float(live) if live and live > 0 else None,
+            float(prev) if prev and prev > 0 else None)
+
+
 def run_price_alerts():
     """
     Lightweight run: check price alerts + trailing stops only.
@@ -3820,24 +3857,14 @@ def run_price_alerts():
                 watch_tickers = log.get("watchlist", [])
                 if not watch_tickers:
                     continue
-                # Crypto tickers need the -USD suffix for yfinance (BTC → BTC-USD);
-                # without it "BTC" resolves to an unrelated instrument (~$28 bug).
-                yf_map = _yf_symbol_map(watch_tickers)
-                yf_tickers = list(yf_map.keys())
-                raw_w = yf.download(
-                    " ".join(yf_tickers), period="2d", interval="1d",
-                    progress=False, auto_adjust=True
-                )
-                if raw_w.empty:
-                    continue
-                close = raw_w["Close"]
-                for yf_t, t in yf_map.items():
+                # Live price vs true previous close (same method as the positions
+                # card) — not lagging daily bars, which showed stale pre-market
+                # closes and could report yesterday's move as today's.
+                for t in watch_tickers:
                     try:
-                        col = close[yf_t] if (hasattr(close, "columns") and yf_t in close.columns) else close
-                        vals = col.dropna()
-                        if len(vals) < 2:
+                        curr, prev = _watch_move_quote(t)
+                        if not (curr and prev):
                             continue
-                        prev, curr = float(vals.iloc[-2]), float(vals.iloc[-1])
                         pct_chg = (curr - prev) / prev * 100
                         if abs(pct_chg) < 3:
                             continue
