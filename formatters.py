@@ -274,16 +274,11 @@ def format_daily_message(picks: dict, config: dict,
 
     # ── Header ────────────────────────────────────────────────────────────────
     mood = _esc(picks.get("daily_summary", ""))
-    mood_emoji = "📈"
-    if mood:
-        lo = mood.lower()
-        if any(w in lo for w in ("bear", "sell", "weak", "crash", "plunge")):
-            mood_emoji = "📉"
-        elif any(w in lo for w in ("cautious", "volatile", "uncertain", "fear", "risk-off", "elevated")):
-            mood_emoji = "⚠️"
 
     greeting = f"Good morning, {_esc(first_name)}! 👋\n" if first_name else ""
-    lines = [f"{greeting}{mood_emoji} <b>{today}</b>"]
+    # Neutral date icon — the market mood/regime is conveyed by the mood line and
+    # the Market line below, so the date itself shouldn't read like a warning.
+    lines = [f"{greeting}📅 <b>{today}</b>"]
     if mood:
         lines.append(f"<i>{mood}</i>")
 
@@ -547,36 +542,42 @@ def format_daily_message(picks: dict, config: dict,
         # Show live price/change for watched-but-not-picked tickers
         if wl_not_in_picks:
             radar_rows = []
-            for t in wl_not_in_picks[:8]:   # cap at 8 to keep message compact
+            for t in wl_not_in_picks:
                 data     = (watchlist_prices or {}).get(t)
                 alerts   = (user_alerts_map  or {}).get(t, [])
                 cur_price = data.get("price") if data else None
+                if not cur_price:
+                    continue
+                chg = data.get("change_pct")
+                # Only surface real movers (>=1.5%) or tickers with an active alert —
+                # flat watchlist noise (±0.5%) just padded the message.
+                is_mover = chg is not None and abs(chg) >= 1.5
+                if not (is_mover or alerts):
+                    continue
+                if len(radar_rows) >= 6:
+                    break
 
-                if cur_price:
-                    price_str = f"<code>${_p(cur_price)}</code>"
-                    chg = data.get("change_pct")
-                    if chg is not None:
-                        sign  = "+" if chg >= 0 else ""
-                        color = "📈" if chg >= 0 else "📉"
-                        chg_str = f"  {color} <i>{sign}{chg:.1f}%</i>"
-                    else:
-                        chg_str = ""
-
-                    # Alert proximity — pick the closest active alert
-                    alert_str = ""
-                    if alerts and cur_price:
-                        closest = min(alerts, key=lambda a: abs(a["target"] - cur_price))
-                        tgt     = closest["target"]
-                        pct_away = (tgt - cur_price) / cur_price * 100
-                        sign_a   = "+" if pct_away >= 0 else ""
-                        alert_str = f"  🔔 <i>alert ${_p(tgt)} ({sign_a}{pct_away:.1f}%)</i>"
-
-                    radar_rows.append(f"  <b>{_esc(t)}</b>  {price_str}{chg_str}{alert_str}")
+                price_str = f"<code>${_p(cur_price)}</code>"
+                if chg is not None:
+                    sign  = "+" if chg >= 0 else ""
+                    color = "📈" if chg >= 0 else "📉"
+                    chg_str = f"  {color} <i>{sign}{chg:.1f}%</i>"
                 else:
-                    radar_rows.append(f"  <b>{_esc(t)}</b>  <i>· not in today's picks</i>")
+                    chg_str = ""
+
+                # Alert proximity — pick the closest active alert
+                alert_str = ""
+                if alerts:
+                    closest = min(alerts, key=lambda a: abs(a["target"] - cur_price))
+                    tgt     = closest["target"]
+                    pct_away = (tgt - cur_price) / cur_price * 100
+                    sign_a   = "+" if pct_away >= 0 else ""
+                    alert_str = f"  🔔 <i>alert ${_p(tgt)} ({sign_a}{pct_away:.1f}%)</i>"
+
+                radar_rows.append(f"  <b>{_esc(t)}</b>  {price_str}{chg_str}{alert_str}")
 
             if radar_rows:
-                lines += ["", "👁 <b>On Your Radar</b>  <i>(watchlist — not in today's picks)</i>"]
+                lines += ["", "👁 <b>On Your Radar</b>  <i>(watchlist movers &amp; alerts)</i>"]
                 lines += radar_rows
 
     # ── One-time sector filter discovery tip ──────────────────────────────────
@@ -595,29 +596,25 @@ def format_daily_message(picks: dict, config: dict,
         lines += e_lines
 
     # ── Footer ────────────────────────────────────────────────────────────────
+    # One compact tip (was two full paragraphs that repeated every morning),
+    # pointing at the new single 'Today's Picks' button.
     _app_url = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or "").rstrip("/")
-    _paper_cta = (
-        "tap <b>📄 Paper Trade</b> below"
-        if _app_url
-        else "use <code>/paper_buy TICKER SHARES</code>"
-    )
+    if _app_url:
+        tip = ("💡 <i>Tap <b>📊 Today's Picks</b> below to log a buy or set an alert — "
+               "you'll get stop/target alerts, gap &amp; earnings warnings, and P&amp;L vs SPY. "
+               "Or <b>📄 Paper Trade</b> to simulate risk-free.</i>")
+    else:
+        tip = ("💡 <i>Log a buy with</i> <code>/bought TICKER</code> <i>for automated stop/target "
+               "alerts &amp; P&amp;L tracking, or simulate with</i> <code>/paper_buy</code>.")
 
-    footer_lines = [
-        "",
-        "💡 <i>Bought one of these? Tap to log it — you'll get stop-loss &amp; target alerts, pre-market gap warnings, earnings heads-ups, and P&amp;L tracking vs SPY. All automated.</i>",
-        "",
-        f"📄 <i>Not ready to commit real money? {_paper_cta} to simulate risk-free. Check performance with</i> /paper_portfolio",
-    ]
+    footer_lines = ["", tip]
 
     # Show /missed only on weekends (when market is closed or it's Sat/Sun)
     _is_weekend = market_closed or datetime.now(pytz.timezone("America/New_York")).weekday() >= 5
     if _is_weekend:
         footer_lines.append("📊 <i>Curious what you skipped this week?</i> /missed")
 
-    footer_lines += [
-        "",
-        "⚠️ <i>Not financial advice. Open the dashboard for full analysis &amp; charts.</i>",
-    ]
+    footer_lines += ["", "⚠️ <i>Not financial advice.</i>"]
 
     lines += footer_lines
 
@@ -628,121 +625,22 @@ def format_daily_message(picks: dict, config: dict,
 
 def build_picks_keyboard(picks: dict, config: dict | None = None) -> list[list[dict]]:
     """
-    Build an inline keyboard for the morning picks message.
-    Returns one '📌 Log TICKER' button per pick — tapping opens the mini app
-    pre-filled to log the position and auto-create stop-loss / target alerts.
+    Inline keyboard for the morning picks message. Collapsed (Jul 2026) from the
+    old per-pick 'Log X' + 'Alert at $Y' rows (14+ buttons) to two: a primary
+    'Today's Picks' button that opens the mini-app picks tab — where each pick has
+    Log (I Bought This) + Set Alert (custom price) + Chart in one sheet — and Paper
+    Trade. `picks`/`config` are unused now but kept for a stable signature.
+    Returns [] when no mini-app URL is configured (pure-bot fallback).
     """
-    cfg         = config or {}
-    show_crypto = _shows_crypto(cfg)   # honors both `assets` and `show_crypto`
-
-    stocks = picks.get("stocks", picks)
-    crypto = picks.get("crypto", {})
-    etfs   = picks.get("etfs", {})
-
-    # Hoist here so _pair can close over it
     render_url = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or "").rstrip("/")
-
-    def _header(label: str) -> list[dict]:
-        return [{"text": label, "callback_data": "noop"}]
-
-    def _buy_callback(pick: dict, asset_type: str) -> str:
-        """Build the buy_pick callback_data string for a pick."""
-        ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
-        entry  = pick.get("entry_price")
-        stop   = pick.get("stop_loss")
-        target = pick.get("target_price")
-
-        # Shares from budget — crypto is fractional; never log a whole coin
-        # the budget can't afford (a $50 budget must not log 1 BTC)
-        budget_key = "crypto_budget" if asset_type == "crypto" else "stock_budget"
-        budget = cfg.get(budget_key)
-        if budget and entry:
-            if asset_type == "crypto":
-                shares = round(float(budget) / float(entry), 6)
-            else:
-                shares = max(1, int(float(budget) / float(entry)))
-        else:
-            shares = 1
-
-        # Percentages — rounded to 1 decimal
-        try:
-            stop_pct   = round((float(entry) - float(stop))   / float(entry) * 100, 1) if (entry and stop)   else 7
-            target_pct = round((float(target) - float(entry)) / float(entry) * 100, 1) if (entry and target) else 15
-        except Exception:
-            stop_pct, target_pct = 7, 15
-
-        entry_str = f"{float(entry):.2f}" if entry else "0"
-        return f"buy_pick|{ticker}|{entry_str}|{shares}|{asset_type}|{stop_pct}|{target_pct}"
-
-    def _log_btn(pick: dict, asset_type: str) -> list[dict]:
-        """Return [Log TICKER, 📡 Alert at $X] buttons for one pick."""
-        ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
-        entry  = pick.get("entry_price")  or ""
-        stop   = pick.get("stop_loss")    or ""
-        target = pick.get("target_price") or ""
-
-        if render_url:
-            log_btn = {"text": f"📌 Log {ticker}", "web_app": {
-                "url": (f"{render_url}/miniapp?tab=portfolio&action=add"
-                        f"&ticker={ticker}&asset_type={asset_type}"
-                        f"&entry={entry}&stop={stop}&target={target}")
-            }}
-        else:
-            log_btn = {"text": f"📌 Log {ticker}", "callback_data": _buy_callback(pick, asset_type)}
-
-        row = [log_btn]
-        if entry:
-            try:
-                price_str = f"${float(entry):,.0f}" if float(entry) >= 100 else f"${float(entry):.2f}"
-                row.append({"text": f"📡 Alert at {price_str}",
-                             "callback_data": f"entry_alert|{ticker}|{entry}"})
-            except Exception:
-                pass
-        return row
-
-    def _add_section(picks_list: list, get_sym, asset_type: str, header: str, icon: str = ""):
-        """
-        Append a section header + one '📌 Log TICKER' button per pick.
-        Single pick: skip the header row.
-        """
-        if not picks_list:
-            return
-        if len(picks_list) == 1:
-            buttons.append(_log_btn(picks_list[0], asset_type))
-            return
-        buttons.append(_header(header))
-        for p in picks_list:
-            buttons.append(_log_btn(p, asset_type))
-
-    buttons = []
-
-    # ── Mini App launch buttons — top row ────────────────────────────────────
-    if render_url:
-        buttons.append([
-            {"text": "🚀 Open Dashboard  ↗", "web_app": {"url": f"{render_url}/miniapp"}},
-            {"text": "📄 Paper Trade  ↗",    "web_app": {"url": f"{render_url}/miniapp?tab=portfolio&mode=paper"}},
-        ])
-
-    st_picks  = [s for s in stocks.get("short_term", []) if s.get("ticker")]
-    lt_picks  = [s for s in stocks.get("long_term",  []) if s.get("ticker")]
-    cst_picks = [c for c in crypto.get("short_term", []) if c.get("symbol")] if show_crypto else []
-    etf_picks = (
-        [e for e in etfs.get("short_term", []) if e.get("ticker")] +
-        [e for e in etfs.get("long_term",  []) if e.get("ticker")]
-    )
-    commodities = picks.get("commodities", {})
-    comm_picks  = (
-        [c for c in commodities.get("short_term", []) if c.get("ticker")] +
-        [c for c in commodities.get("long_term",  []) if c.get("ticker")]
-    )
-
-    _add_section(st_picks,  lambda s: s["ticker"], "stock",  "── 📈 Short Term ──",  "📈")
-    _add_section(lt_picks,  lambda s: s["ticker"], "stock",  "── 🏛 Long Term ──",   "🏛")
-    _add_section(cst_picks, lambda c: c["symbol"], "crypto", "── 🪙 Crypto ──",      "✅")
-    _add_section(etf_picks, lambda e: e["ticker"], "etf",       "── 📦 ETFs ──",        "📦")
-    _add_section(comm_picks, lambda c: c["ticker"], "commodity", "── 🛢 Commodities ──", "🛢")
-
-    return buttons
+    if not render_url:
+        return []
+    return [
+        [{"text": "📊 Today's Picks — Log / Set Alert  ↗",
+          "web_app": {"url": f"{render_url}/miniapp?tab=picks"}}],
+        [{"text": "📄 Paper Trade  ↗",
+          "web_app": {"url": f"{render_url}/miniapp?tab=portfolio&mode=paper"}}],
+    ]
 
 
 # ── Confirmation message ──────────────────────────────────────────────────────

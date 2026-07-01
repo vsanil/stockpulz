@@ -304,3 +304,38 @@ class TestFormatDailyMessage:
         result = format_daily_message(picks, _cfg())
         assert isinstance(result, str)
         assert "NVDA" in result
+
+
+class TestPicksKeyboardCollapsed:
+    """The morning keyboard collapsed (Jul 2026) from per-pick Log/Alert rows to
+    a single 'Today's Picks' button (opens the picks tab) + Paper Trade."""
+
+    def _picks(self):
+        return {"stocks": {"short_term": [{"ticker": "AAPL", "entry_price": 100,
+                                           "stop_loss": 90, "target_price": 120}],
+                           "long_term": [{"ticker": "MSFT", "entry_price": 300}]},
+                "crypto": {"short_term": [{"symbol": "BTC", "entry_price": 50000}]}}
+
+    def test_two_buttons_picks_and_paper(self, monkeypatch):
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://x.onrender.com")
+        from formatters import build_picks_keyboard
+        kb = build_picks_keyboard(self._picks(), {})
+        assert len(kb) == 2 and all(len(row) == 1 for row in kb)
+        texts = [row[0]["text"] for row in kb]
+        assert any("Today's Picks" in t for t in texts)
+        assert any("Paper Trade" in t for t in texts)
+        assert "tab=picks" in kb[0][0]["web_app"]["url"]
+
+    def test_no_per_pick_log_or_alert_buttons(self, monkeypatch):
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://x.onrender.com")
+        from formatters import build_picks_keyboard
+        flat = [b["text"] for row in build_picks_keyboard(self._picks(), {}) for b in row]
+        # no per-ticker rows (old 'Log AAPL' / 'Alert at $100')
+        assert not any(sym in t for t in flat for sym in ("AAPL", "MSFT", "BTC"))
+        assert not any("Alert at" in t for t in flat)
+
+    def test_empty_when_no_miniapp_url(self, monkeypatch):
+        monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+        monkeypatch.delenv("APP_URL", raising=False)
+        from formatters import build_picks_keyboard
+        assert build_picks_keyboard(self._picks(), {}) == []

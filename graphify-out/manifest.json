@@ -45,8 +45,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/formatters.py": {
-    "mtime": 1782629121.4261575,
-    "ast_hash": "c1c316c8409d6792c3d9bf369db4b0a7",
+    "mtime": 1782915804.4333642,
+    "ast_hash": "2f1a89622534fc5921fef75f5a5dddc1",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/webhook.py": {
@@ -315,8 +315,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_formatters.py": {
-    "mtime": 1780457359.770762,
-    "ast_hash": "205c87b131db0965cb6c7a4c5effc0bd",
+    "mtime": 1782915965.4424028,
+    "ast_hash": "be4ccc8e19889f692bd1ad65271a5885",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_config_manager.py": {
@@ -420,8 +420,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/miniapp/index.html": {
-    "mtime": 1782661655.1451373,
-    "ast_hash": "b4ff4571e1bba17f97d643442fb882ec",
+    "mtime": 1782915854.8973103,
+    "ast_hash": "f89f915daf33579e4b4adfc603161766",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/stockpulz_miniapp_preview.png": {

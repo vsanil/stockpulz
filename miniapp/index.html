@@ -4747,7 +4747,7 @@ function renderPickCard(p, idx = 0) {
       <div class="pick-actions">
         <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
         <button class="btn-chart-sm" style="color:var(--accent)" onclick="openBacktestSheet('${sym}',${parseFloat(p.entry_price)||0},${parseFloat(p.stop_loss)||0},${parseFloat(p.target_price)||0})">🔁 Backtest</button>
-        ${p.entry_price ? `<button class="btn-chart-sm" style="color:#48bb78" id="alert-btn-${sym}" onclick="setPickEntryAlert('${sym}',${parseFloat(p.entry_price)||0},this)">📡 Alert at $${fmtPrice(p.entry_price)}</button>` : ''}
+        ${p.entry_price ? `<button class="btn-chart-sm" style="color:#48bb78" id="alert-btn-${sym}" onclick="openWatchAlert('${sym}',${parseFloat(p.entry_price)||0})">📡 Set Alert</button>` : ''}
         <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
                 onclick="markBought('${sym}','${p._type}','${p._tf}')">
           ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
@@ -5053,22 +5053,6 @@ async function addToWatchlistFromPick(ticker) {
     }
   } catch(e) {
     showToast('⚠️ Couldn\'t add to watchlist');
-  }
-}
-
-async function setPickEntryAlert(sym, price, btn) {
-  btn.disabled = true;
-  const orig = btn.textContent;
-  btn.textContent = '…';
-  try {
-    await api('/api/miniapp/add_alert', 'POST', { ticker: sym, target: price, direction: 'below' });
-    btn.textContent = '✅ Alert set';
-    btn.style.color = 'var(--hint)';
-    tg.HapticFeedback?.notificationOccurred('success');
-  } catch (e) {
-    btn.disabled = false;
-    btn.textContent = orig;
-    showToast('Could not set alert — try again');
   }
 }
 
@@ -6459,17 +6443,20 @@ function _updateAlertHint() {
   }
 }
 
-async function openWatchAlert(ticker) {
+async function openWatchAlert(ticker, defaultPrice) {
   _alertTicker = ticker;
   document.getElementById('watchalert-title').textContent = `🔔 Alert for ${ticker}`;
-  // Pre-fill with current live price
+  // Pre-fill with current live price; fall back to a passed-in price (e.g. a
+  // pick's entry when opened from the picks tab, where wprice- doesn't exist).
   const priceEl = document.getElementById('wprice-' + ticker);
   const liveText = priceEl ? priceEl.textContent.replace(/[^0-9.]/g, '') : '';
-  _alertCurrentPrice = liveText ? parseFloat(liveText) : null;
-  // Pre-fill with existing alert price if one is already set for this ticker
-  const _existingAlert = _watchAlertsData.find(a => a.ticker === ticker);
+  _alertCurrentPrice = liveText ? parseFloat(liveText) : (defaultPrice ? parseFloat(defaultPrice) : null);
+  // Pre-fill with existing alert price if set, else the passed-in default price.
+  // Guard _watchAlertsData — it may be unloaded when opened from the picks tab.
+  const _existingAlert = (_watchAlertsData || []).find(a => a.ticker === ticker);
   const _priceInput = document.getElementById('watchalert-price');
-  _priceInput.value = _existingAlert ? String(_existingAlert.target) : '';
+  _priceInput.value = _existingAlert ? String(_existingAlert.target)
+                    : (defaultPrice ? String(defaultPrice) : '');
   document.getElementById('watchalert-summary').textContent =
     _alertCurrentPrice ? `Now: $${_alertCurrentPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}  ·  ${_existingAlert ? 'current alert shown — update below' : 'enter your target price below'}` : '';
   document.getElementById('watchalert-hint').textContent = '';
