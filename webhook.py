@@ -137,9 +137,12 @@ threading.Thread(target=_keep_alive_loop, daemon=True).start()
 @app.route("/trigger/morning", methods=["POST", "GET"])
 def trigger_morning():
     """
-    Called by cron-job.org at 11:00 AM UTC (7 AM EDT) on weekdays.
-    Spawns the morning picks run in a background subprocess and returns immediately.
-    Protected by CRON_SECRET env var — include as ?secret=XXX in the cron URL.
+    Called by cron-job.org at 11:00 AM UTC (7 AM ET) on weekdays.
+    Relays to GitHub Actions via workflow dispatch — the morning run (cache load +
+    ETF screen + Claude analysis + personalised send) exceeds Render's 512MB
+    (proven OOM 2026-06-30/07-01: cron_last_morning updated but delivery never
+    completed and picks weren't saved). GH's 7GB runners handle it. Mirrors
+    /trigger/prescreener. Protected by CRON_SECRET env var (?secret=XXX).
     """
     secret   = os.environ.get("CRON_SECRET", "")
     provided = request.args.get("secret", "") or (request.get_json(silent=True) or {}).get("secret", "")
@@ -163,37 +166,34 @@ def trigger_morning():
         except Exception as _e:
             print(f"[trigger_morning] Duplicate check failed (non-critical): {_e}")
 
-    # Spawn morning run as a detached subprocess — start_new_session=True ensures
-    # agent.py survives gunicorn worker restarts (new process group, not killed
-    # by SIGTERM to the parent worker).
-    owner_only  = request.args.get("owner_only", "").lower() in ("1", "true")
-    extra_env   = {"RUN_MODE": "morning"}
-    if owner_only:
-        extra_env["OWNER_ONLY"] = "1"
-    if force:
-        extra_env["FORCE_MORNING"] = "1"
-    import subprocess, sys as _sys, signal as _signal
-    # Kill any existing agent.py processes before spawning — prevents memory
-    # buildup from multiple concurrent runs (each start_new_session=True process
-    # survives independently and all consume memory simultaneously).
+    # Relay to GitHub Actions (7GB) — running the morning delivery locally on
+    # Render's 512MB OOM-kills it mid-run (sets cron_last_morning but never
+    # delivers, and the per-day guard then blocks retries). Same pattern as the
+    # prescreener. ?force=true propagates so a recovery run bypasses the GH guard.
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if not gh_token:
+        print("[trigger_morning] GITHUB_TOKEN not set — cannot dispatch workflow.")
+        return jsonify({"ok": False, "error": "GITHUB_TOKEN not configured"}), 500
     try:
-        result = subprocess.run(["pgrep", "-f", "agent.py"], capture_output=True, text=True)
-        for pid in result.stdout.strip().split():
-            try:
-                os.kill(int(pid), _signal.SIGTERM)
-            except Exception:
-                pass
-        print(f"[trigger_morning] Killed existing agent.py processes: {result.stdout.strip()}")
-    except Exception:
-        pass
-    subprocess.Popen(
-        [_sys.executable, "agent.py"],
-        env={**os.environ, **extra_env},
-        cwd=os.path.dirname(os.path.abspath(__file__)),
-        start_new_session=True,   # detach from gunicorn worker process group
-    )
-    print(f"[trigger_morning] Morning run spawned (owner_only={owner_only}).")
-    return jsonify({"ok": True, "triggered": True, "owner_only": owner_only}), 200
+        import requests as _rq
+        resp = _rq.post(
+            f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/daily_run.yml/dispatches",
+            headers={
+                "Authorization": f"Bearer {gh_token}",
+                "Accept": "application/vnd.github+json",
+            },
+            json={"ref": "main",
+                  "inputs": {"run_mode": "morning", "force": "true" if force else "false"}},
+            timeout=10,
+        )
+        if resp.status_code == 204:
+            print("[trigger_morning] GitHub Actions morning run dispatched.")
+            return jsonify({"ok": True, "dispatched": True}), 200
+        print(f"[trigger_morning] Dispatch failed: {resp.status_code} {resp.text[:200]}")
+        return jsonify({"ok": False, "error": f"dispatch returned {resp.status_code}"}), 502
+    except Exception as exc:
+        print(f"[trigger_morning] Dispatch error: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 502
 
 
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "vsanil/stockpulz")
