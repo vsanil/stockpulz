@@ -794,3 +794,26 @@ class TestWatchMoveQuote:
         live, prev = ag._watch_move_quote("BTC")
         assert seen["sym"] == "BTC-USD"             # crypto suffix applied
         assert live == 27500.0 and prev == 27000.0
+
+
+class TestMoveBand:
+    """Watchlist move alerts re-fire on escalation into the next ±3% band, but
+    never spam within a band, and treat a reversal as a distinct band."""
+
+    def test_first_band_boundaries(self):
+        import agent as ag
+        assert ag._move_band(3.0) == "+1"
+        assert ag._move_band(3.2) == "+1"
+        assert ag._move_band(5.9) == "+1"     # same band → suppressed after first
+
+    def test_escalation_crosses_to_next_band(self):
+        import agent as ag
+        assert ag._move_band(6.0) == "+2"     # 3% alert then 6% alert = two bands
+        assert ag._move_band(8.4) == "+2"
+        assert ag._move_band(9.0) == "+3"
+
+    def test_direction_aware(self):
+        import agent as ag
+        assert ag._move_band(4.0)  == "+1"
+        assert ag._move_band(-4.0) == "-1"    # reversal is a different key → re-alerts
+        assert ag._move_band(-9.0) == "-3"
