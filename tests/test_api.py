@@ -1138,3 +1138,57 @@ class TestTriggerPrescreener:
         r = client.post(f"/trigger/prescreener?secret={self.SECRET}")
         assert r.status_code == 200
         assert r.get_json().get("skipped") is True
+
+
+class TestTriggerMorning:
+    """/trigger/morning must relay to GH Actions (7GB) — running the morning
+    delivery on Render's 512MB OOM-kills it mid-run (proven 2026-06-30/07-01)."""
+
+    SECRET = "test-cron-secret"
+
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("CRON_SECRET", self.SECRET)
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+
+    def test_wrong_secret_returns_403(self, client):
+        assert client.post("/trigger/morning?secret=wrong").status_code == 403
+
+    def test_dispatches_github_morning_with_force(self, client, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_post = MagicMock(return_value=MagicMock(status_code=204))
+        monkeypatch.setattr("requests.post", mock_post)
+        r = client.post(f"/trigger/morning?secret={self.SECRET}&force=true")
+        assert r.status_code == 200
+        assert r.get_json()["dispatched"] is True
+        url = mock_post.call_args[0][0]
+        assert "actions/workflows/daily_run.yml/dispatches" in url
+        inputs = mock_post.call_args[1]["json"]["inputs"]
+        assert inputs["run_mode"] == "morning"
+        assert inputs["force"] == "true"          # force propagates for recovery
+
+    def test_missing_token_returns_500(self, client, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN")
+        r = client.post(f"/trigger/morning?secret={self.SECRET}&force=true")
+        assert r.status_code == 500
+        assert r.get_json()["ok"] is False
+
+    def test_github_error_returns_502(self, client, monkeypatch):
+        from unittest.mock import MagicMock
+        monkeypatch.setattr(
+            "requests.post",
+            MagicMock(return_value=MagicMock(status_code=500, text="boom")),
+        )
+        r = client.post(f"/trigger/morning?secret={self.SECRET}&force=true")
+        assert r.status_code == 502
+
+    def test_duplicate_guard_skips_same_day(self, client, monkeypatch, _gist_store):
+        from datetime import datetime
+        import pytz, config_manager
+        cfg = _gist_store.load("config.json") or {}
+        cfg["cron_last_morning"] = datetime.now(pytz.timezone("America/New_York")).isoformat()
+        _gist_store.write("config.json", cfg)
+        monkeypatch.setattr(config_manager, "get_config", lambda: cfg)
+        r = client.post(f"/trigger/morning?secret={self.SECRET}")
+        assert r.status_code == 200
+        assert r.get_json().get("skipped") is True

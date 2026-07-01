@@ -35,6 +35,10 @@ on:
         description: "true = use mock picks, skip screeners + Claude API (instant ~10s test)"
         required: false
         default: "false"
+      force:
+        description: "true = bypass the once-per-day morning duplicate guard (recovery)"
+        required: false
+        default: "false"
 
 jobs:
   run-agent:
@@ -125,6 +129,7 @@ jobs:
           RUN_MODE: ${{ env.RUN_MODE }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           MOCK_DATA: ${{ github.event.inputs.mock_data || 'false' }}
+          FORCE_MORNING: ${{ github.event.inputs.force || 'false' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
