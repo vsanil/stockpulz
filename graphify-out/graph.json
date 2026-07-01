@@ -5976,7 +5976,7 @@
       "source_file": "price_checker.py",
       "source_location": "L1",
       "id": "price_checker_py",
-      "community": 0,
+      "community": 20,
       "norm_label": "price_checker.py"
     },
     {
@@ -5985,7 +5985,7 @@
       "source_file": "price_checker.py",
       "source_location": "L62",
       "id": "stock_agent_price_checker_get_current_prices",
-      "community": 0,
+      "community": 20,
       "norm_label": "get_current_prices()"
     },
     {
@@ -5994,7 +5994,7 @@
       "source_file": "price_checker.py",
       "source_location": "L1",
       "id": "stock_agent_price_checker_rationale_1",
-      "community": 0,
+      "community": 20,
       "norm_label": "price_checker.py \u2014 fetch current prices for the 10:30 am confirmation run. uses"
     },
     {
@@ -6003,7 +6003,7 @@
       "source_file": "price_checker.py",
       "source_location": "L63",
       "id": "stock_agent_price_checker_rationale_63",
-      "community": 0,
+      "community": 20,
       "norm_label": "given the morning picks dict, fetch current prices for all tickers/symbols."
     },
     {
@@ -7110,7 +7110,7 @@
       "source_file": "agent.py",
       "source_location": "L1256",
       "id": "stock_agent_agent_run_eod_summary",
-      "community": 0,
+      "community": 301,
       "norm_label": "run_eod_summary()"
     },
     {
@@ -7209,7 +7209,7 @@
       "source_file": "agent.py",
       "source_location": "L2246",
       "id": "stock_agent_agent_run_monthly_commentary",
-      "community": 227,
+      "community": 104,
       "norm_label": "run_monthly_commentary()"
     },
     {
@@ -7218,7 +7218,7 @@
       "source_file": "agent.py",
       "source_location": "L2371",
       "id": "stock_agent_agent_run_monthly_pnl_digest",
-      "community": 104,
+      "community": 0,
       "norm_label": "run_monthly_pnl_digest()"
     },
     {
@@ -7245,7 +7245,7 @@
       "source_file": "agent.py",
       "source_location": "L2615",
       "id": "stock_agent_agent_check_options_flow_alert",
-      "community": 104,
+      "community": 301,
       "norm_label": "_check_options_flow_alert()"
     },
     {
@@ -7254,7 +7254,7 @@
       "source_file": "agent.py",
       "source_location": "L2668",
       "id": "stock_agent_agent_check_congressional_alert",
-      "community": 0,
+      "community": 104,
       "norm_label": "_check_congressional_alert()"
     },
     {
@@ -7308,7 +7308,7 @@
       "source_file": "agent.py",
       "source_location": "L3222",
       "id": "stock_agent_agent_is_quiet_hours",
-      "community": 68,
+      "community": 20,
       "norm_label": "_is_quiet_hours()"
     },
     {
@@ -7443,7 +7443,7 @@
       "source_file": "agent.py",
       "source_location": "L4171",
       "id": "stock_agent_agent_all_recipients",
-      "community": 20,
+      "community": 0,
       "norm_label": "_all_recipients()"
     },
     {
@@ -7758,7 +7758,7 @@
       "source_file": "agent.py",
       "source_location": "L1257",
       "id": "stock_agent_agent_rationale_1257",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo"
     },
     {
@@ -7857,7 +7857,7 @@
       "source_file": "agent.py",
       "source_location": "L2247",
       "id": "stock_agent_agent_rationale_2247",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a"
     },
     {
@@ -7866,7 +7866,7 @@
       "source_file": "agent.py",
       "source_location": "L2372",
       "id": "stock_agent_agent_rationale_2372",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:"
     },
     {
@@ -7893,7 +7893,7 @@
       "source_file": "agent.py",
       "source_location": "L2616",
       "id": "stock_agent_agent_rationale_2616",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any"
     },
     {
@@ -7902,7 +7902,7 @@
       "source_file": "agent.py",
       "source_location": "L2669",
       "id": "stock_agent_agent_rationale_2669",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu"
     },
     {
@@ -7956,7 +7956,7 @@
       "source_file": "agent.py",
       "source_location": "L3223",
       "id": "stock_agent_agent_rationale_3223",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con"
     },
     {
@@ -8082,7 +8082,7 @@
       "source_file": "agent.py",
       "source_location": "L4172",
       "id": "stock_agent_agent_rationale_4172",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var"
     },
     {
@@ -19476,7 +19476,7 @@
       "source_file": "tests/test_api.py",
       "source_location": "L865",
       "id": "tests_test_api_testupdatepositionentryprice_seed_open_trade",
-      "community": 313,
+      "community": 210,
       "norm_label": "._seed_open_trade()"
     },
     {
@@ -20025,7 +20025,7 @@
       "source_file": "tests/test_api.py",
       "source_location": "L866",
       "id": "tests_test_api_rationale_866",
-      "community": 313,
+      "community": 297,
       "norm_label": "return a picks dict that open_trades() understands."
     },
     {
@@ -20034,7 +20034,7 @@
       "source_file": "tests/test_api.py",
       "source_location": "L884",
       "id": "tests_test_api_rationale_884",
-      "community": 210,
+      "community": 297,
       "norm_label": "post entry_price=185.0 for aapl should be stored in the trade log."
     },
     {
@@ -23062,7 +23062,7 @@
       "label": "Scale hardening (Jun 28) \u2014 what's done vs deliberately deferred",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L90",
+      "source_location": "L91",
       "id": "stock_agent_claude_scale_hardening_jun_28_what_s_done_vs_deliberately_deferred",
       "community": 148,
       "norm_label": "scale hardening (jun 28) \u2014 what's done vs deliberately deferred"
@@ -23071,7 +23071,7 @@
       "label": "Bug pattern: \"moving X% today\" must use live price, not daily bars (Jun 30)",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L96",
+      "source_location": "L97",
       "id": "stock_agent_claude_bug_pattern_moving_x_today_must_use_live_price_not_daily_bars_jun_30",
       "community": 148,
       "norm_label": "bug pattern: \"moving x% today\" must use live price, not daily bars (jun 30)"
@@ -23080,7 +23080,7 @@
       "label": "Units & user-data hygiene (release polish, Jun 28)",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L102",
+      "source_location": "L103",
       "id": "stock_agent_claude_units_user_data_hygiene_release_polish_jun_28",
       "community": 148,
       "norm_label": "units & user-data hygiene (release polish, jun 28)"
@@ -23089,7 +23089,7 @@
       "label": "Background jobs must fail silently to users",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L108",
+      "source_location": "L109",
       "id": "stock_agent_claude_background_jobs_must_fail_silently_to_users",
       "community": 148,
       "norm_label": "background jobs must fail silently to users"
@@ -23098,7 +23098,7 @@
       "label": "Ops API access (Render/GitHub)",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L111",
+      "source_location": "L112",
       "id": "stock_agent_claude_ops_api_access_render_github",
       "community": 148,
       "norm_label": "ops api access (render/github)"
@@ -23107,7 +23107,7 @@
       "label": "Position logging: total-invested is the primary input (settled Jun 15, 2026)",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L116",
+      "source_location": "L117",
       "id": "stock_agent_claude_position_logging_total_invested_is_the_primary_input_settled_jun_15_2026",
       "community": 148,
       "norm_label": "position logging: total-invested is the primary input (settled jun 15, 2026)"
@@ -23116,7 +23116,7 @@
       "label": "Development rules",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L128",
+      "source_location": "L129",
       "id": "stock_agent_claude_development_rules",
       "community": 148,
       "norm_label": "development rules"
@@ -23125,7 +23125,7 @@
       "label": "Scope \u2014 always apply changes everywhere",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L130",
+      "source_location": "L131",
       "id": "stock_agent_claude_scope_always_apply_changes_everywhere",
       "community": 148,
       "norm_label": "scope \u2014 always apply changes everywhere"
@@ -23134,7 +23134,7 @@
       "label": "Auto-save / UX",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L137",
+      "source_location": "L138",
       "id": "stock_agent_claude_auto_save_ux",
       "community": 148,
       "norm_label": "auto-save / ux"
@@ -23143,7 +23143,7 @@
       "label": "State persistence",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L141",
+      "source_location": "L142",
       "id": "stock_agent_claude_state_persistence",
       "community": 148,
       "norm_label": "state persistence"
@@ -23152,7 +23152,7 @@
       "label": "Timing / schedule references",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L146",
+      "source_location": "L147",
       "id": "stock_agent_claude_timing_schedule_references",
       "community": 148,
       "norm_label": "timing / schedule references"
@@ -23161,7 +23161,7 @@
       "label": "Performance stats \u2014 median not mean",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L155",
+      "source_location": "L156",
       "id": "stock_agent_claude_performance_stats_median_not_mean",
       "community": 148,
       "norm_label": "performance stats \u2014 median not mean"
@@ -23170,7 +23170,7 @@
       "label": "Commit discipline",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L160",
+      "source_location": "L161",
       "id": "stock_agent_claude_commit_discipline",
       "community": 148,
       "norm_label": "commit discipline"
@@ -23179,7 +23179,7 @@
       "label": "Read before editing",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L164",
+      "source_location": "L165",
       "id": "stock_agent_claude_read_before_editing",
       "community": 148,
       "norm_label": "read before editing"
@@ -23188,7 +23188,7 @@
       "label": "Full data flow verification",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L169",
+      "source_location": "L170",
       "id": "stock_agent_claude_full_data_flow_verification",
       "community": 148,
       "norm_label": "full data flow verification"
@@ -23197,7 +23197,7 @@
       "label": "Error handling \u2014 every async path needs it",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L174",
+      "source_location": "L175",
       "id": "stock_agent_claude_error_handling_every_async_path_needs_it",
       "community": 148,
       "norm_label": "error handling \u2014 every async path needs it"
@@ -23206,7 +23206,7 @@
       "label": "UI/UX standards",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L179",
+      "source_location": "L180",
       "id": "stock_agent_claude_ui_ux_standards",
       "community": 148,
       "norm_label": "ui/ux standards"
@@ -23215,7 +23215,7 @@
       "label": "Cache invalidation",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L186",
+      "source_location": "L187",
       "id": "stock_agent_claude_cache_invalidation",
       "community": 148,
       "norm_label": "cache invalidation"
@@ -23224,7 +23224,7 @@
       "label": "pandas 2.x compatibility \u2014 always use StringIO",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L190",
+      "source_location": "L191",
       "id": "stock_agent_claude_pandas_2_x_compatibility_always_use_stringio",
       "community": 148,
       "norm_label": "pandas 2.x compatibility \u2014 always use stringio"
@@ -23233,7 +23233,7 @@
       "label": "Syntax check before declaring done",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L196",
+      "source_location": "L197",
       "id": "stock_agent_claude_syntax_check_before_declaring_done",
       "community": 148,
       "norm_label": "syntax check before declaring done"
@@ -23242,7 +23242,7 @@
       "label": "Test suite \u2014 mandatory before every commit",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L204",
+      "source_location": "L205",
       "id": "stock_agent_claude_test_suite_mandatory_before_every_commit",
       "community": 148,
       "norm_label": "test suite \u2014 mandatory before every commit"
@@ -23251,7 +23251,7 @@
       "label": "Tests must travel with every code change",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L211",
+      "source_location": "L212",
       "id": "stock_agent_claude_tests_must_travel_with_every_code_change",
       "community": 148,
       "norm_label": "tests must travel with every code change"
@@ -23260,7 +23260,7 @@
       "label": "Proactive bug hunting",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L221",
+      "source_location": "L222",
       "id": "stock_agent_claude_proactive_bug_hunting",
       "community": 148,
       "norm_label": "proactive bug hunting"
@@ -23269,7 +23269,7 @@
       "label": "Always ask before coding",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L226",
+      "source_location": "L227",
       "id": "stock_agent_claude_always_ask_before_coding",
       "community": 148,
       "norm_label": "always ask before coding"
@@ -23278,7 +23278,7 @@
       "label": "Verification before declaring done",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L231",
+      "source_location": "L232",
       "id": "stock_agent_claude_verification_before_declaring_done",
       "community": 148,
       "norm_label": "verification before declaring done"
@@ -23287,7 +23287,7 @@
       "label": "Feature parity \u2014 bot + mini app",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L236",
+      "source_location": "L237",
       "id": "stock_agent_claude_feature_parity_bot_mini_app",
       "community": 148,
       "norm_label": "feature parity \u2014 bot + mini app"
@@ -23296,7 +23296,7 @@
       "label": "Telegram WebView constraints",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L241",
+      "source_location": "L242",
       "id": "stock_agent_claude_telegram_webview_constraints",
       "community": 148,
       "norm_label": "telegram webview constraints"
@@ -23305,7 +23305,7 @@
       "label": "Never introduce regressions",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L246",
+      "source_location": "L247",
       "id": "stock_agent_claude_never_introduce_regressions",
       "community": 148,
       "norm_label": "never introduce regressions"
@@ -23314,7 +23314,7 @@
       "label": "Completeness check before closing a task",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L251",
+      "source_location": "L252",
       "id": "stock_agent_claude_completeness_check_before_closing_a_task",
       "community": 148,
       "norm_label": "completeness check before closing a task"
@@ -23323,7 +23323,7 @@
       "label": "Loyal users first \u2014 every change must be zero-impact on UX",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L258",
+      "source_location": "L259",
       "id": "stock_agent_claude_loyal_users_first_every_change_must_be_zero_impact_on_ux",
       "community": 148,
       "norm_label": "loyal users first \u2014 every change must be zero-impact on ux"
@@ -23332,7 +23332,7 @@
       "label": "cron-job.org management",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L268",
+      "source_location": "L269",
       "id": "stock_agent_claude_cron_job_org_management",
       "community": 148,
       "norm_label": "cron-job.org management"
@@ -23341,7 +23341,7 @@
       "label": "Memory updates \u2014 do it as you go, not just at the end",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L273",
+      "source_location": "L274",
       "id": "stock_agent_claude_memory_updates_do_it_as_you_go_not_just_at_the_end",
       "community": 148,
       "norm_label": "memory updates \u2014 do it as you go, not just at the end"
@@ -23350,7 +23350,7 @@
       "label": "External service access \u2014 always ask for API keys first",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L278",
+      "source_location": "L279",
       "id": "stock_agent_claude_external_service_access_always_ask_for_api_keys_first",
       "community": 148,
       "norm_label": "external service access \u2014 always ask for api keys first"
@@ -23441,7 +23441,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4157",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4157"
     },
@@ -23522,7 +23522,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4130",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4130"
     },
@@ -24062,7 +24062,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L3736",
-      "community": 23,
+      "community": 232,
       "norm_label": "resolve company names to tickers without haiku. returns uppercased ticker.",
       "id": "stock_agent_webhook_rationale_3736"
     },
@@ -24197,7 +24197,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L847",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_847"
     },
@@ -24971,7 +24971,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L831",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_831"
     },
@@ -27284,7 +27284,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L792",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_792"
     },
@@ -27869,7 +27869,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L3456",
-      "community": 157,
+      "community": 212,
       "norm_label": "add a ticker to the user's watchlist.     resolves company names (e.g. 'amazon'",
       "id": "stock_agent_webhook_rationale_3456"
     },
@@ -27878,7 +27878,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L3498",
-      "community": 173,
+      "community": 157,
       "norm_label": "remove a ticker from the user's watchlist.",
       "id": "stock_agent_webhook_rationale_3498"
     },
@@ -28022,7 +28022,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2239",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2239"
     },
@@ -28031,7 +28031,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2364",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2364"
     },
@@ -28058,7 +28058,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2608",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any",
       "id": "stock_agent_agent_rationale_2608"
     },
@@ -28067,7 +28067,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2661",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu",
       "id": "stock_agent_agent_rationale_2661"
     },
@@ -28121,7 +28121,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3215",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3215"
     },
@@ -28229,7 +28229,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4118",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4118"
     },
@@ -28328,7 +28328,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L773",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_773"
     },
@@ -29426,7 +29426,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L745",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_745"
     },
@@ -29660,7 +29660,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L3747",
-      "community": 175,
+      "community": 290,
       "norm_label": "remove a paper position without recording it as a sale (cash refunded).",
       "id": "stock_agent_webhook_rationale_3747"
     },
@@ -29759,7 +29759,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L710",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_710"
     },
@@ -29831,7 +29831,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3210",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3210"
     },
@@ -30551,7 +30551,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2606",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any",
       "id": "stock_agent_agent_rationale_2606"
     },
@@ -30560,7 +30560,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2659",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu",
       "id": "stock_agent_agent_rationale_2659"
     },
@@ -30614,7 +30614,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3208",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3208"
     },
@@ -30713,7 +30713,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4111",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4111"
     },
@@ -31703,7 +31703,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2602",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any",
       "id": "stock_agent_agent_rationale_2602"
     },
@@ -31712,7 +31712,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2655",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu",
       "id": "stock_agent_agent_rationale_2655"
     },
@@ -31766,7 +31766,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3204",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3204"
     },
@@ -31874,7 +31874,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4107",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4107"
     },
@@ -33476,7 +33476,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L3658",
-      "community": 290,
+      "community": 173,
       "norm_label": "buy a paper position from the mini app.",
       "id": "stock_agent_webhook_rationale_3658"
     },
@@ -33773,7 +33773,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1251",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo",
       "id": "stock_agent_agent_rationale_1251"
     },
@@ -33872,7 +33872,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2232",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2232"
     },
@@ -33881,7 +33881,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2357",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2357"
     },
@@ -33908,7 +33908,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2595",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any",
       "id": "stock_agent_agent_rationale_2595"
     },
@@ -33917,7 +33917,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2648",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu",
       "id": "stock_agent_agent_rationale_2648"
     },
@@ -33971,7 +33971,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3197",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3197"
     },
@@ -34079,7 +34079,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4100",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4100"
     },
@@ -34205,7 +34205,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L692",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_692"
     },
@@ -34853,7 +34853,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L673",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_673"
     },
@@ -35348,7 +35348,7 @@
       "file_type": "rationale",
       "source_file": "price_checker.py",
       "source_location": "L49",
-      "community": 0,
+      "community": 20,
       "norm_label": "given the morning picks dict, fetch current prices for all tickers/symbols.",
       "id": "stock_agent_price_checker_rationale_49"
     },
@@ -35780,7 +35780,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1238",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo",
       "id": "stock_agent_agent_rationale_1238"
     },
@@ -35879,7 +35879,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2227",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2227"
     },
@@ -35888,7 +35888,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2352",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2352"
     },
@@ -35915,7 +35915,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2590",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any",
       "id": "stock_agent_agent_rationale_2590"
     },
@@ -35924,7 +35924,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2643",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu",
       "id": "stock_agent_agent_rationale_2643"
     },
@@ -35978,7 +35978,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3192",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3192"
     },
@@ -36077,7 +36077,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4095",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4095"
     },
@@ -36410,7 +36410,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1228",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo",
       "id": "stock_agent_agent_rationale_1228"
     },
@@ -36500,7 +36500,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2217",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2217"
     },
@@ -36509,7 +36509,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2342",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2342"
     },
@@ -36536,7 +36536,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2580",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any",
       "id": "stock_agent_agent_rationale_2580"
     },
@@ -36545,7 +36545,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2633",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu",
       "id": "stock_agent_agent_rationale_2633"
     },
@@ -36599,7 +36599,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3182",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3182"
     },
@@ -36698,7 +36698,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4081",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4081"
     },
@@ -36950,7 +36950,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2205",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2205"
     },
@@ -36959,7 +36959,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2330",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2330"
     },
@@ -36986,7 +36986,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2568",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any",
       "id": "stock_agent_agent_rationale_2568"
     },
@@ -36995,7 +36995,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2621",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu",
       "id": "stock_agent_agent_rationale_2621"
     },
@@ -37049,7 +37049,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3170",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3170"
     },
@@ -37157,7 +37157,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L4069",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_4069"
     },
@@ -37202,7 +37202,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_api.py",
       "source_location": "L597",
-      "community": 313,
+      "community": 210,
       "norm_label": "return a picks dict that open_trades() understands.",
       "id": "tests_test_api_rationale_597"
     },
@@ -38048,7 +38048,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1139",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo",
       "id": "stock_agent_agent_rationale_1139"
     },
@@ -38129,7 +38129,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2135",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2135"
     },
@@ -38138,7 +38138,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2260",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2260"
     },
@@ -38165,7 +38165,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2498",
-      "community": 104,
+      "community": 301,
       "norm_label": "check held tickers for unusual options activity. returns a text block if any",
       "id": "stock_agent_agent_rationale_2498"
     },
@@ -38174,7 +38174,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2546",
-      "community": 0,
+      "community": 104,
       "norm_label": "fire when 3+ congress members have recently bought a ticker you hold (cluster bu",
       "id": "stock_agent_agent_rationale_2546"
     },
@@ -38210,7 +38210,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3093",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_3093"
     },
@@ -38291,7 +38291,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3949",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).     if owner_only=1 env var",
       "id": "stock_agent_agent_rationale_3949"
     },
@@ -39407,7 +39407,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1115",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo",
       "id": "stock_agent_agent_rationale_1115"
     },
@@ -39506,7 +39506,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2079",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2079"
     },
@@ -39515,7 +39515,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2204",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2204"
     },
@@ -39578,7 +39578,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2940",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_2940"
     },
@@ -39650,7 +39650,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3717",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).",
       "id": "stock_agent_agent_rationale_3717"
     },
@@ -40649,7 +40649,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L3304",
-      "community": 212,
+      "community": 23,
       "norm_label": "search coingecko for a crypto name/symbol and return the ticker symbol.     resu",
       "id": "stock_agent_webhook_rationale_3304"
     },
@@ -41675,7 +41675,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1129",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo",
       "id": "stock_agent_agent_rationale_1129"
     },
@@ -41774,7 +41774,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2093",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2093"
     },
@@ -41783,7 +41783,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2218",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2218"
     },
@@ -41846,7 +41846,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2954",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_2954"
     },
@@ -41936,7 +41936,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3723",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).",
       "id": "stock_agent_agent_rationale_3723"
     },
@@ -42737,7 +42737,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1114",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo",
       "id": "stock_agent_agent_rationale_1114"
     },
@@ -42827,7 +42827,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2078",
-      "community": 227,
+      "community": 104,
       "norm_label": "1st of each month \u2014 send a market commentary with last month's returns     and a",
       "id": "stock_agent_agent_rationale_2078"
     },
@@ -42836,7 +42836,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2203",
-      "community": 104,
+      "community": 0,
       "norm_label": "1st of each month \u2014 send each user a personal p&l recap for the prior month:",
       "id": "stock_agent_agent_rationale_2203"
     },
@@ -42899,7 +42899,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2939",
-      "community": 68,
+      "community": 20,
       "norm_label": "return true if the current et time falls within the user's quiet window.     con",
       "id": "stock_agent_agent_rationale_2939"
     },
@@ -42980,7 +42980,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L3708",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).",
       "id": "stock_agent_agent_rationale_3708"
     },
@@ -44402,7 +44402,7 @@
       "file_type": "rationale",
       "source_file": "price_checker.py",
       "source_location": "L48",
-      "community": 0,
+      "community": 20,
       "norm_label": "given the morning picks dict, fetch current prices for all tickers/symbols.",
       "id": "stock_agent_price_checker_rationale_48"
     },
@@ -44600,7 +44600,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L896",
-      "community": 0,
+      "community": 301,
       "norm_label": "4:15 pm run \u2014 after market close.     sends a rich end-of-day wrap-up: final clo",
       "id": "stock_agent_agent_rationale_896"
     },
@@ -44654,7 +44654,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1422",
-      "community": 20,
+      "community": 0,
       "norm_label": "return all allowed chat_ids (always includes owner).",
       "id": "stock_agent_agent_rationale_1422"
     },
@@ -133787,9 +133787,9 @@
       "source_file": "CLAUDE.md",
       "source_location": "L84",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_claude_memory_oom_architecture_settled_jun_12_2026_do_not_relitigate",
-      "target": "stock_agent_claude_morning_message_ux_simplified_jul_1_2026_do_not_re_add_clutter",
-      "confidence_score": 1.0
+      "target": "stock_agent_claude_morning_message_ux_simplified_jul_1_2026_do_not_re_add_clutter"
     },
     {
       "relation": "contains",
@@ -134298,5 +134298,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "06ee2f99b3f7d508d5e141d16959d55dba7e6e41"
+  "built_at_commit": "a623259abe3685e3bfb68ecee48f4550d4558bfc"
 }

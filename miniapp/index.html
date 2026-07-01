@@ -2429,6 +2429,7 @@ body.tg-light { --hint: #4b5563; }
         <span>🔁 Recurring (re-arm after firing)</span>
       </label>
       <button class="btn-primary" id="watchalert-save-btn" onclick="saveWatchAlert()">Set Alert</button>
+      <button class="btn-cancel" id="watchalert-remove-btn" style="display:none;color:var(--red,#ff453a)" onclick="removeWatchAlert()">🗑 Remove alert</button>
       <button class="btn-cancel" onclick="closeOverlay('watchalert-overlay')">Cancel</button>
     </div>
   </div>
@@ -4344,6 +4345,7 @@ async function loadPicks(isRetry = false) {
   // Render outside the API try-catch — a render crash must never show "Couldn't load picks"
   try {
     renderPicksView();
+    _loadPickAlerts();   // overlay each pick's active-alert state onto its button
   } catch (renderErr) {
     console.error('[picks] render error:', renderErr);
     // Render failed after data arrived — show a retry button so the user isn't stuck
@@ -4747,7 +4749,7 @@ function renderPickCard(p, idx = 0) {
       <div class="pick-actions">
         <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
         <button class="btn-chart-sm" style="color:var(--accent)" onclick="openBacktestSheet('${sym}',${parseFloat(p.entry_price)||0},${parseFloat(p.stop_loss)||0},${parseFloat(p.target_price)||0})">🔁 Backtest</button>
-        ${p.entry_price ? `<button class="btn-chart-sm" style="color:#48bb78" id="alert-btn-${sym}" onclick="openWatchAlert('${sym}',${parseFloat(p.entry_price)||0})">📡 Set Alert</button>` : ''}
+        ${p.entry_price ? _pickAlertBtnHtml(sym, parseFloat(p.entry_price)||0) : ''}
         <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
                 onclick="markBought('${sym}','${p._type}','${p._tf}')">
           ${isBought ? '<span>✅</span> Bought' : '<span>✓</span> I Bought This'}
@@ -6443,6 +6445,30 @@ function _updateAlertHint() {
   }
 }
 
+// ── Pick-tab alert state: reflect the user's active alerts on each pick card ──
+function _pickAlertBtnHtml(sym, entry) {
+  const a = (_watchAlertsData || []).find(x => x.ticker === sym);
+  const attrs = `class="btn-chart-sm" id="alert-btn-${sym}" data-entry="${entry}" onclick="openWatchAlert('${sym}',${entry})"`;
+  return a
+    ? `<button ${attrs} style="color:#f7b500">🔔 Alert $${fmtPrice(a.target)}</button>`
+    : `<button ${attrs} style="color:#48bb78">📡 Set Alert</button>`;
+}
+
+async function _loadPickAlerts() {
+  // Load the user's alerts (only the watchlist tab did this before) so each pick
+  // card shows whether an alert is set + its price, and openWatchAlert pre-fills it.
+  try {
+    const data = await api('/api/miniapp/alerts');
+    _watchAlertsData = data.alerts || [];
+  } catch (_) { return; }
+  // Repaint every visible pick alert button in place (no full re-render).
+  document.querySelectorAll('[id^="alert-btn-"]').forEach(el => {
+    const sym   = el.id.replace('alert-btn-', '');
+    const entry = parseFloat(el.dataset.entry) || 0;
+    el.outerHTML = _pickAlertBtnHtml(sym, entry);
+  });
+}
+
 async function openWatchAlert(ticker, defaultPrice) {
   _alertTicker = ticker;
   document.getElementById('watchalert-title').textContent = `🔔 Alert for ${ticker}`;
@@ -6465,6 +6491,12 @@ async function openWatchAlert(ticker, defaultPrice) {
   if (recurCb) recurCb.checked = _existingAlert?.recurring || false;
   const btn = document.getElementById('watchalert-save-btn');
   btn.disabled = false; btn.textContent = _existingAlert ? 'Update Alert' : 'Set Alert';
+  // Remove/reset button — only when an alert already exists for this ticker.
+  const removeBtn = document.getElementById('watchalert-remove-btn');
+  if (removeBtn) {
+    removeBtn.style.display = _existingAlert ? 'block' : 'none';
+    removeBtn.disabled = false; removeBtn.textContent = '🗑 Remove alert';
+  }
   openOverlay('watchalert-overlay');
   setTimeout(() => document.getElementById('watchalert-price')?.focus(), 220);
 }
@@ -6478,6 +6510,12 @@ async function saveWatchAlert() {
   btn.disabled = true; btn.textContent = '⏳ Setting…';
   try {
     const recurring = document.getElementById('watchalert-recurring')?.checked || false;
+    // One alert per ticker: if editing to a new price, remove the old target first
+    // so we replace it rather than stack a duplicate.
+    const existing = (_watchAlertsData || []).find(a => a.ticker === _alertTicker);
+    if (existing && Number(existing.target) !== parseFloat(priceV)) {
+      try { await api('/api/miniapp/remove_alert', 'POST', { ticker: _alertTicker, target: existing.target }); } catch (_) {}
+    }
     await api('/api/miniapp/alerts', 'POST', {
       action: 'add',
       ticker: _alertTicker,
@@ -6488,11 +6526,31 @@ async function saveWatchAlert() {
     tg.HapticFeedback?.notificationOccurred('success');
     showToast(`🔔 Alert set for ${_alertTicker}`, 'success');
     closeOverlay('watchalert-overlay');
+    _loadPickAlerts();   // refresh pick-card alert buttons in place
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Set Alert';
     tg.HapticFeedback?.notificationOccurred('error');
     document.getElementById('watchalert-summary').textContent = e.message || 'Error setting alert';
     document.getElementById('watchalert-summary').style.color = 'var(--red)';
+  }
+}
+
+async function removeWatchAlert() {
+  if (!_alertTicker) return;
+  const existing = (_watchAlertsData || []).find(a => a.ticker === _alertTicker);
+  if (!existing) { closeOverlay('watchalert-overlay'); return; }
+  const btn = document.getElementById('watchalert-remove-btn');
+  btn.disabled = true; btn.textContent = '⏳ Removing…';
+  try {
+    await api('/api/miniapp/remove_alert', 'POST', { ticker: _alertTicker, target: existing.target });
+    tg.HapticFeedback?.notificationOccurred('success');
+    showToast(`🔕 Alert removed for ${_alertTicker}`, 'success');
+    closeOverlay('watchalert-overlay');
+    _loadPickAlerts();   // flip the pick button back to 'Set Alert'
+  } catch (e) {
+    btn.disabled = false; btn.textContent = '🗑 Remove alert';
+    tg.HapticFeedback?.notificationOccurred('error');
+    showToast('Couldn\'t remove alert — try again', 'error');
   }
 }
 
