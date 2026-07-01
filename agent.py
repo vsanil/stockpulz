@@ -3787,6 +3787,18 @@ def _watch_move_quote(ticker: str) -> tuple[float | None, float | None]:
             float(prev) if prev and prev > 0 else None)
 
 
+def _move_band(pct_chg: float) -> str:
+    """
+    Escalation band for a watchlist "% today" move, in ±3% steps.
+    Same band → same day → already alerted (no spam). Crossing into the NEXT band
+    re-alerts, so a ticker that keeps running past its first small alert isn't
+    silenced for the rest of the day. Direction-aware ("+"/"-") so a reversal to
+    the other side alerts separately from the original move.
+      +3.2% → "+1"   +6.0% → "+2"   +8.4% → "+2"   -3.2% → "-1"   -9.0% → "-3"
+    """
+    return f"{'+' if pct_chg > 0 else '-'}{int(abs(pct_chg) // 3)}"
+
+
 def run_price_alerts():
     """
     Lightweight run: check price alerts + trailing stops only.
@@ -3868,7 +3880,10 @@ def run_price_alerts():
                         pct_chg = (curr - prev) / prev * 100
                         if abs(pct_chg) < 3:
                             continue
-                        key = f"watch_move_{uid}_{t}_{et_today().isoformat()}"
+                        # Re-alert when the move escalates into the next ±3% band,
+                        # instead of once-flat-per-day (which silenced a ticker that
+                        # kept running well past its first small alert).
+                        key = f"watch_move_{uid}_{t}_{et_today().isoformat()}_{_move_band(pct_chg)}"
                         if cache_get(key):
                             continue
                         cache_set(key, "1", ttl_seconds=86400)
