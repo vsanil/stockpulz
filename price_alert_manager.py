@@ -80,7 +80,7 @@ def _current_price(ticker: str) -> float | None:
 
 def add_alert(chat_id: str, ticker: str, target_price: float,
               direction: str = "auto", recurring: bool = False,
-              auto: bool = False) -> str:
+              auto: bool = False, replace: bool = False) -> str:
     """
     Set a price alert.
 
@@ -119,6 +119,12 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
                 a for a in chat_alerts
                 if not (a["ticker"] == ticker and a["direction"] == direction and a.get("auto"))
             ]
+        elif replace:
+            # One alert per ticker (mini-app pick/watchlist edit): atomically drop
+            # ALL existing alerts for this ticker — any direction, incl. the auto
+            # stop — before adding the new one. Doing this in a single mutate avoids
+            # the two-request remove-then-add race (GitHub read-after-write lag).
+            chat_alerts[:] = [a for a in chat_alerts if a["ticker"] != ticker]
         else:
             # Manual: reject exact-price duplicate (raise → UI 400). Raised inside
             # the lock; mutate_gist_file propagates it and writes nothing.
