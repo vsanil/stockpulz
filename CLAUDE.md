@@ -157,6 +157,7 @@ Rules:
 - GitHub Actions free tier can delay cron jobs by hours during peak load — this is why cron-job.org was added for the morning run
 - `CRON_SECRET` env var must be set on Render — include as `?secret=CRON_SECRET` in cron-job.org URL
 - Late-delivery guard was removed — picks now always send since cron-job.org fires on time
+- **Keep-warm must cover the morning peak.** `keepwarm.yml` pings `/health` every 10 min over `10-22 UTC` (~6 AM–6 PM ET). It deliberately STARTS BEFORE the 11:00 UTC (7 AM ET) morning run — users tap the bot right after picks land, and a cold Render server makes the first `/start`/button wait ~30-60s for a boot (reads as "bot not working"). The old `12-21 UTC` window left that 7-8 AM ET peak cold. **Rule: any change to the morning-run hour must move the keep-warm start with it.** GH cron can lag a few min; for hard reliability mirror it as a cron-job.org `/health` ping (their REST API takes a Bearer key).
 
 ### Performance stats — median not mean
 - `get_recent_stats()` in `performance_tracker.py` now returns both `avg_return` and `median_return`

@@ -1,16 +1,16 @@
-# Graph Report - stock-agent  (2026-07-01)
+# Graph Report - stock-agent  (2026-07-02)
 
 ## Corpus Check
-- 85 files · ~234,041 words
+- 85 files · ~234,230 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 5158 nodes · 8602 edges · 333 communities (225 shown, 108 thin omitted)
+- 5158 nodes · 8602 edges · 330 communities (223 shown, 107 thin omitted)
 - Extraction: 93% EXTRACTED · 7% INFERRED · 0% AMBIGUOUS · INFERRED: 622 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `008e701e`
+- Built from commit: `4c924c89`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -249,7 +249,6 @@
 - [[_COMMUNITY_Community 231|Community 231]]
 - [[_COMMUNITY_Community 232|Community 232]]
 - [[_COMMUNITY_Community 234|Community 234]]
-- [[_COMMUNITY_Community 235|Community 235]]
 - [[_COMMUNITY_Community 236|Community 236]]
 - [[_COMMUNITY_Community 237|Community 237]]
 - [[_COMMUNITY_Community 238|Community 238]]
@@ -279,7 +278,6 @@
 - [[_COMMUNITY_Community 262|Community 262]]
 - [[_COMMUNITY_Community 263|Community 263]]
 - [[_COMMUNITY_Community 264|Community 264]]
-- [[_COMMUNITY_Community 265|Community 265]]
 - [[_COMMUNITY_Community 266|Community 266]]
 - [[_COMMUNITY_Community 267|Community 267]]
 - [[_COMMUNITY_Community 268|Community 268]]
@@ -299,7 +297,6 @@
 - [[_COMMUNITY_Community 282|Community 282]]
 - [[_COMMUNITY_Community 283|Community 283]]
 - [[_COMMUNITY_Community 284|Community 284]]
-- [[_COMMUNITY_Community 285|Community 285]]
 - [[_COMMUNITY_Community 286|Community 286]]
 - [[_COMMUNITY_Community 287|Community 287]]
 - [[_COMMUNITY_Community 289|Community 289]]
@@ -372,19 +369,19 @@
 - `open_trades()` --calls--> `run_morning()`  [INFERRED]
   trade_logger.py → agent.py
 
-## Communities (333 total, 108 thin omitted)
+## Communities (330 total, 107 thin omitted)
 
 ### Community 0 - "Community 0"
-Cohesion: 0.05
-Nodes (39): _log_cron_run(), Record the last run timestamp for a cron mode in the shared config., Return True if every category in picks has no entries after filtering., Record the last run timestamp for a cron mode in the shared config., Mon–Thu ~5 PM ET — check if high-impact macro events are scheduled tomorrow., Mon–Thu ~5 PM ET — check if high-impact macro events are scheduled tomorrow., Mon–Thu ~5 PM ET — check if high-impact macro events are scheduled tomorrow., Mon–Thu ~5 PM ET — check if high-impact macro events are scheduled tomorrow. (+31 more)
+Cohesion: 0.14
+Nodes (14): _is_quiet_hours(), Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con (+6 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.07
-Nodes (31): miniapp_add_alert(), miniapp_alerts(), _miniapp_auth(), miniapp_clear_alerts(), miniapp_picks(), Extract and validate chat_id from the Mini App request.     Returns chat_id stri, Extract and validate chat_id from the Mini App request.     Returns chat_id stri, Extract and validate chat_id from the Mini App request.     Returns chat_id stri (+23 more)
+Nodes (30): miniapp_add_alert(), miniapp_alerts(), _miniapp_auth(), miniapp_clear_alerts(), miniapp_index(), Extract and validate chat_id from the Mini App request.     Returns chat_id stri, Serve the Telegram Mini App HTML., Serve the Telegram Mini App HTML. (+22 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.09
-Nodes (22): int, count_unread_feedback(), increment_buy_count(), load_feedback(), Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it (+14 more)
+Cohesion: 0.08
+Nodes (27): int, count_unread_feedback(), increment_buy_count(), log_user_event(), mark_feedback_read(), Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it (+19 more)
 
 ### Community 3 - "Community 3"
 Cohesion: 0.09
@@ -455,12 +452,12 @@ Cohesion: 0.06
 Nodes (36): miniapp_backtest_pick(), miniapp_close_on_date(), Backtest a specific pick: given ticker + entry/stop/target,     simulate how it, Backtest a specific pick: given ticker + entry/stop/target,     simulate how it, Backtest a specific pick: given ticker + entry/stop/target,     simulate how it, Remove a paper position without recording it as a sale (cash refunded)., Buy a paper position from the mini app., Return the closing price for a ticker on a given date — or the nearest     prior (+28 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.06
-Nodes (36): _is_quiet_hours(), _miniapp_btn(), _miniapp_url_btn(), Return a web_app button that opens the Mini App at the given tab.     Falls back, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con (+28 more)
+Cohesion: 0.05
+Nodes (46): _check_hold_or_fold(), _check_trailing_stops(), _miniapp_btn(), _miniapp_url_btn(), Return a web_app button that opens the Mini App at the given tab.     Falls back, For each open trade for uid, check if the position has moved far enough     to w, For each open trade for uid, check if the position has moved far enough     to w, For each open trade for uid, check if the position has moved far enough     to w (+38 more)
 
 ### Community 21 - "Community 21"
-Cohesion: 0.19
-Nodes (8): _cfg(), _picks(), format_daily_message integration tests., A watchlist ticker should appear before non-watchlist tickers in output., The morning keyboard collapsed (Jul 2026) from per-pick Log/Alert rows to     a, Build a minimal picks dict with the given tickers., TestFormatDailyMessage, TestPicksKeyboardCollapsed
+Cohesion: 0.17
+Nodes (10): _cfg(), _picks(), format_daily_message integration tests., A watchlist ticker should appear before non-watchlist tickers in output., Regression: _theme_tag used _re from _clean_thesis scope → NameError.         An, Regression: _theme_tag used _re from _clean_thesis scope → NameError.         An, The morning keyboard collapsed (Jul 2026) from per-pick Log/Alert rows to     a, Build a minimal picks dict with the given tickers. (+2 more)
 
 ### Community 22 - "Community 22"
 Cohesion: 0.07
@@ -475,16 +472,16 @@ Cohesion: 0.16
 Nodes (12): _open_trade(), check_and_close_trades closes on stop/target/expiry, keeps live trades open., Seed the in-memory store with pre-built open trades., check_and_close_trades closes on stop/target/expiry, keeps live trades open., Seed the in-memory store with pre-built open trades., If somehow both would trigger, stop wins (stop checked first)., If somehow both would trigger, stop wins (stop checked first)., Tickers not in current_prices dict should remain open. (+4 more)
 
 ### Community 37 - "Community 37"
-Cohesion: 0.04
-Nodes (53): _check_hold_or_fold(), _check_trailing_stops(), _get_macro_events_this_week(), Sunday run — send a standalone 'Week Ahead' message to all users.     Includes:, For each open trade for uid, check if the position has moved far enough     to w, For each open trade for uid, check if the position has moved far enough     to w, For each open trade for uid, check if the position has moved far enough     to w, For positions between -3% and the stop-loss: send a plain-English     hold/fold (+45 more)
+Cohesion: 0.07
+Nodes (29): _get_macro_events_this_week(), Sunday run — send a standalone 'Week Ahead' message to all users.     Includes:, Return a list of notable macro events this week (Mon–Fri)., Sunday run — send a standalone 'Week Ahead' message to all users.     Includes:, Return a list of notable macro events this week (Mon–Fri)., Sunday run — send a standalone 'Week Ahead' message to all users.     Includes:, For positions down 2–8% from entry AND within 5% of their stop: send a     plain, Sunday run — send a standalone 'Week Ahead' message to all users.     Includes: (+21 more)
 
 ### Community 42 - "Community 42"
 Cohesion: 0.10
 Nodes (21): miniapp_analyst_ratings(), Recent analyst upgrades/downgrades for watchlist tickers., Recent analyst upgrades/downgrades for watchlist tickers., Recent analyst upgrades/downgrades for watchlist tickers., Recent analyst upgrades/downgrades for watchlist tickers., Recent analyst upgrades/downgrades for watchlist tickers., Recent analyst upgrades/downgrades for watchlist tickers., Recent analyst upgrades/downgrades for watchlist tickers. (+13 more)
 
 ### Community 43 - "Community 43"
-Cohesion: 0.14
-Nodes (14): Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Remove a user from the banned list (does not re-approve, use add_allowed_user fo, Remove a user from the banned list (does not re-approve, use add_allowed_user fo, Remove a user from the banned list (does not re-approve, use add_allowed_user fo (+6 more)
+Cohesion: 0.10
+Nodes (21): ban_user(), Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Ban a user: remove from allowlist and add to banned list., Ban a user: remove from allowlist and add to banned list. (+13 more)
 
 ### Community 45 - "Community 45"
 Cohesion: 0.04
@@ -504,7 +501,7 @@ Nodes (24): admin_fix_ticker(), miniapp_manifest(), Rename a ticker across all u
 
 ### Community 68 - "Community 68"
 Cohesion: 0.09
-Nodes (21): Return a picks dict that open_trades() understands., POST entry_price=185.0 for AAPL should be stored in the trade log., Return a picks dict that open_trades() understands., POST entry_price=185.0 for AAPL should be stored in the trade log., Return a picks dict that open_trades() understands., Return a picks dict that open_trades() understands., POST entry_price=185.0 for AAPL should be stored in the trade log., Return a picks dict that open_trades() understands. (+13 more)
+Nodes (20): Return a picks dict that open_trades() understands., POST entry_price=185.0 for AAPL should be stored in the trade log., Return a picks dict that open_trades() understands., POST entry_price=185.0 for AAPL should be stored in the trade log., Return a picks dict that open_trades() understands., Return a picks dict that open_trades() understands., POST entry_price=185.0 for AAPL should be stored in the trade log., Return a picks dict that open_trades() understands. (+12 more)
 
 ### Community 70 - "Community 70"
 Cohesion: 0.09
@@ -528,15 +525,15 @@ Nodes (24): str, test_agent_scope.py — Scope isolation tests for agent.py deli
 
 ### Community 104 - "Community 104"
 Cohesion: 0.04
-Nodes (53): _check_cash_position(), _check_options_flow_alert(), _is_alerted(), _mark_alerted(), Return True if we have already fired an alert for this key today., Return True if we have already fired an alert for this key today., Persist alert dedup key so restarts don't resend the same alert.      ttl_hours, Persist alert dedup key so restarts don't resend the same alert.      ttl_hours (+45 more)
+Nodes (52): _check_options_flow_alert(), _is_alerted(), _mark_alerted(), Return True if we have already fired an alert for this key today., Return True if we have already fired an alert for this key today., Persist alert dedup key so restarts don't resend the same alert.      ttl_hours, Persist alert dedup key so restarts don't resend the same alert.      ttl_hours, Return True if we have already fired an alert for this key today. (+44 more)
 
 ### Community 105 - "Community 105"
 Cohesion: 0.29
 Nodes (4): bool, Wait until the app JS has fully initialized (key variables out of TDZ)., Helper: intercept showPopup, run setup_js, wait, return whether popup fired., TestConfirmationPopups
 
 ### Community 114 - "Community 114"
-Cohesion: 0.05
-Nodes (62): bytes, str, float, str, str, generate_performance_card(), generate_trade_card(), card_generator.py — Generate a shareable performance card PNG for a user.  Produ (+54 more)
+Cohesion: 0.04
+Nodes (71): bytes, str, float, str, str, fix_ticker(), bool, str (+63 more)
 
 ### Community 132 - "Community 132"
 Cohesion: 0.13
@@ -544,7 +541,7 @@ Nodes (15): float, _get_alpaca_snapshots(), Screen S&P 500 stocks and return top
 
 ### Community 138 - "Community 138"
 Cohesion: 0.04
-Nodes (64): bool, str, fix_ticker(), bool, str, One-time migration: rename a ticker in all users' open + closed trade logs.  Usa, is_crypto(), _cmd_market() (+56 more)
+Nodes (61): bool, str, is_crypto(), _cmd_market(), _picks_tickers(), cmd_market.py — Market data + portfolio commands extracted from bot_commands.py., Market data & portfolio commands., Return all unique tickers/symbols from a picks dict. (+53 more)
 
 ### Community 139 - "Community 139"
 Cohesion: 0.05
@@ -584,15 +581,15 @@ Nodes (23): Architecture, code:bash (git clone https://github.com/YOUR_USERNAME/
 
 ### Community 151 - "Community 151"
 Cohesion: 0.06
-Nodes (62): str, str, bot_commands.py — Bot business logic: entry point, callbacks, pending-reply hand, _cmd_alerts(), cmd_alerts.py — Price alert commands extracted from bot_commands.py., Price alert commands., Price alert commands., _nl_param() (+54 more)
+Nodes (57): str, str, bot_commands.py — Bot business logic: entry point, callbacks, pending-reply hand, _cmd_alerts(), cmd_alerts.py — Price alert commands extracted from bot_commands.py., Price alert commands., Price alert commands., cmd_misc.py — Help, status, utility commands extracted from bot_commands.py. (+49 more)
 
 ### Community 152 - "Community 152"
 Cohesion: 0.10
 Nodes (21): miniapp_sparkline(), Return closing prices for a sparkline chart. period query param: 7d (default) or, Return closing prices for a sparkline chart. period query param: 7d (default) or, Return closing prices for a sparkline chart. period query param: 7d (default) or, Return closing prices for a sparkline chart. period query param: 7d (default) or, Return closing prices for a sparkline chart. period query param: 7d (default) or, Return closing prices for a sparkline chart. period query param: 7d (default) or, Return closing prices for a sparkline chart. period query param: 7d (default) or (+13 more)
 
 ### Community 153 - "Community 153"
-Cohesion: 0.07
-Nodes (28): miniapp_index(), miniapp_log_bought(), Serve the Telegram Mini App HTML., Serve the Telegram Mini App HTML., Serve the Telegram Mini App HTML., Serve the Telegram Mini App HTML., Serve the Telegram Mini App HTML., Serve the Telegram Mini App HTML. (+20 more)
+Cohesion: 0.13
+Nodes (15): miniapp_log_bought(), Log that the user bought a pick (same as /bought command)., Log that the user bought a pick (same as /bought command)., Log that the user bought a pick (same as /bought command)., Log that the user bought a pick (same as /bought command)., Log that the user bought a pick (same as /bought command)., Log that the user bought a pick (same as /bought command)., Log that the user bought a pick (same as /bought command). (+7 more)
 
 ### Community 154 - "Community 154"
 Cohesion: 0.24
@@ -635,12 +632,12 @@ Cohesion: 0.07
 Nodes (24): live_prices without ?tickers returns structured list for /prices card view., live_prices without ?tickers returns structured list for /prices card view., Patch config_manager.load_picks to return _FAKE_PICKS without HTTP calls., live_prices without ?tickers returns structured list for /prices card view., Patch config_manager.load_picks to return _FAKE_PICKS without HTTP calls., live_prices without ?tickers returns structured list for /prices card view., ?tickers= mode must return a dict (BUG-01 regression)., Patch config_manager.load_picks to return _FAKE_PICKS without HTTP calls. (+16 more)
 
 ### Community 165 - "Community 165"
-Cohesion: 0.17
-Nodes (12): load_screener_cache(), Load the midnight screener cache if it exists and is fresh (< 10h old).     Retu, Load the midnight screener cache if it exists, is fresh (< 10h old),     and mat, Load the midnight screener cache if it exists, is fresh (< 10h old),     and mat, Load the midnight screener cache if it exists, is fresh (< 10h old),     and mat, Load the midnight screener cache if it exists, is fresh (< 10h old),     and mat, Save macro signals to Gist with current UTC timestamp., Save macro signals to Gist with current UTC timestamp. (+4 more)
+Cohesion: 0.33
+Nodes (6): Save macro signals to Gist with current UTC timestamp., Save macro signals to Gist with current UTC timestamp., Save macro signals to Gist with current UTC timestamp., Save macro signals to Gist with current UTC timestamp., Save macro signals to Gist with current UTC timestamp., save_macro_cache()
 
 ### Community 166 - "Community 166"
 Cohesion: 0.04
-Nodes (74): date, int, date, _easter_sunday(), get_holiday_name(), _holiday_observed(), is_market_holiday(), _last_weekday_of_month() (+66 more)
+Nodes (82): date, int, date, _easter_sunday(), get_holiday_name(), _holiday_observed(), is_market_holiday(), _last_weekday_of_month() (+74 more)
 
 ### Community 167 - "Community 167"
 Cohesion: 0.09
@@ -719,8 +716,8 @@ Cohesion: 0.10
 Nodes (21): miniapp_tax_lots(), Tax lot summary — realized ST vs LT P&L breakdown + FIFO/LIFO guidance for open, Return the user's REAL closed trade performance — no simulated data., Tax lot summary — realized ST vs LT P&L breakdown + FIFO/LIFO guidance for open, Tax lot summary — realized ST vs LT P&L breakdown + FIFO/LIFO guidance for open, Tax lot summary — realized ST vs LT P&L breakdown + FIFO/LIFO guidance for open, Tax lot summary — realized ST vs LT P&L breakdown + FIFO/LIFO guidance for open, Tax lot summary — realized ST vs LT P&L breakdown + FIFO/LIFO guidance for open (+13 more)
 
 ### Community 186 - "Community 186"
-Cohesion: 0.14
-Nodes (14): ban_user(), log_user_event(), Return number of unread feedback entries., Mark all feedback entries as read., Append a structured event to the user's rolling activity log.     Buffered in-me, Append a structured event to the user's rolling activity log.     Buffered in-me, Ban a user: remove from allowlist and add to banned list., Append a structured event to the user's rolling activity log.     Buffered in-me (+6 more)
+Cohesion: 0.18
+Nodes (11): 1st of each month — send each user a personal P&L recap for the prior month:, 1st of each month — send each user a personal P&L recap for the prior month:, 1st of each month — send each user a personal P&L recap for the prior month:, 1st of each month — send each user a personal P&L recap for the prior month:, 1st of each month — send each user a personal P&L recap for the prior month:, 1st of each month — send each user a personal P&L recap for the prior month:, 1st of each month — send each user a personal P&L recap for the prior month:, 1st of each month — send each user a personal P&L recap for the prior month: (+3 more)
 
 ### Community 187 - "Community 187"
 Cohesion: 0.11
@@ -739,16 +736,16 @@ Cohesion: 0.12
 Nodes (11): Mock Telegram /getMe so share_link doesn't need network access., Mock Telegram /getMe so share_link doesn't need network access., Mock Telegram /getMe so share_link doesn't need network access., Mock Telegram /getMe so share_link doesn't need network access., Mock Telegram /getMe so share_link doesn't need network access., Mock Telegram /getMe so share_link doesn't need network access., Mock Telegram /getMe so share_link doesn't need network access., Mock Telegram /getMe so share_link doesn't need network access. (+3 more)
 
 ### Community 191 - "Community 191"
-Cohesion: 0.07
-Nodes (32): _all_recipients(), Return all allowed chat_ids (always includes owner)., Broadcast a scheduled message to all allowed users., Return all allowed chat_ids (always includes owner)., Return all allowed chat_ids (always includes owner)., Broadcast a scheduled message to all allowed users., Lightweight run: check price alerts + trailing stops only.     No Claude call, n, Return all allowed chat_ids (always includes owner). (+24 more)
+Cohesion: 0.05
+Nodes (46): _all_recipients(), Return all allowed chat_ids (always includes owner)., Broadcast a scheduled message to all allowed users., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap. (+38 more)
 
 ### Community 192 - "Community 192"
 Cohesion: 0.12
 Nodes (17): miniapp_pnl_history(), Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart. (+9 more)
 
 ### Community 193 - "Community 193"
-Cohesion: 0.10
-Nodes (19): One-shot script to wipe a user's trade log clean. Run from the stock-agent folde, load_backtest_trades(), _load_gist_file(), load_macro_cache(), Load macro signals cache from Gist.     Returns None if missing or older than MA, Load simulated backtest trades for a user. Returns [] if none seeded., Load simulated backtest trades for a user. Returns [] if none seeded., Fetch and parse a JSON file from the active storage backend.     Checks in-memor (+11 more)
+Cohesion: 0.09
+Nodes (24): load_backtest_trades(), _load_gist_file(), load_macro_cache(), load_screener_cache(), Load the midnight screener cache if it exists and is fresh (< 10h old).     Retu, Load the midnight screener cache if it exists, is fresh (< 10h old),     and mat, Load the midnight screener cache if it exists, is fresh (< 10h old),     and mat, Load macro signals cache from Gist.     Returns None if missing or older than MA (+16 more)
 
 ### Community 194 - "Community 194"
 Cohesion: 0.06
@@ -775,8 +772,8 @@ Cohesion: 0.25
 Nodes (6): _closed_trade(), get_performance_stats computes win rate, streak, best/worst, etc., get_performance_stats computes win rate, streak, best/worst, etc., Streak counts consecutive wins from the most recent trade backward., Streak counts consecutive wins from the most recent trade backward., TestGetPerformanceStats
 
 ### Community 200 - "Community 200"
-Cohesion: 0.12
-Nodes (17): Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Lightweight run: check price alerts + trailing stops only.     No Claude call, n, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa (+9 more)
+Cohesion: 0.25
+Nodes (8): load_feedback(), Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first.
 
 ### Community 201 - "Community 201"
 Cohesion: 0.06
@@ -799,8 +796,8 @@ Cohesion: 0.29
 Nodes (4): Each quick command dispatches and returns a reply (not async)., /prices is intercepted client-side, but if run_command is called with it, When handle_incoming_command exceeds the 22s join timeout the endpoint         m, TestRunCommandQuick
 
 ### Community 206 - "Community 206"
-Cohesion: 0.07
-Nodes (28): _alert(), Send an operational alert.     admin_only=True  → owner only (errors, warnings,, Return the last occurrence of weekday in the given month., Run crypto screener with up to 5 attempts and increasing delays.     Sends a Tel, Run crypto screener with up to 5 attempts and increasing delays.     Sends a Tel, Run crypto screener with up to 5 attempts and increasing delays.     Sends a Tel, Run crypto screener with up to 5 attempts and increasing delays.     Sends a Tel, Send an operational alert.     admin_only=True  → owner only (errors, warnings, (+20 more)
+Cohesion: 0.05
+Nodes (37): _alert(), Send an operational alert.     admin_only=True  → owner only (errors, warnings,, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Lightweight run: check price alerts + trailing stops only.     No Claude call, n, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa, Watchdog — runs at 9:00 AM ET on weekdays.     Checks whether the morning run wa (+29 more)
 
 ### Community 207 - "Community 207"
 Cohesion: 0.17
@@ -827,8 +824,8 @@ Cohesion: 0.06
 Nodes (34): miniapp_watchlist_add(), Add a ticker to the user's watchlist.     Resolves company names (e.g. 'AMAZON', Add a ticker to the user's watchlist.     Resolves company names (e.g. 'AMAZON', Search CoinGecko for a crypto name/symbol and return the ticker symbol.     Resu, Return a shareable invite link for the current user., Search CoinGecko for a crypto name/symbol and return the ticker symbol.     Resu, Add a ticker to the user's watchlist.     Resolves company names (e.g. 'AMAZON', Add a ticker to the user's watchlist.     Resolves company names (e.g. 'AMAZON' (+26 more)
 
 ### Community 213 - "Community 213"
-Cohesion: 0.08
-Nodes (25): mark_feedback_read(), Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Write any dict as a JSON blob via the active storage backend.     Always invalid (+17 more)
+Cohesion: 0.09
+Nodes (20): One-shot script to wipe a user's trade log clean. Run from the stock-agent folde, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Write any dict as a JSON blob via the active storage backend.     Always invalid (+12 more)
 
 ### Community 214 - "Community 214"
 Cohesion: 0.40
@@ -843,8 +840,8 @@ Cohesion: 0.15
 Nodes (13): Remove alert(s) for a ticker. If target_price given, removes only that one., Remove alert(s) for a ticker. If target_price given, removes only that one., Remove alert(s) for a ticker. If target_price given, removes only that one., Remove alert(s) for a ticker. If target_price given, removes only that one., Remove alert(s) for a ticker. If target_price given, removes only that one., Remove alert(s) for a ticker. If target_price given, removes only that one., remove_alert(), miniapp_remove_alert() (+5 more)
 
 ### Community 218 - "Community 218"
-Cohesion: 0.22
-Nodes (7): Return (+X.X%) or (-X.X%) string., Return (+X.X%) or (-X.X%) string., Return (+X.X%) or (-X.X%) string., _upside(), test_formatters.py — Unit tests for formatters.py  Coverage:   - _p           pr, _upside returns (+X.X%) or (-X.X%)., TestUpsideCalculator
+Cohesion: 0.25
+Nodes (6): Return (+X.X%) or (-X.X%) string., Return (+X.X%) or (-X.X%) string., Return (+X.X%) or (-X.X%) string., _upside(), _upside returns (+X.X%) or (-X.X%)., TestUpsideCalculator
 
 ### Community 219 - "Community 219"
 Cohesion: 0.23
@@ -893,10 +890,6 @@ Nodes (20): miniapp_paper_sell(), Sell (close) a paper position from the mini ap
 ### Community 234 - "Community 234"
 Cohesion: 0.19
 Nodes (8): check_alerts(), Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, TestCheckAlerts
-
-### Community 235 - "Community 235"
-Cohesion: 0.20
-Nodes (10): Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot). (+2 more)
 
 ### Community 236 - "Community 236"
 Cohesion: 0.08
@@ -955,8 +948,8 @@ Cohesion: 0.08
 Nodes (23): bool, _add_near_miss_reason(), Add a human-readable 'near_miss_reason' to a candidate that almost qualified., Add a human-readable 'near_miss_reason' to a candidate that almost qualified., Add a human-readable 'near_miss_reason' to a candidate that almost qualified., Add a human-readable 'near_miss_reason' to a candidate that almost qualified., Single pick always returned as-is., near_miss_reason is always a non-empty string. (+15 more)
 
 ### Community 250 - "Community 250"
-Cohesion: 0.43
-Nodes (3): _stars(), _stars returns correct star/hollow-star combination., TestStars
+Cohesion: 0.33
+Nodes (4): _stars(), test_formatters.py — Unit tests for formatters.py  Coverage:   - _p           pr, _stars returns correct star/hollow-star combination., TestStars
 
 ### Community 251 - "Community 251"
 Cohesion: 0.22
@@ -1013,10 +1006,6 @@ Nodes (9): format_eod_full_summary(), Rich end-of-day wrap-up sent ~4:15 PM ET a
 ### Community 264 - "Community 264"
 Cohesion: 0.06
 Nodes (33): 9:30 AM ET weekday — personalized position digest at market open.     Sends each, 9:30 AM ET weekday — personalized position digest at market open.     Sends each, 9:30 AM ET weekday — personalized position digest at market open.     Sends each, 9:30 AM ET weekday — personalized position digest at market open.     Sends each, 4:30 PM ET weekday — send each user a /recap-style position check-in via Telegra, 4:30 PM ET weekday — send each user a /recap-style position check-in via Telegra, 4:30 PM ET weekday — send each user a /recap-style position check-in via Telegra, 4:30 PM ET weekday — send each user a /recap-style position check-in via Telegra (+25 more)
-
-### Community 265 - "Community 265"
-Cohesion: 0.14
-Nodes (14): Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap., Saturday: run crypto morning picks, then send a compact weekly recap. (+6 more)
 
 ### Community 266 - "Community 266"
 Cohesion: 0.83
@@ -1079,8 +1068,8 @@ Cohesion: 0.20
 Nodes (7): Unit tests for trade_logger.add_holding() and open_trades()., Seed an allowed user so config_manager works., timeframe_override should be stored in the trade dict., Unit tests for trade_logger.add_holding() and open_trades()., Seed an allowed user so config_manager works., timeframe_override should be stored in the trade dict., TestTradeLoggerUnit
 
 ### Community 281 - "Community 281"
-Cohesion: 0.12
-Nodes (17): miniapp_settings(), Return the user's settings for the Mini App., Return the user's settings for the Mini App., Return the user's settings for the Mini App., Return the user's settings for the Mini App., Return the user's settings for the Mini App., Return the user's settings for the Mini App., Return the user's settings for the Mini App. (+9 more)
+Cohesion: 0.06
+Nodes (31): miniapp_picks(), miniapp_settings(), Return today's picks for the Mini App., Extract and validate chat_id from the Mini App request.     Returns chat_id stri, Return today's picks for the Mini App., Return today's picks for the Mini App., Return today's picks for the Mini App., Return today's picks for the Mini App. (+23 more)
 
 ### Community 282 - "Community 282"
 Cohesion: 0.20
@@ -1095,8 +1084,8 @@ Cohesion: 0.21
 Nodes (7): An oldest entry > 6 days old should trigger a full reset., save_weekly_pick accumulates; stale weeks (>6 days) are cleared., An oldest entry > 6 days old should trigger a full reset., An oldest entry > 6 days old should trigger a full reset., save_weekly_pick accumulates; stale weeks (>6 days) are cleared., An oldest entry > 6 days old should trigger a full reset., TestWeeklyPicks
 
 ### Community 289 - "Community 289"
-Cohesion: 0.11
-Nodes (19): Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos (+11 more)
+Cohesion: 0.06
+Nodes (37): _log_cron_run(), Record the last run timestamp for a cron mode in the shared config., Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos, Return True if every category in picks has no entries after filtering., Friday ~6 PM ET — send each user a personalised weekly summary.     Covers: clos (+29 more)
 
 ### Community 290 - "Community 290"
 Cohesion: 0.06
@@ -1112,7 +1101,7 @@ Nodes (17): test_api.py — Flask endpoint integration tests for the StockPulz M
 
 ### Community 297 - "Community 297"
 Cohesion: 0.10
-Nodes (20): Calling open_trades twice should not double-add tickers., Calling open_trades twice should not double-add tickers., Calling open_trades twice should not double-add tickers., Calling open_trades twice should not double-add tickers., open_trades() must log both short_term and long_term crypto picks., open_trades() must log both short_term and long_term crypto picks., Calling open_trades twice should not double-add tickers., open_trades() must log both short_term and long_term crypto picks. (+12 more)
+Nodes (21): Calling open_trades twice should not double-add tickers., Calling open_trades twice should not double-add tickers., Calling open_trades twice should not double-add tickers., Calling open_trades twice should not double-add tickers., open_trades() must log both short_term and long_term crypto picks., open_trades() must log both short_term and long_term crypto picks., Calling open_trades twice should not double-add tickers., open_trades() must log both short_term and long_term crypto picks. (+13 more)
 
 ### Community 298 - "Community 298"
 Cohesion: 0.33
@@ -1123,8 +1112,8 @@ Cohesion: 0.18
 Nodes (11): _keyboard_tickers(), Fire _parse_and_execute with mocks active, return reply., Fire _parse_and_execute with mocks active, return reply., Simulate a pending-state reply., Simulate a pending-state reply., Extract tickers from last inline keyboard callback_data sent., Extract tickers from last inline keyboard callback_data sent., _run_cmd() (+3 more)
 
 ### Community 300 - "Community 300"
-Cohesion: 0.06
-Nodes (35): _check_portfolio_drawdown(), _check_trade_reminders(), 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours. (+27 more)
+Cohesion: 0.04
+Nodes (46): _check_cash_position(), _check_portfolio_drawdown(), _check_trade_reminders(), 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours. (+38 more)
 
 ### Community 301 - "Community 301"
 Cohesion: 0.29
@@ -1207,8 +1196,8 @@ Cohesion: 0.13
 Nodes (16): check_and_close_trades(), close_trade(), get_weekly_closed_trades(), trade_logger.py — Persistent trade tracking for short-term picks. Per-user: each, Manually close an open trade, recording P&L in closed history.     Returns the c, Manually close an open trade, recording P&L in closed history.     Returns the c, Return trades closed this calendar week (Mon–today) for a specific user., Manually close an open trade, recording P&L in closed history.     Returns the c (+8 more)
 
 ### Community 332 - "Community 332"
-Cohesion: 0.08
-Nodes (32): bool, float, str, _fetch_live_price(), _is_number(), _make_admin_invite_token(), parse_money(), cmd_helpers.py — Pure shared utilities extracted from bot_commands.py. No import (+24 more)
+Cohesion: 0.06
+Nodes (41): bool, float, str, _fetch_live_price(), _is_number(), _make_admin_invite_token(), _nl_param(), parse_money() (+33 more)
 
 ### Community 334 - "Community 334"
 Cohesion: 0.40
@@ -1273,16 +1262,16 @@ Nodes (9): _bar_eligibility(), Return (admit, compute_st) for a ticker with n_ba
 ## Knowledge Gaps
 - **147 isolated node(s):** `float`, `int`, `bytes`, `str`, `Series` (+142 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **108 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **107 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `load_user_trade_log()` connect `Community 138` to `Community 0`, `Community 257`, `Community 1`, `Community 259`, `Community 5`, `Community 6`, `Community 264`, `Community 8`, `Community 268`, `Community 13`, `Community 270`, `Community 15`, `Community 20`, `Community 277`, `Community 278`, `Community 151`, `Community 280`, `Community 157`, `Community 160`, `Community 289`, `Community 161`, `Community 163`, `Community 37`, `Community 166`, `Community 167`, `Community 294`, `Community 297`, `Community 300`, `Community 46`, `Community 49`, `Community 306`, `Community 178`, `Community 180`, `Community 183`, `Community 184`, `Community 185`, `Community 317`, `Community 192`, `Community 193`, `Community 323`, `Community 331`, `Community 212`, `Community 353`, `Community 104`, `Community 236`, `Community 240`, `Community 114`?**
+- **Why does `load_user_trade_log()` connect `Community 114` to `Community 257`, `Community 259`, `Community 5`, `Community 6`, `Community 264`, `Community 8`, `Community 138`, `Community 268`, `Community 13`, `Community 270`, `Community 15`, `Community 20`, `Community 277`, `Community 278`, `Community 151`, `Community 280`, `Community 281`, `Community 157`, `Community 160`, `Community 289`, `Community 161`, `Community 163`, `Community 37`, `Community 166`, `Community 167`, `Community 294`, `Community 297`, `Community 300`, `Community 46`, `Community 49`, `Community 306`, `Community 178`, `Community 180`, `Community 183`, `Community 184`, `Community 185`, `Community 186`, `Community 317`, `Community 192`, `Community 193`, `Community 323`, `Community 331`, `Community 212`, `Community 353`, `Community 104`, `Community 236`, `Community 240`?**
   _High betweenness centrality (0.137) - this node is a cross-community bridge._
 - **Why does `post()` connect `Community 149` to `Community 353`, `Community 68`, `Community 294`, `Community 262`, `Community 170`, `Community 171`, `Community 205`, `Community 238`, `Community 209`, `Community 210`, `Community 147`, `Community 180`, `Community 190`?**
   _High betweenness centrality (0.055) - this node is a cross-community bridge._
-- **Why does `get_user_config()` connect `Community 306` to `Community 0`, `Community 257`, `Community 1`, `Community 264`, `Community 265`, `Community 138`, `Community 8`, `Community 268`, `Community 13`, `Community 15`, `Community 20`, `Community 149`, `Community 278`, `Community 151`, `Community 281`, `Community 157`, `Community 289`, `Community 161`, `Community 37`, `Community 166`, `Community 167`, `Community 300`, `Community 46`, `Community 178`, `Community 183`, `Community 184`, `Community 317`, `Community 189`, `Community 193`, `Community 331`, `Community 332`, `Community 353`, `Community 227`, `Community 104`, `Community 236`, `Community 114`, `Community 242`?**
+- **Why does `get_user_config()` connect `Community 306` to `Community 0`, `Community 257`, `Community 264`, `Community 8`, `Community 138`, `Community 268`, `Community 13`, `Community 15`, `Community 20`, `Community 149`, `Community 278`, `Community 151`, `Community 281`, `Community 157`, `Community 289`, `Community 161`, `Community 37`, `Community 166`, `Community 167`, `Community 300`, `Community 46`, `Community 178`, `Community 183`, `Community 184`, `Community 186`, `Community 317`, `Community 189`, `Community 191`, `Community 193`, `Community 331`, `Community 332`, `Community 353`, `Community 227`, `Community 104`, `Community 236`, `Community 114`, `Community 242`?**
   _High betweenness centrality (0.049) - this node is a cross-community bridge._
 - **Are the 25 inferred relationships involving `load_user_trade_log()` (e.g. with `_auto_set_pick_alerts()` and `_check_trailing_stops()`) actually correct?**
   _`load_user_trade_log()` has 25 INFERRED edges - model-reasoned connections that need verification._
