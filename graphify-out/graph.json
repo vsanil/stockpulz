@@ -4401,7 +4401,7 @@
       "source_file": "screener.py",
       "source_location": "L496",
       "id": "stock_agent_screener_get_alpaca_snapshots",
-      "community": 242,
+      "community": 316,
       "norm_label": "_get_alpaca_snapshots()"
     },
     {
@@ -4410,7 +4410,7 @@
       "source_file": "screener.py",
       "source_location": "L496",
       "id": "screener_py_float",
-      "community": 242,
+      "community": 316,
       "norm_label": "float"
     },
     {
@@ -4419,7 +4419,7 @@
       "source_file": "screener.py",
       "source_location": "L548",
       "id": "stock_agent_screener_alpaca_single_bars",
-      "community": 196,
+      "community": 293,
       "norm_label": "_alpaca_single_bars()"
     },
     {
@@ -4455,7 +4455,7 @@
       "source_file": "screener.py",
       "source_location": "L734",
       "id": "stock_agent_screener_get_analyst_target",
-      "community": 316,
+      "community": 301,
       "norm_label": "_get_analyst_target()"
     },
     {
@@ -4464,7 +4464,7 @@
       "source_file": "screener.py",
       "source_location": "L763",
       "id": "stock_agent_screener_get_eps_surprises",
-      "community": 316,
+      "community": 293,
       "norm_label": "_get_eps_surprises()"
     },
     {
@@ -4491,7 +4491,7 @@
       "source_file": "screener.py",
       "source_location": "L936",
       "id": "stock_agent_screener_long_term_score",
-      "community": 196,
+      "community": 293,
       "norm_label": "_long_term_score()"
     },
     {
@@ -4509,7 +4509,7 @@
       "source_file": "screener.py",
       "source_location": "L1076",
       "id": "stock_agent_screener_run_screener",
-      "community": 242,
+      "community": 316,
       "norm_label": "run_screener()"
     },
     {
@@ -4581,7 +4581,7 @@
       "source_file": "screener.py",
       "source_location": "L497",
       "id": "stock_agent_screener_rationale_497",
-      "community": 242,
+      "community": 316,
       "norm_label": "fetch real-time latest prices for a list of tickers via alpaca free tier.     re"
     },
     {
@@ -4590,7 +4590,7 @@
       "source_file": "screener.py",
       "source_location": "L549",
       "id": "stock_agent_screener_rationale_549",
-      "community": 196,
+      "community": 293,
       "norm_label": "fetch daily bars for one stock ticker via alpaca. returns dataframe or none."
     },
     {
@@ -4626,7 +4626,7 @@
       "source_file": "screener.py",
       "source_location": "L735",
       "id": "stock_agent_screener_rationale_735",
-      "community": 316,
+      "community": 301,
       "norm_label": "fetch analyst consensus price target from finnhub /stock/price-target.     retur"
     },
     {
@@ -4635,7 +4635,7 @@
       "source_file": "screener.py",
       "source_location": "L764",
       "id": "stock_agent_screener_rationale_764",
-      "community": 316,
+      "community": 293,
       "norm_label": "fetch last 4 quarters of eps surprise from finnhub /stock/earnings (free tier)."
     },
     {
@@ -4662,7 +4662,7 @@
       "source_file": "screener.py",
       "source_location": "L942",
       "id": "stock_agent_screener_rationale_942",
-      "community": 196,
+      "community": 293,
       "norm_label": "score a ticker for long-term investing (out of 100).     prioritises finnhub met"
     },
     {
@@ -4680,7 +4680,7 @@
       "source_file": "screener.py",
       "source_location": "L1080",
       "id": "stock_agent_screener_rationale_1080",
-      "community": 242,
+      "community": 316,
       "norm_label": "screen s&p 500 stocks and return top candidates.      short-term and long-term c"
     },
     {
@@ -6795,7 +6795,7 @@
       "source_file": "agent.py",
       "source_location": "L1",
       "id": "agent_py",
-      "community": 236,
+      "community": 37,
       "norm_label": "agent.py"
     },
     {
@@ -6831,7 +6831,7 @@
       "source_file": "agent.py",
       "source_location": "L86",
       "id": "stock_agent_agent_is_pos",
-      "community": 236,
+      "community": 37,
       "norm_label": "_is_pos()"
     },
     {
@@ -6840,7 +6840,7 @@
       "source_file": "agent.py",
       "source_location": "L86",
       "id": "agent_py_bool",
-      "community": 236,
+      "community": 37,
       "norm_label": "bool"
     },
     {
@@ -7038,7 +7038,7 @@
       "source_file": "agent.py",
       "source_location": "L522",
       "id": "stock_agent_agent_can_run_live_screener",
-      "community": 236,
+      "community": 37,
       "norm_label": "_can_run_live_screener()"
     },
     {
@@ -7056,7 +7056,7 @@
       "source_file": "agent.py",
       "source_location": "L870",
       "id": "stock_agent_agent_broadcast_trade_closes",
-      "community": 20,
+      "community": 242,
       "norm_label": "_broadcast_trade_closes()"
     },
     {
@@ -7074,7 +7074,7 @@
       "source_file": "agent.py",
       "source_location": "L1111",
       "id": "stock_agent_agent_check_picks_stop_loss",
-      "community": 37,
+      "community": 242,
       "norm_label": "_check_picks_stop_loss()"
     },
     {
@@ -7101,7 +7101,7 @@
       "source_file": "agent.py",
       "source_location": "L1206",
       "id": "stock_agent_agent_run_close_check",
-      "community": 20,
+      "community": 242,
       "norm_label": "run_close_check()"
     },
     {
@@ -7155,7 +7155,7 @@
       "source_file": "agent.py",
       "source_location": "L1777",
       "id": "stock_agent_agent_run_midday_check",
-      "community": 300,
+      "community": 236,
       "norm_label": "run_midday_check()"
     },
     {
@@ -7227,7 +7227,7 @@
       "source_file": "agent.py",
       "source_location": "L2477",
       "id": "stock_agent_agent_check_cash_position",
-      "community": 301,
+      "community": 236,
       "norm_label": "_check_cash_position()"
     },
     {
@@ -7497,7 +7497,7 @@
       "source_file": "agent.py",
       "source_location": "L1",
       "id": "stock_agent_agent_rationale_1",
-      "community": 236,
+      "community": 37,
       "norm_label": "agent.py \u2014 main daily runner. called by github actions cron job.  three run mode"
     },
     {
@@ -7524,7 +7524,7 @@
       "source_file": "agent.py",
       "source_location": "L87",
       "id": "stock_agent_agent_rationale_87",
-      "community": 236,
+      "community": 37,
       "norm_label": "true only for a real, positive number. rejects none, 0, negatives, and nan."
     },
     {
@@ -7686,7 +7686,7 @@
       "source_file": "agent.py",
       "source_location": "L523",
       "id": "stock_agent_agent_rationale_523",
-      "community": 236,
+      "community": 37,
       "norm_label": "the full 600-ticker screener needs more ram than render's 512mb instance     (pr"
     },
     {
@@ -7704,7 +7704,7 @@
       "source_file": "agent.py",
       "source_location": "L871",
       "id": "stock_agent_agent_rationale_871",
-      "community": 20,
+      "community": 242,
       "norm_label": "auto-close disabled \u2014 positions must be closed manually by the user."
     },
     {
@@ -7722,7 +7722,7 @@
       "source_file": "agent.py",
       "source_location": "L1112",
       "id": "stock_agent_agent_rationale_1112",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te"
     },
     {
@@ -7731,7 +7731,7 @@
       "source_file": "agent.py",
       "source_location": "L1188",
       "id": "stock_agent_agent_rationale_1188",
-      "community": 20,
+      "community": 242,
       "norm_label": "return true if we have already fired an alert for this key today."
     },
     {
@@ -7749,7 +7749,7 @@
       "source_file": "agent.py",
       "source_location": "L1207",
       "id": "stock_agent_agent_rationale_1207",
-      "community": 20,
+      "community": 242,
       "norm_label": "3:30 pm run. checks trades silently \u2014 only sends a message if target/stop hit."
     },
     {
@@ -7803,7 +7803,7 @@
       "source_file": "agent.py",
       "source_location": "L1778",
       "id": "stock_agent_agent_rationale_1778",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours."
     },
     {
@@ -7875,7 +7875,7 @@
       "source_file": "agent.py",
       "source_location": "L2478",
       "id": "stock_agent_agent_rationale_2478",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting."
     },
     {
@@ -8136,7 +8136,7 @@
       "source_file": "agent.py",
       "source_location": "L793",
       "id": "stock_agent_agent_rationale_793",
-      "community": 236,
+      "community": 37,
       "norm_label": "# note: open_trades() is intentionally not called here."
     },
     {
@@ -23098,7 +23098,7 @@
       "label": "Scale hardening (Jun 28) \u2014 what's done vs deliberately deferred",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L91",
+      "source_location": "L92",
       "id": "stock_agent_claude_scale_hardening_jun_28_what_s_done_vs_deliberately_deferred",
       "community": 148,
       "norm_label": "scale hardening (jun 28) \u2014 what's done vs deliberately deferred"
@@ -23107,7 +23107,7 @@
       "label": "Bug pattern: \"moving X% today\" must use live price, not daily bars (Jun 30)",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L97",
+      "source_location": "L98",
       "id": "stock_agent_claude_bug_pattern_moving_x_today_must_use_live_price_not_daily_bars_jun_30",
       "community": 148,
       "norm_label": "bug pattern: \"moving x% today\" must use live price, not daily bars (jun 30)"
@@ -23116,7 +23116,7 @@
       "label": "Units & user-data hygiene (release polish, Jun 28)",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L103",
+      "source_location": "L104",
       "id": "stock_agent_claude_units_user_data_hygiene_release_polish_jun_28",
       "community": 148,
       "norm_label": "units & user-data hygiene (release polish, jun 28)"
@@ -23125,7 +23125,7 @@
       "label": "Background jobs must fail silently to users",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L109",
+      "source_location": "L110",
       "id": "stock_agent_claude_background_jobs_must_fail_silently_to_users",
       "community": 148,
       "norm_label": "background jobs must fail silently to users"
@@ -23134,7 +23134,7 @@
       "label": "Ops API access (Render/GitHub)",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L112",
+      "source_location": "L113",
       "id": "stock_agent_claude_ops_api_access_render_github",
       "community": 148,
       "norm_label": "ops api access (render/github)"
@@ -23143,7 +23143,7 @@
       "label": "Position logging: total-invested is the primary input (settled Jun 15, 2026)",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L117",
+      "source_location": "L118",
       "id": "stock_agent_claude_position_logging_total_invested_is_the_primary_input_settled_jun_15_2026",
       "community": 148,
       "norm_label": "position logging: total-invested is the primary input (settled jun 15, 2026)"
@@ -23152,7 +23152,7 @@
       "label": "Development rules",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L129",
+      "source_location": "L130",
       "id": "stock_agent_claude_development_rules",
       "community": 148,
       "norm_label": "development rules"
@@ -23161,7 +23161,7 @@
       "label": "Scope \u2014 always apply changes everywhere",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L131",
+      "source_location": "L132",
       "id": "stock_agent_claude_scope_always_apply_changes_everywhere",
       "community": 148,
       "norm_label": "scope \u2014 always apply changes everywhere"
@@ -23170,7 +23170,7 @@
       "label": "Auto-save / UX",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L138",
+      "source_location": "L139",
       "id": "stock_agent_claude_auto_save_ux",
       "community": 148,
       "norm_label": "auto-save / ux"
@@ -23179,7 +23179,7 @@
       "label": "State persistence",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L142",
+      "source_location": "L143",
       "id": "stock_agent_claude_state_persistence",
       "community": 148,
       "norm_label": "state persistence"
@@ -23188,7 +23188,7 @@
       "label": "Timing / schedule references",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L147",
+      "source_location": "L148",
       "id": "stock_agent_claude_timing_schedule_references",
       "community": 148,
       "norm_label": "timing / schedule references"
@@ -23197,7 +23197,7 @@
       "label": "Performance stats \u2014 median not mean",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L156",
+      "source_location": "L157",
       "id": "stock_agent_claude_performance_stats_median_not_mean",
       "community": 148,
       "norm_label": "performance stats \u2014 median not mean"
@@ -23206,7 +23206,7 @@
       "label": "Commit discipline",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L161",
+      "source_location": "L162",
       "id": "stock_agent_claude_commit_discipline",
       "community": 148,
       "norm_label": "commit discipline"
@@ -23215,7 +23215,7 @@
       "label": "Read before editing",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L165",
+      "source_location": "L166",
       "id": "stock_agent_claude_read_before_editing",
       "community": 148,
       "norm_label": "read before editing"
@@ -23224,7 +23224,7 @@
       "label": "Full data flow verification",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L170",
+      "source_location": "L171",
       "id": "stock_agent_claude_full_data_flow_verification",
       "community": 148,
       "norm_label": "full data flow verification"
@@ -23233,7 +23233,7 @@
       "label": "Error handling \u2014 every async path needs it",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L175",
+      "source_location": "L176",
       "id": "stock_agent_claude_error_handling_every_async_path_needs_it",
       "community": 148,
       "norm_label": "error handling \u2014 every async path needs it"
@@ -23242,7 +23242,7 @@
       "label": "UI/UX standards",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L180",
+      "source_location": "L181",
       "id": "stock_agent_claude_ui_ux_standards",
       "community": 148,
       "norm_label": "ui/ux standards"
@@ -23251,7 +23251,7 @@
       "label": "Cache invalidation",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L187",
+      "source_location": "L188",
       "id": "stock_agent_claude_cache_invalidation",
       "community": 148,
       "norm_label": "cache invalidation"
@@ -23260,7 +23260,7 @@
       "label": "pandas 2.x compatibility \u2014 always use StringIO",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L191",
+      "source_location": "L192",
       "id": "stock_agent_claude_pandas_2_x_compatibility_always_use_stringio",
       "community": 148,
       "norm_label": "pandas 2.x compatibility \u2014 always use stringio"
@@ -23269,7 +23269,7 @@
       "label": "Syntax check before declaring done",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L197",
+      "source_location": "L198",
       "id": "stock_agent_claude_syntax_check_before_declaring_done",
       "community": 148,
       "norm_label": "syntax check before declaring done"
@@ -23278,7 +23278,7 @@
       "label": "Test suite \u2014 mandatory before every commit",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L205",
+      "source_location": "L206",
       "id": "stock_agent_claude_test_suite_mandatory_before_every_commit",
       "community": 148,
       "norm_label": "test suite \u2014 mandatory before every commit"
@@ -23287,7 +23287,7 @@
       "label": "Tests must travel with every code change",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L212",
+      "source_location": "L213",
       "id": "stock_agent_claude_tests_must_travel_with_every_code_change",
       "community": 148,
       "norm_label": "tests must travel with every code change"
@@ -23296,7 +23296,7 @@
       "label": "Proactive bug hunting",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L222",
+      "source_location": "L223",
       "id": "stock_agent_claude_proactive_bug_hunting",
       "community": 148,
       "norm_label": "proactive bug hunting"
@@ -23305,7 +23305,7 @@
       "label": "Always ask before coding",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L227",
+      "source_location": "L228",
       "id": "stock_agent_claude_always_ask_before_coding",
       "community": 148,
       "norm_label": "always ask before coding"
@@ -23314,7 +23314,7 @@
       "label": "Verification before declaring done",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L232",
+      "source_location": "L233",
       "id": "stock_agent_claude_verification_before_declaring_done",
       "community": 148,
       "norm_label": "verification before declaring done"
@@ -23323,7 +23323,7 @@
       "label": "Feature parity \u2014 bot + mini app",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L237",
+      "source_location": "L238",
       "id": "stock_agent_claude_feature_parity_bot_mini_app",
       "community": 148,
       "norm_label": "feature parity \u2014 bot + mini app"
@@ -23332,7 +23332,7 @@
       "label": "Telegram WebView constraints",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L242",
+      "source_location": "L243",
       "id": "stock_agent_claude_telegram_webview_constraints",
       "community": 148,
       "norm_label": "telegram webview constraints"
@@ -23341,7 +23341,7 @@
       "label": "Never introduce regressions",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L247",
+      "source_location": "L248",
       "id": "stock_agent_claude_never_introduce_regressions",
       "community": 148,
       "norm_label": "never introduce regressions"
@@ -23350,7 +23350,7 @@
       "label": "Completeness check before closing a task",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L252",
+      "source_location": "L253",
       "id": "stock_agent_claude_completeness_check_before_closing_a_task",
       "community": 148,
       "norm_label": "completeness check before closing a task"
@@ -23359,7 +23359,7 @@
       "label": "Loyal users first \u2014 every change must be zero-impact on UX",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L259",
+      "source_location": "L260",
       "id": "stock_agent_claude_loyal_users_first_every_change_must_be_zero_impact_on_ux",
       "community": 148,
       "norm_label": "loyal users first \u2014 every change must be zero-impact on ux"
@@ -23368,7 +23368,7 @@
       "label": "cron-job.org management",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L269",
+      "source_location": "L270",
       "id": "stock_agent_claude_cron_job_org_management",
       "community": 148,
       "norm_label": "cron-job.org management"
@@ -23377,7 +23377,7 @@
       "label": "Memory updates \u2014 do it as you go, not just at the end",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L274",
+      "source_location": "L275",
       "id": "stock_agent_claude_memory_updates_do_it_as_you_go_not_just_at_the_end",
       "community": 148,
       "norm_label": "memory updates \u2014 do it as you go, not just at the end"
@@ -23386,7 +23386,7 @@
       "label": "External service access \u2014 always ask for API keys first",
       "file_type": "document",
       "source_file": "CLAUDE.md",
-      "source_location": "L279",
+      "source_location": "L280",
       "id": "stock_agent_claude_external_service_access_always_ask_for_api_keys_first",
       "community": 148,
       "norm_label": "external service access \u2014 always ask for api keys first"
@@ -24872,7 +24872,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L477",
-      "community": 196,
+      "community": 293,
       "norm_label": "fetch real-time latest prices for a list of tickers via alpaca free tier.     re",
       "id": "stock_agent_screener_rationale_477"
     },
@@ -24881,7 +24881,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L529",
-      "community": 196,
+      "community": 293,
       "norm_label": "fetch daily bars for one stock ticker via alpaca. returns dataframe or none.",
       "id": "stock_agent_screener_rationale_529"
     },
@@ -24917,7 +24917,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L715",
-      "community": 316,
+      "community": 301,
       "norm_label": "fetch analyst consensus price target from finnhub /stock/price-target.     retur",
       "id": "stock_agent_screener_rationale_715"
     },
@@ -24926,7 +24926,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L744",
-      "community": 316,
+      "community": 293,
       "norm_label": "fetch last 4 quarters of eps surprise from finnhub /stock/earnings (free tier).",
       "id": "stock_agent_screener_rationale_744"
     },
@@ -24953,7 +24953,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L922",
-      "community": 196,
+      "community": 293,
       "norm_label": "score a ticker for long-term investing (out of 100).     prioritises finnhub met",
       "id": "stock_agent_screener_rationale_922"
     },
@@ -24971,7 +24971,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L1060",
-      "community": 242,
+      "community": 316,
       "norm_label": "screen s&p 500 stocks and return top candidates.      short-term and long-term c",
       "id": "stock_agent_screener_rationale_1060"
     },
@@ -28490,7 +28490,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2470",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2470"
     },
@@ -28895,7 +28895,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L437",
-      "community": 242,
+      "community": 316,
       "norm_label": "fetch real-time latest prices for a list of tickers via alpaca free tier.     re",
       "id": "stock_agent_screener_rationale_437"
     },
@@ -28904,7 +28904,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L489",
-      "community": 196,
+      "community": 293,
       "norm_label": "fetch daily bars for one stock ticker via alpaca. returns dataframe or none.",
       "id": "stock_agent_screener_rationale_489"
     },
@@ -28940,7 +28940,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L675",
-      "community": 316,
+      "community": 301,
       "norm_label": "fetch analyst consensus price target from finnhub /stock/price-target.     retur",
       "id": "stock_agent_screener_rationale_675"
     },
@@ -28949,7 +28949,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L704",
-      "community": 316,
+      "community": 293,
       "norm_label": "fetch last 4 quarters of eps surprise from finnhub /stock/earnings (free tier).",
       "id": "stock_agent_screener_rationale_704"
     },
@@ -28976,7 +28976,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L882",
-      "community": 196,
+      "community": 293,
       "norm_label": "score a ticker for long-term investing (out of 100).     prioritises finnhub met",
       "id": "stock_agent_screener_rationale_882"
     },
@@ -28994,7 +28994,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L1020",
-      "community": 242,
+      "community": 316,
       "norm_label": "screen s&p 500 stocks and return top candidates.      short-term and long-term c",
       "id": "stock_agent_screener_rationale_1020"
     },
@@ -29084,7 +29084,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L425",
-      "community": 242,
+      "community": 316,
       "norm_label": "fetch real-time latest prices for a list of tickers via alpaca free tier.     re",
       "id": "stock_agent_screener_rationale_425"
     },
@@ -29120,7 +29120,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L663",
-      "community": 316,
+      "community": 301,
       "norm_label": "fetch analyst consensus price target from finnhub /stock/price-target.     retur",
       "id": "stock_agent_screener_rationale_663"
     },
@@ -29129,7 +29129,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L692",
-      "community": 316,
+      "community": 293,
       "norm_label": "fetch last 4 quarters of eps surprise from finnhub /stock/earnings (free tier).",
       "id": "stock_agent_screener_rationale_692"
     },
@@ -29156,7 +29156,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L870",
-      "community": 196,
+      "community": 293,
       "norm_label": "score a ticker for long-term investing (out of 100).     prioritises finnhub met",
       "id": "stock_agent_screener_rationale_870"
     },
@@ -29174,7 +29174,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L1008",
-      "community": 242,
+      "community": 316,
       "norm_label": "screen s&p 500 stocks and return top candidates.      short-term and long-term c",
       "id": "stock_agent_screener_rationale_1008"
     },
@@ -34133,7 +34133,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L517",
-      "community": 236,
+      "community": 37,
       "norm_label": "the full 600-ticker screener needs more ram than render's 512mb instance     (pr",
       "id": "stock_agent_agent_rationale_517"
     },
@@ -34151,7 +34151,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L865",
-      "community": 20,
+      "community": 242,
       "norm_label": "auto-close disabled \u2014 positions must be closed manually by the user.",
       "id": "stock_agent_agent_rationale_865"
     },
@@ -34169,7 +34169,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1106",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te",
       "id": "stock_agent_agent_rationale_1106"
     },
@@ -34196,7 +34196,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1201",
-      "community": 20,
+      "community": 242,
       "norm_label": "3:30 pm run. checks trades silently \u2014 only sends a message if target/stop hit.",
       "id": "stock_agent_agent_rationale_1201"
     },
@@ -34250,7 +34250,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1772",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours.",
       "id": "stock_agent_agent_rationale_1772"
     },
@@ -34322,7 +34322,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2463",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2463"
     },
@@ -34547,7 +34547,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L787",
-      "community": 236,
+      "community": 37,
       "norm_label": "# note: open_trades() is intentionally not called here.",
       "id": "stock_agent_agent_rationale_787"
     },
@@ -36140,7 +36140,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L504",
-      "community": 236,
+      "community": 37,
       "norm_label": "the full 600-ticker screener needs more ram than render's 512mb instance     (pr",
       "id": "stock_agent_agent_rationale_504"
     },
@@ -36158,7 +36158,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L852",
-      "community": 20,
+      "community": 242,
       "norm_label": "auto-close disabled \u2014 positions must be closed manually by the user.",
       "id": "stock_agent_agent_rationale_852"
     },
@@ -36176,7 +36176,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1093",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te",
       "id": "stock_agent_agent_rationale_1093"
     },
@@ -36248,7 +36248,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1759",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours.",
       "id": "stock_agent_agent_rationale_1759"
     },
@@ -36320,7 +36320,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2458",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2458"
     },
@@ -36554,7 +36554,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L774",
-      "community": 236,
+      "community": 37,
       "norm_label": "# note: open_trades() is intentionally not called here.",
       "id": "stock_agent_agent_rationale_774"
     },
@@ -36761,7 +36761,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L494",
-      "community": 236,
+      "community": 37,
       "norm_label": "the full 600-ticker screener needs more ram than render's 512mb instance     (pr",
       "id": "stock_agent_agent_rationale_494"
     },
@@ -36779,7 +36779,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L842",
-      "community": 20,
+      "community": 242,
       "norm_label": "auto-close disabled \u2014 positions must be closed manually by the user.",
       "id": "stock_agent_agent_rationale_842"
     },
@@ -36797,7 +36797,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1083",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te",
       "id": "stock_agent_agent_rationale_1083"
     },
@@ -36824,7 +36824,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1178",
-      "community": 20,
+      "community": 242,
       "norm_label": "3:30 pm run. checks trades silently \u2014 only sends a message if target/stop hit.",
       "id": "stock_agent_agent_rationale_1178"
     },
@@ -36878,7 +36878,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1749",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours.",
       "id": "stock_agent_agent_rationale_1749"
     },
@@ -36941,7 +36941,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2448",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2448"
     },
@@ -37175,7 +37175,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L764",
-      "community": 236,
+      "community": 37,
       "norm_label": "# note: open_trades() is intentionally not called here.",
       "id": "stock_agent_agent_rationale_764"
     },
@@ -37319,7 +37319,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1737",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours.",
       "id": "stock_agent_agent_rationale_1737"
     },
@@ -37382,7 +37382,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2436",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2436"
     },
@@ -38264,7 +38264,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L866",
-      "community": 196,
+      "community": 293,
       "norm_label": "score a ticker for long-term investing (out of 100).     prioritises finnhub met",
       "id": "stock_agent_screener_rationale_866"
     },
@@ -38273,7 +38273,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L965",
-      "community": 242,
+      "community": 316,
       "norm_label": "screen s&p 500 stocks and return top candidates.      short-term and long-term c",
       "id": "stock_agent_screener_rationale_965"
     },
@@ -38408,7 +38408,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L759",
-      "community": 20,
+      "community": 242,
       "norm_label": "auto-close disabled \u2014 positions must be closed manually by the user.",
       "id": "stock_agent_agent_rationale_759"
     },
@@ -38426,7 +38426,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L994",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te",
       "id": "stock_agent_agent_rationale_994"
     },
@@ -38453,7 +38453,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1089",
-      "community": 20,
+      "community": 242,
       "norm_label": "3:30 pm run. checks trades silently \u2014 only sends a message if target/stop hit.",
       "id": "stock_agent_agent_rationale_1089"
     },
@@ -38507,7 +38507,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1666",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours.",
       "id": "stock_agent_agent_rationale_1666"
     },
@@ -38561,7 +38561,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2366",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2366"
     },
@@ -38741,7 +38741,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L681",
-      "community": 236,
+      "community": 37,
       "norm_label": "# note: open_trades() is intentionally not called here.",
       "id": "stock_agent_agent_rationale_681"
     },
@@ -39425,7 +39425,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L562",
-      "community": 316,
+      "community": 301,
       "norm_label": "fetch analyst consensus price target from finnhub /stock/price-target.     retur",
       "id": "stock_agent_screener_rationale_562"
     },
@@ -39434,7 +39434,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L591",
-      "community": 316,
+      "community": 293,
       "norm_label": "fetch last 4 quarters of eps surprise from finnhub /stock/earnings (free tier).",
       "id": "stock_agent_screener_rationale_591"
     },
@@ -39443,7 +39443,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L765",
-      "community": 196,
+      "community": 293,
       "norm_label": "score a ticker for long-term investing (out of 100).     prioritises finnhub met",
       "id": "stock_agent_screener_rationale_765"
     },
@@ -39452,7 +39452,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L861",
-      "community": 242,
+      "community": 316,
       "norm_label": "screen s&p 500 stocks and return top candidates.      short-term and long-term c",
       "id": "stock_agent_screener_rationale_861"
     },
@@ -39749,7 +39749,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L743",
-      "community": 20,
+      "community": 242,
       "norm_label": "auto-close disabled \u2014 positions must be closed manually by the user.",
       "id": "stock_agent_agent_rationale_743"
     },
@@ -39767,7 +39767,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L970",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te",
       "id": "stock_agent_agent_rationale_970"
     },
@@ -39794,7 +39794,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1065",
-      "community": 20,
+      "community": 242,
       "norm_label": "3:30 pm run. checks trades silently \u2014 only sends a message if target/stop hit.",
       "id": "stock_agent_agent_rationale_1065"
     },
@@ -39848,7 +39848,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1610",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours.",
       "id": "stock_agent_agent_rationale_1610"
     },
@@ -39920,7 +39920,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2310",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2310"
     },
@@ -40082,7 +40082,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L669",
-      "community": 236,
+      "community": 37,
       "norm_label": "# note: open_trades() is intentionally not called here.",
       "id": "stock_agent_agent_rationale_669"
     },
@@ -42008,7 +42008,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L757",
-      "community": 20,
+      "community": 242,
       "norm_label": "auto-close disabled \u2014 positions must be closed manually by the user.",
       "id": "stock_agent_agent_rationale_757"
     },
@@ -42026,7 +42026,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L984",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te",
       "id": "stock_agent_agent_rationale_984"
     },
@@ -42044,7 +42044,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1079",
-      "community": 20,
+      "community": 242,
       "norm_label": "3:30 pm run. checks trades silently \u2014 only sends a message if target/stop hit.",
       "id": "stock_agent_agent_rationale_1079"
     },
@@ -42098,7 +42098,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1624",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours.",
       "id": "stock_agent_agent_rationale_1624"
     },
@@ -42170,7 +42170,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2324",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2324"
     },
@@ -42359,7 +42359,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L683",
-      "community": 236,
+      "community": 37,
       "norm_label": "# note: open_trades() is intentionally not called here.",
       "id": "stock_agent_agent_rationale_683"
     },
@@ -43061,7 +43061,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L742",
-      "community": 20,
+      "community": 242,
       "norm_label": "auto-close disabled \u2014 positions must be closed manually by the user.",
       "id": "stock_agent_agent_rationale_742"
     },
@@ -43079,7 +43079,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L969",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te",
       "id": "stock_agent_agent_rationale_969"
     },
@@ -43106,7 +43106,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1064",
-      "community": 20,
+      "community": 242,
       "norm_label": "3:30 pm run. checks trades silently \u2014 only sends a message if target/stop hit.",
       "id": "stock_agent_agent_rationale_1064"
     },
@@ -43151,7 +43151,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L1609",
-      "community": 300,
+      "community": 236,
       "norm_label": "12:30 pm et intraday check \u2014 catch big moves during market hours.",
       "id": "stock_agent_agent_rationale_1609"
     },
@@ -43223,7 +43223,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L2309",
-      "community": 301,
+      "community": 236,
       "norm_label": "warn user if they are over 85% invested based on total_portfolio_size setting.",
       "id": "stock_agent_agent_rationale_2309"
     },
@@ -43394,7 +43394,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L668",
-      "community": 236,
+      "community": 37,
       "norm_label": "# note: open_trades() is intentionally not called here.",
       "id": "stock_agent_agent_rationale_668"
     },
@@ -44366,7 +44366,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L376",
-      "community": 242,
+      "community": 316,
       "norm_label": "fetch real-time latest prices for a list of tickers via alpaca free tier.     re",
       "id": "stock_agent_screener_rationale_376"
     },
@@ -44384,7 +44384,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L460",
-      "community": 316,
+      "community": 301,
       "norm_label": "fetch analyst consensus price target from finnhub /stock/price-target.     retur",
       "id": "stock_agent_screener_rationale_460"
     },
@@ -44411,7 +44411,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L658",
-      "community": 196,
+      "community": 293,
       "norm_label": "score a ticker for long-term investing (out of 100).     prioritises finnhub met",
       "id": "stock_agent_screener_rationale_658"
     },
@@ -44420,7 +44420,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L720",
-      "community": 242,
+      "community": 316,
       "norm_label": "screen s&p 500 stocks and return top candidates.      short-term and long-term c",
       "id": "stock_agent_screener_rationale_720"
     },
@@ -44924,7 +44924,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L595",
-      "community": 20,
+      "community": 242,
       "norm_label": "check and close trades for all recipients, sending close alerts + debriefs.",
       "id": "stock_agent_agent_rationale_595"
     },
@@ -44942,7 +44942,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L777",
-      "community": 37,
+      "community": 242,
       "norm_label": "compare current prices against the stop_loss on today's ai picks.     fires a te",
       "id": "stock_agent_agent_rationale_777"
     },
@@ -44969,7 +44969,7 @@
       "file_type": "rationale",
       "source_file": "agent.py",
       "source_location": "L855",
-      "community": 20,
+      "community": 242,
       "norm_label": "3:30 pm run. checks trades silently \u2014 only sends a message if target/stop hit.",
       "id": "stock_agent_agent_rationale_855"
     },
@@ -74008,9 +74008,9 @@
       "source_file": "webhook.py",
       "source_location": "L2157",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2157",
-      "target": "stock_agent_webhook_fast_quote",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_fast_quote"
     },
     {
       "relation": "calls",
@@ -74219,9 +74219,9 @@
       "source_file": "webhook.py",
       "source_location": "L2230",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2230",
-      "target": "stock_agent_webhook_miniapp_names",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_names"
     },
     {
       "relation": "calls",
@@ -74430,9 +74430,9 @@
       "source_file": "webhook.py",
       "source_location": "L2247",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2247",
-      "target": "stock_agent_webhook_miniapp_quote",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_quote"
     },
     {
       "relation": "rationale_for",
@@ -74630,9 +74630,9 @@
       "source_file": "webhook.py",
       "source_location": "L2324",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2324",
-      "target": "stock_agent_webhook_miniapp_news",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_news"
     },
     {
       "relation": "calls",
@@ -74946,9 +74946,9 @@
       "source_file": "webhook.py",
       "source_location": "L2557",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2557",
-      "target": "stock_agent_webhook_miniapp_markets",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_markets"
     },
     {
       "relation": "calls",
@@ -75187,9 +75187,9 @@
       "source_file": "webhook.py",
       "source_location": "L2706",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2706",
-      "target": "stock_agent_webhook_miniapp_my_performance",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_my_performance"
     },
     {
       "relation": "rationale_for",
@@ -75397,9 +75397,9 @@
       "source_file": "webhook.py",
       "source_location": "L2787",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2787",
-      "target": "stock_agent_webhook_miniapp_economic_calendar",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_economic_calendar"
     },
     {
       "relation": "rationale_for",
@@ -75607,9 +75607,9 @@
       "source_file": "webhook.py",
       "source_location": "L2852",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2852",
-      "target": "stock_agent_webhook_miniapp_analyst_ratings",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_analyst_ratings"
     },
     {
       "relation": "rationale_for",
@@ -75817,9 +75817,9 @@
       "source_file": "webhook.py",
       "source_location": "L2898",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2898",
-      "target": "stock_agent_webhook_miniapp_volume_spikes",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_volume_spikes"
     },
     {
       "relation": "calls",
@@ -76089,9 +76089,9 @@
       "source_file": "webhook.py",
       "source_location": "L2947",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_2947",
-      "target": "stock_agent_webhook_miniapp_performance",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_performance"
     },
     {
       "relation": "calls",
@@ -76329,9 +76329,9 @@
       "source_file": "webhook.py",
       "source_location": "L3011",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3011",
-      "target": "stock_agent_webhook_miniapp_tax_lots",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_tax_lots"
     },
     {
       "relation": "rationale_for",
@@ -76549,9 +76549,9 @@
       "source_file": "webhook.py",
       "source_location": "L3134",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3134",
-      "target": "stock_agent_webhook_miniapp_screener_data",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_screener_data"
     },
     {
       "relation": "rationale_for",
@@ -76769,9 +76769,9 @@
       "source_file": "webhook.py",
       "source_location": "L3204",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3204",
-      "target": "stock_agent_webhook_miniapp_earnings_surprise",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_earnings_surprise"
     },
     {
       "relation": "rationale_for",
@@ -76989,9 +76989,9 @@
       "source_file": "webhook.py",
       "source_location": "L3273",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3273",
-      "target": "stock_agent_webhook_miniapp_run_command",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_run_command"
     },
     {
       "relation": "calls",
@@ -77229,9 +77229,9 @@
       "source_file": "webhook.py",
       "source_location": "L3320",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3320",
-      "target": "stock_agent_webhook_miniapp_share_link",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_share_link"
     },
     {
       "relation": "rationale_for",
@@ -77449,9 +77449,9 @@
       "source_file": "webhook.py",
       "source_location": "L3357",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3357",
-      "target": "stock_agent_webhook_miniapp_earnings",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_earnings"
     },
     {
       "relation": "calls",
@@ -77623,9 +77623,9 @@
       "source_file": "webhook.py",
       "source_location": "L3494",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3494",
-      "target": "stock_agent_webhook_load_watchlist",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_load_watchlist"
     },
     {
       "relation": "calls",
@@ -77786,9 +77786,9 @@
       "source_file": "webhook.py",
       "source_location": "L3516",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3516",
-      "target": "stock_agent_webhook_save_watchlist",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_save_watchlist"
     },
     {
       "relation": "rationale_for",
@@ -78016,9 +78016,9 @@
       "source_file": "webhook.py",
       "source_location": "L3543",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3543",
-      "target": "stock_agent_webhook_miniapp_watchlist",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_watchlist"
     },
     {
       "relation": "rationale_for",
@@ -78246,9 +78246,9 @@
       "source_file": "webhook.py",
       "source_location": "L3555",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3555",
-      "target": "stock_agent_webhook_miniapp_sparkline",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_sparkline"
     },
     {
       "relation": "calls",
@@ -78509,9 +78509,9 @@
       "source_file": "webhook.py",
       "source_location": "L3577",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3577",
-      "target": "stock_agent_webhook_miniapp_watchlist_add",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_watchlist_add"
     },
     {
       "relation": "rationale_for",
@@ -78739,9 +78739,9 @@
       "source_file": "webhook.py",
       "source_location": "L3619",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3619",
-      "target": "stock_agent_webhook_miniapp_watchlist_remove",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_watchlist_remove"
     },
     {
       "relation": "calls",
@@ -78979,9 +78979,9 @@
       "source_file": "webhook.py",
       "source_location": "L3679",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3679",
-      "target": "stock_agent_webhook_resolve_crypto_name_dynamic",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_resolve_crypto_name_dynamic"
     },
     {
       "relation": "calls",
@@ -79220,9 +79220,9 @@
       "source_file": "webhook.py",
       "source_location": "L3766",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3766",
-      "target": "stock_agent_webhook_resolve_watchlist_ticker",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_resolve_watchlist_ticker"
     },
     {
       "relation": "calls",
@@ -79481,9 +79481,9 @@
       "source_file": "webhook.py",
       "source_location": "L3829",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3829",
-      "target": "stock_agent_webhook_miniapp_paper_buy",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_paper_buy"
     },
     {
       "relation": "calls",
@@ -79722,9 +79722,9 @@
       "source_file": "webhook.py",
       "source_location": "L3871",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3871",
-      "target": "stock_agent_webhook_miniapp_paper_sell",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_paper_sell"
     },
     {
       "relation": "calls",
@@ -79983,9 +79983,9 @@
       "source_file": "webhook.py",
       "source_location": "L3898",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3898",
-      "target": "stock_agent_webhook_miniapp_paper_cancel",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_paper_cancel"
     },
     {
       "relation": "calls",
@@ -80244,9 +80244,9 @@
       "source_file": "webhook.py",
       "source_location": "L3916",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3916",
-      "target": "stock_agent_webhook_miniapp_paper_add_cash",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_paper_add_cash"
     },
     {
       "relation": "calls",
@@ -80485,9 +80485,9 @@
       "source_file": "webhook.py",
       "source_location": "L3942",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3942",
-      "target": "stock_agent_webhook_miniapp_paper_reset",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_paper_reset"
     },
     {
       "relation": "calls",
@@ -80737,9 +80737,9 @@
       "source_file": "webhook.py",
       "source_location": "L3955",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_3955",
-      "target": "stock_agent_webhook_backtest_fetch_prices",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_backtest_fetch_prices"
     },
     {
       "relation": "rationale_for",
@@ -80887,9 +80887,9 @@
       "source_file": "webhook.py",
       "source_location": "L4010",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_4010",
-      "target": "stock_agent_webhook_miniapp_close_on_date",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_close_on_date"
     },
     {
       "relation": "rationale_for",
@@ -81127,9 +81127,9 @@
       "source_file": "webhook.py",
       "source_location": "L4073",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_webhook_rationale_4073",
-      "target": "stock_agent_webhook_miniapp_backtest_pick",
-      "confidence_score": 1.0
+      "target": "stock_agent_webhook_miniapp_backtest_pick"
     },
     {
       "relation": "contains",
@@ -84265,9 +84265,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L77",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_py",
-      "target": "stock_agent_price_alert_manager_load_alerts",
-      "confidence_score": 1.0
+      "target": "stock_agent_price_alert_manager_load_alerts"
     },
     {
       "relation": "calls",
@@ -85123,9 +85123,9 @@
       "source_file": "price_alert_manager.py",
       "source_location": "L155",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_price_alert_manager_rationale_155",
-      "target": "stock_agent_price_alert_manager_remove_alert",
-      "confidence_score": 1.0
+      "target": "stock_agent_price_alert_manager_remove_alert"
     },
     {
       "relation": "rationale_for",
@@ -85281,9 +85281,9 @@
       "source_file": "price_alert_manager.py",
       "source_location": "L178",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_price_alert_manager_rationale_178",
-      "target": "stock_agent_price_alert_manager_get_user_alerts_map",
-      "confidence_score": 1.0
+      "target": "stock_agent_price_alert_manager_get_user_alerts_map"
     },
     {
       "relation": "rationale_for",
@@ -85373,9 +85373,9 @@
       "source_file": "price_alert_manager.py",
       "source_location": "L195",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_price_alert_manager_rationale_195",
-      "target": "stock_agent_price_alert_manager_list_alerts",
-      "confidence_score": 1.0
+      "target": "stock_agent_price_alert_manager_list_alerts"
     },
     {
       "relation": "rationale_for",
@@ -85597,9 +85597,9 @@
       "source_file": "price_alert_manager.py",
       "source_location": "L212",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_price_alert_manager_rationale_212",
-      "target": "stock_agent_price_alert_manager_check_alerts",
-      "confidence_score": 1.0
+      "target": "stock_agent_price_alert_manager_check_alerts"
     },
     {
       "relation": "rationale_for",
@@ -85877,9 +85877,9 @@
       "source_file": "price_alert_manager.py",
       "source_location": "L302",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_price_alert_manager_rationale_302",
-      "target": "stock_agent_price_alert_manager_check_all_alerts",
-      "confidence_score": 1.0
+      "target": "stock_agent_price_alert_manager_check_all_alerts"
     },
     {
       "relation": "rationale_for",
@@ -85938,9 +85938,9 @@
       "source_file": "price_alert_manager.py",
       "source_location": "L317",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "stock_agent_price_alert_manager_rationale_317",
-      "target": "stock_agent_price_alert_manager_clear_alerts",
-      "confidence_score": 1.0
+      "target": "stock_agent_price_alert_manager_clear_alerts"
     },
     {
       "relation": "rationale_for",
@@ -119034,9 +119034,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L85",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_testaddalert",
-      "target": "tests_test_alert_manager_testaddalert_test_replace_bypasses_duplicate_rejection",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testaddalert_test_replace_bypasses_duplicate_rejection"
     },
     {
       "relation": "method",
@@ -119044,9 +119044,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L74",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_testaddalert",
-      "target": "tests_test_alert_manager_testaddalert_test_replace_leaves_exactly_one_alert_for_ticker",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testaddalert_test_replace_leaves_exactly_one_alert_for_ticker"
     },
     {
       "relation": "method",
@@ -119154,9 +119154,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L75",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_75",
-      "target": "tests_test_alert_manager_testaddalert_test_replace_leaves_exactly_one_alert_for_ticker",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testaddalert_test_replace_leaves_exactly_one_alert_for_ticker"
     },
     {
       "relation": "rationale_for",
@@ -119164,9 +119164,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L86",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_86",
-      "target": "tests_test_alert_manager_testaddalert_test_replace_bypasses_duplicate_rejection",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testaddalert_test_replace_bypasses_duplicate_rejection"
     },
     {
       "relation": "rationale_for",
@@ -119184,9 +119184,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L95",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_95",
-      "target": "tests_test_alert_manager_testaddalert_test_same_ticker_different_target_allowed",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testaddalert_test_same_ticker_different_target_allowed"
     },
     {
       "relation": "rationale_for",
@@ -119194,9 +119194,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L100",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_100",
-      "target": "tests_test_alert_manager_testaddalert_test_same_ticker_same_target_different_direction_allowed",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testaddalert_test_same_ticker_same_target_different_direction_allowed"
     },
     {
       "relation": "rationale_for",
@@ -119214,9 +119214,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L105",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_105",
-      "target": "tests_test_alert_manager_testaddalert_test_unknown_ticker_raises",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testaddalert_test_unknown_ticker_raises"
     },
     {
       "relation": "rationale_for",
@@ -119234,9 +119234,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L110",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_110",
-      "target": "tests_test_alert_manager_testaddalert_test_returns_pct_away_in_message",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testaddalert_test_returns_pct_away_in_message"
     },
     {
       "relation": "rationale_for",
@@ -119357,9 +119357,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L145",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_145",
-      "target": "tests_test_alert_manager_testremovealert_test_remove_decimal_price_float_tolerance",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testremovealert_test_remove_decimal_price_float_tolerance"
     },
     {
       "relation": "rationale_for",
@@ -119377,9 +119377,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L155",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_155",
-      "target": "tests_test_alert_manager_testremovealert_test_remove_leaves_other_users_alerts_intact",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testremovealert_test_remove_leaves_other_users_alerts_intact"
     },
     {
       "relation": "method",
@@ -119497,9 +119497,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L238",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_238",
-      "target": "tests_test_alert_manager_testnonpositivepriceguard",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testnonpositivepriceguard"
     },
     {
       "relation": "method",
@@ -119632,9 +119632,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L270",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_270",
-      "target": "tests_test_alert_manager_testnonpositivepriceguard_test_real_price_still_triggers",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testnonpositivepriceguard_test_real_price_still_triggers"
     },
     {
       "relation": "method",
@@ -119692,9 +119692,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L300",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_300",
-      "target": "tests_test_alert_manager_testalertchartbutton",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testalertchartbutton"
     },
     {
       "relation": "method",
@@ -119742,9 +119742,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L303",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_303",
-      "target": "tests_test_alert_manager_testalertchartbutton_test_keyboard_has_chart_button_when_app_url_set",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testalertchartbutton_test_keyboard_has_chart_button_when_app_url_set"
     },
     {
       "relation": "rationale_for",
@@ -119772,9 +119772,9 @@
       "source_file": "tests/test_alert_manager.py",
       "source_location": "L324",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_alert_manager_rationale_324",
-      "target": "tests_test_alert_manager_testalertchartbutton_test_keyboard_no_chart_button_without_app_url",
-      "confidence_score": 1.0
+      "target": "tests_test_alert_manager_testalertchartbutton_test_keyboard_no_chart_button_without_app_url"
     },
     {
       "relation": "contains",
@@ -135261,5 +135261,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "9029103e7b4d30cec4eb8fdd6506e81573d434f5"
+  "built_at_commit": "e52115bc12978989710a88dc7dd27a725ced1765"
 }
