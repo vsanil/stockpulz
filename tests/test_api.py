@@ -670,6 +670,26 @@ class TestRateLimiter:
         assert webhook._rate_limited("u1", "other", 20, 60) is False
 
 
+class TestBacktestNonOverlapping:
+    """Backtest counts NON-OVERLAPPING trades — consecutive days near entry are
+    ONE trade, not N (which inflated win rates, e.g. AMBA's 0/21 was really ~0/3)."""
+
+    def test_clustered_entries_count_once(self, client, monkeypatch):
+        import webhook
+        # entry=100 (band 98-102). Cluster A (idx 0-2) drops to stop(89) = 1 loss;
+        # cluster B (idx 6-7) rises to target(111) = 1 win. Old logic: 3 losses +
+        # 2 wins (5 sims). New: exactly 1 win + 1 loss.
+        dates  = [f"2026-01-{d:02d}" for d in range(1, 11)]
+        closes = [100, 100, 100, 89, 95, 96, 100, 100, 105, 111]
+        monkeypatch.setattr(webhook, "_backtest_fetch_prices", lambda t: (dates, closes))
+        r = get(client, "/api/miniapp/backtest_pick",
+                ticker="TESTX", entry=100, stop=90, target=110)
+        assert r.status_code == 200
+        d = r.get_json()
+        assert d["wins"] == 1 and d["losses"] == 1   # non-overlapping, not 2/3
+        assert d["win_rate"] == 50.0
+
+
 class TestUpdateDedup:
     """Telegram retries of a slow handler must not double-process the command."""
 
