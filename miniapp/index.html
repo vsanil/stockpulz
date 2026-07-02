@@ -6677,7 +6677,7 @@ async function loadPaperPortfolio(forceRefresh = false) {
           </div>
           <div class="pos-actions">
             <button class="pos-btn pos-btn-chart" onclick="openChart('${sym}','${aType}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
-            <button class="pos-btn" style="color:var(--green)" onclick="openPaperBuySheet('${sym}')">📈 More</button>
+            <button class="pos-btn" style="color:var(--green)" onclick="openPaperBuySheet('${sym}')">➕ Buy More</button>
             <button class="pos-btn" style="color:var(--red)" onclick="sellPaperPosition('${sym}')">🔴 Sell</button>
             <button class="pos-btn" style="color:var(--hint)" onclick="cancelPaperPosition('${sym}')">🗑</button>
           </div>
