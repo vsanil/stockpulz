@@ -1,16 +1,16 @@
 # Graph Report - stock-agent  (2026-07-01)
 
 ## Corpus Check
-- 85 files · ~233,583 words
+- 85 files · ~233,668 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 5142 nodes · 8580 edges · 337 communities (228 shown, 109 thin omitted)
+- 5142 nodes · 8580 edges · 338 communities (229 shown, 109 thin omitted)
 - Extraction: 93% EXTRACTED · 7% INFERRED · 0% AMBIGUOUS · INFERRED: 622 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `9029103e`
+- Built from commit: `e52115bc`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -307,6 +307,7 @@
 - [[_COMMUNITY_Community 290|Community 290]]
 - [[_COMMUNITY_Community 291|Community 291]]
 - [[_COMMUNITY_Community 292|Community 292]]
+- [[_COMMUNITY_Community 293|Community 293]]
 - [[_COMMUNITY_Community 294|Community 294]]
 - [[_COMMUNITY_Community 295|Community 295]]
 - [[_COMMUNITY_Community 296|Community 296]]
@@ -376,7 +377,7 @@
 - `format_dividends_message()` --calls--> `_handle_pending_reply()`  [INFERRED]
   /sessions/beautiful-modest-edison/mnt/stock-agent/dividends_checker.py → bot_commands.py
 
-## Communities (337 total, 109 thin omitted)
+## Communities (338 total, 109 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.07
@@ -459,8 +460,8 @@ Cohesion: 0.06
 Nodes (35): miniapp_backtest_pick(), miniapp_close_on_date(), Backtest a specific pick: given ticker + entry/stop/target,     simulate how it, Backtest a specific pick: given ticker + entry/stop/target,     simulate how it, Backtest a specific pick: given ticker + entry/stop/target,     simulate how it, Remove a paper position without recording it as a sale (cash refunded)., Buy a paper position from the mini app., Return the closing price for a ticker on a given date — or the nearest     prior (+27 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.04
-Nodes (56): _broadcast_trade_closes(), _is_quiet_hours(), 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., Return True if we have already fired an alert for this key today. (+48 more)
+Cohesion: 0.05
+Nodes (36): _is_quiet_hours(), Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con (+28 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.16
@@ -479,8 +480,8 @@ Cohesion: 0.16
 Nodes (12): _open_trade(), check_and_close_trades closes on stop/target/expiry, keeps live trades open., Seed the in-memory store with pre-built open trades., check_and_close_trades closes on stop/target/expiry, keeps live trades open., Seed the in-memory store with pre-built open trades., If somehow both would trigger, stop wins (stop checked first)., If somehow both would trigger, stop wins (stop checked first)., Tickers not in current_prices dict should remain open. (+4 more)
 
 ### Community 37 - "Community 37"
-Cohesion: 0.06
-Nodes (33): _check_hold_or_fold(), _check_picks_stop_loss(), _check_trailing_stops(), Compare current prices against the stop_loss on today's AI picks.     Fires a Te, Compare current prices against the stop_loss on today's AI picks.     Fires a Te, Compare current prices against the stop_loss on today's AI picks.     Fires a Te, Compare current prices against the stop_loss on today's AI picks.     Fires a Te, For each open trade for uid, check if the position has moved far enough     to w (+25 more)
+Cohesion: 0.05
+Nodes (40): bool, _can_run_live_screener(), _check_hold_or_fold(), _check_trailing_stops(), _is_pos(), agent.py — Main daily runner. Called by GitHub Actions cron job.  Three run mode, For each open trade for uid, check if the position has moved far enough     to w, For each open trade for uid, check if the position has moved far enough     to w (+32 more)
 
 ### Community 42 - "Community 42"
 Cohesion: 0.12
@@ -763,8 +764,8 @@ Cohesion: 0.13
 Nodes (18): int, check_all_alerts(), clear_alerts(), _load_alerts(), price_alert_manager.py — Price alert storage, evaluation, and notification.  Ale, Check alerts for ALL chat IDs (called from cron runs).     Returns total number, Check alerts for ALL chat IDs (called from cron runs).     Returns total number, Check alerts for ALL chat IDs (called from cron runs).     Returns total number (+10 more)
 
 ### Community 196 - "Community 196"
-Cohesion: 0.07
-Nodes (32): DataFrame, int, _alpaca_bulk_bars(), _alpaca_single_bars(), _detect_patterns(), _long_term_score(), Score a ticker for short-term trading (out of 100). Returns (score, metrics)., Score a ticker for short-term trading (out of 100). Returns (score, metrics). (+24 more)
+Cohesion: 0.12
+Nodes (19): DataFrame, int, _alpaca_bulk_bars(), _detect_patterns(), Score a ticker for short-term trading (out of 100). Returns (score, metrics)., Score a ticker for short-term trading (out of 100). Returns (score, metrics)., Score a ticker for short-term trading (out of 100). Returns (score, metrics)., Score a ticker for short-term trading (out of 100). Returns (score, metrics). (+11 more)
 
 ### Community 197 - "Community 197"
 Cohesion: 0.18
@@ -899,8 +900,8 @@ Cohesion: 0.19
 Nodes (8): check_alerts(), Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, Evaluate all alerts for a chat against current prices.     Triggered alerts are, TestCheckAlerts
 
 ### Community 236 - "Community 236"
-Cohesion: 0.08
-Nodes (28): bool, _can_run_live_screener(), _check_stale_positions(), _is_pos(), agent.py — Main daily runner. Called by GitHub Actions cron job.  Three run mode, For each open trade older than 21 days with less than 10% progress     toward ta, For each open trade older than 21 days with less than 10% progress     toward ta, For each open trade older than 21 days with less than 10% progress     toward ta (+20 more)
+Cohesion: 0.06
+Nodes (32): _check_cash_position(), _check_stale_positions(), 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., For each open trade older than 21 days with less than 10% progress     toward ta, For each open trade older than 21 days with less than 10% progress     toward ta (+24 more)
 
 ### Community 237 - "Community 237"
 Cohesion: 0.15
@@ -923,8 +924,8 @@ Cohesion: 0.09
 Nodes (22): miniapp_volume_spikes(), Detect unusual volume vs 20-day avg for given tickers., Detect unusual volume vs 20-day avg for given tickers., Detect unusual volume vs 20-day avg for given tickers., Detect unusual volume vs 20-day avg for given tickers., Detect unusual volume vs 20-day avg for given tickers., Detect unusual volume vs 20-day avg for given tickers., Detect unusual volume vs 20-day avg for given tickers. (+14 more)
 
 ### Community 242 - "Community 242"
-Cohesion: 0.14
-Nodes (14): float, _get_alpaca_snapshots(), Screen S&P 500 stocks and return top candidates.      Short-term and long-term c, Screen S&P 500 stocks and return top candidates.      Short-term and long-term c, Screen S&P 500 stocks and return top candidates.      Short-term and long-term c, Screen S&P 500 stocks and return top candidates.      Short-term and long-term c, Fetch real-time latest prices for a list of tickers via Alpaca free tier.     Re, Fetch real-time latest prices for a list of tickers via Alpaca free tier.     Re (+6 more)
+Cohesion: 0.07
+Nodes (30): _broadcast_trade_closes(), _check_picks_stop_loss(), 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., Compare current prices against the stop_loss on today's AI picks.     Fires a Te, 3:30 PM run. Checks trades silently — only sends a message if target/stop hit., Compare current prices against the stop_loss on today's AI picks.     Fires a Te (+22 more)
 
 ### Community 243 - "Community 243"
 Cohesion: 0.20
@@ -1114,6 +1115,10 @@ Nodes (6): _get_finnhub_profile(), Fetch company name and sector from Finnhub /s
 Cohesion: 0.40
 Nodes (4): Adding an already-present user should not append a duplicate., Adding an already-present user should not append a duplicate., Adding an already-present user should not append a duplicate., Adding an already-present user should not append a duplicate.
 
+### Community 293 - "Community 293"
+Cohesion: 0.11
+Nodes (19): _alpaca_single_bars(), _get_eps_surprises(), _long_term_score(), Fetch real-time latest prices for a list of tickers via Alpaca free tier.     Re, Fetch daily bars for one stock ticker via Alpaca. Returns DataFrame or None., Fetch daily bars for one stock ticker via Alpaca. Returns DataFrame or None., Fetch daily bars for one stock ticker via Alpaca. Returns DataFrame or None., Fetch last 4 quarters of EPS surprise from Finnhub /stock/earnings (free tier). (+11 more)
+
 ### Community 294 - "Community 294"
 Cohesion: 0.06
 Nodes (15): test_api.py — Flask endpoint integration tests for the StockPulz Mini App.  All, /trigger/morning must relay to GH Actions (7GB) — running the morning     delive, The real Telegram initData HMAC verification (auth is bypassed elsewhere via, Per-user limiter guards the cost-bearing LLM endpoints from key-drain., Telegram retries of a slow handler must not double-process the command., Picks endpoint always includes _meta with today's date., Pre-public-launch hardening: no config leak, JSON (never HTML) errors., TestAuth (+7 more)
@@ -1135,12 +1140,12 @@ Cohesion: 0.18
 Nodes (11): _keyboard_tickers(), Fire _parse_and_execute with mocks active, return reply., Fire _parse_and_execute with mocks active, return reply., Simulate a pending-state reply., Simulate a pending-state reply., Extract tickers from last inline keyboard callback_data sent., Extract tickers from last inline keyboard callback_data sent., _run_cmd() (+3 more)
 
 ### Community 300 - "Community 300"
-Cohesion: 0.06
-Nodes (35): _check_portfolio_drawdown(), _check_trade_reminders(), 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours., 12:30 PM ET intraday check — catch big moves during market hours. (+27 more)
+Cohesion: 0.08
+Nodes (25): _check_portfolio_drawdown(), _check_trade_reminders(), If the user's open portfolio has dropped more than `max_daily_drawdown_pct`, If the user's open portfolio has dropped more than `max_daily_drawdown_pct`, If the user's open portfolio has dropped more than `max_daily_drawdown_pct`, Check each user's pending reminders. For any reminder whose date is today     (o, Check each user's pending reminders. For any reminder whose date is today     (o, Check each user's pending reminders. For any reminder whose date is today     (o (+17 more)
 
 ### Community 301 - "Community 301"
-Cohesion: 0.18
-Nodes (11): _check_cash_position(), Warn user if they are over 85% invested based on total_portfolio_size setting., Warn user if they are over 85% invested based on total_portfolio_size setting., Warn user if they are over 85% invested based on total_portfolio_size setting., Warn user if they are over 85% invested based on total_portfolio_size setting., Warn user if they are over 85% invested based on total_portfolio_size setting., Warn user if they are over 85% invested based on total_portfolio_size setting., Warn user if they are over 85% invested based on total_portfolio_size setting. (+3 more)
+Cohesion: 0.29
+Nodes (7): _get_analyst_target(), Fetch analyst consensus price target from Finnhub /stock/price-target.     Retur, Fetch analyst consensus price target from Finnhub /stock/price-target.     Retur, Fetch analyst consensus price target from Finnhub /stock/price-target.     Retur, Fetch analyst consensus price target from Finnhub /stock/price-target.     Retur, Fetch analyst consensus price target from Finnhub /stock/price-target.     Retur, Fetch analyst consensus price target from Finnhub /stock/price-target.     Retur
 
 ### Community 302 - "Community 302"
 Cohesion: 0.13
@@ -1176,7 +1181,7 @@ Nodes (7): get_cached_signal(), Return cached signals for a ticker if still with
 
 ### Community 316 - "Community 316"
 Cohesion: 0.09
-Nodes (29): str, _get_analyst_target(), _get_eps_surprises(), get_sp500_tickers(), get_stock_universe(), _high_interest_tickers(), screener.py — Broad US stock screener using yfinance + ta + Finnhub fundamentals, Build a broad US stock universe: S&P 500 + NASDAQ 100 + S&P MidCap 400.     Fetc (+21 more)
+Nodes (30): float, str, _get_alpaca_snapshots(), get_sp500_tickers(), get_stock_universe(), _high_interest_tickers(), screener.py — Broad US stock screener using yfinance + ta + Finnhub fundamentals, Screen S&P 500 stocks and return top candidates.      Short-term and long-term c (+22 more)
 
 ### Community 317 - "Community 317"
 Cohesion: 0.06
@@ -1298,7 +1303,7 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.132) - this node is a cross-community bridge._
 - **Why does `post()` connect `Community 149` to `Community 353`, `Community 68`, `Community 294`, `Community 262`, `Community 170`, `Community 235`, `Community 171`, `Community 331`, `Community 238`, `Community 205`, `Community 209`, `Community 210`, `Community 147`, `Community 180`, `Community 255`?**
   _High betweenness centrality (0.062) - this node is a cross-community bridge._
-- **Why does `get_user_config()` connect `Community 257` to `Community 0`, `Community 1`, `Community 2`, `Community 132`, `Community 5`, `Community 265`, `Community 138`, `Community 13`, `Community 15`, `Community 272`, `Community 20`, `Community 149`, `Community 151`, `Community 281`, `Community 157`, `Community 289`, `Community 161`, `Community 37`, `Community 166`, `Community 167`, `Community 42`, `Community 300`, `Community 306`, `Community 178`, `Community 184`, `Community 317`, `Community 189`, `Community 193`, `Community 331`, `Community 332`, `Community 227`, `Community 228`, `Community 104`, `Community 236`, `Community 114`?**
+- **Why does `get_user_config()` connect `Community 257` to `Community 0`, `Community 1`, `Community 2`, `Community 132`, `Community 5`, `Community 265`, `Community 138`, `Community 13`, `Community 15`, `Community 272`, `Community 20`, `Community 149`, `Community 151`, `Community 281`, `Community 157`, `Community 289`, `Community 161`, `Community 37`, `Community 166`, `Community 167`, `Community 42`, `Community 300`, `Community 306`, `Community 178`, `Community 184`, `Community 317`, `Community 189`, `Community 193`, `Community 331`, `Community 332`, `Community 227`, `Community 228`, `Community 104`, `Community 236`, `Community 114`, `Community 242`?**
   _High betweenness centrality (0.052) - this node is a cross-community bridge._
 - **Are the 25 inferred relationships involving `load_user_trade_log()` (e.g. with `_auto_set_pick_alerts()` and `_check_trailing_stops()`) actually correct?**
   _`load_user_trade_log()` has 25 INFERRED edges - model-reasoned connections that need verification._
