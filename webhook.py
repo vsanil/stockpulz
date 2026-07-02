@@ -4102,22 +4102,28 @@ def miniapp_backtest_pick():
 
         if entry > 0 and (stop > 0 or target > 0):
             prices_list = closes
-            for i, p in enumerate(prices_list):
-                # Entry signal: price within 2% of entry level
-                if abs(p - entry) / entry > 0.02:
+            n = len(prices_list)
+            i = 0
+            # NON-OVERLAPPING trades: each entry near the level starts ONE trade,
+            # then we skip past its exit so consecutive days of the SAME setup
+            # aren't re-counted. Previously every day within 2% of entry started a
+            # separate sim, so a stock that hovered near entry for 10 days inflated
+            # N ~10x — making win rates look far more statistically robust than the
+            # handful of independent setups behind them (e.g. AMBA showed 0/21 that
+            # was really ~5 distinct episodes).
+            while i < n:
+                if abs(prices_list[i] - entry) / entry > 0.02:
+                    i += 1
                     continue
-                # Simulate forward from entry
                 hit_target = hit_stop = False
-                days_held  = 0
-                for j in range(i + 1, min(i + 60, len(prices_list))):
+                exit_idx = min(i + 60, n) - 1     # default: no exit within window
+                for j in range(i + 1, min(i + 60, n)):
                     fwd = prices_list[j]
-                    days_held += 1
                     if target > 0 and fwd >= target:
-                        hit_target = True
-                        break
+                        hit_target = True; exit_idx = j; break
                     if stop > 0 and fwd <= stop:
-                        hit_stop = True
-                        break
+                        hit_stop = True; exit_idx = j; break
+                days_held = exit_idx - i
                 if hit_target:
                     wins += 1
                     avg_days_to_exit.append(days_held)
@@ -4126,6 +4132,7 @@ def miniapp_backtest_pick():
                     avg_days_to_exit.append(days_held)
                 else:
                     skipped += 1
+                i = exit_idx + 1                  # resume after this trade's exit
 
         total_sims = wins + losses
         win_rate   = round(wins / total_sims * 100, 1) if total_sims > 0 else None
