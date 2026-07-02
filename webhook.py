@@ -2139,8 +2139,9 @@ def miniapp_alerts_post():
                 return jsonify({"error": "target price required"}), 400
             direction = body.get("direction", "auto")
             recurring = bool(body.get("recurring", False))
+            replace   = bool(body.get("replace", False))
             msg = add_alert(str(chat_id), ticker, float(target_raw),
-                            direction=direction, recurring=recurring)
+                            direction=direction, recurring=recurring, replace=replace)
             return jsonify({"ok": True, "message": msg})
     except ValueError as ve:
         return jsonify({"error": str(ve)}), 400

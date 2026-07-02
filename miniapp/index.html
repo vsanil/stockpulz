@@ -6454,6 +6454,15 @@ function _pickAlertBtnHtml(sym, entry) {
     : `<button ${attrs} style="color:#48bb78">📡 Set Alert</button>`;
 }
 
+function _repaintPickAlertBtns() {
+  // Repaint every visible pick alert button in place (no full re-render).
+  document.querySelectorAll('[id^="alert-btn-"]').forEach(el => {
+    const sym   = el.id.replace('alert-btn-', '');
+    const entry = parseFloat(el.dataset.entry) || 0;
+    el.outerHTML = _pickAlertBtnHtml(sym, entry);
+  });
+}
+
 async function _loadPickAlerts() {
   // Load the user's alerts (only the watchlist tab did this before) so each pick
   // card shows whether an alert is set + its price, and openWatchAlert pre-fills it.
@@ -6461,12 +6470,7 @@ async function _loadPickAlerts() {
     const data = await api('/api/miniapp/alerts');
     _watchAlertsData = data.alerts || [];
   } catch (_) { return; }
-  // Repaint every visible pick alert button in place (no full re-render).
-  document.querySelectorAll('[id^="alert-btn-"]').forEach(el => {
-    const sym   = el.id.replace('alert-btn-', '');
-    const entry = parseFloat(el.dataset.entry) || 0;
-    el.outerHTML = _pickAlertBtnHtml(sym, entry);
-  });
+  _repaintPickAlertBtns();
 }
 
 async function openWatchAlert(ticker, defaultPrice) {
@@ -6510,23 +6514,23 @@ async function saveWatchAlert() {
   btn.disabled = true; btn.textContent = '⏳ Setting…';
   try {
     const recurring = document.getElementById('watchalert-recurring')?.checked || false;
-    // One alert per ticker: if editing to a new price, remove the old target first
-    // so we replace it rather than stack a duplicate.
-    const existing = (_watchAlertsData || []).find(a => a.ticker === _alertTicker);
-    if (existing && Number(existing.target) !== parseFloat(priceV)) {
-      try { await api('/api/miniapp/remove_alert', 'POST', { ticker: _alertTicker, target: existing.target }); } catch (_) {}
-    }
+    const newTarget = parseFloat(priceV);
+    // ONE atomic call: replace:true drops any existing alert for this ticker and
+    // adds the new one server-side in a single mutate — no two-request remove+add
+    // race (which could leave the old target on GitHub read-after-write lag).
     await api('/api/miniapp/alerts', 'POST', {
-      action: 'add',
-      ticker: _alertTicker,
-      target: parseFloat(priceV),
-      direction: dir,
-      recurring,
+      action: 'add', ticker: _alertTicker, target: newTarget,
+      direction: dir, recurring, replace: true,
     });
     tg.HapticFeedback?.notificationOccurred('success');
     showToast(`🔔 Alert set for ${_alertTicker}`, 'success');
     closeOverlay('watchalert-overlay');
-    _loadPickAlerts();   // refresh pick-card alert buttons in place
+    // Optimistic: backend now holds exactly one alert for this ticker — reflect it
+    // immediately so the button flips without waiting on a (possibly lagged) re-fetch.
+    _watchAlertsData = (_watchAlertsData || []).filter(a => a.ticker !== _alertTicker);
+    _watchAlertsData.push({ ticker: _alertTicker, target: newTarget, recurring });
+    _repaintPickAlertBtns();
+    _loadPickAlerts();   // reconcile with server (resolves direction, dedup)
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Set Alert';
     tg.HapticFeedback?.notificationOccurred('error');
@@ -6546,7 +6550,10 @@ async function removeWatchAlert() {
     tg.HapticFeedback?.notificationOccurred('success');
     showToast(`🔕 Alert removed for ${_alertTicker}`, 'success');
     closeOverlay('watchalert-overlay');
-    _loadPickAlerts();   // flip the pick button back to 'Set Alert'
+    // Optimistic: drop it locally + repaint so the button flips back immediately.
+    _watchAlertsData = (_watchAlertsData || []).filter(a => a.ticker !== _alertTicker);
+    _repaintPickAlertBtns();
+    _loadPickAlerts();   // reconcile with server
   } catch (e) {
     btn.disabled = false; btn.textContent = '🗑 Remove alert';
     tg.HapticFeedback?.notificationOccurred('error');

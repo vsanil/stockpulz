@@ -71,6 +71,26 @@ class TestAddAlert:
         with pytest.raises(ValueError, match="Alert already exists"):
             add_alert(CHAT, "MSFT", 420.00000001, direction="above")
 
+    def test_replace_leaves_exactly_one_alert_for_ticker(self):
+        """replace=True atomically drops all existing alerts for the ticker
+        (any direction, incl. an auto stop) and leaves only the new one."""
+        from price_alert_manager import _load_alerts
+        add_alert(CHAT, "AAPL", 180.0, direction="below")
+        add_alert(CHAT, "AAPL", 210.0, direction="above")
+        add_alert(CHAT, "AAPL", 195.0, direction="above", replace=True)
+        aapl = [a for a in _load_alerts().get(CHAT, []) if a["ticker"] == "AAPL"]
+        assert len(aapl) == 1
+        assert aapl[0]["target"] == 195.0
+
+    def test_replace_bypasses_duplicate_rejection(self):
+        """replace=True must succeed even if an identical alert already exists
+        (it replaces rather than raising 'already exists')."""
+        from price_alert_manager import _load_alerts
+        add_alert(CHAT, "AAPL", 195.0, direction="above")
+        add_alert(CHAT, "AAPL", 195.0, direction="above", replace=True)  # no raise
+        aapl = [a for a in _load_alerts().get(CHAT, []) if a["ticker"] == "AAPL"]
+        assert len(aapl) == 1
+
     def test_same_ticker_different_target_allowed(self):
         """Two alerts on the same ticker at different prices are both valid."""
         add_alert(CHAT, "AAPL", 200.0, direction="above")
