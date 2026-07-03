@@ -11,9 +11,8 @@ name: Synthetic User
 
 on:
   schedule:
-    - cron: "0 12 * * 1-5"     # 8 AM ET — open (after the 7 AM morning picks)
-    - cron: "0 16 * * 1-5"     # 12 PM ET — manage (midday)
-    - cron: "30 19 * * 1-5"    # 3:30 PM ET — manage (near close)
+    - cron: "0 12 * * 1-5"        # 8 AM ET — open (after the 7 AM morning picks)
+    - cron: "0 14-20 * * 1-5"     # 10 AM–4 PM ET hourly — manage (market hours)
   workflow_dispatch:
     inputs:
       phase:
