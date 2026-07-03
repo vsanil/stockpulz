@@ -22,9 +22,9 @@ Safety:
   • Mini-app auth runs in param mode (MINIAPP_AUTH_DISABLED=1) so the in-process
     Flask test client can authenticate as the admin via a chat_id param.
 
-Self-retires after _SWEEP_END (the 3-day window) — the workflow can then be
-deleted. Reports loudly on any failure; on green it stays quiet except for one
-end-of-day summary.
+Runs daily (no end date) until the owner asks to stop — disable/delete the
+workflow to stop it. Reports loudly on any failure; on green it stays quiet
+except for one end-of-day summary.
 
 Usage: python3 scripts/full_sweep.py [--dry-run]
 """
@@ -44,9 +44,6 @@ os.environ.setdefault("MINIAPP_AUTH_DISABLED", "1")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requests
-
-# The hardening window. After this ET date the sweep no-ops (delete the workflow).
-_SWEEP_END = "2026-07-06"
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -257,16 +254,6 @@ def main() -> int:
     if not admin:
         print("TELEGRAM_CHAT_ID not set — cannot run as admin.")
         return 2
-
-    # Self-retire after the hardening window.
-    try:
-        from config_manager import et_today
-        today = str(et_today())          # et_today() returns a date → normalise to ISO str
-    except Exception:
-        today = _dt.date.today().isoformat()
-    if today > _SWEEP_END:
-        print(f"[full_sweep] window ended ({today} > {_SWEEP_END}) — no-op. Delete the workflow.")
-        return 0
 
     from webhook import app
     client = app.test_client()
