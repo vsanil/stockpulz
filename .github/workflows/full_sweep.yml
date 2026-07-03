@@ -1,0 +1,44 @@
+name: Full Sweep
+
+# Exhaustive user-surface exerciser: hits EVERY /api/miniapp/* endpoint, EVERY
+# bot command, and EVERY inline-button callback as the admin, snapshot/restore-safe.
+# Complements the canary (math/delivery) and the synthetic-user (real lifecycle).
+# Runs ~3x/day for a short hardening window, then the script self-retires after
+# its end date (scripts/full_sweep.py: _SWEEP_END). DMs the admin only on failure.
+
+on:
+  schedule:
+    - cron: "0 13 * * *"     # 9 AM ET  — after the morning open + picks
+    - cron: "0 17 * * *"     # 1 PM ET  — midday
+    - cron: "30 20 * * *"    # 4:30 PM ET — after the close
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - run: pip install -r requirements.txt
+      - name: Run full sweep
+        run: python scripts/full_sweep.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
+          GITHUB_TOKEN:       ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID:            ${{ secrets.GIST_ID }}
+          FINNHUB_API_KEY:    ${{ secrets.FINNHUB_API_KEY }}
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          ALPACA_KEY_ID:      ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
