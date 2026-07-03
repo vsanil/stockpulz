@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/CLAUDE.md": {
-    "mtime": 1783062073.4878588,
-    "ast_hash": "d988b89920b1577f35c52280f7a7d34e",
+    "mtime": 1783062901.678035,
+    "ast_hash": "4a17c334d8c3328bc55b33a5f83a054c",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/docs/index.html": {
@@ -517,6 +517,21 @@
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.github/workflows/synthetic_user.yml": {
     "mtime": 1783061994.1324317,
     "ast_hash": "8cfb5fab33378251bacda04d866a20fc",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_full_sweep.py": {
+    "mtime": 1783062837.9872067,
+    "ast_hash": "4694b510ebb3f503a2e96f436f9f33f8",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/full_sweep.py": {
+    "mtime": 1783062756.8891306,
+    "ast_hash": "fe1089c3c7ce7f73f7fe277f10a3af6d",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.github/workflows/full_sweep.yml": {
+    "mtime": 1783062477.7040117,
+    "ast_hash": "148bc2918559677fb78377928f07c7d9",
     "semantic_hash": ""
   }
 }
