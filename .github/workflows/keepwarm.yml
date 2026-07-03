@@ -1,18 +1,18 @@
 name: Keep Render Warm
 
-# Pings /health every 10 minutes so Render never goes cold during the hours users
-# are active. A cold server → the first /start or button tap waits ~30-60s for a
-# boot (or the reply is dropped mid-boot), which reads as "the bot isn't working".
+# Pings /health every 10 minutes, 24/7, so Render never goes cold. A cold server →
+# the first /start or button tap waits ~30-60s for a boot (or the reply is dropped
+# mid-boot), which reads as "the bot isn't working". This bit NEW users worst:
+# they click a share link at ANY hour (other timezones, evenings, weekends), and
+# a cold server ate their first /start — so the invite looked broken.
 #
-# Window: 10:00–22:59 UTC (~6 AM–6 PM ET). Deliberately STARTS BEFORE the 11:00 UTC
-# (7 AM ET) morning-picks run — users interact right after picks land, and the old
-# 12:00-UTC start left that peak window cold (a 7 AM ET /start hit a cold server).
-# Covers through the EOD/evening jobs (~20-21 UTC). Cost: ~78 runs/day × ~10s ≈
-# 13 min/day — well within the free tier. GH cron can lag a few min under load;
-# for hard reliability, mirror this as a cron-job.org /health ping.
+# 24/7 because share-link clicks aren't confined to trading hours. This repo is
+# PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free.
+# Render free tier spins down after ~15 min idle; 10-min pings keep it hot. GH cron
+# can lag a few min under load — for hard reliability mirror as a cron-job.org ping.
 on:
   schedule:
-    - cron: "*/10 10-22 * * *"     # Every 10 min, ~6 AM–6 PM ET (warms before the 7 AM run)
+    - cron: "*/10 * * * *"     # Every 10 min, 24/7 — Render never goes cold
 
   workflow_dispatch: {}   # Manual trigger for testing
 
