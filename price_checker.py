@@ -6,10 +6,68 @@ with a yfinance fallback for crypto in case CoinGecko fails or ids are missing.
 from __future__ import annotations
 
 import concurrent.futures
+import time
+import threading
 import requests
 import yfinance as yf
 
 COINGECKO_SIMPLE = "https://api.coingecko.com/api/v3/simple/price"
+
+# ── Shared CoinGecko price fetch: 60s cache + 429 backoff ─────────────────────
+# CoinGecko's free tier is rate-limited (~30 calls/min, shared across ALL our
+# call sites: alerts, positions, watchlist, paper, screener). Uncoordinated
+# per-coin calls were 429-ing. Route crypto price fetches through this so each
+# coin is fetched at most once per _CG_TTL, and a 429 backs off instead of failing.
+_CG_CACHE: dict[str, tuple[float, float]] = {}   # cg_id -> (usd_price, ts)
+_CG_TTL = 60                                       # seconds
+_CG_LOCK = threading.Lock()
+
+
+def cg_prices(cg_ids: list[str]) -> dict[str, float]:
+    """
+    Batched CoinGecko /simple/price for coin ids, with a 60s cache and one 429
+    backoff. Returns {cg_id: usd_price} for whatever resolved. Safe/shared so the
+    app never hammers CoinGecko's free-tier limit from many places at once.
+    """
+    now = time.time()
+    out: dict[str, float] = {}
+    missing: list[str] = []
+    with _CG_LOCK:
+        for cid in cg_ids:
+            hit = _CG_CACHE.get(cid)
+            if hit and (now - hit[1]) < _CG_TTL:
+                out[cid] = hit[0]
+            else:
+                missing.append(cid)
+    if not missing:
+        return out
+    ids = ",".join(sorted(set(missing)))
+    for attempt in (1, 2):
+        try:
+            resp = requests.get(COINGECKO_SIMPLE,
+                                params={"ids": ids, "vs_currencies": "usd"}, timeout=10)
+            if resp.status_code == 429 and attempt == 1:
+                try:
+                    wait = min(int(resp.headers.get("Retry-After", "2") or 2), 10)
+                except (ValueError, TypeError):
+                    wait = 2
+                print(f"[price_checker] CoinGecko 429 — backing off {wait}s")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            stamp = time.time()
+            with _CG_LOCK:
+                for cid in set(missing):
+                    p = data.get(cid, {}).get("usd")
+                    if p and p > 0:
+                        _CG_CACHE[cid] = (float(p), stamp)
+                        out[cid] = float(p)
+            break
+        except Exception as exc:
+            print(f"[price_checker] CoinGecko batch failed ({exc}).")
+            break
+    return out
 
 # Fallback map: crypto symbol → CoinGecko coin id
 # Used when the picks dict doesn't carry an `id` field (e.g. Claude omitted it)
@@ -144,23 +202,14 @@ def get_current_prices(picks: dict) -> dict:
             print(f"[price_checker] No CoinGecko id for {sym} — will try yfinance fallback.")
 
     if symbol_to_id:
-        try:
-            ids  = ",".join(symbol_to_id.values())
-            resp = requests.get(
-                COINGECKO_SIMPLE,
-                params={"ids": ids, "vs_currencies": "usd"},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            for sym, cid in symbol_to_id.items():
-                price = data.get(cid, {}).get("usd")
-                if price and price > 0:   # reject 0 / nan / negative
-                    prices[sym] = float(price)
-                    crypto_symbols.discard(sym)   # mark as resolved
-            print(f"[price_checker] CoinGecko returned prices for: {list(symbol_to_id.keys())}")
-        except Exception as exc:
-            print(f"[price_checker] CoinGecko call failed ({exc}) — falling back to yfinance for all crypto.")
+        # Cached + 429-backoff batch fetch (shared across the app's call sites).
+        cg_out = cg_prices(list(symbol_to_id.values()))
+        for sym, cid in symbol_to_id.items():
+            price = cg_out.get(cid)
+            if price and price > 0:   # reject 0 / nan / negative
+                prices[sym] = float(price)
+                crypto_symbols.discard(sym)   # mark as resolved
+        print(f"[price_checker] CoinGecko resolved: {sorted(set(symbol_to_id) - crypto_symbols)}")
 
     # ── yfinance fallback for any crypto still missing a price ────────────────
     still_missing = [s for s in crypto_symbols if s not in prices]
