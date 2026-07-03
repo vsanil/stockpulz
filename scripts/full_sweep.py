@@ -348,7 +348,7 @@ def main() -> int:
     # Self-retire after the hardening window.
     try:
         from config_manager import et_today
-        today = et_today()
+        today = str(et_today())          # et_today() returns a date → normalise to ISO str
     except Exception:
         today = _dt.date.today().isoformat()
     if today > _SWEEP_END:
