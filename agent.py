@@ -83,6 +83,27 @@ DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
 STOP_PROXIMITY_PCT = 3.0
 
 
+def _stop_badge(price, stop) -> str:
+    """
+    Position badge for stop proximity. Distinguishes ALREADY past the stop (loud)
+    from merely near it — a position 13% BELOW its stop must not read 'NEAR STOP'
+    (that was the BNB bug: $560 shown 'near' a $645 stop it had blown through).
+      price <= stop            → 🔴 STOP HIT
+      stop < price <= stop*1.03 → ⚠️ NEAR STOP
+    """
+    try:
+        price, stop = float(price), float(stop)
+    except (TypeError, ValueError):
+        return ""
+    if not (stop > 0 and price > 0):
+        return ""
+    if price <= stop:
+        return "  🔴 <b>STOP HIT</b>"
+    if price <= stop * (1 + STOP_PROXIMITY_PCT / 100):
+        return "  ⚠️ <b>NEAR STOP</b>"
+    return ""
+
+
 def _is_pos(x) -> bool:
     """
     True only for a real, positive number. Rejects None, 0, negatives, and nan.
@@ -3276,6 +3297,28 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
         entry_f, stop_f, curr_f = float(entry), float(stop), float(current)
         pct_from_entry = (curr_f - entry_f) / entry_f * 100
         pct_to_stop    = (curr_f - stop_f)  / curr_f  * 100
+
+        # Hard stop breach — price at/below the stop. Fires regardless of how far
+        # underwater, so a position that blew PAST its stop (e.g. BNB at -13.9%,
+        # well beyond the -8% hold/fold floor below) still gets a loud alert. The
+        # old code only nudged in the -2% to -8% band, so a blown-through stop
+        # went silent and the pre-market card mislabelled it "NEAR STOP".
+        if curr_f <= stop_f:
+            key = f"stophit_{uid}_{ticker}_{et_today()}"
+            if not _is_alerted(key):
+                _mark_alerted(key)
+                send_inline_keyboard(
+                    f"🔴 <b>STOP HIT — {ticker}</b>\n"
+                    f"Now <code>${_p(curr_f)}</code>, below your "
+                    f"<code>${_p(stop_f)}</code> stop  ·  <b>{pct_from_entry:.1f}%</b> from entry.\n\n"
+                    f"<i>Your stop has triggered. Consider closing to protect capital, "
+                    f"or move the stop if the thesis still holds.</i>\n\n"
+                    f"<code>/sold {ticker}</code> to close  ·  <code>/updatestop {ticker}</code> to adjust",
+                    [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
+                    chat_id=uid,
+                )
+            continue   # past-stop: don't ALSO send the softer hold/fold nudge
+
         # Only nudge when down 2–8% AND within 5% of stop
         if -8.0 <= pct_from_entry <= -2.0 and pct_to_stop <= 5.0:
             key = f"holdfold_{uid}_{ticker}_{et_today()}"
@@ -3600,9 +3643,7 @@ def run_premarket(config: dict):
                             if entry:
                                 ve = (price - float(entry)) / float(entry) * 100
                                 vs_entry_str = f"  ·  {'+' if ve >= 0 else ''}{ve:.1f}% vs entry"
-                            stop_badge = ""
-                            if stop and price <= float(stop) * (1 + STOP_PROXIMITY_PCT / 100):
-                                stop_badge = "  ⚠️ <b>NEAR STOP</b>"
+                            stop_badge = _stop_badge(price, stop) if stop else ""
                             position_lines.append(
                                 f"  ⚪ <b>{ticker}</b>  <code>${_p(price)}</code>"
                                 f"  <i>24/7 · live{vs_entry_str}</i>{stop_badge}"
@@ -3666,10 +3707,8 @@ def run_premarket(config: dict):
                         vs_entry = (pre_price - float(entry)) / float(entry) * 100
                         vs_entry_str = f"  ·  {'+' if vs_entry >= 0 else ''}{vs_entry:.1f}% vs entry"
 
-                    # Stop proximity
-                    stop_badge = ""
-                    if stop and pre_price <= float(stop) * (1 + STOP_PROXIMITY_PCT / 100):
-                        stop_badge = "  ⚠️ <b>NEAR STOP</b>"
+                    # Stop proximity (STOP HIT if already at/below the stop)
+                    stop_badge = _stop_badge(pre_price, stop) if stop else ""
 
                     move_icon = "🔴" if vs_prev <= -3 else ("🟢" if vs_prev >= 3 else "⚪")
                     line = (

@@ -817,3 +817,53 @@ class TestMoveBand:
         assert ag._move_band(4.0)  == "+1"
         assert ag._move_band(-4.0) == "-1"    # reversal is a different key → re-alerts
         assert ag._move_band(-9.0) == "-3"
+
+
+class TestStopBadge:
+    """Position badge distinguishes STOP HIT (at/below stop) from NEAR STOP."""
+
+    def test_stop_hit_at_or_below(self):
+        import agent as ag
+        assert "STOP HIT" in ag._stop_badge(560.5, 645)   # BNB: 13% below stop
+        assert "STOP HIT" in ag._stop_badge(645, 645)      # exactly at stop
+
+    def test_near_stop_within_band(self):
+        import agent as ag
+        assert "NEAR STOP" in ag._stop_badge(650, 645)     # just above stop
+        assert "NEAR STOP" in ag._stop_badge(645 * 1.03, 645)
+
+    def test_no_badge_when_clear(self):
+        import agent as ag
+        assert ag._stop_badge(700, 645) == ""              # 8.5% above stop
+
+    def test_bad_input_no_badge(self):
+        import agent as ag
+        assert ag._stop_badge(None, 645) == ""
+        assert ag._stop_badge(100, 0) == ""
+
+
+class TestStopHitAlert:
+    """A position past its stop must get a loud STOP-HIT alert, even beyond the
+    -2%..-8% hold/fold window (the BNB -13.9% gap)."""
+
+    def _wire(self, monkeypatch, trades):
+        import agent as ag
+        sent = []
+        monkeypatch.setattr(ag, "load_user_trade_log", lambda uid: {"open": trades})
+        monkeypatch.setattr(ag, "send_inline_keyboard",
+                            lambda text, kb=None, chat_id=None: sent.append(text))
+        monkeypatch.setattr(ag, "_is_alerted", lambda k: False)
+        monkeypatch.setattr(ag, "_mark_alerted", lambda k: None)
+        return ag, sent
+
+    def test_blown_through_stop_fires_stop_hit(self, monkeypatch):
+        ag, sent = self._wire(monkeypatch, [{"ticker": "BNB", "entry_price": 651, "stop_loss": 645}])
+        ag._check_hold_or_fold("u1", {"BNB": 560.5})       # 13% below stop
+        assert any("STOP HIT" in t and "BNB" in t for t in sent)
+        assert not any("Hold or fold" in t for t in sent)  # not ALSO the soft nudge
+
+    def test_approaching_stop_still_hold_fold(self, monkeypatch):
+        ag, sent = self._wire(monkeypatch, [{"ticker": "AAA", "entry_price": 100, "stop_loss": 92}])
+        ag._check_hold_or_fold("u1", {"AAA": 95})           # -5% from entry, above stop
+        assert any("Hold or fold" in t for t in sent)
+        assert not any("STOP HIT" in t for t in sent)
