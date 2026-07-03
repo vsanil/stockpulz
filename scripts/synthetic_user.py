@@ -179,21 +179,25 @@ def phase_manage(admin: str, dry: bool) -> list[str]:
     for t in st.get("real", []):
         pos = real_open.get(t)
         if not pos:
-            continue
-        px = get_live_price(t)
-        if not _pos(px):
-            still_real.append(t); continue
-        tgt, stop = pos.get("target_price"), pos.get("stop_loss")
-        if _pos(tgt) and px >= float(tgt):
-            if not dry:
-                ct = close_trade(t, admin, exit_price=float(px))
-            acts.append(f"🎯 SOLD REAL {t} @ ${px:.2f} (target hit)")
-        elif _pos(stop) and px <= float(stop):
-            if not dry:
-                close_trade(t, admin, exit_price=float(px))
-            acts.append(f"🔴 SOLD REAL {t} @ ${px:.2f} (stop hit)")
-        else:
-            still_real.append(t)
+            continue                      # already closed / gone — drop from state
+        try:
+            px = get_live_price(t)
+            if not _pos(px):
+                still_real.append(t); continue
+            tgt, stop = pos.get("target_price"), pos.get("stop_loss")
+            if _pos(tgt) and px >= float(tgt):
+                if not dry:
+                    close_trade(t, admin, exit_price=float(px))
+                acts.append(f"🎯 SOLD REAL {t} @ ${px:.2f} (target hit)")
+            elif _pos(stop) and px <= float(stop):
+                if not dry:
+                    close_trade(t, admin, exit_price=float(px))
+                acts.append(f"🔴 SOLD REAL {t} @ ${px:.2f} (stop hit)")
+            else:
+                still_real.append(t)
+        except Exception as e:
+            still_real.append(t)          # keep tracking; surface the error
+            acts.append(f"⚠️ manage REAL {t} errored: {e}")
 
     paper_open = {x["ticker"]: x for x in load_user_paper(admin).get("positions", [])}
     still_paper = []
@@ -201,26 +205,30 @@ def phase_manage(admin: str, dry: bool) -> list[str]:
         pos = paper_open.get(t)
         if not pos:
             continue
-        px = get_live_price(t)
-        if not _pos(px):
-            still_paper.append(t); continue
-        tgt, stop = pos.get("target_price"), pos.get("stop_loss")
-        if _pos(tgt) and px >= float(tgt):
-            if not dry:
-                paper_sell(t, admin, price=float(px))
-            acts.append(f"🎯 paper-sold {t} @ ${px:.2f} (target)")
-        elif _pos(stop) and px <= float(stop):
-            if not dry:
-                paper_sell(t, admin, price=float(px))
-            acts.append(f"🔴 paper-sold {t} @ ${px:.2f} (stop)")
-        else:
+        try:
+            px = get_live_price(t)
+            if not _pos(px):
+                still_paper.append(t); continue
+            tgt, stop = pos.get("target_price"), pos.get("stop_loss")
+            if _pos(tgt) and px >= float(tgt):
+                if not dry:
+                    paper_sell(t, admin, price=float(px))
+                acts.append(f"🎯 paper-sold {t} @ ${px:.2f} (target)")
+            elif _pos(stop) and px <= float(stop):
+                if not dry:
+                    paper_sell(t, admin, price=float(px))
+                acts.append(f"🔴 paper-sold {t} @ ${px:.2f} (stop)")
+            else:
+                still_paper.append(t)
+        except Exception as e:
             still_paper.append(t)
+            acts.append(f"⚠️ manage PAPER {t} errored: {e}")
 
     if not dry:
         st["real"], st["paper"] = still_real, still_paper
         _save_state(st)
-    if not acts:
-        acts.append(f"held all (real: {st.get('real')}, paper: {st.get('paper')})")
+    # NOTE: returns ONLY actionable events (sells/cuts/errors). An empty list
+    # means "nothing to do" — main() then stays silent (no Telegram spam).
     return acts
 
 
@@ -234,10 +242,19 @@ def main() -> int:
         print("TELEGRAM_CHAT_ID not set"); return 2
 
     acts = phase_open(admin, args.dry_run) if args.phase == "open" else phase_manage(admin, args.dry_run)
+
+    # manage runs hourly during market hours — only DM when it actually did
+    # something (sold/cut/error), else stay silent so the reports don't become
+    # noise. open always reports (it opens positions every time).
+    actionable = bool(acts)
+    if not acts:  # manage with nothing to do — log a held summary to stdout only
+        st = _state()
+        acts = [f"held all (real: {st.get('real')}, paper: {st.get('paper')})"]
     body = "\n".join(f"  {a}" for a in acts)
     print(f"[synthetic_user] phase={args.phase} dry={args.dry_run}\n{body}")
 
-    if not args.dry_run:
+    should_send = (not args.dry_run) and (args.phase == "open" or actionable)
+    if should_send:
         try:
             from telegram_api import send_message
             send_message(f"🤖 <b>Synthetic user — {args.phase}</b>\n{body}", chat_id=admin)
