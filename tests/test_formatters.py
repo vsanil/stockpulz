@@ -203,6 +203,19 @@ class TestFormatDailyMessage:
         result = format_daily_message(_picks(st_tickers=("AAPL",)), _cfg(pick_mode="lt"))
         assert "AAPL" not in result
 
+    def test_st_lt_duplicate_collapsed(self):
+        """A ticker in BOTH short + long term shows once (ST card + note), not a
+        duplicate LT card."""
+        result = format_daily_message(_picks(st_tickers=("VERX",), lt_tickers=("VERX",)), _cfg())
+        assert result.count("also a long-term hold") == 1   # noted once in the ST card
+        assert "shown above" in result                       # LT section cross-refs, no dup card
+        assert "VERX" in result
+
+    def test_distinct_st_lt_not_collapsed(self):
+        result = format_daily_message(_picks(st_tickers=("AAPL",), lt_tickers=("NVDA",)), _cfg())
+        assert "also a long-term hold" not in result
+        assert "AAPL" in result and "NVDA" in result
+
     def test_greeting_when_first_name(self):
         result = format_daily_message(_picks(), _cfg(first_name="Alice"))
         assert "Alice" in result

@@ -263,6 +263,15 @@ def format_daily_message(picks: dict, config: dict,
 
     st_picks    = _wl_sort(stocks.get("short_term",   []) if show_st else [])
     lt_picks    = _wl_sort(stocks.get("long_term",    []) if show_lt else [])
+    # Collapse ST/LT duplicates: a ticker that's both a short-term trade AND a
+    # long-term hold shows ONCE (full card in Short Term with an "also a long-term
+    # hold" note) instead of a duplicate card in both sections. _lt_hold maps the
+    # ticker → its (LT target, horizon) so the ST note can carry the LT thesis.
+    _st_syms = {(s.get("ticker") or "").upper() for s in st_picks}
+    _lt_hold = {(s.get("ticker") or "").upper(): (s.get("target_price"), s.get("horizon"))
+                for s in lt_picks if (s.get("ticker") or "").upper() in _st_syms}
+    if _lt_hold:
+        lt_picks = [s for s in lt_picks if (s.get("ticker") or "").upper() not in _lt_hold]
     cst_picks   = _wl_sort(crypto.get("short_term",   []) if show_crypto else [], key="symbol")
     etf_picks   = _wl_sort(etfs.get("short_term", []) if show_st else []) + \
                   _wl_sort([{**e, "_lt": True} for e in etfs.get("long_term", [])] if show_lt else [])
@@ -371,6 +380,14 @@ def format_daily_message(picks: dict, config: dict,
         row = (f"<b>{_esc(t)}</b>{_name_tag(t)}{_conv_tag(s.get('conviction',3))}{held_badge}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(e,tgt)}</i>{stop_str}{_theme_tag(s)}")
+        # If this ticker is also a long-term pick, note it here (the duplicate LT
+        # card was dropped) so its LT target/horizon isn't lost.
+        if t.upper() in _lt_hold:
+            _lt_tgt, _lt_hz = _lt_hold[t.upper()]
+            _note = "  ·  <i>also a long-term hold"
+            if _lt_tgt: _note += f" → ${_p(_lt_tgt)}"
+            if _lt_hz:  _note += f" ({_esc(_lt_hz)})"
+            row += _note + "</i>"
         tl = _tline(s.get("thesis"), s.get("catalyst"))
         if tl: row += f"\n{tl}"
         edge = s.get("edge", "")
@@ -477,6 +494,10 @@ def format_daily_message(picks: dict, config: dict,
         lines += ["", "🏦 <b>STOCKS — LONG TERM</b>"]
         for s in lt_picks:
             lines += [f"<blockquote expandable>{_row_lt(s)}</blockquote>"]
+    elif _lt_hold:
+        # Every long-term pick was also a short-term pick — shown above with a note.
+        _held = ", ".join(f"<b>{_esc(sym)}</b>" for sym in _lt_hold)
+        lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_held} shown above (also long-term holds)</i>"]
     elif show_lt:
         _lt_skip = _closed_short or "no stock cleared the quality bar today"
         lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
