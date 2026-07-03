@@ -2680,7 +2680,7 @@ def _check_options_flow_alert(uid: str, open_positions: list) -> str | None:
     body = "\n".join(hits)
     return (
         f"🔥 <b>Unusual Options Activity</b> on your held positions:\n\n{body}\n\n"
-        f"Smart money may be positioning — check before market close."
+        f"Smart money may be positioning ahead of a move — worth a look."
     )
 
 
