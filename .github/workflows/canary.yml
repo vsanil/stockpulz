@@ -1,0 +1,45 @@
+name: Daily Canary
+
+# Synthetic end-to-end health check + calculation audit. Runs as the admin
+# account, exercises every path (picks, prices, sizing, paper trade, alerts,
+# watchlist, backtest, delivery/cron health, endpoint health), verifies the math,
+# and DMs a report to the admin. Non-destructive (snapshot→act→restore).
+#
+# 12:30 UTC (7:30 AM ET) — ~30 min AFTER the 11:00 UTC morning run, so the
+# delivery checks can confirm today's picks actually went out. Public repo →
+# GitHub Actions minutes are unlimited.
+
+on:
+  schedule:
+    - cron: "30 12 * * *"      # 7:30 AM ET daily
+  workflow_dispatch: {}         # manual "run now"
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - run: pip install -r requirements.txt
+      - name: Run canary
+        run: python scripts/canary.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
+          GITHUB_TOKEN:       ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID:            ${{ secrets.GIST_ID }}
+          FINNHUB_API_KEY:    ${{ secrets.FINNHUB_API_KEY }}
+          ALPACA_KEY_ID:      ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
+          RENDER_EXTERNAL_URL: ${{ secrets.RENDER_EXTERNAL_URL }}
