@@ -490,13 +490,18 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/canary.py": {
-    "mtime": 1783054088.2106712,
-    "ast_hash": "c16ae192691a7b59f132e5208eea5cfe",
+    "mtime": 1783055120.374848,
+    "ast_hash": "251196ce4dad5f275b98e287d36db32d",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.github/workflows/canary.yml": {
     "mtime": 1783054164.479164,
     "ast_hash": "99b8fb4cc6982415448b43fbeaf416df",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/LAUNCH_READINESS.md": {
+    "mtime": 1783054769.9728222,
+    "ast_hash": "82ebd59af31207cf7443dab98ec38625",
     "semantic_hash": ""
   }
 }

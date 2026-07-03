@@ -316,16 +316,22 @@ def build_report() -> str:
     fails = [r for r in RESULTS if not r[1]]
     passes = [r for r in RESULTS if r[1]]
     head = "✅" if not fails else "🔴"
-    lines = [f"{head} <b>Canary — daily health check</b>",
-             f"<i>{now}</i>",
-             f"<b>{len(passes)}/{len(RESULTS)} checks passed</b>", ""]
+    lines = [f"{head} <b>Canary — daily health check</b>", f"<i>{now}</i>"]
     if fails:
-        lines.append("🔴 <b>Failures:</b>")
+        # Loud, unmissable, and tells you exactly what to do with it.
+        lines += ["",
+                  "🚨🚨🚨 <b>ACTION NEEDED</b> 🚨🚨🚨",
+                  "<b>Forward this whole message to Claude to fix.</b>",
+                  ""]
+    lines.append(f"<b>{len(passes)}/{len(RESULTS)} checks passed</b>")
+    if fails:
+        lines.append("")
+        lines.append(f"🔴 <b>{len(fails)} FAILED:</b>")
         for name, _ok, detail in fails:
             lines.append(f"  • <b>{name}</b> — {detail}")
-        lines.append("")
-    # group passes compactly
-    lines.append("<i>Passed: " + ", ".join(r[0] for r in passes) + "</i>")
+    else:
+        lines.append("<i>Every path + calculation verified. Nothing to do. 👍</i>")
+    lines += ["", "<i>Passed: " + ", ".join(r[0] for r in passes) + "</i>"]
     return "\n".join(lines)
 
 
