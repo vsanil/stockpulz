@@ -110,8 +110,16 @@ _orig_get = requests.get
 _orig_req = requests.Session.request
 
 
+# Mute only the SEND methods — let read-only getMe/getWebhookInfo through so
+# username-dependent paths (share_link, mini-app deep-link buttons) work for real.
+_TG_SEND = ("sendmessage", "sendphoto", "sendchataction", "answercallbackquery",
+            "editmessagetext", "editmessagereplymarkup", "senddocument",
+            "sendmediagroup", "sendvideo", "sendanimation")
+
+
 def _is_tg(url) -> bool:
-    return isinstance(url, str) and "api.telegram.org" in url
+    return (isinstance(url, str) and "api.telegram.org" in url
+            and any(m in url.lower() for m in _TG_SEND))
 
 
 class _FakeResp:
