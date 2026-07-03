@@ -55,20 +55,14 @@ def _current_price(ticker: str) -> float | None:
                 return float(price)
         except Exception:
             pass
-    # Fallback: try CoinGecko for crypto if yfinance failed
+    # Fallback: try CoinGecko for crypto if yfinance failed — through the shared
+    # cached/back-off fetch so per-alert checks don't hammer the free-tier limit.
     if ticker in _CRYPTO_SYMBOLS:
         try:
-            import requests
-            from price_checker import _SYMBOL_TO_CG_ID  # canonical symbol→CG-id map
+            from price_checker import _SYMBOL_TO_CG_ID, cg_prices
             cg_id = _SYMBOL_TO_CG_ID.get(ticker)
             if cg_id:
-                resp = requests.get(
-                    "https://api.coingecko.com/api/v3/simple/price",
-                    params={"ids": cg_id, "vs_currencies": "usd"},
-                    timeout=8,
-                )
-                resp.raise_for_status()
-                price = resp.json().get(cg_id, {}).get("usd")
+                price = cg_prices([cg_id]).get(cg_id)
                 if price and price > 0:   # reject 0 / nan / negative (failed fetch)
                     return float(price)
         except Exception:

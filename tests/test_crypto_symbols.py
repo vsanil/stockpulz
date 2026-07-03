@@ -46,3 +46,33 @@ class TestModulesShareCanonicalSet:
     def test_webhook_chart_crypto_is_canonical(self):
         import webhook
         assert webhook._CHART_CRYPTO is CRYPTO_SYMBOLS
+
+
+class TestCgPricesCacheAndBackoff:
+    """Shared CoinGecko fetch: 60s cache (no repeat calls) + 429 backoff."""
+
+    def test_caches_within_ttl(self, monkeypatch):
+        import price_checker as pc
+        pc._CG_CACHE.clear()
+        calls = {"n": 0}
+        class _Resp:
+            status_code = 200; headers = {}
+            def raise_for_status(self): pass
+            def json(self): return {"bitcoin": {"usd": 60000.0}}
+        monkeypatch.setattr(pc.requests, "get", lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1) or _Resp()))
+        assert pc.cg_prices(["bitcoin"]) == {"bitcoin": 60000.0}
+        assert pc.cg_prices(["bitcoin"]) == {"bitcoin": 60000.0}   # 2nd hits cache
+        assert calls["n"] == 1                                      # only ONE network call
+
+    def test_429_backs_off_then_succeeds(self, monkeypatch):
+        import price_checker as pc, time
+        pc._CG_CACHE.clear()
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        seq = [429, 200]
+        class _Resp:
+            def __init__(self, code): self.status_code = code; self.headers = {"Retry-After": "1"}
+            def raise_for_status(self):
+                if self.status_code >= 400: raise Exception("http error")
+            def json(self): return {"ethereum": {"usd": 3000.0}}
+        monkeypatch.setattr(pc.requests, "get", lambda *a, **k: _Resp(seq.pop(0)))
+        assert pc.cg_prices(["ethereum"]) == {"ethereum": 3000.0}   # retried after 429
