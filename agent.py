@@ -1309,8 +1309,13 @@ def run_eod_summary():
             missing = [p["ticker"] for p in open_positions
                        if p.get("ticker") and p["ticker"] not in user_prices]
             if missing:
+                # get_live_prices is partial-tolerant (crypto-aware, per-ticker):
+                # one failed/rate-limited fetch returns the rest, whereas the old
+                # _download_prices threw on any failure and the except then dropped
+                # the ENTIRE positions block from the EOD (the crypto-429 case).
                 try:
-                    user_prices.update(_download_prices(missing))
+                    from market_data import get_live_prices as _glp
+                    user_prices.update(_glp(missing) or {})
                 except Exception as _px_exc:
                     print(f"[agent] EOD position price fetch failed for {uid} (non-critical): {_px_exc}")
 
