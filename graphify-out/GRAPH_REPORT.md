@@ -1,7 +1,7 @@
 # Graph Report - stock-agent  (2026-07-03)
 
 ## Corpus Check
-- 88 files · ~239,129 words
+- 88 files · ~239,305 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `50118166`
+- Built from commit: `86e29f14`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -410,7 +410,7 @@
 
 ### Community 0 - "Community 0"
 Cohesion: 0.08
-Nodes (27): fix_ticker(), bool, str, One-time migration: rename a ticker in all users' open + closed trade logs.  Usa, get_allowed_users(), Return list of allowed chat_ids. Always includes TELEGRAM_CHAT_ID (owner)., Return list of allowed chat_ids. Always includes TELEGRAM_CHAT_ID (owner)., Return list of allowed chat_ids. Always includes TELEGRAM_CHAT_ID (owner). (+19 more)
+Nodes (31): fix_ticker(), bool, str, One-time migration: rename a ticker in all users' open + closed trade logs.  Usa, get_allowed_users(), load_user_trade_log(), Load trade log for a specific user., Save trade log for a specific user. (+23 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.07
@@ -525,8 +525,8 @@ Cohesion: 0.13
 Nodes (15): _is_quiet_hours(), Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con, Return True if the current ET time falls within the user's quiet window.     Con (+7 more)
 
 ### Community 46 - "Community 46"
-Cohesion: 0.11
-Nodes (18): add_feedback(), _flush_user_logs(), log_user_event(), Append a new feedback entry., Append a new feedback entry with user + app context for admin triage., Append a new feedback entry with user + app context for admin triage., Safely set all_data[chat_id] = value in a chat_id-keyed multi-user file.      Tw, Return number of unread feedback entries. (+10 more)
+Cohesion: 0.15
+Nodes (13): ban_user(), log_user_event(), Return number of unread feedback entries., Append a structured event to the user's rolling activity log.     Buffered in-me, Append a structured event to the user's rolling activity log.     Buffered in-me, Ban a user: remove from allowlist and add to banned list., Append a structured event to the user's rolling activity log.     Buffered in-me, Ban a user: remove from allowlist and add to banned list. (+5 more)
 
 ### Community 49 - "Community 49"
 Cohesion: 0.06
@@ -570,7 +570,7 @@ Nodes (4): bool, Wait until the app JS has fully initialized (key variables out 
 
 ### Community 114 - "Community 114"
 Cohesion: 0.05
-Nodes (66): bytes, str, float, str, str, generate_performance_card(), generate_trade_card(), card_generator.py — Generate a shareable performance card PNG for a user.  Produ (+58 more)
+Nodes (52): bytes, str, float, str, str, generate_performance_card(), generate_trade_card(), card_generator.py — Generate a shareable performance card PNG for a user.  Produ (+44 more)
 
 ### Community 132 - "Community 132"
 Cohesion: 0.11
@@ -581,8 +581,8 @@ Cohesion: 0.20
 Nodes (8): Extract Telegram's requested 429 cool-off. Telegram puts it in the JSON body, _retry_after_secs(), int, Shared CoinGecko fetch: 60s cache (no repeat calls) + 429 backoff., TestCgPricesCacheAndBackoff, 429 backpressure: honor Telegram's requested cool-off, capped., _Resp, TestRetryAfter
 
 ### Community 139 - "Community 139"
-Cohesion: 0.16
-Nodes (10): Send a Telegram message. Splits messages > 4096 chars automatically.     Retries, Send a Telegram message. Splits messages > 4096 chars automatically.     Retries, send_message(), admin_request_link(), Generate a one-time magic link and send it to the owner's Telegram., _err_response(), Retries up to MAX_RETRIES times on server errors., Messages longer than MAX_MESSAGE_LENGTH must be split and each chunk sent. (+2 more)
+Cohesion: 0.09
+Nodes (20): Send a Telegram message. Splits messages > 4096 chars automatically.     Retries, Send a Telegram message. Splits messages > 4096 chars automatically.     Retries, send_message(), admin_request_link(), Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot)., Receive Telegram update (message from user to bot). (+12 more)
 
 ### Community 140 - "Community 140"
 Cohesion: 0.08
@@ -677,8 +677,8 @@ Cohesion: 0.10
 Nodes (22): _holiday_observed(), _nth_weekday_of_month(), Shift a fixed-date holiday to its observed date when it falls on a weekend., Shift a fixed-date holiday to its observed date when it falls on a weekend., Return the nth occurrence of weekday (0=Mon…6=Sun) in the given month., Return {date: name} for all US stock-market holidays in the given year., Return {date: name} for all US stock-market holidays in the given year., Return True if every category in picks has no entries after filtering. (+14 more)
 
 ### Community 167 - "Community 167"
-Cohesion: 0.09
-Nodes (24): get_banned_users(), get_user_logs(), Return the last N log events for a user, newest first.     Merges persisted Gist, Return the last N log events for a user, newest first.     Merges persisted Gist, Return the last N log events for a user, newest first.     Merges persisted Gist, Return list of banned chat_ids., Remove pending state for a chat_id., Return list of banned chat_ids. (+16 more)
+Cohesion: 0.08
+Nodes (25): add_feedback(), _flush_user_logs(), get_banned_users(), get_user_logs(), Append a new feedback entry., Append a new feedback entry with user + app context for admin triage., Append a new feedback entry with user + app context for admin triage., Safely set all_data[chat_id] = value in a chat_id-keyed multi-user file.      Tw (+17 more)
 
 ### Community 168 - "Community 168"
 Cohesion: 0.11
@@ -781,8 +781,8 @@ Cohesion: 0.12
 Nodes (17): miniapp_pnl_history(), Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart., Return daily cumulative P&L from closed trades for portfolio chart. (+9 more)
 
 ### Community 193 - "Community 193"
-Cohesion: 0.07
-Nodes (34): load_backtest_trades(), load_buy_counts(), _load_gist_file(), load_macro_cache(), Load today's buy counts.     Structure: {"date": "YYYY-MM-DD", "counts": {"NVDA", Load macro signals cache from Gist.     Returns None if missing or older than MA, Persist simulated backtest trades for a user (used to seed Performance tab)., Persist simulated backtest trades for a user (used to seed Performance tab). (+26 more)
+Cohesion: 0.10
+Nodes (27): str, load_backtest_trades(), _load_gist_file(), load_macro_cache(), Load macro signals cache from Gist.     Returns None if missing or older than MA, Load simulated backtest trades for a user. Returns [] if none seeded., Load simulated backtest trades for a user. Returns [] if none seeded., Fetch and parse a JSON file from the active storage backend.     Checks in-memor (+19 more)
 
 ### Community 194 - "Community 194"
 Cohesion: 0.10
@@ -801,8 +801,8 @@ Cohesion: 0.18
 Nodes (10): personalize_picks(), Strip accidental markdown code-fence wrappers from a JSON string., Strip accidental markdown code-fence wrappers from a JSON string., Use Claude Haiku to write a one-line "why this fits YOUR portfolio" note per pic, Use Claude Haiku to write a one-line "why this fits YOUR portfolio" note per pic, Use Claude Haiku to write a one-line "why this fits YOUR portfolio" note per pic, Strip accidental markdown code-fence wrappers from a JSON string., _strip_fences() (+2 more)
 
 ### Community 198 - "Community 198"
-Cohesion: 0.33
-Nodes (10): str, add_pending_note(), _load(), mark_note_sent(), mark_note_skipped(), release_tracker.py — Tracks AI-generated release notes for StockPulz.  Pending n, Save a new AI-generated release note as pending., Move a note from pending to sent after broadcasting. (+2 more)
+Cohesion: 0.11
+Nodes (19): load_feedback(), Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first., Return list of feedback entries, newest first. (+11 more)
 
 ### Community 199 - "Community 199"
 Cohesion: 0.25
@@ -941,8 +941,8 @@ Cohesion: 0.15
 Nodes (10): list_alerts(), Return formatted Telegram HTML list of active alerts for this chat., Return formatted Telegram HTML list of active alerts for this chat., Return formatted Telegram HTML list of active alerts for this chat., Return formatted Telegram HTML list of active alerts for this chat., Return formatted Telegram HTML list of active alerts for this chat., Return formatted Telegram HTML list of active alerts for this chat., test_alert_manager.py — Unit tests for price_alert_manager.py  Covers:   - add_a (+2 more)
 
 ### Community 238 - "Community 238"
-Cohesion: 0.09
-Nodes (22): int, count_unread_feedback(), increment_buy_count(), load_feedback(), Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it (+14 more)
+Cohesion: 0.14
+Nodes (14): int, count_unread_feedback(), increment_buy_count(), Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it, Increment the buy count for a ticker today.     Creates or resets the file if it (+6 more)
 
 ### Community 239 - "Community 239"
 Cohesion: 0.18
@@ -1149,8 +1149,8 @@ Cohesion: 0.06
 Nodes (39): miniapp_paper_cancel(), miniapp_paper_reset(), Remove a paper position without recording it as a sale (cash refunded)., Remove a paper position without recording it as a sale (cash refunded)., Remove a paper position without recording it as a sale (cash refunded)., Reset the user's paper portfolio to $10,000 with no positions., Reset the user's paper portfolio to $10,000 with no positions., Reset the user's paper portfolio to $10,000 with no positions. (+31 more)
 
 ### Community 291 - "Community 291"
-Cohesion: 0.09
-Nodes (22): ban_user(), Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Ban a user: remove from allowlist and add to banned list. (+14 more)
+Cohesion: 0.13
+Nodes (15): Append today's picks to weekly_picks.json in Gist. Clears stale weeks automatica, Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Patch a single key in config.json on the Gist. Returns updated config., Remove a user from the banned list (does not re-approve, use add_allowed_user fo, Remove a user from the banned list (does not re-approve, use add_allowed_user fo (+7 more)
 
 ### Community 292 - "Community 292"
 Cohesion: 0.14
@@ -1193,8 +1193,8 @@ Cohesion: 0.09
 Nodes (23): _build_stock_candidates(), Combine short + long stock candidates and enrich with news + signals.      Signa, Combine short + long stock candidates and enrich with news + signals.      Signa, get_cached_signal(), load_signal_cache(), Load the signal cache from Gist.     Cache structure: { ticker: { "sentiment": {, Return cached signals for a ticker if still within TTL, else None.     Caller is, Load the signal cache from Gist.     Cache structure: { "_schema": int, ticker: (+15 more)
 
 ### Community 303 - "Community 303"
-Cohesion: 0.15
-Nodes (13): _get_analyst_recommendations(), _get_finnhub_metrics(), Fetch basic financial metrics from Finnhub /stock/metric.     Returns the 'metri, Fetch analyst buy/hold/sell consensus from Finnhub /stock/recommendation (free t, Fetch basic financial metrics from Finnhub /stock/metric.     Returns the 'metri, Fetch basic financial metrics from Finnhub /stock/metric.     Returns the 'metri, Fetch basic financial metrics from Finnhub /stock/metric.     Returns the 'metri, Fetch basic financial metrics from Finnhub /stock/metric.     Returns the 'metri (+5 more)
+Cohesion: 0.17
+Nodes (12): load_buy_counts(), Load today's buy counts.     Structure: {"date": "YYYY-MM-DD", "counts": {"NVDA", Persist simulated backtest trades for a user (used to seed Performance tab)., Persist simulated backtest trades for a user (used to seed Performance tab)., Persist simulated backtest trades for a user (used to seed Performance tab)., Load today's buy counts.     Structure: {"date": "YYYY-MM-DD", "counts": {"NVDA", Load today's buy counts.     Structure: {"date": "YYYY-MM-DD", "counts": {"NVDA", Persist simulated backtest trades for a user (used to seed Performance tab). (+4 more)
 
 ### Community 304 - "Community 304"
 Cohesion: 0.15
@@ -1245,8 +1245,8 @@ Cohesion: 0.33
 Nodes (5): paper_sell(), Simulate selling for a user. If shares=None, sells entire position., Simulate selling for a user. If shares=None, sells entire position., If user requests more shares than held, sell all held., TestPaperSell
 
 ### Community 316 - "Community 316"
-Cohesion: 0.11
-Nodes (22): str, _get_finnhub_profile(), get_sp500_tickers(), get_stock_universe(), _high_interest_tickers(), screener.py — Broad US stock screener using yfinance + ta + Finnhub fundamentals, Build a broad US stock universe: S&P 500 + NASDAQ 100 + S&P MidCap 400.     Fetc, Build a broad US stock universe: S&P 500 + NASDAQ 100 + S&P MidCap 400.      Fet (+14 more)
+Cohesion: 0.07
+Nodes (35): str, _get_analyst_recommendations(), _get_finnhub_metrics(), _get_finnhub_profile(), get_sp500_tickers(), get_stock_universe(), _high_interest_tickers(), screener.py — Broad US stock screener using yfinance + ta + Finnhub fundamentals (+27 more)
 
 ### Community 317 - "Community 317"
 Cohesion: 0.14
@@ -1257,8 +1257,8 @@ Cohesion: 0.17
 Nodes (12): _get_tomorrows_macro_events(), Fetch tomorrow's high-impact economic events from ForexFactory public JSON., Fetch tomorrow's high-impact economic events from ForexFactory public JSON., Fetch tomorrow's high-impact economic events from ForexFactory public JSON., Fetch tomorrow's high-impact economic events from ForexFactory public JSON., Fetch tomorrow's high-impact economic events from ForexFactory public JSON., Fetch tomorrow's high-impact economic events from ForexFactory public JSON., Fetch tomorrow's high-impact economic events from ForexFactory public JSON. (+4 more)
 
 ### Community 319 - "Community 319"
-Cohesion: 0.29
-Nodes (7): Fetch config.json from Gist (cached). Falls back to DEFAULT_CONFIG on error., Patch multiple keys at once. Returns updated config., Patch multiple keys at once. Returns updated config., Fetch config.json from Gist (cached). Falls back to DEFAULT_CONFIG on error., Patch multiple keys at once. Returns updated config., Patch multiple keys at once. Returns updated config., update_config_multi()
+Cohesion: 0.17
+Nodes (12): Fetch config.json from Gist (cached). Falls back to DEFAULT_CONFIG on error., Patch multiple keys at once. Returns updated config., Patch multiple keys at once. Returns updated config., Fetch config.json from Gist (cached). Falls back to DEFAULT_CONFIG on error., Patch multiple keys at once. Returns updated config., Patch multiple keys at once. Returns updated config., Write config dict directly to Gist as config.json via GitHub API.     Must use t, Write config dict directly to Gist as config.json via GitHub API.     Must use t (+4 more)
 
 ### Community 320 - "Community 320"
 Cohesion: 0.08
@@ -1436,11 +1436,11 @@ Nodes (5): add_holding on an existing ticker updates levels but returns existed=
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `load_user_trade_log()` connect `Community 114` to `Community 0`, `Community 257`, `Community 258`, `Community 259`, `Community 1`, `Community 5`, `Community 6`, `Community 264`, `Community 8`, `Community 265`, `Community 13`, `Community 270`, `Community 15`, `Community 272`, `Community 275`, `Community 157`, `Community 159`, `Community 160`, `Community 289`, `Community 163`, `Community 37`, `Community 294`, `Community 167`, `Community 296`, `Community 297`, `Community 298`, `Community 43`, `Community 300`, `Community 172`, `Community 49`, `Community 310`, `Community 183`, `Community 184`, `Community 185`, `Community 317`, `Community 192`, `Community 321`, `Community 193`, `Community 200`, `Community 332`, `Community 212`, `Community 213`, `Community 228`, `Community 229`, `Community 102`, `Community 231`, `Community 235`, `Community 236`, `Community 242`, `Community 243`, `Community 255`?**
+- **Why does `load_user_trade_log()` connect `Community 0` to `Community 257`, `Community 258`, `Community 259`, `Community 1`, `Community 5`, `Community 6`, `Community 264`, `Community 8`, `Community 265`, `Community 13`, `Community 270`, `Community 15`, `Community 272`, `Community 275`, `Community 157`, `Community 159`, `Community 160`, `Community 289`, `Community 163`, `Community 37`, `Community 294`, `Community 296`, `Community 297`, `Community 298`, `Community 43`, `Community 300`, `Community 172`, `Community 49`, `Community 310`, `Community 183`, `Community 184`, `Community 185`, `Community 317`, `Community 192`, `Community 321`, `Community 193`, `Community 198`, `Community 200`, `Community 332`, `Community 212`, `Community 213`, `Community 228`, `Community 229`, `Community 102`, `Community 231`, `Community 235`, `Community 236`, `Community 114`, `Community 242`, `Community 243`, `Community 255`?**
   _High betweenness centrality (0.142) - this node is a cross-community bridge._
 - **Why does `post()` connect `Community 149` to `Community 294`, `Community 262`, `Community 170`, `Community 171`, `Community 205`, `Community 367`, `Community 272`, `Community 209`, `Community 210`, `Community 147`, `Community 180`, `Community 308`, `Community 317`, `Community 191`?**
   _High betweenness centrality (0.060) - this node is a cross-community bridge._
-- **Why does `get_user_config()` connect `Community 8` to `Community 257`, `Community 258`, `Community 1`, `Community 264`, `Community 265`, `Community 13`, `Community 15`, `Community 275`, `Community 149`, `Community 280`, `Community 281`, `Community 157`, `Community 289`, `Community 37`, `Community 167`, `Community 296`, `Community 298`, `Community 43`, `Community 300`, `Community 45`, `Community 305`, `Community 178`, `Community 310`, `Community 184`, `Community 317`, `Community 189`, `Community 321`, `Community 193`, `Community 324`, `Community 200`, `Community 227`, `Community 228`, `Community 102`, `Community 231`, `Community 235`, `Community 236`, `Community 114`, `Community 242`, `Community 243`?**
+- **Why does `get_user_config()` connect `Community 8` to `Community 257`, `Community 258`, `Community 1`, `Community 264`, `Community 265`, `Community 13`, `Community 15`, `Community 275`, `Community 149`, `Community 280`, `Community 281`, `Community 157`, `Community 289`, `Community 37`, `Community 296`, `Community 298`, `Community 43`, `Community 300`, `Community 45`, `Community 305`, `Community 178`, `Community 310`, `Community 184`, `Community 317`, `Community 189`, `Community 321`, `Community 193`, `Community 324`, `Community 198`, `Community 200`, `Community 227`, `Community 228`, `Community 102`, `Community 231`, `Community 235`, `Community 236`, `Community 114`, `Community 242`, `Community 243`?**
   _High betweenness centrality (0.045) - this node is a cross-community bridge._
 - **Are the 26 inferred relationships involving `load_user_trade_log()` (e.g. with `check_mutations()` and `_auto_set_pick_alerts()`) actually correct?**
   _`load_user_trade_log()` has 26 INFERRED edges - model-reasoned connections that need verification._

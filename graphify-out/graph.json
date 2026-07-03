@@ -1161,7 +1161,7 @@
       "source_file": "config_manager.py",
       "source_location": "L261",
       "id": "stock_agent_config_manager_load_user_trade_log",
-      "community": 114,
+      "community": 0,
       "norm_label": "load_user_trade_log()"
     },
     {
@@ -1170,7 +1170,7 @@
       "source_file": "config_manager.py",
       "source_location": "L270",
       "id": "stock_agent_config_manager_save_user_trade_log",
-      "community": 114,
+      "community": 0,
       "norm_label": "save_user_trade_log()"
     },
     {
@@ -1350,7 +1350,7 @@
       "source_file": "config_manager.py",
       "source_location": "L606",
       "id": "stock_agent_config_manager_save_backtest_trades",
-      "community": 193,
+      "community": 303,
       "norm_label": "save_backtest_trades()"
     },
     {
@@ -1368,7 +1368,7 @@
       "source_file": "config_manager.py",
       "source_location": "L622",
       "id": "stock_agent_config_manager_load_buy_counts",
-      "community": 193,
+      "community": 303,
       "norm_label": "load_buy_counts()"
     },
     {
@@ -1413,7 +1413,7 @@
       "source_file": "config_manager.py",
       "source_location": "L706",
       "id": "stock_agent_config_manager_write_config",
-      "community": 193,
+      "community": 319,
       "norm_label": "_write_config()"
     },
     {
@@ -1503,7 +1503,7 @@
       "source_file": "config_manager.py",
       "source_location": "L857",
       "id": "stock_agent_config_manager_load_feedback",
-      "community": 238,
+      "community": 198,
       "norm_label": "load_feedback()"
     },
     {
@@ -1512,7 +1512,7 @@
       "source_file": "config_manager.py",
       "source_location": "L865",
       "id": "stock_agent_config_manager_add_feedback",
-      "community": 46,
+      "community": 167,
       "norm_label": "add_feedback()"
     },
     {
@@ -1548,7 +1548,7 @@
       "source_file": "config_manager.py",
       "source_location": "L922",
       "id": "stock_agent_config_manager_flush_user_logs",
-      "community": 46,
+      "community": 167,
       "norm_label": "_flush_user_logs()"
     },
     {
@@ -1575,7 +1575,7 @@
       "source_file": "config_manager.py",
       "source_location": "L963",
       "id": "stock_agent_config_manager_ban_user",
-      "community": 291,
+      "community": 46,
       "norm_label": "ban_user()"
     },
     {
@@ -1710,7 +1710,7 @@
       "source_file": "config_manager.py",
       "source_location": "L262",
       "id": "stock_agent_config_manager_rationale_262",
-      "community": 114,
+      "community": 0,
       "norm_label": "load trade log for a specific user."
     },
     {
@@ -1719,7 +1719,7 @@
       "source_file": "config_manager.py",
       "source_location": "L271",
       "id": "stock_agent_config_manager_rationale_271",
-      "community": 114,
+      "community": 0,
       "norm_label": "save trade log for a specific user (clobber-safe, concurrency-safe)."
     },
     {
@@ -1899,7 +1899,7 @@
       "source_file": "config_manager.py",
       "source_location": "L607",
       "id": "stock_agent_config_manager_rationale_607",
-      "community": 193,
+      "community": 303,
       "norm_label": "persist simulated backtest trades for a user (used to seed performance tab)."
     },
     {
@@ -1917,7 +1917,7 @@
       "source_file": "config_manager.py",
       "source_location": "L623",
       "id": "stock_agent_config_manager_rationale_623",
-      "community": 193,
+      "community": 303,
       "norm_label": "load today's buy counts.     structure: {\"date\": \"yyyy-mm-dd\", \"counts\": {\"nvda\""
     },
     {
@@ -1953,7 +1953,7 @@
       "source_file": "config_manager.py",
       "source_location": "L707",
       "id": "stock_agent_config_manager_rationale_707",
-      "community": 193,
+      "community": 319,
       "norm_label": "write config dict directly to gist as config.json via github api.     must use t"
     },
     {
@@ -1980,7 +1980,7 @@
       "source_file": "config_manager.py",
       "source_location": "L776",
       "id": "stock_agent_config_manager_rationale_776",
-      "community": 46,
+      "community": 167,
       "norm_label": "safely set all_data[chat_id] = value in a chat_id-keyed multi-user file.      tw"
     },
     {
@@ -2025,7 +2025,7 @@
       "source_file": "config_manager.py",
       "source_location": "L858",
       "id": "stock_agent_config_manager_rationale_858",
-      "community": 238,
+      "community": 198,
       "norm_label": "return list of feedback entries, newest first."
     },
     {
@@ -2070,7 +2070,7 @@
       "source_file": "config_manager.py",
       "source_location": "L923",
       "id": "stock_agent_config_manager_rationale_923",
-      "community": 46,
+      "community": 167,
       "norm_label": "merge buffer into gist and clear buffer. called automatically or by admin read."
     },
     {
@@ -2097,7 +2097,7 @@
       "source_file": "config_manager.py",
       "source_location": "L964",
       "id": "stock_agent_config_manager_rationale_964",
-      "community": 291,
+      "community": 46,
       "norm_label": "ban a user: remove from allowlist and add to banned list."
     },
     {
@@ -2556,7 +2556,7 @@
       "source_file": "webhook.py",
       "source_location": "L361",
       "id": "stock_agent_webhook_webhook",
-      "community": 0,
+      "community": 139,
       "norm_label": "webhook()"
     },
     {
@@ -2664,7 +2664,7 @@
       "source_file": "webhook.py",
       "source_location": "L1217",
       "id": "stock_agent_webhook_admin_user_detail",
-      "community": 167,
+      "community": 198,
       "norm_label": "admin_user_detail()"
     },
     {
@@ -2691,7 +2691,7 @@
       "source_file": "webhook.py",
       "source_location": "L1290",
       "id": "stock_agent_webhook_admin_ban_user",
-      "community": 291,
+      "community": 46,
       "norm_label": "admin_ban_user()"
     },
     {
@@ -2925,7 +2925,7 @@
       "source_file": "webhook.py",
       "source_location": "L2032",
       "id": "stock_agent_webhook_miniapp_history",
-      "community": 114,
+      "community": 0,
       "norm_label": "miniapp_history()"
     },
     {
@@ -3078,7 +3078,7 @@
       "source_file": "webhook.py",
       "source_location": "L2653",
       "id": "stock_agent_webhook_miniapp_update_position",
-      "community": 114,
+      "community": 0,
       "norm_label": "miniapp_update_position()"
     },
     {
@@ -3474,7 +3474,7 @@
       "source_file": "webhook.py",
       "source_location": "L362",
       "id": "stock_agent_webhook_rationale_362",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot)."
     },
     {
@@ -3546,7 +3546,7 @@
       "source_file": "webhook.py",
       "source_location": "L1218",
       "id": "stock_agent_webhook_rationale_1218",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer."
     },
     {
@@ -4446,7 +4446,7 @@
       "source_file": "screener.py",
       "source_location": "L704",
       "id": "stock_agent_screener_get_finnhub_metrics",
-      "community": 303,
+      "community": 316,
       "norm_label": "_get_finnhub_metrics()"
     },
     {
@@ -4473,7 +4473,7 @@
       "source_file": "screener.py",
       "source_location": "L805",
       "id": "stock_agent_screener_get_analyst_recommendations",
-      "community": 303,
+      "community": 316,
       "norm_label": "_get_analyst_recommendations()"
     },
     {
@@ -4617,7 +4617,7 @@
       "source_file": "screener.py",
       "source_location": "L705",
       "id": "stock_agent_screener_rationale_705",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch basic financial metrics from finnhub /stock/metric.     returns the 'metri"
     },
     {
@@ -4644,7 +4644,7 @@
       "source_file": "screener.py",
       "source_location": "L806",
       "id": "stock_agent_screener_rationale_806",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch analyst buy/hold/sell consensus from finnhub /stock/recommendation (free t"
     },
     {
@@ -9027,7 +9027,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L1",
       "id": "release_tracker_py",
-      "community": 198,
+      "community": 193,
       "norm_label": "release_tracker.py"
     },
     {
@@ -9036,7 +9036,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L17",
       "id": "stock_agent_release_tracker_load",
-      "community": 198,
+      "community": 193,
       "norm_label": "_load()"
     },
     {
@@ -9045,7 +9045,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L24",
       "id": "stock_agent_release_tracker_save",
-      "community": 198,
+      "community": 193,
       "norm_label": "_save()"
     },
     {
@@ -9063,7 +9063,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L33",
       "id": "stock_agent_release_tracker_add_pending_note",
-      "community": 198,
+      "community": 193,
       "norm_label": "add_pending_note()"
     },
     {
@@ -9072,7 +9072,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L33",
       "id": "release_tracker_py_str",
-      "community": 198,
+      "community": 193,
       "norm_label": "str"
     },
     {
@@ -9081,7 +9081,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L45",
       "id": "stock_agent_release_tracker_mark_note_sent",
-      "community": 198,
+      "community": 193,
       "norm_label": "mark_note_sent()"
     },
     {
@@ -9090,7 +9090,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L57",
       "id": "stock_agent_release_tracker_mark_note_skipped",
-      "community": 198,
+      "community": 193,
       "norm_label": "mark_note_skipped()"
     },
     {
@@ -9099,7 +9099,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L1",
       "id": "stock_agent_release_tracker_rationale_1",
-      "community": 198,
+      "community": 193,
       "norm_label": "release_tracker.py \u2014 tracks ai-generated release notes for stockpulz.  pending n"
     },
     {
@@ -9117,7 +9117,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L34",
       "id": "stock_agent_release_tracker_rationale_34",
-      "community": 198,
+      "community": 193,
       "norm_label": "save a new ai-generated release note as pending."
     },
     {
@@ -9126,7 +9126,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L46",
       "id": "stock_agent_release_tracker_rationale_46",
-      "community": 198,
+      "community": 193,
       "norm_label": "move a note from pending to sent after broadcasting."
     },
     {
@@ -9135,7 +9135,7 @@
       "source_file": "release_tracker.py",
       "source_location": "L58",
       "id": "stock_agent_release_tracker_rationale_58",
-      "community": 198,
+      "community": 193,
       "norm_label": "discard a pending note without sending."
     },
     {
@@ -21159,7 +21159,7 @@
       "source_file": "tests/test_config_manager.py",
       "source_location": "L56",
       "id": "tests_test_config_manager_teststorageconcurrencysafety",
-      "community": 114,
+      "community": 0,
       "norm_label": "teststorageconcurrencysafety"
     },
     {
@@ -21168,7 +21168,7 @@
       "source_file": "tests/test_config_manager.py",
       "source_location": "L59",
       "id": "tests_test_config_manager_teststorageconcurrencysafety_test_save_does_not_clobber_other_user",
-      "community": 114,
+      "community": 0,
       "norm_label": ".test_save_does_not_clobber_other_user()"
     },
     {
@@ -21177,7 +21177,7 @@
       "source_file": "tests/test_config_manager.py",
       "source_location": "L67",
       "id": "tests_test_config_manager_teststorageconcurrencysafety_test_save_aborts_on_read_failure_no_clobber",
-      "community": 114,
+      "community": 0,
       "norm_label": ".test_save_aborts_on_read_failure_no_clobber()"
     },
     {
@@ -22406,7 +22406,7 @@
       "label": "check_live_prices()",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L159",
+      "source_location": "L156",
       "id": "scripts_canary_check_live_prices",
       "community": 159,
       "norm_label": "check_live_prices()"
@@ -22415,7 +22415,7 @@
       "label": "check_sizing()",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L178",
+      "source_location": "L175",
       "id": "scripts_canary_check_sizing",
       "community": 159,
       "norm_label": "check_sizing()"
@@ -22424,7 +22424,7 @@
       "label": "check_backtest_math()",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L198",
+      "source_location": "L201",
       "id": "scripts_canary_check_backtest_math",
       "community": 159,
       "norm_label": "check_backtest_math()"
@@ -22433,7 +22433,7 @@
       "label": "check_cron_delivery()",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L218",
+      "source_location": "L221",
       "id": "scripts_canary_check_cron_delivery",
       "community": 159,
       "norm_label": "check_cron_delivery()"
@@ -22442,7 +22442,7 @@
       "label": "check_endpoints()",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L230",
+      "source_location": "L233",
       "id": "scripts_canary_check_endpoints",
       "community": 159,
       "norm_label": "check_endpoints()"
@@ -22451,7 +22451,7 @@
       "label": "check_mutations()",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L245",
+      "source_location": "L248",
       "id": "scripts_canary_check_mutations",
       "community": 159,
       "norm_label": "check_mutations()"
@@ -22460,7 +22460,7 @@
       "label": "build_report()",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L358",
+      "source_location": "L382",
       "id": "scripts_canary_build_report",
       "community": 159,
       "norm_label": "build_report()"
@@ -22469,7 +22469,7 @@
       "label": "main()",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L384",
+      "source_location": "L408",
       "id": "scripts_canary_main",
       "community": 159,
       "norm_label": "main()"
@@ -22478,7 +22478,7 @@
       "label": "int",
       "file_type": "code",
       "source_file": "scripts/canary.py",
-      "source_location": "L384",
+      "source_location": "L408",
       "id": "scripts_canary_py_int",
       "community": 159,
       "norm_label": "int"
@@ -25952,7 +25952,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L338",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot).",
       "id": "stock_agent_webhook_rationale_338"
     },
@@ -26015,7 +26015,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L1189",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_1189"
     },
@@ -26816,7 +26816,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L685",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch basic financial metrics from finnhub /stock/metric.     returns the 'metri",
       "id": "stock_agent_screener_rationale_685"
     },
@@ -26843,7 +26843,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L786",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch analyst buy/hold/sell consensus from finnhub /stock/recommendation (free t",
       "id": "stock_agent_screener_rationale_786"
     },
@@ -28220,7 +28220,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L265",
-      "community": 114,
+      "community": 0,
       "norm_label": "load trade log for a specific user.",
       "id": "stock_agent_config_manager_rationale_265"
     },
@@ -28229,7 +28229,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L274",
-      "community": 114,
+      "community": 0,
       "norm_label": "save trade log for a specific user.",
       "id": "stock_agent_config_manager_rationale_274"
     },
@@ -28400,7 +28400,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L614",
-      "community": 193,
+      "community": 303,
       "norm_label": "persist simulated backtest trades for a user (used to seed performance tab).",
       "id": "stock_agent_config_manager_rationale_614"
     },
@@ -28418,7 +28418,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L630",
-      "community": 193,
+      "community": 303,
       "norm_label": "load today's buy counts.     structure: {\"date\": \"yyyy-mm-dd\", \"counts\": {\"nvda\"",
       "id": "stock_agent_config_manager_rationale_630"
     },
@@ -28454,7 +28454,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L714",
-      "community": 193,
+      "community": 319,
       "norm_label": "write config dict directly to gist as config.json via github api.     must use t",
       "id": "stock_agent_config_manager_rationale_714"
     },
@@ -28508,7 +28508,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L807",
-      "community": 238,
+      "community": 198,
       "norm_label": "return list of feedback entries, newest first.",
       "id": "stock_agent_config_manager_rationale_807"
     },
@@ -28517,7 +28517,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L816",
-      "community": 46,
+      "community": 167,
       "norm_label": "append a new feedback entry with user + app context for admin triage.",
       "id": "stock_agent_config_manager_rationale_816"
     },
@@ -28553,7 +28553,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L872",
-      "community": 46,
+      "community": 167,
       "norm_label": "merge buffer into gist and clear buffer. called automatically or by admin read.",
       "id": "stock_agent_config_manager_rationale_872"
     },
@@ -28580,7 +28580,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L913",
-      "community": 291,
+      "community": 46,
       "norm_label": "ban a user: remove from allowlist and add to banned list.",
       "id": "stock_agent_config_manager_rationale_913"
     },
@@ -29003,7 +29003,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L337",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot).",
       "id": "stock_agent_webhook_rationale_337"
     },
@@ -29075,7 +29075,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L1177",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_1177"
     },
@@ -29768,7 +29768,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L321",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot).",
       "id": "stock_agent_webhook_rationale_321"
     },
@@ -29831,7 +29831,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L1164",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_1164"
     },
@@ -30794,7 +30794,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L645",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch basic financial metrics from finnhub /stock/metric.     returns the 'metri",
       "id": "stock_agent_screener_rationale_645"
     },
@@ -30821,7 +30821,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L746",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch analyst buy/hold/sell consensus from finnhub /stock/recommendation (free t",
       "id": "stock_agent_screener_rationale_746"
     },
@@ -30974,7 +30974,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L633",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch basic financial metrics from finnhub /stock/metric.     returns the 'metri",
       "id": "stock_agent_screener_rationale_633"
     },
@@ -31001,7 +31001,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L734",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch analyst buy/hold/sell consensus from finnhub /stock/recommendation (free t",
       "id": "stock_agent_screener_rationale_734"
     },
@@ -31145,7 +31145,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L291",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot).",
       "id": "stock_agent_webhook_rationale_291"
     },
@@ -31217,7 +31217,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L1134",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_1134"
     },
@@ -33161,7 +33161,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L239",
-      "community": 114,
+      "community": 0,
       "norm_label": "load trade log for a specific user.",
       "id": "stock_agent_config_manager_rationale_239"
     },
@@ -33323,7 +33323,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L574",
-      "community": 193,
+      "community": 303,
       "norm_label": "persist simulated backtest trades for a user (used to seed performance tab).",
       "id": "stock_agent_config_manager_rationale_574"
     },
@@ -33341,7 +33341,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L590",
-      "community": 193,
+      "community": 303,
       "norm_label": "load today's buy counts.     structure: {\"date\": \"yyyy-mm-dd\", \"counts\": {\"nvda\"",
       "id": "stock_agent_config_manager_rationale_590"
     },
@@ -33377,7 +33377,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L674",
-      "community": 193,
+      "community": 319,
       "norm_label": "write config dict directly to gist as config.json via github api.     must use t",
       "id": "stock_agent_config_manager_rationale_674"
     },
@@ -33431,7 +33431,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L767",
-      "community": 238,
+      "community": 198,
       "norm_label": "return list of feedback entries, newest first.",
       "id": "stock_agent_config_manager_rationale_767"
     },
@@ -33467,7 +33467,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L832",
-      "community": 46,
+      "community": 167,
       "norm_label": "merge buffer into gist and clear buffer. called automatically or by admin read.",
       "id": "stock_agent_config_manager_rationale_832"
     },
@@ -33476,7 +33476,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L873",
-      "community": 291,
+      "community": 46,
       "norm_label": "ban a user: remove from allowlist and add to banned list.",
       "id": "stock_agent_config_manager_rationale_873"
     },
@@ -34547,7 +34547,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L225",
-      "community": 114,
+      "community": 0,
       "norm_label": "load trade log for a specific user.",
       "id": "stock_agent_config_manager_rationale_225"
     },
@@ -34700,7 +34700,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L564",
-      "community": 193,
+      "community": 303,
       "norm_label": "persist simulated backtest trades for a user (used to seed performance tab).",
       "id": "stock_agent_config_manager_rationale_564"
     },
@@ -34709,7 +34709,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L580",
-      "community": 193,
+      "community": 303,
       "norm_label": "load today's buy counts.     structure: {\"date\": \"yyyy-mm-dd\", \"counts\": {\"nvda\"",
       "id": "stock_agent_config_manager_rationale_580"
     },
@@ -34790,7 +34790,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L757",
-      "community": 238,
+      "community": 198,
       "norm_label": "return list of feedback entries, newest first.",
       "id": "stock_agent_config_manager_rationale_757"
     },
@@ -34799,7 +34799,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L766",
-      "community": 46,
+      "community": 167,
       "norm_label": "append a new feedback entry with user + app context for admin triage.",
       "id": "stock_agent_config_manager_rationale_766"
     },
@@ -34835,7 +34835,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L822",
-      "community": 46,
+      "community": 167,
       "norm_label": "merge buffer into gist and clear buffer. called automatically or by admin read.",
       "id": "stock_agent_config_manager_rationale_822"
     },
@@ -34862,7 +34862,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L863",
-      "community": 291,
+      "community": 46,
       "norm_label": "ban a user: remove from allowlist and add to banned list.",
       "id": "stock_agent_config_manager_rationale_863"
     },
@@ -36635,7 +36635,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L228",
-      "community": 114,
+      "community": 0,
       "norm_label": "save trade log for a specific user.",
       "id": "stock_agent_config_manager_rationale_228"
     },
@@ -36761,7 +36761,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L558",
-      "community": 193,
+      "community": 303,
       "norm_label": "persist simulated backtest trades for a user (used to seed performance tab).",
       "id": "stock_agent_config_manager_rationale_558"
     },
@@ -36797,7 +36797,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L658",
-      "community": 193,
+      "community": 319,
       "norm_label": "write config dict directly to gist as config.json via github api.     must use t",
       "id": "stock_agent_config_manager_rationale_658"
     },
@@ -36842,7 +36842,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L751",
-      "community": 238,
+      "community": 198,
       "norm_label": "return list of feedback entries, newest first.",
       "id": "stock_agent_config_manager_rationale_751"
     },
@@ -39524,7 +39524,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L743",
-      "community": 238,
+      "community": 198,
       "norm_label": "return list of feedback entries, newest first.",
       "id": "stock_agent_config_manager_rationale_743"
     },
@@ -39533,7 +39533,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L752",
-      "community": 46,
+      "community": 167,
       "norm_label": "append a new feedback entry with user + app context for admin triage.",
       "id": "stock_agent_config_manager_rationale_752"
     },
@@ -39542,7 +39542,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L808",
-      "community": 46,
+      "community": 167,
       "norm_label": "merge buffer into gist and clear buffer. called automatically or by admin read.",
       "id": "stock_agent_config_manager_rationale_808"
     },
@@ -39569,7 +39569,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L849",
-      "community": 291,
+      "community": 46,
       "norm_label": "ban a user: remove from allowlist and add to banned list.",
       "id": "stock_agent_config_manager_rationale_849"
     },
@@ -39650,7 +39650,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L258",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot).",
       "id": "stock_agent_webhook_rationale_258"
     },
@@ -39722,7 +39722,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L1101",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_1101"
     },
@@ -40757,7 +40757,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L179",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot).",
       "id": "stock_agent_webhook_rationale_179"
     },
@@ -40829,7 +40829,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L1022",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_1022"
     },
@@ -41207,7 +41207,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L532",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch basic financial metrics from finnhub /stock/metric.     returns the 'metri",
       "id": "stock_agent_screener_rationale_532"
     },
@@ -42521,7 +42521,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L997",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_997"
     },
@@ -42890,7 +42890,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L137",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot).",
       "id": "stock_agent_webhook_rationale_137"
     },
@@ -42962,7 +42962,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L955",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_955"
     },
@@ -43466,7 +43466,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L910",
-      "community": 167,
+      "community": 198,
       "norm_label": "full user snapshot for the detail drawer.",
       "id": "stock_agent_webhook_rationale_910"
     },
@@ -45464,7 +45464,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L205",
-      "community": 114,
+      "community": 0,
       "norm_label": "load trade log for a specific user.",
       "id": "stock_agent_config_manager_rationale_205"
     },
@@ -45473,7 +45473,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L214",
-      "community": 114,
+      "community": 0,
       "norm_label": "save trade log for a specific user.",
       "id": "stock_agent_config_manager_rationale_214"
     },
@@ -45608,7 +45608,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L506",
-      "community": 193,
+      "community": 303,
       "norm_label": "load today's buy counts.     structure: {\"date\": \"yyyy-mm-dd\", \"counts\": {\"nvda\"",
       "id": "stock_agent_config_manager_rationale_506"
     },
@@ -45680,7 +45680,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L668",
-      "community": 238,
+      "community": 198,
       "norm_label": "return list of feedback entries, newest first.",
       "id": "stock_agent_config_manager_rationale_668"
     },
@@ -45689,7 +45689,7 @@
       "file_type": "rationale",
       "source_file": "config_manager.py",
       "source_location": "L676",
-      "community": 46,
+      "community": 167,
       "norm_label": "append a new feedback entry.",
       "id": "stock_agent_config_manager_rationale_676"
     },
@@ -45860,7 +45860,7 @@
       "file_type": "rationale",
       "source_file": "webhook.py",
       "source_location": "L61",
-      "community": 0,
+      "community": 139,
       "norm_label": "receive telegram update (message from user to bot).",
       "id": "stock_agent_webhook_rationale_61"
     },
@@ -46157,7 +46157,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L430",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch basic financial metrics from finnhub /stock/metric.     returns the 'metri",
       "id": "stock_agent_screener_rationale_430"
     },
@@ -46175,7 +46175,7 @@
       "file_type": "rationale",
       "source_file": "screener.py",
       "source_location": "L531",
-      "community": 303,
+      "community": 316,
       "norm_label": "fetch analyst buy/hold/sell consensus from finnhub /stock/recommendation (free t",
       "id": "stock_agent_screener_rationale_531"
     },
@@ -48893,9 +48893,9 @@
       "source_file": "scripts/canary.py",
       "source_location": "L288",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "scripts_canary_check_mutations",
-      "target": "stock_agent_trade_logger_add_holding",
-      "confidence_score": 1.0
+      "target": "stock_agent_trade_logger_add_holding"
     },
     {
       "relation": "imports",
@@ -48904,9 +48904,9 @@
       "source_file": "scripts/canary.py",
       "source_location": "L284",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "scripts_canary_py",
-      "target": "stock_agent_trade_logger_add_holding",
-      "confidence_score": 1.0
+      "target": "stock_agent_trade_logger_add_holding"
     },
     {
       "relation": "calls",
@@ -91188,9 +91188,9 @@
       "source_file": "scripts/canary.py",
       "source_location": "L273",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "scripts_canary_check_mutations",
-      "target": "stock_agent_paper_trader_paper_sell",
-      "confidence_score": 1.0
+      "target": "stock_agent_paper_trader_paper_sell"
     },
     {
       "relation": "imports",
@@ -91199,9 +91199,9 @@
       "source_file": "scripts/canary.py",
       "source_location": "L272",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "scripts_canary_py",
-      "target": "stock_agent_paper_trader_paper_sell",
-      "confidence_score": 1.0
+      "target": "stock_agent_paper_trader_paper_sell"
     },
     {
       "relation": "calls",
@@ -137522,9 +137522,9 @@
       "source_file": "scripts/canary.py",
       "source_location": "L305",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "scripts_canary_check_mutations",
-      "target": "scripts_canary_fin",
-      "confidence_score": 1.0
+      "target": "scripts_canary_fin"
     },
     {
       "relation": "calls",
@@ -137694,9 +137694,9 @@
       "source_file": "scripts/canary.py",
       "source_location": "L87",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "scripts_canary_rationale_87",
-      "target": "scripts_canary_raw_picks",
-      "confidence_score": 1.0
+      "target": "scripts_canary_raw_picks"
     },
     {
       "relation": "calls",
@@ -137736,9 +137736,9 @@
       "source_file": "scripts/canary.py",
       "source_location": "L97",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "scripts_canary_rationale_97",
-      "target": "scripts_canary_expected_delivery_date",
-      "confidence_score": 1.0
+      "target": "scripts_canary_expected_delivery_date"
     },
     {
       "relation": "calls",
@@ -140050,5 +140050,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "501181661551191733623edf0c32c94bb631e452"
+  "built_at_commit": "86e29f14bd6a4835b0c74f152aa7b85b20eac90f"
 }

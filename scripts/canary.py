@@ -123,37 +123,34 @@ def check_picks_integrity() -> None:
     _check("picks.fresh", picks.get("_saved_date") == exp,
            f"_saved_date={picks.get('_saved_date')} expected={exp}")
 
-    stocks = picks.get("stocks", {})
-    bad = []
-    upside_bad = []
-    for tf, is_long in (("short_term", False), ("long_term", True)):
-        for p in stocks.get(tf, []) or []:
-            t = p.get("ticker", "?")
-            e, tgt, stop = p.get("entry_price"), p.get("target_price"), p.get("stop_loss")
-            if not (_pos(e) and _pos(tgt)):
-                bad.append(f"{t}(e={e},t={tgt})")
-                continue
-            if float(tgt) <= float(e):
-                upside_bad.append(f"{t} tgt<=entry")
-            if not is_long and _pos(stop) and float(stop) >= float(e):
-                upside_bad.append(f"{t} stop>=entry")
-            # verify upside % math if present
-            up = p.get("upside_pct") or p.get("target_gain_pct")
-            if _fin(up):
-                calc = (float(tgt) - float(e)) / float(e) * 100
-                if abs(float(up) - calc) > 0.6:
-                    upside_bad.append(f"{t} upside {up}≠{calc:.1f}")
-    _check("picks.prices_valid", not bad, ("bad: " + ", ".join(bad)) if bad else "all entry/target > 0")
-    _check("picks.math", not upside_bad, ("; ".join(upside_bad)) if upside_bad else "target>entry, stop<entry, upside ok")
-
-    # crypto sanity
-    cbad = []
-    for tf in ("short_term", "long_term"):
-        for c in (picks.get("crypto", {}) or {}).get(tf, []) or []:
-            sym, e = c.get("symbol", "?"), c.get("entry_price")
-            if not _pos(e):
-                cbad.append(f"{sym}=0/NaN")
-    _check("picks.crypto_valid", not cbad, "; ".join(cbad) if cbad else "crypto entries > 0")
+    # Validate EVERY pick in EVERY section — stocks, crypto, ETFs, commodities.
+    # (commodities are often empty; count 0 is fine, not a failure.)
+    bad, math_bad, counts = [], [], {}
+    for sec, key in (("stocks", "ticker"), ("crypto", "symbol"),
+                     ("etfs", "ticker"), ("commodities", "ticker")):
+        n = 0
+        for tf, is_long in (("short_term", False), ("long_term", True)):
+            for p in (picks.get(sec, {}) or {}).get(tf, []) or []:
+                n += 1
+                t = p.get(key) or p.get("ticker") or p.get("symbol") or "?"
+                e, tgt, stop = p.get("entry_price"), p.get("target_price"), p.get("stop_loss")
+                if not (_pos(e) and _pos(tgt)):
+                    bad.append(f"{sec}:{t}(e={e},t={tgt})")
+                    continue
+                if float(tgt) <= float(e):
+                    math_bad.append(f"{sec}:{t} tgt<=entry")
+                if not is_long and _pos(stop) and float(stop) >= float(e):
+                    math_bad.append(f"{sec}:{t} stop>=entry")
+                up = p.get("upside_pct") or p.get("target_gain_pct")
+                if _fin(up):
+                    calc = (float(tgt) - float(e)) / float(e) * 100
+                    if abs(float(up) - calc) > 0.6:
+                        math_bad.append(f"{sec}:{t} upside {up}≠{calc:.1f}")
+        counts[sec] = n
+    _check("picks.all_sections_valid", not bad,
+           ("bad: " + ", ".join(bad)) if bad else f"counts={counts} · all entry/target > 0")
+    _check("picks.math", not math_bad,
+           "; ".join(math_bad) if math_bad else "target>entry, stop<entry, upside ok (ALL sections)")
 
 
 def check_live_prices() -> None:
@@ -193,6 +190,12 @@ def check_sizing() -> None:
     sp = r.get("stop_pct")
     _check("sizing.stop_pct_sane", _fin(sp) and 0 < float(sp) <= 25,
            f"stop_pct={sp} (should be ~7%, not clamped to 20 for a 7% stop)")
+    # crypto sizes by DOLLAR amount (shares intentionally None — callers derive
+    # fractional coins from dollar_amount / price). Verify the $ sizing is valid.
+    cr = size_pick({"symbol": "BTC", "entry_price": 60000.0, "stop_loss": 55000.0,
+                    "target_price": 80000.0, "conviction": 3}, cfg, is_crypto=True)
+    _check("sizing.crypto_dollar_based", _pos(cr.get("dollar_amount")),
+           f"crypto dollar_amount=${cr.get('dollar_amount')} (shares None by design)")
 
 
 def check_backtest_math() -> None:
@@ -309,6 +312,27 @@ def check_mutations(admin: str) -> None:
                 _check("log_bought.entry_is_price", False, "V price unavailable")
         except Exception as e:
             _check("log_bought.entry_is_price", False, f"exc: {e}")
+
+        # ── Crypto paper round-trip (fractional coin, -USD pricing) ───────────
+        try:
+            from paper_trader import paper_buy, load_user_paper
+            from market_data import get_live_price
+            cpx = get_live_price("ETH")
+            if _pos(cpx):
+                csh = round(200.0 / float(cpx), 8)   # $200 of ETH → tiny fraction
+                paper_buy("ETH", csh, admin, price=float(cpx))
+                cpos = next((p for p in load_user_paper(admin).get("positions", [])
+                             if p.get("ticker") == "ETH"), None)
+                # invariant: fractional coin (< 1 ETH) stored at the real -USD price
+                ok = cpos and _pos(cpos.get("entry_price")) and 0 < float(cpos.get("shares", 9)) < 1 \
+                    and abs(float(cpos.get("entry_price")) - float(cpx)) / float(cpx) < 0.02
+                _check("paper.crypto_fractional", bool(ok),
+                       f"ETH {cpos.get('shares') if cpos else '?'} sh @ ${cpos.get('entry_price') if cpos else '?'} "
+                       f"(fractional coin at real -USD price)")
+            else:
+                _check("paper.crypto_fractional", False, "ETH price unavailable")
+        except Exception as e:
+            _check("paper.crypto_fractional", False, f"exc: {e}")
 
         # ── Alert round-trip (add → replace → remove) ─────────────────────────
         try:
