@@ -62,13 +62,25 @@ def _gist_all() -> dict:
 
 
 def _gist_restore(snapshot: dict) -> None:
-    """Write the snapshotted contents back verbatim."""
+    """Write the snapshotted contents back verbatim, with retries. GitHub can
+    409/403 on rapid successive PATCHes to the same gist (the canary does ~8
+    writes during a run), so a single restore PATCH sometimes conflicts — retry
+    with backoff until it lands, else the run leaves residue on the account."""
+    import time
     files = {fn: {"content": c} for fn, c in snapshot.items() if c is not None}
     if not files:
         return
-    requests.patch(f"https://api.github.com/gists/{_GID}",
-                   headers={"Authorization": f"token {_TOK}"},
-                   json={"files": files}, timeout=25).raise_for_status()
+    time.sleep(1.5)   # let GitHub settle after the run's writes
+    last = ""
+    for attempt in range(1, 7):
+        r = requests.patch(f"https://api.github.com/gists/{_GID}",
+                           headers={"Authorization": f"token {_TOK}"},
+                           json={"files": files}, timeout=25)
+        if r.status_code < 400:
+            return
+        last = f"{r.status_code} {r.text[:80]}"
+        time.sleep(2 * attempt)
+    raise RuntimeError(f"gist restore failed after retries: {last}")
 
 
 def _raw_picks() -> dict:
@@ -256,13 +268,47 @@ def check_mutations(admin: str) -> None:
                            f"stored entry=${ep} vs price=${px:.2f} (must NOT be ${total} total)")
                     _check("paper.shares_fractional", abs(float(pos.get("shares", 0)) - shares) < 1e-4,
                            f"shares={pos.get('shares')} expect {shares}")
-                    paper_cancel("AAPL", admin)   # remove (restore also runs)
+                    # Sell at +10% → exercise the realized-P&L path (restore cleans up).
+                    from paper_trader import paper_sell
+                    sm = paper_sell("AAPL", admin, price=round(float(px) * 1.10, 2))
+                    _check("paper.sell_ok", not sm.startswith("❌"), f"sell: {sm[:70]}")
                 else:
                     _check("paper.entry_is_price", False, "position not stored after paper_buy")
             else:
                 _check("paper.entry_is_price", False, "AAPL price unavailable")
         except Exception as e:
             _check("paper.entry_is_price", False, f"exc: {e}")
+
+        # ── "I Bought This" (log a REAL position) round-trip ──────────────────
+        try:
+            from trade_logger import add_holding, load_user_trade_log
+            from market_data import get_live_price
+            px = get_live_price("V")   # Visa — not in the admin's holdings/watchlist
+            if _pos(px):
+                add_holding("V", admin,
+                            entry_override=float(px),
+                            stop_override=round(float(px) * 0.93, 2),
+                            target_override=round(float(px) * 1.15, 2),
+                            shares_override=3.0,
+                            asset_type_override="stock")
+                pos = next((t for t in load_user_trade_log(admin).get("open", [])
+                            if t.get("ticker") == "V"), None)
+                if pos:
+                    ep = pos.get("entry_price")
+                    _check("log_bought.entry_is_price",
+                           _pos(ep) and abs(float(ep) - float(px)) < 0.5,
+                           f"stored entry=${ep} vs price=${px:.2f} (must be per-share, not a total)")
+                    _check("log_bought.levels",
+                           _pos(pos.get("stop_loss")) and _pos(pos.get("target_price")),
+                           f"stop={pos.get('stop_loss')} target={pos.get('target_price')}")
+                    pnl = (float(px) - float(ep)) / float(ep) * 100
+                    _check("log_bought.pnl_math", _fin(pnl), f"P&L vs entry = {pnl:.2f}%")
+                else:
+                    _check("log_bought.entry_is_price", False, "position not stored after add_holding")
+            else:
+                _check("log_bought.entry_is_price", False, "V price unavailable")
+        except Exception as e:
+            _check("log_bought.entry_is_price", False, f"exc: {e}")
 
         # ── Alert round-trip (add → replace → remove) ─────────────────────────
         try:
