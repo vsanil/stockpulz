@@ -3,8 +3,8 @@ name: Full Sweep
 # Exhaustive user-surface exerciser: hits EVERY /api/miniapp/* endpoint, EVERY
 # bot command, and EVERY inline-button callback as the admin, snapshot/restore-safe.
 # Complements the canary (math/delivery) and the synthetic-user (real lifecycle).
-# Runs ~3x/day for a short hardening window, then the script self-retires after
-# its end date (scripts/full_sweep.py: _SWEEP_END). DMs the admin only on failure.
+# Runs ~3x/day daily (no end date) until the owner asks to stop — disable or
+# delete this workflow to stop it. DMs the admin only on failure.
 
 on:
   schedule:
