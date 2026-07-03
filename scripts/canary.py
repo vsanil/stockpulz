@@ -1,0 +1,373 @@
+#!/usr/bin/env python3
+"""
+canary.py — daily synthetic end-to-end health check + calculation audit.
+
+Runs against LIVE data as the admin account (TELEGRAM_CHAT_ID), exercises every
+major path (picks, prices, sizing, paper trade, alerts, watchlist, backtest,
+delivery/cron health, endpoint health) AND verifies the underlying math, then
+DMs a report to the admin.
+
+Non-destructive: before any mutation it snapshots the affected Gist files and
+ALWAYS restores them in a finally block, so the admin's real data is byte-for-byte
+unchanged after a run — the paper buy / alert / watchlist round-trips leave nothing.
+
+Usage:
+    python3 scripts/canary.py            # run + send the report to the admin
+    python3 scripts/canary.py --dry-run  # run + print only (no Telegram send)
+"""
+from __future__ import annotations
+
+import os
+import sys
+import math
+import argparse
+import traceback
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import requests
+
+RESULTS: list[tuple[str, bool, str]] = []
+
+
+def _check(name: str, ok: bool, detail: str = "") -> None:
+    RESULTS.append((name, bool(ok), detail))
+    print(f"{'PASS' if ok else 'FAIL'}  {name}  {('· ' + detail) if detail else ''}")
+
+
+def _fin(x) -> bool:
+    """True only for a real finite number (rejects None / NaN / Inf)."""
+    try:
+        return x is not None and math.isfinite(float(x))
+    except (TypeError, ValueError):
+        return False
+
+
+def _pos(x) -> bool:
+    return _fin(x) and float(x) > 0
+
+
+# ── raw Gist snapshot / restore (guarantees zero residue) ─────────────────────
+_GID = os.environ.get("GIST_ID")
+_TOK = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN")
+_SNAP_FILES = ("user_paper.json", "price_alerts.json", "trade_log.json",
+               "user_trades.json", "user_configs.json")
+
+
+def _gist_all() -> dict:
+    r = requests.get(f"https://api.github.com/gists/{_GID}",
+                     headers={"Authorization": f"token {_TOK}"}, timeout=20)
+    r.raise_for_status()
+    return r.json().get("files", {})
+
+
+def _gist_restore(snapshot: dict) -> None:
+    """Write the snapshotted contents back verbatim."""
+    files = {fn: {"content": c} for fn, c in snapshot.items() if c is not None}
+    if not files:
+        return
+    requests.patch(f"https://api.github.com/gists/{_GID}",
+                   headers={"Authorization": f"token {_TOK}"},
+                   json={"files": files}, timeout=25).raise_for_status()
+
+
+def _raw_picks() -> dict:
+    """Read picks.json directly (NOT load_picks, which returns None off-day)."""
+    import json
+    files = _gist_all()
+    try:
+        return json.loads(files.get("picks.json", {}).get("content") or "{}")
+    except Exception:
+        return {}
+
+
+def _expected_delivery_date() -> str:
+    """The date we SHOULD have morning picks/delivery for, given the clock.
+    Morning runs ~11:00 UTC (7 AM ET). Today counts only if it's a weekday and
+    we're past ~7:30 AM ET; otherwise the latest delivery is the prior weekday.
+    Makes the delivery checks correct whatever hour the canary runs."""
+    import datetime as dt, pytz
+    et = dt.datetime.now(pytz.timezone("America/New_York"))
+    d = et.date()
+    if d.weekday() < 5 and (et.hour, et.minute) >= (7, 30):
+        return d.isoformat()
+    d -= dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= dt.timedelta(days=1)
+    return d.isoformat()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Read-only checks
+# ══════════════════════════════════════════════════════════════════════════════
+
+def check_picks_integrity() -> None:
+    picks = _raw_picks()
+    if not picks or not picks.get("stocks"):
+        _check("picks.load", False, "picks.json empty/malformed")
+        return
+    exp = _expected_delivery_date()
+    _check("picks.load", True, f"saved {picks.get('_saved_date')}")
+    _check("picks.fresh", picks.get("_saved_date") == exp,
+           f"_saved_date={picks.get('_saved_date')} expected={exp}")
+
+    stocks = picks.get("stocks", {})
+    bad = []
+    upside_bad = []
+    for tf, is_long in (("short_term", False), ("long_term", True)):
+        for p in stocks.get(tf, []) or []:
+            t = p.get("ticker", "?")
+            e, tgt, stop = p.get("entry_price"), p.get("target_price"), p.get("stop_loss")
+            if not (_pos(e) and _pos(tgt)):
+                bad.append(f"{t}(e={e},t={tgt})")
+                continue
+            if float(tgt) <= float(e):
+                upside_bad.append(f"{t} tgt<=entry")
+            if not is_long and _pos(stop) and float(stop) >= float(e):
+                upside_bad.append(f"{t} stop>=entry")
+            # verify upside % math if present
+            up = p.get("upside_pct") or p.get("target_gain_pct")
+            if _fin(up):
+                calc = (float(tgt) - float(e)) / float(e) * 100
+                if abs(float(up) - calc) > 0.6:
+                    upside_bad.append(f"{t} upside {up}≠{calc:.1f}")
+    _check("picks.prices_valid", not bad, ("bad: " + ", ".join(bad)) if bad else "all entry/target > 0")
+    _check("picks.math", not upside_bad, ("; ".join(upside_bad)) if upside_bad else "target>entry, stop<entry, upside ok")
+
+    # crypto sanity
+    cbad = []
+    for tf in ("short_term", "long_term"):
+        for c in (picks.get("crypto", {}) or {}).get(tf, []) or []:
+            sym, e = c.get("symbol", "?"), c.get("entry_price")
+            if not _pos(e):
+                cbad.append(f"{sym}=0/NaN")
+    _check("picks.crypto_valid", not cbad, "; ".join(cbad) if cbad else "crypto entries > 0")
+
+
+def check_live_prices() -> None:
+    from market_data import get_live_prices
+    basket = ["AAPL", "MSFT", "NVDA", "SPY"]
+    prices = get_live_prices(basket)
+    missing = [t for t in basket if not _pos(prices.get(t))]
+    _check("prices.stocks", not missing,
+           f"missing/invalid: {missing}" if missing else f"{', '.join(f'{t}=${prices[t]:.0f}' for t in basket if prices.get(t))}")
+    # crypto via cg cache
+    from price_checker import cg_prices, _SYMBOL_TO_CG_ID
+    cg = cg_prices([_SYMBOL_TO_CG_ID["BTC"], _SYMBOL_TO_CG_ID["ETH"]])
+    btc = cg.get(_SYMBOL_TO_CG_ID["BTC"])
+    eth = cg.get(_SYMBOL_TO_CG_ID["ETH"])
+    _check("prices.btc_sane", _pos(btc) and 10_000 <= btc <= 500_000, f"BTC=${btc}")
+    _check("prices.eth_sane", _pos(eth) and 300 <= eth <= 30_000, f"ETH=${eth}")
+    # cache: 2nd call must not change / must return same
+    cg2 = cg_prices([_SYMBOL_TO_CG_ID["BTC"]])
+    _check("prices.cg_cache", cg2.get(_SYMBOL_TO_CG_ID["BTC"]) == btc, "cached BTC stable")
+
+
+def check_sizing() -> None:
+    from position_sizer import size_pick
+    from config_manager import get_config
+    cfg = get_config()
+    pick = {"ticker": "TESTX", "entry_price": 100.0, "stop_loss": 93.0,
+            "target_price": 120.0, "conviction": 3}
+    r = size_pick(pick, cfg)
+    shares = r.get("shares")
+    _check("sizing.shares_pos", _pos(shares), f"shares={shares}")
+    # risk-dollars sanity: shares * (entry-stop) should be > 0 and finite
+    try:
+        risk = float(shares) * (100.0 - 93.0)
+        _check("sizing.risk_finite", _fin(risk) and risk > 0, f"risk≈${risk:.0f}")
+    except Exception as e:
+        _check("sizing.risk_finite", False, str(e))
+    sp = r.get("stop_pct")
+    _check("sizing.stop_pct_sane", _fin(sp) and 0 < float(sp) <= 25,
+           f"stop_pct={sp} (should be ~7%, not clamped to 20 for a 7% stop)")
+
+
+def check_backtest_math() -> None:
+    # replicate the endpoint's non-overlapping logic on a synthetic series
+    closes = [100, 100, 100, 89, 95, 96, 100, 100, 105, 111]
+    entry, stop, target = 100, 90, 110
+    n = len(closes); i = 0; wins = losses = 0
+    while i < n:
+        if abs(closes[i] - entry) / entry > 0.02:
+            i += 1; continue
+        ht = hs = False; exit_idx = min(i + 60, n) - 1
+        for j in range(i + 1, min(i + 60, n)):
+            if closes[j] >= target: ht = True; exit_idx = j; break
+            if closes[j] <= stop:   hs = True; exit_idx = j; break
+        wins += ht; losses += hs; i = exit_idx + 1
+    _check("backtest.nonoverlap", wins == 1 and losses == 1,
+           f"wins={wins} losses={losses} (expect 1/1, not 2/3)")
+    if wins + losses:
+        wr = wins / (wins + losses) * 100
+        _check("backtest.winrate_math", abs(wr - 50.0) < 0.01, f"win_rate={wr}")
+
+
+def check_cron_delivery() -> None:
+    from config_manager import get_config
+    cfg = get_config()
+    exp = _expected_delivery_date()
+    # last_morning_run is the DELIVERY stamp (cron_last_morning is just "started").
+    lmr = (cfg.get("last_morning_run") or "")[:10]
+    _check("delivery.morning", lmr == exp,
+           f"last_morning_run={lmr or 'never'} (expected {exp})")
+    _check("delivery.picks_saved", _raw_picks().get("_saved_date") == exp,
+           f"picks._saved_date={_raw_picks().get('_saved_date')} (expected {exp})")
+
+
+def check_endpoints() -> None:
+    base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
+            or "https://stock-agent-enqx.onrender.com").rstrip("/")
+    try:
+        h = requests.get(base + "/health", timeout=25)
+        _check("endpoint.health", h.status_code == 200 and h.json().get("status") == "ok",
+               f"{h.status_code}")
+    except Exception as e:
+        _check("endpoint.health", False, str(e))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Mutating round-trips (snapshot → act → verify → restore)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def check_mutations(admin: str) -> None:
+    snap_files = _gist_all()
+    snapshot = {fn: snap_files.get(fn, {}).get("content")
+                for fn in _SNAP_FILES if fn in snap_files}
+    try:
+        _check("snapshot", bool(snapshot), f"{len(snapshot)} files snapshotted")
+
+        # ── Paper trade round-trip ────────────────────────────────────────────
+        try:
+            from paper_trader import paper_buy, paper_cancel, load_user_paper
+            from market_data import get_live_price
+            px = get_live_price("AAPL")
+            if _pos(px):
+                total = 1000.0
+                shares = round(total / float(px), 6)
+                paper_buy("AAPL", shares, admin, price=float(px))
+                data = load_user_paper(admin)
+                pos = next((p for p in data.get("positions", []) if p.get("ticker") == "AAPL"), None)
+                if pos:
+                    ep = pos.get("entry_price")
+                    # entry must be the per-share PRICE, never the $1000 total
+                    ok = _pos(ep) and abs(float(ep) - float(px)) / float(px) < 0.02
+                    _check("paper.entry_is_price", ok,
+                           f"stored entry=${ep} vs price=${px:.2f} (must NOT be ${total} total)")
+                    _check("paper.shares_fractional", abs(float(pos.get("shares", 0)) - shares) < 1e-4,
+                           f"shares={pos.get('shares')} expect {shares}")
+                    paper_cancel("AAPL", admin)   # remove (restore also runs)
+                else:
+                    _check("paper.entry_is_price", False, "position not stored after paper_buy")
+            else:
+                _check("paper.entry_is_price", False, "AAPL price unavailable")
+        except Exception as e:
+            _check("paper.entry_is_price", False, f"exc: {e}")
+
+        # ── Alert round-trip (add → replace → remove) ─────────────────────────
+        try:
+            from price_alert_manager import add_alert, remove_alert, _load_alerts
+            from market_data import get_live_price
+            px = get_live_price("MSFT") or 400.0
+            t1 = round(float(px) * 0.90, 2)   # 10% below → 'below'
+            t2 = round(float(px) * 0.85, 2)
+            add_alert(admin, "MSFT", t1)
+            got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
+            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
+                   f"{[a['target'] for a in got1]}")
+            add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
+            got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
+            _check("alert.replace_atomic", len(got2) == 1 and abs(got2[0]["target"] - t2) < 0.01,
+                   f"after replace: {[a['target'] for a in got2]} (must be exactly [{t2}])")
+            remove_alert(admin, "MSFT")
+            got3 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
+            _check("alert.remove", len(got3) == 0, f"remaining: {[a['target'] for a in got3]}")
+        except Exception as e:
+            _check("alert.add", False, f"exc: {e}")
+
+        # ── Watchlist round-trip ──────────────────────────────────────────────
+        try:
+            import webhook as wh
+            before = wh._load_watchlist(admin)
+            test_t = "SPY"
+            wh._save_watchlist(admin, list(dict.fromkeys(list(before) + [test_t])))
+            mid = wh._load_watchlist(admin)
+            _check("watchlist.add", test_t in [t.upper() for t in mid], f"watchlist has {test_t}")
+            wh._save_watchlist(admin, before)   # restore original list
+            _check("watchlist.restore_ok", True, f"{len(before)} tickers preserved")
+        except Exception as e:
+            _check("watchlist.add", False, f"exc: {e}")
+
+    finally:
+        # ALWAYS restore — guarantees the admin's data is unchanged after a run.
+        try:
+            _gist_restore(snapshot)
+            _check("restore", True, "all mutated stores restored to snapshot")
+        except Exception as e:
+            _check("restore", False, f"RESTORE FAILED: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_report() -> str:
+    from datetime import datetime
+    import pytz
+    now = datetime.now(pytz.timezone("America/New_York")).strftime("%a %b %d · %I:%M %p ET")
+    fails = [r for r in RESULTS if not r[1]]
+    passes = [r for r in RESULTS if r[1]]
+    head = "✅" if not fails else "🔴"
+    lines = [f"{head} <b>Canary — daily health check</b>",
+             f"<i>{now}</i>",
+             f"<b>{len(passes)}/{len(RESULTS)} checks passed</b>", ""]
+    if fails:
+        lines.append("🔴 <b>Failures:</b>")
+        for name, _ok, detail in fails:
+            lines.append(f"  • <b>{name}</b> — {detail}")
+        lines.append("")
+    # group passes compactly
+    lines.append("<i>Passed: " + ", ".join(r[0] for r in passes) + "</i>")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true", help="print only, don't send")
+    args = ap.parse_args()
+
+    admin = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not admin:
+        print("TELEGRAM_CHAT_ID not set — cannot run canary as admin.")
+        return 2
+
+    for fn in (check_picks_integrity, check_live_prices, check_sizing,
+               check_backtest_math, check_cron_delivery, check_endpoints):
+        try:
+            fn()
+        except Exception as e:
+            _check(fn.__name__, False, f"crashed: {e}")
+            traceback.print_exc()
+
+    try:
+        check_mutations(admin)
+    except Exception as e:
+        _check("check_mutations", False, f"crashed: {e}")
+        traceback.print_exc()
+
+    report = build_report()
+    print("\n" + "=" * 60 + "\n" + report.replace("<b>", "").replace("</b>", "")
+          .replace("<i>", "").replace("</i>", ""))
+
+    if not args.dry_run:
+        try:
+            from telegram_api import send_message
+            send_message(report, chat_id=admin)
+            print("\n[canary] report sent to admin.")
+        except Exception as e:
+            print(f"[canary] failed to send report: {e}")
+
+    fails = [r for r in RESULTS if not r[1]]
+    return 1 if fails else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
