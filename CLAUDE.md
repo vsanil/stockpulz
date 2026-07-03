@@ -222,6 +222,10 @@ Rules:
 - It checks: picks integrity+math, live price sanity (BTC/ETH ranges, CoinGecko cache), sizing math, backtest non-overlap, delivery/cron health (time-aware via `_expected_delivery_date`), `/health`, and MUTATING round-trips (paper buy → entry==per-share-price not the $ total; alert add→replace→remove; watchlist add) each wrapped in **snapshot→act→restore** so the admin's real data is byte-identical after a run.
 - **Rule: when you add or change a user-facing feature or a calculation, add a matching canary check** — that's how a real-world regression gets caught automatically instead of the owner finding it in a screenshot. Keep every mutating check snapshot/restore-safe.
 
+### Synthetic-user bot — accumulating stabilization tester (`scripts/synthetic_user.py`)
+- Distinct from the canary (which round-trips + restores). This one behaves like a real active user on the ADMIN account and LEAVES its activity so time-based bugs (P&L drift, alerts firing, position tracking over days) surface. Scheduled by `.github/workflows/synthetic_user.yml`: `--phase open` at 12:00 UTC (8 AM ET) logs REAL "I Bought This" positions + paper-buys from the day's picks, sets target alerts, watchlists them; `--phase manage` at 16:00 + 19:30 UTC sells its winners at target / cuts at stop (real via `close_trade`, paper via `paper_sell`). Reports every action to the admin.
+- **SAFETY (do not break): it tracks ONLY the tickers it opened in the Gist file `synthetic_state.json` and manages only those — it must NEVER close the owner's real pre-existing positions.** By design it logs REAL trades because the owner uses the admin account as a test account and will reset it before real use. Do NOT point this at a production/real user account.
+
 ### Test suite — mandatory before every commit
 - Run `python -m pytest tests/ -q` before every commit, no exceptions
 - A commit is NOT done until all tests pass
