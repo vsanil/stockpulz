@@ -1,0 +1,61 @@
+name: Synthetic User
+
+# An automated "active user" for stabilization testing. Opens real + paper
+# positions from the day's picks (with target alerts + watchlist) in the morning,
+# then manages them intraday (sell winners at target / cut at stop). It ONLY
+# touches the tickers it opened (tracked in synthetic_state.json) — never the
+# owner's real pre-existing positions. Reports every action to the admin.
+#
+# By design this logs REAL "I Bought This" positions (the owner uses the admin
+# account as a test account and will reset it before real use).
+
+on:
+  schedule:
+    - cron: "0 12 * * 1-5"     # 8 AM ET — open (after the 7 AM morning picks)
+    - cron: "0 16 * * 1-5"     # 12 PM ET — manage (midday)
+    - cron: "30 19 * * 1-5"    # 3:30 PM ET — manage (near close)
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "open | manage"
+        required: false
+        default: "manage"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - run: pip install -r requirements.txt
+      - name: Pick phase (12:00 UTC = open, else manage)
+        id: p
+        run: |
+          if [[ -n "${{ github.event.inputs.phase }}" ]]; then
+            echo "phase=${{ github.event.inputs.phase }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.schedule }}" == "0 12 * * 1-5" ]]; then
+            echo "phase=open" >> $GITHUB_OUTPUT
+          else
+            echo "phase=manage" >> $GITHUB_OUTPUT
+          fi
+      - name: Run synthetic user
+        run: python scripts/synthetic_user.py --phase ${{ steps.p.outputs.phase }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
+          GITHUB_TOKEN:       ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID:            ${{ secrets.GIST_ID }}
+          FINNHUB_API_KEY:    ${{ secrets.FINNHUB_API_KEY }}
+          ALPACA_KEY_ID:      ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
