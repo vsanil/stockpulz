@@ -352,3 +352,30 @@ class TestPicksKeyboardCollapsed:
         monkeypatch.delenv("APP_URL", raising=False)
         from formatters import build_picks_keyboard
         assert build_picks_keyboard(self._picks(), {}) == []
+
+
+class TestEodPositionsSection:
+    """EOD shows the user's held positions (P&L vs entry + stop-hit flag)."""
+
+    def _picks_min(self):
+        return {"stocks": {"short_term": [{"ticker": "AAA", "entry_price": 100,
+                            "target_price": 115, "stop_loss": 90}], "long_term": []},
+                "crypto": {"short_term": [], "long_term": []},
+                "etfs": {"short_term": [], "long_term": []},
+                "commodities": {"short_term": [], "long_term": []},
+                "options_plays": [], "daily_summary": "x"}
+
+    def test_positions_render_with_stop_hit(self):
+        from formatters import format_eod_full_summary
+        positions = [{"ticker": "BNB", "entry_price": 651, "stop_loss": 645},
+                     {"ticker": "XEL", "entry_price": 80,  "stop_loss": 75}]
+        prices = {"AAA": 110, "BNB": 560.5, "XEL": 81.9}
+        msg = format_eod_full_summary(self._picks_min(), prices, positions)
+        assert "Your other positions" in msg
+        assert "BNB" in msg and "XEL" in msg
+        assert "stop hit" in msg          # BNB is below its stop
+
+    def test_no_positions_no_section(self):
+        from formatters import format_eod_full_summary
+        msg = format_eod_full_summary(self._picks_min(), {"AAA": 110}, [])
+        assert "Your other positions" not in msg
