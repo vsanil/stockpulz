@@ -25,6 +25,9 @@ class TestFullSweepHelpers:
 
     def test_is_tg(self):
         assert fs._is_tg("https://api.telegram.org/bot123/sendMessage")
+        assert fs._is_tg("https://api.telegram.org/bot123/sendPhoto")
+        # read-only getMe passes through (needed for bot-username resolution)
+        assert not fs._is_tg("https://api.telegram.org/bot123/getMe")
         assert not fs._is_tg("https://api.github.com/gists/x")
         assert not fs._is_tg(None)
 
