@@ -836,7 +836,6 @@ def run_morning(config: dict, now_et: datetime):
             # Also include each user's watchlist tickers
             for uid in _all_recipients():
                 try:
-                    from config_manager import get_user_config
                     wl = get_user_config(uid).get("watchlist", [])
                     all_tickers.extend(wl)
                 except Exception:
@@ -1034,7 +1033,6 @@ def run_confirmation():
 
         for uid in _all_recipients():
             try:
-                from config_manager import get_user_config
                 u_cfg     = get_user_config(uid)
                 if u_cfg.get("paused") or u_cfg.get("skip_watchlist_alerts"):
                     continue

@@ -431,7 +431,7 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
 
     # ── /watchlist — show current watchlist with live prices ────────────────
     if text == "WATCHLIST":
-        from config_manager import get_user_config, load_user_trade_log
+        from config_manager import load_user_trade_log   # get_user_config is module-level
         ucfg   = get_user_config(chat_id)
         log    = load_user_trade_log(chat_id)
         wl_cfg = ucfg.get("watchlist") or []

@@ -1312,7 +1312,8 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
 
     # ── /digest — personalized morning check-in for open positions ───────────
     if text == "DIGEST":
-        from cmd_helpers import _fetch_live_price
+        # NB: _fetch_live_price is module-level (line 13). A local re-import here
+        # makes it function-local → UnboundLocalError at the earlier /size use.
         from earnings_checker import get_upcoming_earnings
 
         log    = load_user_trade_log(chat_id)
