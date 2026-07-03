@@ -105,43 +105,63 @@ def phase_open(admin: str, dry: bool) -> list[str]:
     paper_cands = [u for u in uni if u["atype"] in ("crypto", "etf") and u["t"] not in opened][:_MAX_PAPER] \
                   or [u for u in uni if u["t"] not in opened][:_MAX_PAPER]
 
-    held_real = {x["ticker"] for x in load_user_trade_log(admin).get("open", [])}
-    for u in real_cands:
-        px = get_live_price(u["t"])
-        if not _pos(px) or u["t"] in held_real:
-            continue
-        shares = round(_REAL_USD / px, 4)
-        if not dry:
-            add_holding(u["t"], admin, entry_override=float(px),
-                        stop_override=u["stop"], target_override=u["target"],
-                        shares_override=shares, asset_type_override=u["atype"])
-            if _pos(u["target"]):
-                add_alert(admin, u["t"], float(u["target"]), replace=True)
-        new_real.append(u["t"]); watch.append(u["t"])
-        acts.append(f"🟢 REAL {u['t']} @ ${px:.2f} · {shares} sh · target ${u['target']}")
-
-    held_paper = {x["ticker"] for x in load_user_paper(admin).get("positions", [])}
-    for u in paper_cands:
-        px = get_live_price(u["t"])
-        if not _pos(px) or u["t"] in held_paper:
-            continue
-        shares = round(_PAPER_USD / px, 8)
-        if not dry:
-            paper_buy(u["t"], shares, admin, price=float(px))
-        new_paper.append(u["t"]); watch.append(u["t"])
-        acts.append(f"📄 PAPER {u['t']} @ ${px:.2f} · {shares} sh")
-
-    if watch and not dry:
-        before = wh._load_watchlist(admin)
-        wh._save_watchlist(admin, list(dict.fromkeys([x.upper() for x in before] + watch)))
-    acts.append(f"👁 watchlisted {watch}")
-
-    if not dry:
+    def _persist():
+        """Save state so a logged position is NEVER orphaned, even if a later
+        best-effort step (alert/watchlist) throws. manage tracks only what's here."""
+        if dry:
+            return
         st.setdefault("real", []).extend(new_real)
         st.setdefault("paper", []).extend(new_paper)
         st["real"] = list(dict.fromkeys(st["real"]))
         st["paper"] = list(dict.fromkeys(st["paper"]))
         _save_state(st)
+
+    try:
+        held_real = {x["ticker"] for x in load_user_trade_log(admin).get("open", [])}
+        for u in real_cands:
+            try:
+                px = get_live_price(u["t"])
+                if not _pos(px) or u["t"] in held_real:
+                    continue
+                shares = round(_REAL_USD / px, 4)
+                if not dry:
+                    add_holding(u["t"], admin, entry_override=float(px),
+                                stop_override=u["stop"], target_override=u["target"],
+                                shares_override=shares, asset_type_override=u["atype"])
+                # record in state IMMEDIATELY — the position is now real
+                new_real.append(u["t"]); watch.append(u["t"])
+                acts.append(f"🟢 REAL {u['t']} @ ${px:.2f} · {shares} sh · target ${u['target']}")
+                if not dry and _pos(u["target"]):
+                    try:                              # alert is best-effort, not critical
+                        add_alert(admin, u["t"], float(u["target"]), replace=True)
+                    except Exception as e:
+                        acts.append(f"   ⚠️ alert for {u['t']} skipped: {e}")
+            except Exception as e:
+                acts.append(f"   ⚠️ real {u['t']} skipped: {e}")
+
+        held_paper = {x["ticker"] for x in load_user_paper(admin).get("positions", [])}
+        for u in paper_cands:
+            try:
+                px = get_live_price(u["t"])
+                if not _pos(px) or u["t"] in held_paper:
+                    continue
+                shares = round(_PAPER_USD / px, 8)
+                if not dry:
+                    paper_buy(u["t"], shares, admin, price=float(px))
+                new_paper.append(u["t"]); watch.append(u["t"])
+                acts.append(f"📄 PAPER {u['t']} @ ${px:.2f} · {shares} sh")
+            except Exception as e:
+                acts.append(f"   ⚠️ paper {u['t']} skipped: {e}")
+
+        if watch and not dry:
+            try:
+                before = wh._load_watchlist(admin)
+                wh._save_watchlist(admin, list(dict.fromkeys([x.upper() for x in before] + watch)))
+            except Exception as e:
+                acts.append(f"   ⚠️ watchlist skipped: {e}")
+        acts.append(f"👁 watchlisted {watch}")
+    finally:
+        _persist()
     return acts
 
 
