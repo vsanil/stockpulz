@@ -372,7 +372,7 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
 
     # ── /fixticker OLD NEW — rename a stored ticker in your trade log ─────────
     if text.startswith("FIXTICKER "):
-        from config_manager import load_user_trade_log, save_user_trade_log
+        from config_manager import save_user_trade_log   # load_user_trade_log is module-level
         parts_ft = text[len("FIXTICKER "):].strip().upper().split()
         if len(parts_ft) != 2:
             return "⚠️ Usage: <code>/fixticker OLDTICKER NEWTICKER</code>  e.g. <code>/fixticker COSTCO COST</code>"
@@ -650,7 +650,6 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
 
     if text == "SETUP":
         # Re-run the onboarding wizard so the user can reconfigure from scratch
-        from config_manager import get_allowed_users
         if _is_admin(chat_id) or chat_id in get_allowed_users():
             _start_onboarding_wizard(chat_id)
             return ""

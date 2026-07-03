@@ -790,7 +790,6 @@ def handle_callback_query(callback_query: dict) -> None:
         if not (ticker and entry_str):
             return
         try:
-            from cmd_trade_exec import _execute_update_level
             # field must be "stop_loss" (not "stop"), and the price must be a float —
             # passing the raw string crashed round() so the stop never moved.
             result = _execute_update_level(ticker, "stop_loss", float(entry_str), chat_id)
@@ -813,7 +812,6 @@ def handle_callback_query(callback_query: dict) -> None:
         if not ticker:
             return
         try:
-            from config_manager import get_user_config, update_user_config
             cfg       = get_user_config(chat_id)
             watchlist = list(cfg.get("watchlist") or [])
             if ticker.upper() not in [w.upper() for w in watchlist]:
@@ -1848,7 +1846,6 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
 
     if command == "watchlist":
         # Show current watchlist with live prices
-        from config_manager import get_user_config, load_user_trade_log
         ucfg = get_user_config(chat_id)
         log  = load_user_trade_log(chat_id)
         # Merge both storages (trade log is the canonical source for Mini App)
@@ -1900,7 +1897,6 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         if not ticker:
             return ("📌 <b>Usage:</b> <code>/track NVDA</code> — track a price in your watchlist\n"
                     "<code>/untrack NVDA</code> — remove it")
-        from config_manager import load_user_trade_log, save_user_trade_log
         log = load_user_trade_log(chat_id)
         watchlist = log.get("watchlist", [])
         if command == "track":

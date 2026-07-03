@@ -67,41 +67,6 @@ def _pos(x) -> bool:
     return _fin(x) and float(x) > 0
 
 
-# ── raw Gist snapshot / restore (guarantees zero residue) ─────────────────────
-_GID = os.environ.get("GIST_ID")
-_TOK = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN")
-_SNAP_FILES = ("user_paper.json", "price_alerts.json", "trade_log.json",
-               "user_trades.json", "user_configs.json", "feedback.json",
-               "backtest_trades.json", "buy_counts.json")
-
-
-def _gist_all() -> dict:
-    r = requests.get(f"https://api.github.com/gists/{_GID}",
-                     headers={"Authorization": f"token {_TOK}"}, timeout=20)
-    r.raise_for_status()
-    return r.json().get("files", {})
-
-
-def _gist_restore(snapshot: dict) -> None:
-    """Write snapshotted contents back verbatim, with retries (GitHub 409s on
-    rapid successive PATCHes to the same gist — the sweep does many writes)."""
-    import time
-    files = {fn: {"content": c} for fn, c in snapshot.items() if c is not None}
-    if not files:
-        return
-    time.sleep(1.5)
-    last = ""
-    for attempt in range(1, 7):
-        r = requests.patch(f"https://api.github.com/gists/{_GID}",
-                           headers={"Authorization": f"token {_TOK}"},
-                           json={"files": files}, timeout=25)
-        if r.status_code < 400:
-            return
-        last = f"{r.status_code} {r.text[:80]}"
-        time.sleep(2 * attempt)
-    raise RuntimeError(f"gist restore failed after retries: {last}")
-
-
 # ── Telegram muter: stub api.telegram.org so the exercise never DMs the admin ──
 # Patches at the requests layer so it catches EVERY send path regardless of how
 # the module imported send_message. Gist (github.com) + price APIs pass through.
@@ -238,77 +203,17 @@ def sweep_callbacks(admin: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. Mutating POST endpoints — every write path, inside snapshot/restore
+# NOTE: mutating POST endpoints are DELIBERATELY NOT exercised here. An earlier
+# version did ~20 rapid gist PATCHes (log/close/alert/paper/settings/watchlist),
+# which tripped GitHub's secondary rate-limit (403) — and when the *restore* PATCH
+# was the one blocked, it lost the admin's data (wiped alerts, reset paper). The
+# mutation round-trips live in the canary instead (a curated few writes with a
+# proven retrying restore). full_sweep stays READ-ONLY so it can never lose data.
 # ══════════════════════════════════════════════════════════════════════════════
-
-def _post(client, path, body, admin) -> None:
-    name = "POST " + path
-    try:
-        r = client.post(path, json={**body, "chat_id": admin})
-        j = r.get_json(silent=True)
-        ok = r.status_code < 500 and j is not None
-        _check(name, ok, f"{r.status_code}" + ("" if ok else f" · body={r.data[:60]}"))
-    except Exception as e:
-        _check(name, False, f"exc: {e}")
-
-
-def sweep_mutations(client, admin: str) -> None:
-    from market_data import get_live_price
-    from config_manager import get_user_config
-    cfg = get_user_config(admin) or {}
-    px = get_live_price("V")
-    entry = float(px) if _pos(px) else 300.0
-
-    # ── positions: log → update → close/remove/unlog ──────────────────────────
-    _post(client, "/api/miniapp/log_bought",
-          {"ticker": "V", "entry_price": entry, "stop_loss": round(entry * .93, 2),
-           "target_price": round(entry * 1.15, 2), "shares": 2, "asset_type": "stock"}, admin)
-    _post(client, "/api/miniapp/update_position",
-          {"ticker": "V", "stop_loss": round(entry * .95, 2)}, admin)
-    _post(client, "/api/miniapp/close_position", {"ticker": "V", "price": round(entry * 1.05, 2)}, admin)
-    _post(client, "/api/miniapp/log_bought",
-          {"ticker": "MA", "entry_price": 400.0, "shares": 1, "asset_type": "stock"}, admin)
-    _post(client, "/api/miniapp/remove_position", {"ticker": "MA"}, admin)
-    _post(client, "/api/miniapp/log_bought",
-          {"ticker": "UNH", "entry_price": 500.0, "shares": 1, "asset_type": "stock"}, admin)
-    _post(client, "/api/miniapp/unlog_bought", {"ticker": "UNH"}, admin)
-
-    # ── alerts: add → alerts(POST) → remove → clear ───────────────────────────
-    _post(client, "/api/miniapp/add_alert", {"ticker": "MSFT", "target": 300.0}, admin)
-    _post(client, "/api/miniapp/alerts",
-          {"ticker": "MSFT", "target": 290.0, "action": "add", "replace": True}, admin)
-    _post(client, "/api/miniapp/remove_alert", {"ticker": "MSFT"}, admin)
-    _post(client, "/api/miniapp/clear_alerts", {}, admin)
-
-    # ── watchlist: add → remove → replace(with current) ───────────────────────
-    _post(client, "/api/miniapp/watchlist/add", {"ticker": "SPY"}, admin)
-    _post(client, "/api/miniapp/watchlist/remove", {"ticker": "SPY"}, admin)
-    _post(client, "/api/miniapp/update_watchlist", {"watchlist": ["AAPL", "MSFT"]}, admin)
-
-    # ── settings: set fields back to their CURRENT values (no net change) ──────
-    _post(client, "/api/miniapp/toggle_paused", {"paused": bool(cfg.get("paused", False))}, admin)
-    _post(client, "/api/miniapp/settings/update",
-          {"key": "target_gain_pct", "value": cfg.get("target_gain_pct", 15)}, admin)
-    _post(client, "/api/miniapp/update_settings",
-          {"risk_profile": cfg.get("risk_profile", "moderate")}, admin)
-    _post(client, "/api/miniapp/update_exclusions",
-          {"excluded_sectors": cfg.get("excluded_sectors", [])}, admin)
-
-    # ── paper: buy → sell(partial) → cancel → add_cash → reset ─────────────────
-    _post(client, "/api/miniapp/paper_buy", {"ticker": "AAPL", "shares": 2}, admin)
-    _post(client, "/api/miniapp/paper_sell", {"ticker": "AAPL", "shares": 1}, admin)
-    _post(client, "/api/miniapp/paper_buy", {"ticker": "NVDA", "shares": 1}, admin)
-    _post(client, "/api/miniapp/paper_cancel", {"ticker": "NVDA"}, admin)
-    _post(client, "/api/miniapp/paper_add_cash", {"amount": 100}, admin)
-    _post(client, "/api/miniapp/paper_reset", {"amount": 10000}, admin)
-
-    # ── feedback (snapshotted so it's restored, not accumulated) ──────────────
-    _post(client, "/api/miniapp/feedback",
-          {"text": "[full_sweep] automated test — ignore", "page": "sweep"}, admin)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. LLM endpoints — exercised every run (owner's choice)
+# 4. LLM endpoints — exercised every run (owner's choice)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def sweep_llm(client, admin: str) -> None:
@@ -366,18 +271,17 @@ def main() -> int:
     from webhook import app
     client = app.test_client()
 
-    snapshot = {}
+    # READ-ONLY by design: reads + informational commands + prompt-only callbacks
+    # + one LLM call. NO admin-data mutation → no snapshot/restore, so the sweep
+    # can NEVER lose the owner's data (an earlier mutating version tripped GitHub's
+    # secondary rate-limit on ~20 rapid PATCHes and the *restore* was the call that
+    # got blocked → data loss). Mutating endpoints are covered by the canary, which
+    # does a curated few writes and restores properly. Telegram sends are muted so
+    # driving commands/callbacks never DMs the admin.
     _mute_telegram()
     try:
-        snap_files = _gist_all()
-        snapshot = {fn: snap_files.get(fn, {}).get("content")
-                    for fn in _SNAP_FILES if fn in snap_files}
-        _check("snapshot", bool(snapshot), f"{len(snapshot)} files snapshotted")
-
-        for fn in (sweep_get_endpoints, sweep_bot_commands, sweep_callbacks,
-                   sweep_mutations, sweep_llm):
+        for fn in (sweep_get_endpoints, sweep_bot_commands, sweep_callbacks, sweep_llm):
             try:
-                # get/mutation/llm sweeps need the client; command/callback don't
                 if fn in (sweep_bot_commands, sweep_callbacks):
                     fn(admin)
                 else:
@@ -386,11 +290,6 @@ def main() -> int:
                 _check(fn.__name__, False, f"crashed: {e}")
                 traceback.print_exc()
     finally:
-        try:
-            _gist_restore(snapshot)
-            _check("restore", True, "all mutated stores restored to snapshot")
-        except Exception as e:
-            _check("restore", False, f"RESTORE FAILED: {e}")
         _unmute_telegram()
 
     report = build_report()

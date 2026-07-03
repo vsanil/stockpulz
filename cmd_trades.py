@@ -1433,8 +1433,10 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
 
     # ── /export — send closed trades as a CSV document ───────────────────────
     if text == "EXPORT":
-        import csv, io, os
-        from telegram_api import _bot_token
+        import csv, io          # NB: never re-import `os` here — module-level os
+        from telegram_api import _bot_token   # (line 10) is used across this fn;
+        # a local `import os` makes `os` function-local → UnboundLocalError at the
+        # earlier os.environ reads (/positions, /history, /dashboard, /missed).
         import requests as _req
         log    = load_user_trade_log(chat_id)
         closed = log.get("closed", [])
