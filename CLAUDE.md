@@ -217,6 +217,11 @@ Rules:
   - Root cause: a `let`/`const` variable assigned inside a top-level IIFE before its declaration line crashes the entire script at runtime (ReferenceError = blank page). Always move such assignments inside the `_appReady` listener
 - A change is NOT done until syntax is verified
 
+### Daily canary — synthetic E2E monitor (catches what mocked tests can't)
+- `scripts/canary.py` is a live-data "fake user" run daily by `.github/workflows/canary.yml` (12:30 UTC) that exercises the whole app AS THE ADMIN and DMs a pass/fail report. It's the safety net for the class of bug the 649 mocked tests never see (cold starts, rate limits, stale/real data, delivery, live-price math). Run locally: `python3 scripts/canary.py --dry-run`.
+- It checks: picks integrity+math, live price sanity (BTC/ETH ranges, CoinGecko cache), sizing math, backtest non-overlap, delivery/cron health (time-aware via `_expected_delivery_date`), `/health`, and MUTATING round-trips (paper buy → entry==per-share-price not the $ total; alert add→replace→remove; watchlist add) each wrapped in **snapshot→act→restore** so the admin's real data is byte-identical after a run.
+- **Rule: when you add or change a user-facing feature or a calculation, add a matching canary check** — that's how a real-world regression gets caught automatically instead of the owner finding it in a screenshot. Keep every mutating check snapshot/restore-safe.
+
 ### Test suite — mandatory before every commit
 - Run `python -m pytest tests/ -q` before every commit, no exceptions
 - A commit is NOT done until all tests pass
