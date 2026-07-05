@@ -771,7 +771,6 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
         win_pct    = int(stats["wins"] / stats["count"] * 100)
         avg        = stats["avg_return"]
         sign       = "+" if avg >= 0 else ""
-        emoji      = "🟢" if avg > 0 else ("🔴" if avg < -1 else "🟡")
         best_sym,  best_r  = stats["best"]
         worst_sym, worst_r = stats["worst"]
         best_sign  = "+" if best_r  >= 0 else ""
@@ -783,6 +782,13 @@ def format_weekly_recap_message(recap: dict, config: dict | None = None) -> str:
             spy_display = 0.0 if spy == 0 else spy   # collapse -0.0 → 0.0
             spy_sign    = "+" if spy_display >= 0 else ""
             bench = f" vs S&P {spy_sign}{spy_display}% ({vs_sign}{vs}%)"
+            # Dot reflects BEATING THE BENCHMARK (alpha), not just a positive return:
+            # 🟢 beat the S&P, 🟡 roughly in line (within 1%), 🔴 trailed by >1%.
+            # (A +1.7% avg that trails the index reads honestly as 🟡, not 🟢.)
+            emoji = "🟢" if vs > 0 else ("🔴" if vs < -1 else "🟡")
+        else:
+            # No benchmark (e.g. the crypto section) → fall back to absolute return.
+            emoji = "🟢" if avg > 0 else ("🔴" if avg < -1 else "🟡")
         pick_word = "pick" if stats['count'] == 1 else "picks"
         return [
             f"<b>{label}</b> — {stats['count']} {pick_word}, {win_pct}% wins",
