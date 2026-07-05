@@ -178,6 +178,7 @@ Rules:
 - `get_recent_stats()` in `performance_tracker.py` now returns both `avg_return` and `median_return`
 - The morning message perf bar uses `median_return` (outlier-resistant) — a single large crypto return can make `avg_return` misleading (e.g. +441%)
 - All other callers (cmd_market.py, cmd_trades.py, cmd_admin.py) still use `avg_return` — do not change those without checking the display context
+- **Weekly-recap Avg-line dot = ALPHA, not absolute return** (`formatters._section`). When a benchmark (`spy`) is present the 🟢/🟡/🔴 reflects vs-S&P: 🟢 beat, 🟡 in line (within 1%), 🔴 trailed by >1%. Only falls back to absolute-return direction when there's no benchmark (e.g. the crypto section passes `spy=None`). A green dot next to a negative `(-x%)` alpha was the contradiction that prompted this. Guard: `TestWeeklyRecapAlphaDot` in tests/test_formatters.py.
 
 ### Commit discipline
 - Always `git add` ALL changed files together — never leave related changes uncommitted
