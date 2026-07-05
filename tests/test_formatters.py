@@ -379,3 +379,43 @@ class TestEodPositionsSection:
         from formatters import format_eod_full_summary
         msg = format_eod_full_summary(self._picks_min(), {"AAA": 110}, [])
         assert "Your other positions" not in msg
+
+
+class TestWeeklyRecapAlphaDot:
+    """The Avg-line dot reflects BEATING THE BENCHMARK (alpha), not just a
+    positive absolute return. A +1.7% avg that trails the S&P must read 🟡."""
+
+    @staticmethod
+    def _avg_line(recap):
+        from formatters import format_weekly_recap_message
+        msg = format_weekly_recap_message(recap, {})
+        return next(l for l in msg.split("\n") if l.startswith("Avg:"))
+
+    def _recap(self, avg, spy):
+        return {"stocks": {"count": 5, "wins": 4, "avg_return": avg,
+                           "best": ("OPEN", 6.1), "worst": ("AMBA", -8.7)},
+                "crypto": None, "spy_return": spy, "pick_outcomes": []}
+
+    def test_positive_but_trails_index_is_yellow(self):
+        # Jul 4 real case: +1.7% avg vs S&P +2.2% → alpha -0.5% → in line → 🟡
+        line = self._avg_line(self._recap(1.7, 2.2))
+        assert "🟡" in line and "🟢" not in line and "🔴" not in line
+
+    def test_beats_index_is_green(self):
+        line = self._avg_line(self._recap(3.0, 2.2))      # alpha +0.8%
+        assert "🟢" in line
+
+    def test_trails_index_badly_is_red(self):
+        line = self._avg_line(self._recap(-2.0, 2.2))     # alpha -4.2%
+        assert "🔴" in line
+
+    def test_no_benchmark_falls_back_to_absolute_return(self):
+        # crypto section passes no spy → dot reflects absolute return direction
+        r = {"stocks": None,
+             "crypto": {"count": 2, "wins": 2, "avg_return": 4.0,
+                        "best": ("BTC", 5.0), "worst": ("ETH", 3.0)},
+             "spy_return": None, "pick_outcomes": []}
+        from formatters import format_weekly_recap_message
+        msg = format_weekly_recap_message(r, {"assets": ["crypto"], "show_crypto": True})
+        crypto_avg = next(l for l in msg.split("\n") if l.startswith("Avg:"))
+        assert "🟢" in crypto_avg          # +4% absolute, no benchmark → green
