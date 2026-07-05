@@ -419,3 +419,32 @@ class TestWeeklyRecapAlphaDot:
         msg = format_weekly_recap_message(r, {"assets": ["crypto"], "show_crypto": True})
         crypto_avg = next(l for l in msg.split("\n") if l.startswith("Avg:"))
         assert "🟢" in crypto_avg          # +4% absolute, no benchmark → green
+
+
+class TestEODImplausiblePriceGuard:
+    """A garbage feed value (UNI $0.00 / TSLA $0.01 on a holiday) must render as
+    'price unavailable' in the EOD card — never a real −100% ▼ / stop hit."""
+
+    def _picks_min(self):
+        return {"stocks": {"short_term": [{"ticker": "AAA", "entry_price": 100,
+                            "target_price": 115, "stop_loss": 90}], "long_term": []},
+                "crypto": {"short_term": [], "long_term": []},
+                "etfs": {"short_term": [], "long_term": []},
+                "commodities": {"short_term": [], "long_term": []},
+                "options_plays": [], "daily_summary": "x"}
+
+    def test_garbage_price_shows_unavailable_not_stop_hit(self):
+        from formatters import format_eod_full_summary
+        positions = [{"ticker": "TSLA", "entry_price": 354.0, "stop_loss": 340.0}]
+        prices = {"AAA": 110, "TSLA": 0.01}         # TSLA = holiday garbage
+        msg = format_eod_full_summary(self._picks_min(), prices, positions)
+        assert "TSLA" in msg and "price unavailable" in msg
+        assert "stop hit" not in msg                # must NOT read as a real stop
+        assert "100.0%" not in msg                  # no false −100%
+
+    def test_real_stop_hit_still_shows(self):
+        from formatters import format_eod_full_summary
+        positions = [{"ticker": "BNB", "entry_price": 651.0, "stop_loss": 645.0}]
+        prices = {"AAA": 110, "BNB": 570.31}        # real −12.4%, plausible
+        msg = format_eod_full_summary(self._picks_min(), prices, positions)
+        assert "stop hit" in msg and "price unavailable" not in msg

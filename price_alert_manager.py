@@ -233,6 +233,17 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
             remaining.append(a)
             continue
 
+        # Plausibility guard: a failed feed can return tiny garbage ($0.01 TSLA,
+        # ~$0.00 UNI on a market holiday) that passes >0 and trivially satisfies a
+        # 'below $X' target → false −100% alert. Validate against the price we knew
+        # when the alert was set (fallback: the target). A >90% collapse / >10x
+        # spike is a bad fetch, not a real cross → skip (keep the alert armed).
+        from market_data import plausible_price
+        ref = a.get("price_at_set") or a.get("target")
+        if not plausible_price(current, ref):
+            remaining.append(a)
+            continue
+
         hit = (
             (a["direction"] == "above" and current >= a["target"]) or
             (a["direction"] == "below" and current <= a["target"])

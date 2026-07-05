@@ -2820,24 +2820,30 @@ def _check_portfolio_health(uid: str, current_prices: dict) -> list:
     blocks: list[str] = []
 
     # Calculate total portfolio value based on current prices
+    from market_data import plausible_price
     total_value = 0.0
     trade_values: list[tuple] = []
     for trade in trades:
         ticker  = trade.get("ticker")
         entry   = trade.get("entry_price")
         shares  = trade.get("shares") or trade.get("quantity")
-        current = current_prices.get(ticker) if ticker else None
-        if not (ticker and _is_pos(entry) and _is_pos(current)):
+        if not (ticker and _is_pos(entry)):
             continue
+        raw = current_prices.get(ticker) if ticker else None
+        # An implausible/missing live price (holiday garbage: $0.01 that collapses
+        # the portfolio total and fires a false 49% concentration / stop) falls
+        # back to entry (cost basis) → position still counts at a 0% move, so no
+        # false nudge fires off a $0 quote.
+        current = float(raw) if plausible_price(raw, entry) else float(entry)
         alloc = trade.get("allocation") or trade.get("budget") or 0
         if shares:
-            pos_value = float(shares) * float(current)
+            pos_value = float(shares) * current
         elif alloc:
             est_shares = float(alloc) / float(entry)
-            pos_value  = est_shares * float(current)
+            pos_value  = est_shares * current
         else:
             continue
-        trade_values.append((ticker, trade, float(current), float(entry), pos_value))
+        trade_values.append((ticker, trade, current, float(entry), pos_value))
         total_value += pos_value
 
     if total_value <= 0:
@@ -3287,6 +3293,7 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
     For positions down 2–8% from entry AND within 5% of their stop: send a
     plain-English hold/fold nudge. Once per position per day via cache dedup.
     """
+    from market_data import plausible_price
     log = load_user_trade_log(uid)
     for trade in log.get("open", []):
         ticker = trade.get("ticker")
@@ -3295,7 +3302,10 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
         if not (ticker and _is_pos(entry) and _is_pos(stop)):
             continue
         current = current_prices.get(ticker)
-        if not _is_pos(current):
+        # A garbage feed value ($0.01 on a holiday) is _is_pos-positive but would
+        # fire a FALSE "🔴 STOP HIT — sell" alert (curr 0.01 <= any stop). Reject
+        # anything implausible vs entry — never signal a sell off a bad quote.
+        if not plausible_price(current, entry):
             continue
         entry_f, stop_f, curr_f = float(entry), float(stop), float(current)
         pct_from_entry = (curr_f - entry_f) / entry_f * 100
