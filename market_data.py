@@ -40,6 +40,38 @@ _PRICE_CACHE_TTL = 15     # seconds
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+def plausible_price(price, reference=None, lo: float = 0.1, hi: float = 10.0) -> bool:
+    """True if `price` is a plausible live quote.
+
+    A failed/stale feed (yfinance on a market holiday, a CoinGecko hiccup) does
+    NOT always return 0 or None — it can return tiny garbage like $0.01 for TSLA,
+    which passes a bare `price > 0` guard and then trivially satisfies a "below
+    $X" alert or reads as a −100% stop-hit. So `price > 0` is not enough.
+
+    When a `reference` is given (the price we last knew for real — an alert's
+    price_at_set, a position's entry, a previous close), reject any quote outside
+    [reference*lo, reference*hi]. A >90%% collapse or >10x spike between two checks
+    is a bad fetch, not a real move. With no usable reference we can only require
+    a positive, finite number.
+
+    This is the CLASS-level guard: validate every external price against what we
+    last knew, instead of special-casing exactly-$0.00 at each call site.
+    """
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return False
+    if not (p == p and p > 0):          # reject None / NaN / <= 0  (p==p rejects NaN)
+        return False
+    try:
+        r = float(reference)
+    except (TypeError, ValueError):
+        return True                     # no reference → positivity is all we can check
+    if not (r == r and r > 0):
+        return True
+    return r * lo <= p <= r * hi
+
+
 def _ms_to_date(ms: int) -> str:
     """Convert Polygon millisecond timestamp → YYYY-MM-DD."""
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")

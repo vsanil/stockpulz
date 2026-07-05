@@ -880,8 +880,11 @@ def format_eod_full_summary(
     _watchlist = set(watchlist) if watchlist else set()
 
     def _row(symbol, entry, target, stop, label=""):
+        from market_data import plausible_price
         price = current_prices.get(symbol)
-        if price is None or entry is None:
+        # A garbage feed value (UNI $0.00 / TSLA $0.01 on a holiday) is implausible
+        # vs entry — never render it as a real −100% ▼ / stop-hit; show unavailable.
+        if price is None or entry is None or not plausible_price(price, entry):
             return None, f"  <b>{symbol}</b>  <i>price unavailable</i>"
         pct   = (price - float(entry)) / float(entry) * 100
         emoji = "🟢" if pct >= 1 else ("🔴" if pct <= -1 else "🟡")
@@ -976,13 +979,17 @@ def format_eod_full_summary(
 
     # ── Portfolio P&L summary ─────────────────────────────────────────────────
     # Show the user's open-position P&L using today's closing prices.
+    from market_data import plausible_price
     all_holdings = list(open_holdings)  # already passed in
     port_rows = []
     for h in all_holdings:
         tk    = h.get("ticker")
         entry = h.get("entry_price")
         price = current_prices.get(tk) if tk else None
-        if not (tk and entry and price):
+        # A garbage feed value ($0.01 on a holiday) passes `and price` but would
+        # count as a −100% loser and poison the avg/total; exclude it (it then
+        # shows honestly in the "N of M priced" coverage note).
+        if not (tk and entry and plausible_price(price, entry)):
             continue
         try:
             pct = (float(price) - float(entry)) / float(entry) * 100

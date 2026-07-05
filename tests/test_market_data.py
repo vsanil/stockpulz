@@ -59,3 +59,33 @@ class TestOhlcvCache:
         monkeypatch.setattr(market_data, "_yf_ohlcv", lambda t, d: None)
         assert market_data.get_ohlcv("NODATA", 30) is None
         assert ("NODATA", 30) not in market_data._OHLCV_CACHE
+
+
+class TestPlausiblePrice:
+    """market_data.plausible_price — the class-level guard against a feed that
+    returns tiny garbage ($0.01) instead of 0/None on a market holiday."""
+
+    def test_garbage_vs_reference_rejected(self):
+        from market_data import plausible_price
+        assert plausible_price(0.01, 354.05) is False     # TSLA holiday garbage
+        assert plausible_price(0.004, 3.07) is False      # UNI
+        assert plausible_price(4000.0, 354.0) is False    # 11x spike
+
+    def test_real_prices_accepted(self):
+        from market_data import plausible_price
+        assert plausible_price(354.0, 360.0) is True
+        assert plausible_price(570.31, 651.0) is True     # BNB real −12.4% stop
+        assert plausible_price(50.0, 100.0) is True       # legit −50% still ok
+
+    def test_nonpositive_and_nan_rejected(self):
+        from market_data import plausible_price
+        assert plausible_price(0.0, 100.0) is False
+        assert plausible_price(-5.0, 100.0) is False
+        assert plausible_price(float("nan"), 100.0) is False
+        assert plausible_price(None, 100.0) is False
+
+    def test_no_reference_only_requires_positive(self):
+        from market_data import plausible_price
+        assert plausible_price(5.0, None) is True
+        assert plausible_price(0.0, None) is False
+        assert plausible_price(0.01, 0) is True           # ref<=0 → positivity only

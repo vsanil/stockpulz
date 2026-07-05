@@ -218,6 +218,27 @@ def check_backtest_math() -> None:
         _check("backtest.winrate_math", abs(wr - 50.0) < 0.01, f"win_rate={wr}")
 
 
+def check_price_guard() -> None:
+    """The garbage-price guard (market_data.plausible_price) is what stops a
+    failed feed's tiny value ($0.01 TSLA / ~$0.00 UNI on a holiday) from firing a
+    false 'below $X · −100%' alert or a fake EOD stop-hit. This bug fired live on
+    Jul 3 while the canary was green — because nothing here injected a bad price.
+    Assert the guard rejects garbage and still accepts real quotes + real drops."""
+    from market_data import plausible_price
+    rejects = (not plausible_price(0.01, 354.05)      # TSLA holiday garbage
+               and not plausible_price(0.004, 3.07)   # UNI
+               and not plausible_price(0.0, 100.0)
+               and not plausible_price(float("nan"), 100.0)
+               and not plausible_price(4000.0, 354.0))  # 11x spike
+    _check("price_guard.rejects_garbage", rejects,
+           "plausible_price lets a $0.01/spike through — false alerts will fire")
+    accepts = (plausible_price(354.0, 360.0)          # real quote
+               and plausible_price(570.31, 651.0)     # BNB real −12.4% stop
+               and plausible_price(50.0, 100.0))      # legit −50% below-alert
+    _check("price_guard.accepts_real", accepts,
+           "plausible_price rejects a real quote/drop — alerts would be suppressed")
+
+
 def check_cron_delivery() -> None:
     from config_manager import get_config
     cfg = get_config()
@@ -416,7 +437,8 @@ def main() -> int:
         return 2
 
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
-               check_backtest_math, check_cron_delivery, check_endpoints):
+               check_backtest_math, check_price_guard, check_cron_delivery,
+               check_endpoints):
         try:
             fn()
         except Exception as e:

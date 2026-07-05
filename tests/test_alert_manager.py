@@ -274,6 +274,45 @@ class TestNonPositivePriceGuard:
         assert len(fired) == 1 and "AAPL" in fired[0]
 
 
+class TestImplausiblePriceGuard:
+    """
+    The <=0 guard was NOT enough. A failed feed on a market holiday returns tiny
+    POSITIVE garbage ($0.01 for TSLA, ~$0.004 for UNI) that passes `> 0` and then
+    trivially satisfies a 'below $X' target → false "now $0.00 · −100%" alert
+    (the Jul 3 bug). A price implausibly far from where the alert was set (a >90%
+    collapse) is a bad fetch, not a cross, and must not trigger.
+    """
+    import price_alert_manager as _pam
+
+    def _set_price(self, monkeypatch, value):
+        monkeypatch.setattr(self._pam, "_current_price", lambda ticker: value)
+
+    def test_tiny_positive_garbage_does_not_trigger_below_alert(self, monkeypatch):
+        # AAPL ~189.50 when set; feed then returns $0.01 (holiday garbage).
+        add_alert(CHAT, "AAPL", 150.0, direction="below")
+        self._set_price(monkeypatch, 0.01)
+        assert check_alerts(CHAT) == []
+
+    def test_tiny_garbage_leaves_alert_armed(self, monkeypatch):
+        add_alert(CHAT, "AAPL", 150.0, direction="below")
+        self._set_price(monkeypatch, 0.01)
+        check_alerts(CHAT)
+        assert "AAPL" in list_alerts(CHAT)          # not consumed by a false trigger
+
+    def test_real_cross_to_target_still_fires(self, monkeypatch):
+        add_alert(CHAT, "AAPL", 150.0, direction="below")   # set ~189.50
+        self._set_price(monkeypatch, 150.0)                 # plausible real drop
+        fired = check_alerts(CHAT)
+        assert len(fired) == 1 and "AAPL" in fired[0]
+
+    def test_legit_large_drop_still_fires(self, monkeypatch):
+        # A genuine −50% below-alert must NOT be over-filtered.
+        add_alert(CHAT, "AAPL", 100.0, direction="below")   # set ~189.50
+        self._set_price(monkeypatch, 95.0)                  # −50% but plausible
+        fired = check_alerts(CHAT)
+        assert len(fired) == 1
+
+
 # ── clear_alerts ──────────────────────────────────────────────────────────────
 
 class TestClearAlerts:
