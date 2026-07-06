@@ -853,7 +853,8 @@ class TestStopHitAlert:
         monkeypatch.setattr(ag, "send_inline_keyboard",
                             lambda text, kb=None, chat_id=None: sent.append(text))
         monkeypatch.setattr(ag, "_is_alerted", lambda k: False)
-        monkeypatch.setattr(ag, "_mark_alerted", lambda k: None)
+        monkeypatch.setattr(ag, "_mark_alerted", lambda k, ttl_hours=None: None)
+        monkeypatch.setattr(ag, "_clear_alerted", lambda k: None)
         return ag, sent
 
     def test_blown_through_stop_fires_stop_hit(self, monkeypatch):
@@ -867,3 +868,42 @@ class TestStopHitAlert:
         ag._check_hold_or_fold("u1", {"AAA": 95})           # -5% from entry, above stop
         assert any("Hold or fold" in t for t in sent)
         assert not any("STOP HIT" in t for t in sent)
+
+
+class TestStopHitFireOnce:
+    """A position past its stop should alert ONCE per breach episode (not every
+    morning), and re-arm only after it recovers back above the stop."""
+
+    _POS = {"open": [{"ticker": "BNB", "entry_price": 651.0, "stop_loss": 645.0}]}
+
+    def test_fires_once_then_quiet_then_rearms(self, monkeypatch):
+        import agent as ag
+        from cache_layer import reset_cache
+        reset_cache()
+        sent = []
+        monkeypatch.setattr(ag, "load_user_trade_log", lambda uid: self._POS)
+        monkeypatch.setattr(ag, "send_inline_keyboard",
+                            lambda *a, **k: sent.append(a[0]))
+
+        ag._check_hold_or_fold("U1", {"BNB": 570.0})        # below stop → fires
+        assert len(sent) == 1 and "STOP HIT" in sent[0]
+
+        ag._check_hold_or_fold("U1", {"BNB": 560.0})        # still below → quiet
+        assert len(sent) == 1
+
+        ag._check_hold_or_fold("U1", {"BNB": 660.0})        # recovered → re-arm
+        assert len(sent) == 1
+
+        ag._check_hold_or_fold("U1", {"BNB": 555.0})        # breaches again → fires
+        assert len(sent) == 2
+
+    def test_garbage_price_never_fires_stop_hit(self, monkeypatch):
+        import agent as ag
+        from cache_layer import reset_cache
+        reset_cache()
+        sent = []
+        monkeypatch.setattr(ag, "load_user_trade_log", lambda uid: self._POS)
+        monkeypatch.setattr(ag, "send_inline_keyboard",
+                            lambda *a, **k: sent.append(a[0]))
+        ag._check_hold_or_fold("U1", {"BNB": 0.01})         # holiday garbage
+        assert sent == []                                   # no false STOP HIT
