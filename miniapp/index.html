@@ -4732,7 +4732,9 @@ function renderPickCard(p, idx = 0) {
         </div>
         <div class="price-cell">
           <div class="price-lbl">Stop</div>
-          <div class="price-num num-stop">$${fmtPrice(p.stop_loss)}</div>
+          ${p.stop_loss
+            ? `<div class="price-num num-stop">$${fmtPrice(p.stop_loss)}</div>`
+            : `<div class="price-num" style="color:var(--hint);font-weight:600" title="No stop — long-term hold isn't stopped out on short-term moves">— <span style="font-size:9px;font-weight:500">no stop</span></div>`}
         </div>
       </div>
       <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
