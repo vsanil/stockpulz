@@ -71,7 +71,7 @@ from formatters import (
     format_eod_full_summary, format_week_ahead, build_picks_keyboard, _p,
 )
 from telegram_api import send_message, send_inline_keyboard, broadcast_all, send_photo
-from cache_layer import cache_get, cache_set
+from cache_layer import cache_get, cache_set, cache_delete
 
 ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
@@ -1218,6 +1218,13 @@ def _mark_alerted(key: str, ttl_hours: int | None = None) -> None:
     """
     ttl = (ttl_hours * 3600) if ttl_hours else _ALERTED_STOPS_TTL
     cache_set(f"{_ALERTED_KEY_PREFIX}{key}", True, ttl_seconds=ttl)
+
+
+def _clear_alerted(key: str) -> None:
+    """Re-arm a dedup key so its alert can fire again on a fresh event — e.g. a
+    stopped-out position that recovers back above its stop, so the next breach
+    alerts instead of staying suppressed by the fire-once flag."""
+    cache_delete(f"{_ALERTED_KEY_PREFIX}{key}")
 
 
 # ── Close check (3:30 PM — silent unless a trade closed) ─────────────────────
@@ -3316,10 +3323,14 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
         # well beyond the -8% hold/fold floor below) still gets a loud alert. The
         # old code only nudged in the -2% to -8% band, so a blown-through stop
         # went silent and the pre-market card mislabelled it "NEAR STOP".
+        # Fire ONCE per breach episode, then stay quiet while it remains below the
+        # stop (a position sitting past its stop for days used to re-alert every
+        # morning). The date-less key + long cooldown = one loud alert; recovery
+        # above the stop re-arms it (below) so a fresh breach alerts again.
+        stophit_key = f"stophit_{uid}_{ticker}"
         if curr_f <= stop_f:
-            key = f"stophit_{uid}_{ticker}_{et_today()}"
-            if not _is_alerted(key):
-                _mark_alerted(key)
+            if not _is_alerted(stophit_key):
+                _mark_alerted(stophit_key, ttl_hours=720)   # ~30d fire-once window
                 send_inline_keyboard(
                     f"🔴 <b>STOP HIT — {ticker}</b>\n"
                     f"Now <code>${_p(curr_f)}</code>, below your "
@@ -3331,6 +3342,9 @@ def _check_hold_or_fold(uid: str, current_prices: dict) -> None:
                     chat_id=uid,
                 )
             continue   # past-stop: don't ALSO send the softer hold/fold nudge
+
+        # Above the stop → re-arm, so if it breaches again later it alerts afresh.
+        _clear_alerted(stophit_key)
 
         # Only nudge when down 2–8% AND within 5% of stop
         if -8.0 <= pct_from_entry <= -2.0 and pct_to_stop <= 5.0:
@@ -3610,7 +3624,7 @@ def run_premarket(config: dict):
     """
     _log_cron_run("premarket")
     import yfinance as yf
-    from market_data import get_live_price, _CRYPTO_SYMBOLS
+    from market_data import get_live_price, _CRYPTO_SYMBOLS, plausible_price
     print("[agent] Running pre-market pulse...")
 
     for uid in _all_recipients():
@@ -3650,7 +3664,9 @@ def run_premarket(config: dict):
                 if is_crypto:
                     try:
                         price = get_live_price(ticker)
-                        if price:
+                        # gate on plausibility vs entry/stop so a garbage feed value
+                        # ($0.00) never shows a false −100% row / STOP HIT badge here
+                        if plausible_price(price, entry or stop):
                             price = round(float(price), 6)
                             vs_entry_str = ""
                             if entry:
@@ -3703,6 +3719,12 @@ def run_premarket(config: dict):
 
                     pre_price  = round(float(pre_price), 2)
                     prev_close = round(float(prev_close), 2) if prev_close else None
+
+                    # Reject a garbage feed value (holiday $0.01) vs prev close / entry
+                    # so the card never shows a false −100% / STOP HIT for a stock.
+                    if not plausible_price(pre_price, prev_close or entry):
+                        position_lines.append(f"  <b>{ticker}</b>  <i>pre-market data unavailable</i>")
+                        continue
 
                     # % vs previous close (only meaningful when we have real pre-market data)
                     vs_prev = 0
@@ -3927,7 +3949,10 @@ def run_price_alerts():
                 for t in watch_tickers:
                     try:
                         curr, prev = _watch_move_quote(t)
-                        if not (curr and prev):
+                        # plausibility vs previous close: a garbage live value ($0.01)
+                        # would otherwise report a false "moving −100% today".
+                        from market_data import plausible_price
+                        if not (curr and prev) or not plausible_price(curr, prev):
                             continue
                         pct_chg = (curr - prev) / prev * 100
                         if abs(pct_chg) < 3:
