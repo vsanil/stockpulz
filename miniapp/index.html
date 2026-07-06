@@ -7570,7 +7570,12 @@ let _statusData = null;
 function _relTime(isoStr) {
   if (!isoStr) return '';
   try {
-    const diff = (Date.now() - new Date(isoStr + 'Z').getTime()) / 1000;
+    // triggered_at from the backend already carries a tz offset ("+00:00" via
+    // datetime.now(timezone.utc).isoformat()). Only append 'Z' to a NAIVE string
+    // — "+00:00Z" is an invalid date → NaN → the "NaNd ago" bug.
+    const hasTz = /(Z|[+-]\d\d:?\d\d)$/.test(isoStr);
+    const diff  = (Date.now() - new Date(hasTz ? isoStr : isoStr + 'Z').getTime()) / 1000;
+    if (!isFinite(diff)) return '';
     if (diff < 60)    return 'just now';
     if (diff < 3600)  return Math.floor(diff / 60) + 'm ago';
     if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
