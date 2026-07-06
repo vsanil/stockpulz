@@ -216,6 +216,7 @@ Rules:
 ### Cache invalidation
 - When server data changes (position updated, pick bought, watchlist changed), always call `_invalidatePortfolioCache()` or equivalent and set `loadedTabs[tab] = false` for affected tabs
 - Never show stale data after a write — reload the affected tab/section immediately after a successful save
+- **Watchlist tab is stale-while-revalidate cached** (`_WATCH_LS_KEY = 'sp_watch_v1'`, localStorage — survives app close; sessionStorage doesn't). `loadWatchlist` paints cached tickers+prices+sparklines INSTANTLY (no spinner/"…"), then live-refetches and updates in place; it only re-renders structure when the ticker SET changed (`_sameTickers`) so there's no flash on same-set reopen. Prices go through the extracted `_refreshWatchPrices(tickers)` (used by both `renderWatchlist` and the reopen path); sparkline draw is the extracted `_drawWatchSpark(t, closes)`. **Rule: any watchlist mutation (add/remove/add-from-pick) MUST call `_invalidateWatchCache()` so a removed ticker can't reappear on the next open** (mirrors the picks `_PICKS_LS_KEY` cache). Live price always overwrites the cached value within ~1s — cache is first-paint only, never a freshness downgrade. Cache is dropped after 24h.
 
 ### pandas 2.x compatibility — always use StringIO
 - `pd.read_html(string)` and `pd.read_csv(string)` no longer accept raw HTML/CSV strings in pandas 2.x — they try to open the string as a file path and raise `[Errno 2] No such file or directory`
