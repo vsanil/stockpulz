@@ -5052,6 +5052,7 @@ async function addToWatchlistFromPick(ticker) {
     if (d.ok) {
       showToast('👁 ' + ticker + ' added to watchlist');
       loadedTabs['watchlist'] = false; // stale watchlist
+      _invalidateWatchCache();
     } else {
       showToast('👁 ' + ticker + ' already on watchlist');
     }
@@ -7590,56 +7591,153 @@ function _watchAssetType(ticker, assetTypesMap) {
   return isCryptoTicker(ticker) ? 'crypto' : 'stock';
 }
 
+// ── Watchlist stale-while-revalidate cache ───────────────────────────────────
+// Paints the last-known tickers + prices + sparklines INSTANTLY on reopen (no
+// spinner/blank/"…"), then refreshes live in place. localStorage survives app
+// close (sessionStorage doesn't). Live always overwrites cache within ~1s, so
+// there's no freshness tradeoff — just a faster first paint.
+const _WATCH_LS_KEY = 'sp_watch_v1';
+let _watchPriceData = {};   // ticker → {price, change_pct}, collected on live fetch
+let _watchSparkData = {};   // ticker → closes[]
+
+function _readWatchCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(_WATCH_LS_KEY) || 'null');
+    if (!c || !c.ts || (Date.now() - c.ts) > 86400000) return null;  // drop >24h
+    return c;
+  } catch (_) { return null; }
+}
+
+function _saveWatchCache(tickers, alertTickers, assetTypes, triggeredMap) {
+  try {
+    localStorage.setItem(_WATCH_LS_KEY, JSON.stringify({
+      ts: Date.now(), tickers,
+      alertTickers: [...(alertTickers || [])], alertsData: _watchAlertsData,
+      assetTypes: assetTypes || {}, triggeredMap: triggeredMap || {},
+      prices: _watchPriceData, sparks: _watchSparkData,
+    }));
+  } catch (_) {}
+}
+
+// Drop the cache after any add/remove so the next open does a clean live load
+// (never paint a stale ticker set — e.g. a removed ticker reappearing).
+function _invalidateWatchCache() {
+  try { localStorage.removeItem(_WATCH_LS_KEY); } catch (_) {}
+}
+
+function _drawWatchSpark(t, closes) {
+  if (!closes || closes.length < 2) return;
+  const cv = document.getElementById(`wspark-${t}`);
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const mn = Math.min(...closes), mx = Math.max(...closes);
+  const range = mx - mn || 1;
+  const W = cv.width, H = cv.height, pad = 2;
+  ctx.clearRect(0, 0, W, H);
+  const up = closes[closes.length-1] >= closes[0];
+  ctx.strokeStyle = up ? getComputedStyle(document.documentElement).getPropertyValue('--green').trim() || '#48bb78'
+                       : getComputedStyle(document.documentElement).getPropertyValue('--red').trim()  || '#fc5c65';
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  closes.forEach((v, i) => {
+    const x = pad + (i / (closes.length - 1)) * (W - pad*2);
+    const y = H - pad - ((v - mn) / range) * (H - pad*2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function _paintWatchPrices(prices) {
+  for (const t in (prices || {})) {
+    const el = document.getElementById('wprice-' + t);
+    const q  = prices[t];
+    if (!el || !q || q.price == null) continue;
+    const priceStr = '$' + Number(q.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    if (q.change_pct != null) {
+      const chgSign = q.change_pct >= 0 ? '+' : '';
+      const chgColor = q.change_pct >= 0 ? 'var(--green)' : 'var(--red)';
+      el.innerHTML = `${priceStr} <span style="color:${chgColor};font-size:11px">${chgSign}${Number(q.change_pct).toFixed(1)}%</span>`;
+    } else {
+      el.textContent = priceStr;
+    }
+    el.style.opacity = '1';
+  }
+}
+
+function _paintWatchSparks(sparks) {
+  for (const t in (sparks || {})) _drawWatchSpark(t, sparks[t]);
+}
+
+function _sameTickers(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  const sb = new Set(b);
+  return a.every(x => sb.has(x));
+}
+
 async function loadWatchlist() {
   const spinner = document.getElementById('watch-spinner');
   const body    = document.getElementById('watch-body');
+
+  // ── Instant paint from cache (stale-while-revalidate) — no spinner/blank ──
+  const cache = _readWatchCache();
+  let cachePainted = false;
+  if (cache && (cache.tickers || []).length) {
+    try {
+      spinner.style.display = 'none';
+      body.style.display    = 'block';
+      _watchAlertsData = cache.alertsData || [];
+      _watchPriceData  = cache.prices || {};
+      _watchSparkData  = cache.sparks || {};
+      await renderWatchlist(cache.tickers, new Set(cache.alertTickers || []),
+                            cache.assetTypes || {}, cache.triggeredMap || {});
+      _paintWatchPrices(cache.prices || {});   // paint cached prices before live lands
+      _paintWatchSparks(cache.sparks || {});
+      cachePainted = true;
+    } catch (_) { cachePainted = false; }
+  }
+
   try {
     const [d, alertsD] = await Promise.all([
       api('/api/miniapp/watchlist'),
       api('/api/miniapp/alerts').catch(() => ({ alerts: [], triggered_history: [] })),
     ]);
-    const tickers         = d.tickers     || [];
-    const assetTypes      = d.asset_types || {};
-    _watchAlertsData      = alertsD.alerts || [];   // cache for openWatchAlert() pre-fill
-    const alertTickers    = new Set(_watchAlertsData.map(a => a.ticker));
-    // Build a map of ticker → most-recent triggered entry
+    const tickers      = d.tickers     || [];
+    const assetTypes   = d.asset_types || {};
+    _watchAlertsData   = alertsD.alerts || [];   // for openWatchAlert() pre-fill
+    const alertTickers = new Set(_watchAlertsData.map(a => a.ticker));
     const triggeredMap = {};
-    for (const h of (alertsD.triggered_history || [])) {
-      // History is appended newest-last, so later entries overwrite earlier ones
-      triggeredMap[h.ticker] = h;
-    }
+    for (const h of (alertsD.triggered_history || [])) triggeredMap[h.ticker] = h;  // newest-last wins
+
     spinner.style.display = 'none';
     body.style.display    = 'block';
-    await renderWatchlist(tickers, alertTickers, assetTypes, triggeredMap);
+
+    // Re-render structure only when the ticker set changed vs the cache paint.
+    // If it's the same, renderWatchlist (above) already kicked the live price
+    // refetch that updates rows in place — a second innerHTML swap = a flash. On
+    // the same-set path we still revalidate prices explicitly.
+    if (cachePainted && _sameTickers(cache.tickers, tickers)) {
+      // Same set → the cache-paint's renderWatchlist already revalidated prices
+      // in place. Nothing structural to redo (alert-bell/fired state self-heals
+      // on the next open — acceptable stale-while-revalidate).
+    } else {
+      _watchPriceData = {};
+      await renderWatchlist(tickers, alertTickers, assetTypes, triggeredMap);
+    }
+
     _loadNames(tickers); // fire-and-forget — fills company name subtitles
-    // Fetch sparklines for each ticker async (fire-and-forget)
+    // Sparklines: cached ones already drawn; refetch (daily data) + update cache.
     for (const _st of tickers) {
       api(`/api/miniapp/sparkline/${_st}`).then(sd => {
         const closes = sd.closes || [];
-        if (closes.length < 2) return;
-        const cv = document.getElementById(`wspark-${_st}`);
-        if (!cv) return;
-        const ctx = cv.getContext('2d');
-        const mn = Math.min(...closes), mx = Math.max(...closes);
-        const range = mx - mn || 1;
-        const W = cv.width, H = cv.height, pad = 2;
-        ctx.clearRect(0, 0, W, H);
-        const up = closes[closes.length-1] >= closes[0];
-        ctx.strokeStyle = up ? getComputedStyle(document.documentElement).getPropertyValue('--green').trim() || '#48bb78'
-                             : getComputedStyle(document.documentElement).getPropertyValue('--red').trim()  || '#fc5c65';
-        ctx.lineWidth = 1.5;
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        closes.forEach((v, i) => {
-          const x = pad + (i / (closes.length - 1)) * (W - pad*2);
-          const y = H - pad - ((v - mn) / range) * (H - pad*2);
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        });
-        ctx.stroke();
+        _watchSparkData[_st] = closes;
+        _drawWatchSpark(_st, closes);
+        _saveWatchCache(tickers, alertTickers, assetTypes, triggeredMap);
       }).catch(() => {});
     }
+    _saveWatchCache(tickers, alertTickers, assetTypes, triggeredMap);
   } catch(e) {
-    _tabError('watch-spinner', loadWatchlist, e);
+    if (!cachePainted) _tabError('watch-spinner', loadWatchlist, e);  // keep cache on error
   }
 }
 
@@ -7769,30 +7867,36 @@ async function renderWatchlist(tickers, alertTickers = new Set(), assetTypesMap 
   // Store tickers for silent refresh interval
   _wlCurrentTickers = [...tickers];
 
-  // Fetch live prices for each ticker concurrently
-  if (tickers.length) {
-    await Promise.allSettled(tickers.map(async t => {
-      try {
-        const q = await api('/api/miniapp/quote?ticker=' + encodeURIComponent(t));
-        const el = document.getElementById('wprice-' + t);
-        if (el && q.price != null) {
-          const priceStr = '$' + Number(q.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-          if (q.change_pct != null) {
-            const chgSign = q.change_pct >= 0 ? '+' : '';
-            const chgColor = q.change_pct >= 0 ? 'var(--green)' : 'var(--red)';
-            el.innerHTML = `${priceStr} <span style="color:${chgColor};font-size:11px">${chgSign}${q.change_pct.toFixed(1)}%</span>`;
-            // Store change% for silent refresh (change% is relative to prev close — stable)
-            el.dataset.chgColor = chgColor;
-            el.dataset.chgSign  = chgSign;
-            el.dataset.chgPct   = q.change_pct.toFixed(1);
-          } else {
-            el.textContent = priceStr;
-          }
-          el.style.opacity = '1';
+  // Revalidate live prices in place (extracted so the same-ticker reopen path
+  // can refresh prices without a full structural re-render / flash).
+  await _refreshWatchPrices(tickers);
+}
+
+// Fetch each ticker's live quote and update its row in place; also stash into
+// _watchPriceData so the stale-while-revalidate cache can paint it on reopen.
+async function _refreshWatchPrices(tickers) {
+  if (!tickers || !tickers.length) return;
+  await Promise.allSettled(tickers.map(async t => {
+    try {
+      const q = await api('/api/miniapp/quote?ticker=' + encodeURIComponent(t));
+      _watchPriceData[t] = { price: q.price, change_pct: q.change_pct };
+      const el = document.getElementById('wprice-' + t);
+      if (el && q.price != null) {
+        const priceStr = '$' + Number(q.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+        if (q.change_pct != null) {
+          const chgSign = q.change_pct >= 0 ? '+' : '';
+          const chgColor = q.change_pct >= 0 ? 'var(--green)' : 'var(--red)';
+          el.innerHTML = `${priceStr} <span style="color:${chgColor};font-size:11px">${chgSign}${q.change_pct.toFixed(1)}%</span>`;
+          el.dataset.chgColor = chgColor;
+          el.dataset.chgSign  = chgSign;
+          el.dataset.chgPct   = q.change_pct.toFixed(1);
+        } else {
+          el.textContent = priceStr;
         }
-      } catch(_) {}
-    }));
-  }
+        el.style.opacity = '1';
+      }
+    } catch(_) {}
+  }));
 }
 
 async function _loadEarnings(tickers) {
@@ -7989,7 +8093,8 @@ async function addToWatchlist() {
       const savedAs = d.ticker || ticker;
       const resolvedNote = savedAs !== ticker ? ` (saved as ${savedAs})` : '';
       showToast('✅ ' + savedAs + ' added to watchlist' + resolvedNote);
-      // Reload watchlist pane
+      // Reload watchlist pane (fresh — the cached set is now stale)
+      _invalidateWatchCache();
       loadedTabs['watchlist'] = false;
       loadWatchlist();
     } else {
@@ -8018,6 +8123,7 @@ async function removeFromWatchlist(ticker) {
     await api('/api/miniapp/watchlist/remove', 'POST', { ticker });
     const row = document.getElementById('wrow-' + ticker);
     if (row) row.remove();
+    _invalidateWatchCache();   // don't let the removed ticker reappear on reopen
     showToast('🗑 ' + ticker + ' removed');
   } catch(e) {
     showToast('⚠️ Could not remove ticker');
