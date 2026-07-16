@@ -341,14 +341,28 @@ def check_mutations(admin: str) -> None:
             cpx = get_live_price("ETH")
             if _pos(cpx):
                 csh = round(200.0 / float(cpx), 8)   # $200 of ETH → tiny fraction
+                # Delta-based so it's robust to a pre-existing ETH position (the
+                # synthetic-user bot holds ETH paper): paper_buy aggregates, so the
+                # stored entry becomes a weighted avg that legitimately drifts from
+                # live. We verify THIS buy's contribution, not the aggregate.
+                _before = next((p for p in load_user_paper(admin).get("positions", [])
+                                if p.get("ticker") == "ETH"), None)
+                before_sh = float(_before.get("shares", 0)) if _before else 0.0
+                before_entry = (float(_before.get("entry_price"))
+                                if _before and _pos(_before.get("entry_price")) else float(cpx))
                 paper_buy("ETH", csh, admin, price=float(cpx))
                 cpos = next((p for p in load_user_paper(admin).get("positions", [])
                              if p.get("ticker") == "ETH"), None)
-                # invariant: fractional coin (< 1 ETH) stored at the real -USD price
-                ok = cpos and _pos(cpos.get("entry_price")) and 0 < float(cpos.get("shares", 9)) < 1 \
-                    and abs(float(cpos.get("entry_price")) - float(cpx)) / float(cpx) < 0.02
-                _check("paper.crypto_fractional", bool(ok),
-                       f"ETH {cpos.get('shares') if cpos else '?'} sh @ ${cpos.get('entry_price') if cpos else '?'} "
+                delta = (float(cpos.get("shares", 0)) - before_sh) if cpos else 0.0
+                # $200 of ETH must add the FRACTIONAL coin (~200/price), NOT 200
+                # shares / a $200 entry. A weighted-avg entry is always BETWEEN the
+                # old entry and the new buy price, so bound it there (rejects $200).
+                lo, hi = min(before_entry, float(cpx)) * 0.98, max(before_entry, float(cpx)) * 1.02
+                entry = float(cpos.get("entry_price")) if cpos else 0.0
+                ok = bool(cpos) and _pos(entry) \
+                    and 0 < delta < 1 and abs(delta - csh) < 1e-4 and lo <= entry <= hi
+                _check("paper.crypto_fractional", ok,
+                       f"+{delta:.6f} ETH from $200 buy @ ${cpos.get('entry_price') if cpos else '?'} "
                        f"(fractional coin at real -USD price)")
             else:
                 _check("paper.crypto_fractional", False, "ETH price unavailable")
