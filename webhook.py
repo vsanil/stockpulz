@@ -3645,7 +3645,7 @@ def miniapp_status():
     ET  = pytz.timezone("America/New_York")
     now = datetime.now(ET)
     schedule = [
-        ("Morning picks",         8,  30),
+        ("Morning picks",         7,  0),   # 7:00 AM ET (11:00 UTC cron) — matches SCHED
         ("10:30 AM confirmation", 10, 30),
         ("3:30 PM close check",   15, 30),
     ]
