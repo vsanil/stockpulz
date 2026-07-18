@@ -108,10 +108,14 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
     def _mut(alerts):
         chat_alerts = alerts.setdefault(str(chat_id), [])
         if auto:
-            # System stop: replace any existing auto alert for same ticker+direction.
+            # System stop: replace any existing auto alert for same ticker+direction,
+            # AND drop a true duplicate at the same target regardless of auto flag —
+            # else an auto pick-alert stacks a 2nd identical alert on top of a manual/
+            # synthetic one already at that level, and BOTH fire (the dup-ADM bug).
             chat_alerts[:] = [
                 a for a in chat_alerts
-                if not (a["ticker"] == ticker and a["direction"] == direction and a.get("auto"))
+                if not (a["ticker"] == ticker and a["direction"] == direction
+                        and (a.get("auto") or abs(a["target"] - target_price) < 0.005))
             ]
         elif replace:
             # One alert per ticker (mini-app pick/watchlist edit): atomically drop
