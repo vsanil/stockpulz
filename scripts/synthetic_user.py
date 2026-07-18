@@ -159,7 +159,7 @@ def phase_open(admin: str, dry: bool) -> list[str]:
                 wh._save_watchlist(admin, list(dict.fromkeys([x.upper() for x in before] + watch)))
             except Exception as e:
                 acts.append(f"   ⚠️ watchlist skipped: {e}")
-        acts.append(f"👁 watchlisted {watch}")
+        acts.append(f"👁 watchlisted {list(dict.fromkeys(watch))}")
     finally:
         _persist()
     return acts
