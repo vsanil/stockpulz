@@ -377,3 +377,25 @@ class TestAlertChartButton:
             flat = [btn for row in keyboards[0] for btn in row]
             chart_btns = [b for b in flat if "web_app" in b]
             assert len(chart_btns) == 0
+
+
+class TestAutoAlertDedup:
+    """An auto (system pick/stop) alert must not stack a SECOND identical alert on
+    top of a manual/synthetic one already at the same ticker+direction+target —
+    that made both fire (the duplicate-ADM 'above $84.00' bug)."""
+
+    def test_auto_does_not_duplicate_manual_at_same_target(self):
+        from price_alert_manager import _load_alerts
+        add_alert(CHAT, "AAPL", 200.0, direction="above")               # manual
+        add_alert(CHAT, "AAPL", 200.0, direction="above", auto=True)    # system pick-alert
+        got = [a for a in _load_alerts().get(CHAT, [])
+               if a["ticker"] == "AAPL" and a["direction"] == "above"]
+        assert len(got) == 1                                            # collapsed, not 2
+
+    def test_auto_keeps_manual_at_different_target(self):
+        from price_alert_manager import _load_alerts
+        add_alert(CHAT, "AAPL", 200.0, direction="above")               # manual @200
+        add_alert(CHAT, "AAPL", 210.0, direction="above", auto=True)    # auto @210 (different)
+        got = [a for a in _load_alerts().get(CHAT, [])
+               if a["ticker"] == "AAPL" and a["direction"] == "above"]
+        assert len(got) == 2                                            # different levels coexist

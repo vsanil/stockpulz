@@ -6635,7 +6635,7 @@ async function loadPaperPortfolio(forceRefresh = false) {
       </div>
       <div class="summary-box">
         <div class="summary-lbl">Unrealized</div>
-        <div class="summary-val ${unrealPnl >= 0 ? 'val-pos' : 'val-neg'}">${unrealPnl >= 0 ? '+' : ''}${_fmtCash(Math.abs(unrealPnl))}</div>
+        <div class="summary-val ${unrealPnl >= 0 ? 'val-pos' : 'val-neg'}">${unrealPnl >= 0 ? '+' : '−'}${_fmtCash(Math.abs(unrealPnl))}</div>
       </div>
       <div class="summary-box">
         <div class="summary-lbl">Total Value</div>
@@ -7785,8 +7785,14 @@ async function renderWatchlist(tickers, alertTickers = new Set(), assetTypesMap 
     html += `<div id="watch-rows">`;
     for (const t of tickers) {
       const _wTriggered = triggeredMap[t];
-      const _wFiredLine = _wTriggered
-        ? `<div style="font-size:11px;color:var(--amber);opacity:.75;margin-top:2px">🔔 fired $${Number(_wTriggered.triggered_price).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} · ${_relTime(_wTriggered.triggered_at)}</div>`
+      // Hide an implausible historical trigger (e.g. the old "$0.01" feed-glitch
+      // fires from before the plausible_price guard) — a real trigger lands near
+      // its target, never at a tiny fraction of it.
+      const _wtp = _wTriggered ? Number(_wTriggered.triggered_price) : 0;
+      const _wtg = _wTriggered ? Number(_wTriggered.target) : 0;
+      const _wShowFired = _wtp > 0 && !(_wtg > 0 && _wtp < _wtg * 0.1);
+      const _wFiredLine = (_wTriggered && _wShowFired)
+        ? `<div style="font-size:11px;color:var(--amber);opacity:.75;margin-top:2px">🔔 fired $${_wtp.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} · ${_relTime(_wTriggered.triggered_at)}</div>`
         : '';
       html += `<div id="wrow-${t}" style="display:flex;justify-content:space-between;align-items:center;
                padding:12px 0;border-bottom:1px solid var(--border)">
