@@ -109,6 +109,23 @@ def _expected_delivery_date() -> str:
     return d.isoformat()
 
 
+def _delivery_fresh(actual: str, expected: str) -> bool:
+    """Picks/delivery are fresh if the stamp is in [expected, today].
+
+    The app ALSO delivers crypto picks on WEEKENDS (crypto is 24/7), stamping the
+    weekend date — which is FRESHER than the prior-weekday floor `expected`. So a
+    rigid `== expected` false-alarms on any weekend that had crypto picks (Sat Jul
+    18: saved 07-18, floor 07-17). Accept the whole window instead: at least as
+    recent as `expected`, never in the future. Still catches a genuinely stale
+    file (older than expected) or an impossible future date. ISO dates compare
+    lexicographically = chronologically."""
+    if not actual:
+        return False
+    import datetime as dt, pytz
+    today = dt.datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+    return expected <= actual <= today
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Read-only checks
 # ══════════════════════════════════════════════════════════════════════════════
@@ -120,8 +137,8 @@ def check_picks_integrity() -> None:
         return
     exp = _expected_delivery_date()
     _check("picks.load", True, f"saved {picks.get('_saved_date')}")
-    _check("picks.fresh", picks.get("_saved_date") == exp,
-           f"_saved_date={picks.get('_saved_date')} expected={exp}")
+    _check("picks.fresh", _delivery_fresh(picks.get("_saved_date"), exp),
+           f"_saved_date={picks.get('_saved_date')} expected≥{exp} (weekend crypto may be today)")
 
     # Validate EVERY pick in EVERY section — stocks, crypto, ETFs, commodities.
     # (commodities are often empty; count 0 is fine, not a failure.)
@@ -245,10 +262,11 @@ def check_cron_delivery() -> None:
     exp = _expected_delivery_date()
     # last_morning_run is the DELIVERY stamp (cron_last_morning is just "started").
     lmr = (cfg.get("last_morning_run") or "")[:10]
-    _check("delivery.morning", lmr == exp,
-           f"last_morning_run={lmr or 'never'} (expected {exp})")
-    _check("delivery.picks_saved", _raw_picks().get("_saved_date") == exp,
-           f"picks._saved_date={_raw_picks().get('_saved_date')} (expected {exp})")
+    _check("delivery.morning", _delivery_fresh(lmr, exp),
+           f"last_morning_run={lmr or 'never'} (expected ≥{exp})")
+    _saved = _raw_picks().get("_saved_date")
+    _check("delivery.picks_saved", _delivery_fresh(_saved, exp),
+           f"picks._saved_date={_saved} (expected ≥{exp})")
 
 
 def check_endpoints() -> None:
