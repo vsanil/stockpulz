@@ -130,12 +130,20 @@ jobs:
       - name: Ship — push to main (auto+green), branch (auto+red), or report (test)
         id: ship
         run: |
-          BR=$(cat /tmp/branch); git add -A
-          if git diff --cached --quiet; then echo "outcome=nofix" >> "$GITHUB_OUTPUT"; exit 0; fi
-          NF=$(git diff --cached --name-only | tr '\n' ' ')
+          BR=$(cat /tmp/branch)
+          # Claude may have committed the fix itself (the prompt says to), OR left
+          # it uncommitted — handle both: stage+commit anything loose (no-op if
+          # already committed), then detect the fix by diffing HEAD vs main (NOT
+          # the staging area — that's empty once Claude has committed).
+          git add -A
           git commit -m "auto: self-heal ${{ steps.ctx.outputs.monitor }} failure
 
-          Autonomous fix for a failed ${{ steps.ctx.outputs.monitor }} run (${{ steps.ctx.outputs.url }})."
+          Autonomous fix for a failed ${{ steps.ctx.outputs.monitor }} run (${{ steps.ctx.outputs.url }})." 2>/dev/null || true
+          git fetch origin main -q
+          if git diff --quiet origin/main HEAD; then
+            echo "outcome=nofix" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          NF=$(git diff --name-only origin/main HEAD | tr '\n' ' ')
           echo "files=$NF" >> "$GITHUB_OUTPUT"
           if [ "$AUTO_MERGE" != "true" ]; then
             echo "outcome=testfix" >> "$GITHUB_OUTPUT"          # manual test → do NOT push
