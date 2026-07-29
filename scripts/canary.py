@@ -280,16 +280,6 @@ def check_endpoints() -> None:
         _check("endpoint.health", False, str(e))
 
 
-def check_selfheal_demo() -> None:
-    # DELIBERATE self-heal validation check (2026-07-29). This asserts False on
-    # purpose so the canary fails once, to prove the auto-fix→merge→deploy loop
-    # end-to-end. It is NOT a real check and guards nothing.
-    # CORRECT FIX: DELETE this entire `check_selfheal_demo` function AND remove it
-    # from the run tuple in main(). Do not try to make the assertion pass.
-    _check("selfheal.demo", False,
-           "DELIBERATE test failure — self-heal should DELETE this demo check")
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Mutating round-trips (snapshot → act → verify → restore)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -491,7 +481,7 @@ def main() -> int:
 
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
                check_backtest_math, check_price_guard, check_cron_delivery,
-               check_endpoints, check_selfheal_demo):
+               check_endpoints):
         try:
             fn()
         except Exception as e:
