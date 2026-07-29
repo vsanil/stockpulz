@@ -93,6 +93,8 @@ jobs:
           cat > /tmp/prompt.txt <<'PROMPT'
           A monitoring workflow just failed in this app's CI. Diagnose it and fix it on the CURRENT git branch (already checked out). Do NOT push, merge, or open a PR — the surrounding workflow handles that.
 
+          Be efficient and decisive — you have a limited turn budget. Read only what you need (the failure log + the one check/module involved), don't explore the whole repo. If the current code already handles the failure and the tests pass, STOP with no changes.
+
           STEP 1 — read the evidence:
             - The failure log is at /tmp/failure.log (compact summary at /tmp/failure_summary.txt). Read it to see exactly which checks failed and for which monitor.
             - Read CLAUDE.md — it documents this app's bug patterns AND the recurring monitor/canary FALSE-ALARM classes (weekend crypto delivery; the synthetic-user bot draining paper cash / holding pre-existing positions; date-window expectations). MANY monitor failures are the CHECK being wrong, not the app.
@@ -112,7 +114,7 @@ jobs:
           PROMPT
           claude -p "$(cat /tmp/prompt.txt)" \
             --model claude-sonnet-5 \
-            --max-turns 14 \
+            --max-turns 30 \
             --dangerously-skip-permissions \
             2>&1 | tail -60 || echo "[self-heal] claude exited non-zero: $? (downstream steps will report no-fix)"
 
