@@ -83,35 +83,38 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: pip install -r requirements.txt
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
 
       - name: Claude Code — diagnose & fix
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            A monitoring workflow ("${{ steps.ctx.outputs.monitor }}") just failed in CI.
-            Diagnose and fix it on the CURRENT git branch (already checked out). Do NOT push, merge, or open a PR — the workflow handles that.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          cat > /tmp/prompt.txt <<'PROMPT'
+          A monitoring workflow just failed in this app's CI. Diagnose it and fix it on the CURRENT git branch (already checked out). Do NOT push, merge, or open a PR — the surrounding workflow handles that.
 
-            STEP 1 — read the evidence:
-              • Failure log: /tmp/failure.log (compact summary: /tmp/failure_summary.txt). Read it to see exactly which checks failed.
-              • Read CLAUDE.md — it documents this app's bug patterns AND the recurring monitor/canary FALSE-ALARM classes (weekend crypto delivery, the synthetic-user bot draining paper cash / holding pre-existing positions, date-window expectations). MANY monitor failures are the CHECK being wrong, not the app.
+          STEP 1 — read the evidence:
+            - The failure log is at /tmp/failure.log (compact summary at /tmp/failure_summary.txt). Read it to see exactly which checks failed and for which monitor.
+            - Read CLAUDE.md — it documents this app's bug patterns AND the recurring monitor/canary FALSE-ALARM classes (weekend crypto delivery; the synthetic-user bot draining paper cash / holding pre-existing positions; date-window expectations). MANY monitor failures are the CHECK being wrong, not the app.
 
-            STEP 2 — diagnose the ROOT cause and classify:
-              • FALSE ALARM → the monitor/check assumes something no longer true (clean slate, exact date, sufficient cash). Fix = make the check robust in scripts/. NEVER weaken a guard that is correctly catching a real problem.
-              • REAL APP BUG → fix the app code and ADD a regression test.
-              If you are NOT confident it is a genuine fix, make NO commit and stop — a wrong auto-merged fix would deploy live to real users.
+          STEP 2 — diagnose the ROOT cause and classify:
+            - FALSE ALARM: the monitor/check assumes something no longer true (clean slate, exact date, sufficient cash). Fix = make the check robust in scripts/. NEVER weaken a guard that is correctly catching a real problem.
+            - REAL APP BUG: fix the app code and ADD a regression test.
+            If you are NOT confident it is a genuine fix, make NO changes and stop — a wrong auto-merged fix would deploy live to real users.
 
-            STEP 3 — apply the minimal, correct fix, matching surrounding style.
+          STEP 3 — apply the minimal, correct fix, matching the surrounding code style.
 
-            STEP 4 — verify. Run BOTH and make them pass:
-                python -m pytest tests/ -q
-                python scripts/check_js.py
+          STEP 4 — verify. Run BOTH and make them pass:
+              python -m pytest tests/ -q
+              python scripts/check_js.py
 
-            STEP 5 — commit all changes (nothing left staged) with a clear message: what failed → root cause → fix. Do not push.
-          claude_args: |
-            --max-turns 12
-            --model claude-sonnet-5
-            --allowedTools "Read,Edit,Write,Bash"
+          STEP 5 — commit all changes (nothing left staged) with a clear message: what failed, the root cause, and the fix. Do NOT push.
+          PROMPT
+          claude -p "$(cat /tmp/prompt.txt)" \
+            --model claude-sonnet-5 \
+            --max-turns 14 \
+            --dangerously-skip-permissions \
+            2>&1 | tail -60 || echo "[self-heal] claude exited non-zero: $? (downstream steps will report no-fix)"
 
       - name: Verify tests (hard gate)
         id: verify
