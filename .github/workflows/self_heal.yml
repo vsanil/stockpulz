@@ -1,21 +1,27 @@
 name: Self-Heal on Monitor Failure
 
-# When a monitor (Daily Canary / Synthetic User / Full Sweep) fails, this runs
-# Claude Code headlessly to diagnose + fix on a NEW branch, run the test suite,
-# and open a PR for the admin to review (NEVER auto-merges). The admin is DM'd
-# when it starts ("🔧 fixing") and when it finishes ("✅ PR ready" / "⚠️ needs you").
+# When a monitor (Daily Canary / Synthetic User / Full Sweep) FAILS, this runs
+# Claude Code headlessly to diagnose + fix on a branch, gates on the FULL test
+# suite, and — if green — auto-merges to main (Render auto-deploys). After the
+# deploy it smoke-checks /health and LOUDLY alerts the admin if it broke the app.
+# The admin is DM'd at start ("🔧 fixing") and finish ("✅ merged & deployed" /
+# "🚨 deploy broke health" / "⚠️ tests red — draft PR" / "⚠️ couldn't fix").
 #
-# workflow_run matches by the workflow's `name:` (not filename), and only fires
-# for workflows that live on the default branch (main) — a GitHub requirement.
+# SAFETY: a MANUAL workflow_dispatch NEVER auto-merges (it only opens a PR) so the
+# loop can be validated without shipping anything. Auto-merge fires only on a real
+# workflow_run failure with all tests green.
+#
+# workflow_run matches by the workflow `name:` (not filename), and only fires for
+# workflows on the default branch (main) — a GitHub requirement.
 
 on:
   workflow_run:
     workflows: ["Daily Canary", "Synthetic User", "Full Sweep"]
     types: [completed]
-  workflow_dispatch:                 # manual test: point at a past failed run
+  workflow_dispatch:
     inputs:
       failed_run_id:
-        description: "A failed run id to diagnose (for testing the loop)"
+        description: "A failed run id to diagnose (test the loop — never auto-merges)"
         required: false
 
 permissions:
@@ -29,14 +35,16 @@ concurrency:
 
 jobs:
   self-heal:
-    # Only on a real failure (or a manual test dispatch)
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TG_CHAT:  ${{ secrets.TELEGRAM_CHAT_ID }}
+      GH_TOKEN:    ${{ secrets.GITHUB_TOKEN }}
+      TG_TOKEN:    ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TG_CHAT:     ${{ secrets.TELEGRAM_CHAT_ID }}
+      RENDER_URL:  ${{ secrets.RENDER_EXTERNAL_URL }}
+      # auto-merge only on a real monitor failure, never on a manual test dispatch
+      AUTO_MERGE:  ${{ github.event_name == 'workflow_run' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,23 +55,20 @@ jobs:
         id: ctx
         run: |
           RID="${{ github.event.workflow_run.id || github.event.inputs.failed_run_id }}"
-          NAME="${{ github.event.workflow_run.name || 'manual test' }}"
-          URL="${{ github.event.workflow_run.html_url }}"
-          echo "monitor=$NAME" >> "$GITHUB_OUTPUT"
-          echo "url=$URL"       >> "$GITHUB_OUTPUT"
+          echo "monitor=${{ github.event.workflow_run.name || 'manual test' }}" >> "$GITHUB_OUTPUT"
+          echo "url=${{ github.event.workflow_run.html_url }}"                    >> "$GITHUB_OUTPUT"
           if [ -n "$RID" ]; then
             gh run view "$RID" --log > /tmp/failure.log 2>&1 || true
-            # A compact summary Claude can lead with (full log is also on disk)
             grep -iE "FAIL |ACTION NEEDED|🔴|Traceback|Error|FAILED:|• " /tmp/failure.log | head -80 > /tmp/failure_summary.txt || true
           fi
-          [ -s /tmp/failure.log ] || echo "(no logs fetched — Claude should inspect the repo/monitors)" > /tmp/failure.log
-          echo "----- failure summary -----"; cat /tmp/failure_summary.txt 2>/dev/null || true
+          [ -s /tmp/failure.log ] || echo "(no logs — inspect the repo/monitors)" > /tmp/failure.log
+          cat /tmp/failure_summary.txt 2>/dev/null || true
 
       - name: Notify admin — fixing
         run: |
           curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TG_CHAT}" \
-            --data-urlencode "text=🔧 A *${{ steps.ctx.outputs.monitor }}* check failed — auto-diagnosing now. I'll open a PR for you to review (I never merge to your live app on my own)." \
+            --data-urlencode "text=🔧 A *${{ steps.ctx.outputs.monitor }}* check failed — auto-diagnosing. If the fix passes all tests I'll merge + deploy it and confirm; otherwise I'll flag you." \
             -d parse_mode=Markdown >/dev/null || true
 
       - name: Branch
@@ -84,73 +89,80 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             A monitoring workflow ("${{ steps.ctx.outputs.monitor }}") just failed in CI.
-            Diagnose it and fix it on the CURRENT git branch (already checked out). Do NOT push or open a PR — the workflow does that.
+            Diagnose and fix it on the CURRENT git branch (already checked out). Do NOT push, merge, or open a PR — the workflow handles that.
 
             STEP 1 — read the evidence:
-              • The failure log is at /tmp/failure.log (a compact summary is at /tmp/failure_summary.txt). Read it to see exactly which checks failed.
-              • Read CLAUDE.md. It documents this app's bug patterns AND the recurring monitor/canary FALSE-ALARM classes (weekend crypto delivery, synthetic-user bot draining paper cash / holding pre-existing positions, date-window expectations). MANY monitor failures are the CHECK being wrong, not the app.
+              • Failure log: /tmp/failure.log (compact summary: /tmp/failure_summary.txt). Read it to see exactly which checks failed.
+              • Read CLAUDE.md — it documents this app's bug patterns AND the recurring monitor/canary FALSE-ALARM classes (weekend crypto delivery, the synthetic-user bot draining paper cash / holding pre-existing positions, date-window expectations). MANY monitor failures are the CHECK being wrong, not the app.
 
-            STEP 2 — diagnose the ROOT cause and DECIDE which kind it is:
-              • FALSE ALARM: the monitor/check assumes something no longer true (clean slate, exact date, sufficient cash). Fix = correct the check in scripts/ (canary.py etc.) to be robust. NEVER weaken a guard that is correctly catching a real problem.
-              • REAL APP BUG: fix the app code (agent.py / webhook.py / formatters.py / miniapp/index.html / etc.) and ADD a regression test.
+            STEP 2 — diagnose the ROOT cause and classify:
+              • FALSE ALARM → the monitor/check assumes something no longer true (clean slate, exact date, sufficient cash). Fix = make the check robust in scripts/. NEVER weaken a guard that is correctly catching a real problem.
+              • REAL APP BUG → fix the app code and ADD a regression test.
+              If you are NOT confident it is a genuine fix, make NO commit and stop — a wrong auto-merged fix would deploy live to real users.
 
-            STEP 3 — apply the minimal, correct fix. Match surrounding code style.
+            STEP 3 — apply the minimal, correct fix, matching surrounding style.
 
-            STEP 4 — verify. Run:
+            STEP 4 — verify. Run BOTH and make them pass:
                 python -m pytest tests/ -q
                 python scripts/check_js.py
-              Both MUST pass. Iterate until they do (or, if you truly cannot fix it, make no commit and explain why).
 
-            STEP 5 — commit all changes with a message: what failed → root cause → the fix. Do not leave staged-but-uncommitted files. Do not push.
+            STEP 5 — commit all changes (nothing left staged) with a clear message: what failed → root cause → fix. Do not push.
           claude_args: |
             --max-turns 12
             --model claude-sonnet-5
             --allowedTools "Read,Edit,Write,Bash"
 
-      - name: Verify tests (gate)
+      - name: Verify tests (hard gate)
         id: verify
         run: |
           if python -m pytest tests/ -q >/tmp/pytest.txt 2>&1 && python scripts/check_js.py >/tmp/js.txt 2>&1; then
-            echo "green=true" >> "$GITHUB_OUTPUT"
+            echo "green=true"  >> "$GITHUB_OUTPUT"
           else
-            echo "green=false" >> "$GITHUB_OUTPUT"
-            tail -15 /tmp/pytest.txt || true
+            echo "green=false" >> "$GITHUB_OUTPUT"; tail -20 /tmp/pytest.txt || true
           fi
 
-      - name: Push + open PR, or report no-fix
-        id: pr
+      - name: Ship (auto-merge on green) or open PR
+        id: ship
         run: |
-          BR=$(cat /tmp/branch)
-          git add -A
-          if git diff --cached --quiet; then
-            echo "made_changes=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git commit -m "auto: self-heal ${{ steps.ctx.outputs.monitor }} failure" || true
+          BR=$(cat /tmp/branch); git add -A
+          if git diff --cached --quiet; then echo "outcome=nofix" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git commit -m "auto: self-heal ${{ steps.ctx.outputs.monitor }} failure"
           git push -u origin "$BR"
-          GREEN="${{ steps.verify.outputs.green }}"
-          DRAFT=""; [ "$GREEN" = "true" ] || DRAFT="--draft"
-          URL=$(gh pr create $DRAFT \
-            --title "🤖 Auto-fix: ${{ steps.ctx.outputs.monitor }} failure" \
-            --base main --head "$BR" \
-            --body "Autonomous fix for a failed **${{ steps.ctx.outputs.monitor }}** run (${{ steps.ctx.outputs.url }}).
-          Tests green: **${GREEN}**. Review the diff + commit message before merging — this never auto-merges." )
-          echo "made_changes=true" >> "$GITHUB_OUTPUT"
-          echo "pr_url=$URL" >> "$GITHUB_OUTPUT"
-          echo "green=$GREEN" >> "$GITHUB_OUTPUT"
+          BODY="Autonomous fix for a failed **${{ steps.ctx.outputs.monitor }}** run (${{ steps.ctx.outputs.url }}). Tests green: **${{ steps.verify.outputs.green }}**."
+          if [ "${{ steps.verify.outputs.green }}" = "true" ] && [ "$AUTO_MERGE" = "true" ]; then
+            PR=$(gh pr create --title "🤖 Auto-fix: ${{ steps.ctx.outputs.monitor }} failure" --base main --head "$BR" --body "$BODY")
+            gh pr merge "$BR" --squash --delete-branch --admin
+            echo "outcome=merged" >> "$GITHUB_OUTPUT"; echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          else
+            DRAFT=""; [ "${{ steps.verify.outputs.green }}" = "true" ] || DRAFT="--draft"
+            PR=$(gh pr create $DRAFT --title "🤖 Auto-fix: ${{ steps.ctx.outputs.monitor }} failure" --base main --head "$BR" --body "$BODY")
+            echo "outcome=pr" >> "$GITHUB_OUTPUT"; echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post-deploy health check
+        id: health
+        if: ${{ steps.ship.outputs.outcome == 'merged' }}
+        run: |
+          sleep 150                        # let Render auto-deploy the merge
+          H="bad"
+          for i in 1 2 3 4; do
+            c=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "${RENDER_URL}/health" || echo 000)
+            [ "$c" = "200" ] && { H="ok"; break; }
+            sleep 25
+          done
+          echo "status=$H" >> "$GITHUB_OUTPUT"
 
       - name: Notify admin — result
         if: always()
         run: |
-          if [ "${{ steps.pr.outputs.made_changes }}" = "true" ]; then
-            if [ "${{ steps.pr.outputs.green }}" = "true" ]; then
-              MSG="✅ Auto-fix ready — *${{ steps.ctx.outputs.monitor }}*. Tests pass. Review & merge: ${{ steps.pr.outputs.pr_url }}"
-            else
-              MSG="⚠️ Auto-fix attempted for *${{ steps.ctx.outputs.monitor }}* but tests are still red — opened as a DRAFT PR, review carefully: ${{ steps.pr.outputs.pr_url }}"
-            fi
-          else
-            MSG="⚠️ Could not auto-fix the *${{ steps.ctx.outputs.monitor }}* failure (no confident fix). Needs you. Failed run: ${{ steps.ctx.outputs.url }}"
-          fi
+          O="${{ steps.ship.outputs.outcome }}"; PR="${{ steps.ship.outputs.pr }}"; H="${{ steps.health.outputs.status }}"
+          case "$O" in
+            merged)
+              if [ "$H" = "ok" ]; then MSG="✅ Auto-fixed *${{ steps.ctx.outputs.monitor }}* — tests green, merged & deployed, /health OK. ${PR}";
+              else MSG="🚨 Auto-fixed & deployed *${{ steps.ctx.outputs.monitor }}* but /health is NOT responding after deploy — check now / roll back in Render. ${PR}"; fi ;;
+            pr)    MSG="⚠️ Auto-fix for *${{ steps.ctx.outputs.monitor }}* is ready but NOT auto-merged (tests red or manual run) — review the PR: ${PR}" ;;
+            nofix) MSG="⚠️ Couldn't confidently auto-fix *${{ steps.ctx.outputs.monitor }}* — needs you. Failed run: ${{ steps.ctx.outputs.url }}" ;;
+            *)     MSG="⚠️ Self-heal for *${{ steps.ctx.outputs.monitor }}* ended without a result — check the Actions log." ;;
+          esac
           curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${TG_CHAT}" \
-            --data-urlencode "text=${MSG}" -d parse_mode=Markdown >/dev/null || true
+            --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=${MSG}" -d parse_mode=Markdown >/dev/null || true
