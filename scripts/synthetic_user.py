@@ -139,6 +139,21 @@ def phase_open(admin: str, dry: bool) -> list[str]:
             except Exception as e:
                 acts.append(f"   ⚠️ real {u['t']} skipped: {e}")
 
+        # Keep the paper-buy path exercisable: the bot accumulates positions and
+        # drains cash over time (paper_buy rejects a buy it can't afford). Top up
+        # when low so daily paper buys don't silently start failing. paper_add_cash
+        # bumps starting_cash too, so the paper return % stays honest.
+        if not dry:
+            try:
+                from paper_trader import paper_add_cash
+                _cash = load_user_paper(admin).get("cash") or 0
+                _need = _MAX_PAPER * _PAPER_USD + 200          # a day's buys + buffer
+                if _cash < _need:
+                    paper_add_cash(round(5000 + _need - _cash, 2), admin)
+                    acts.append(f"💵 paper cash topped up (was ${_cash:.0f})")
+            except Exception as e:
+                acts.append(f"   ⚠️ paper top-up skipped: {e}")
+
         held_paper = {x["ticker"] for x in load_user_paper(admin).get("positions", [])}
         for u in paper_cands:
             try:
