@@ -1,0 +1,156 @@
+name: Self-Heal on Monitor Failure
+
+# When a monitor (Daily Canary / Synthetic User / Full Sweep) fails, this runs
+# Claude Code headlessly to diagnose + fix on a NEW branch, run the test suite,
+# and open a PR for the admin to review (NEVER auto-merges). The admin is DM'd
+# when it starts ("🔧 fixing") and when it finishes ("✅ PR ready" / "⚠️ needs you").
+#
+# workflow_run matches by the workflow's `name:` (not filename), and only fires
+# for workflows that live on the default branch (main) — a GitHub requirement.
+
+on:
+  workflow_run:
+    workflows: ["Daily Canary", "Synthetic User", "Full Sweep"]
+    types: [completed]
+  workflow_dispatch:                 # manual test: point at a past failed run
+    inputs:
+      failed_run_id:
+        description: "A failed run id to diagnose (for testing the loop)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: self-heal
+  cancel-in-progress: false
+
+jobs:
+  self-heal:
+    # Only on a real failure (or a manual test dispatch)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TG_CHAT:  ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Resolve failed run + fetch logs
+        id: ctx
+        run: |
+          RID="${{ github.event.workflow_run.id || github.event.inputs.failed_run_id }}"
+          NAME="${{ github.event.workflow_run.name || 'manual test' }}"
+          URL="${{ github.event.workflow_run.html_url }}"
+          echo "monitor=$NAME" >> "$GITHUB_OUTPUT"
+          echo "url=$URL"       >> "$GITHUB_OUTPUT"
+          if [ -n "$RID" ]; then
+            gh run view "$RID" --log > /tmp/failure.log 2>&1 || true
+            # A compact summary Claude can lead with (full log is also on disk)
+            grep -iE "FAIL |ACTION NEEDED|🔴|Traceback|Error|FAILED:|• " /tmp/failure.log | head -80 > /tmp/failure_summary.txt || true
+          fi
+          [ -s /tmp/failure.log ] || echo "(no logs fetched — Claude should inspect the repo/monitors)" > /tmp/failure.log
+          echo "----- failure summary -----"; cat /tmp/failure_summary.txt 2>/dev/null || true
+
+      - name: Notify admin — fixing
+        run: |
+          curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "text=🔧 A *${{ steps.ctx.outputs.monitor }}* check failed — auto-diagnosing now. I'll open a PR for you to review (I never merge to your live app on my own)." \
+            -d parse_mode=Markdown >/dev/null || true
+
+      - name: Branch
+        run: |
+          git config user.name  "Claude Self-Heal"
+          git config user.email "noreply@anthropic.com"
+          BR="auto/self-heal-$(date +%s)"
+          git checkout -b "$BR"
+          echo "$BR" > /tmp/branch
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+
+      - name: Claude Code — diagnose & fix
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            A monitoring workflow ("${{ steps.ctx.outputs.monitor }}") just failed in CI.
+            Diagnose it and fix it on the CURRENT git branch (already checked out). Do NOT push or open a PR — the workflow does that.
+
+            STEP 1 — read the evidence:
+              • The failure log is at /tmp/failure.log (a compact summary is at /tmp/failure_summary.txt). Read it to see exactly which checks failed.
+              • Read CLAUDE.md. It documents this app's bug patterns AND the recurring monitor/canary FALSE-ALARM classes (weekend crypto delivery, synthetic-user bot draining paper cash / holding pre-existing positions, date-window expectations). MANY monitor failures are the CHECK being wrong, not the app.
+
+            STEP 2 — diagnose the ROOT cause and DECIDE which kind it is:
+              • FALSE ALARM: the monitor/check assumes something no longer true (clean slate, exact date, sufficient cash). Fix = correct the check in scripts/ (canary.py etc.) to be robust. NEVER weaken a guard that is correctly catching a real problem.
+              • REAL APP BUG: fix the app code (agent.py / webhook.py / formatters.py / miniapp/index.html / etc.) and ADD a regression test.
+
+            STEP 3 — apply the minimal, correct fix. Match surrounding code style.
+
+            STEP 4 — verify. Run:
+                python -m pytest tests/ -q
+                python scripts/check_js.py
+              Both MUST pass. Iterate until they do (or, if you truly cannot fix it, make no commit and explain why).
+
+            STEP 5 — commit all changes with a message: what failed → root cause → the fix. Do not leave staged-but-uncommitted files. Do not push.
+          claude_args: |
+            --max-turns 12
+            --model claude-sonnet-5
+            --allowedTools "Read,Edit,Write,Bash"
+
+      - name: Verify tests (gate)
+        id: verify
+        run: |
+          if python -m pytest tests/ -q >/tmp/pytest.txt 2>&1 && python scripts/check_js.py >/tmp/js.txt 2>&1; then
+            echo "green=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "green=false" >> "$GITHUB_OUTPUT"
+            tail -15 /tmp/pytest.txt || true
+          fi
+
+      - name: Push + open PR, or report no-fix
+        id: pr
+        run: |
+          BR=$(cat /tmp/branch)
+          git add -A
+          if git diff --cached --quiet; then
+            echo "made_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "auto: self-heal ${{ steps.ctx.outputs.monitor }} failure" || true
+          git push -u origin "$BR"
+          GREEN="${{ steps.verify.outputs.green }}"
+          DRAFT=""; [ "$GREEN" = "true" ] || DRAFT="--draft"
+          URL=$(gh pr create $DRAFT \
+            --title "🤖 Auto-fix: ${{ steps.ctx.outputs.monitor }} failure" \
+            --base main --head "$BR" \
+            --body "Autonomous fix for a failed **${{ steps.ctx.outputs.monitor }}** run (${{ steps.ctx.outputs.url }}).
+          Tests green: **${GREEN}**. Review the diff + commit message before merging — this never auto-merges." )
+          echo "made_changes=true" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "green=$GREEN" >> "$GITHUB_OUTPUT"
+
+      - name: Notify admin — result
+        if: always()
+        run: |
+          if [ "${{ steps.pr.outputs.made_changes }}" = "true" ]; then
+            if [ "${{ steps.pr.outputs.green }}" = "true" ]; then
+              MSG="✅ Auto-fix ready — *${{ steps.ctx.outputs.monitor }}*. Tests pass. Review & merge: ${{ steps.pr.outputs.pr_url }}"
+            else
+              MSG="⚠️ Auto-fix attempted for *${{ steps.ctx.outputs.monitor }}* but tests are still red — opened as a DRAFT PR, review carefully: ${{ steps.pr.outputs.pr_url }}"
+            fi
+          else
+            MSG="⚠️ Could not auto-fix the *${{ steps.ctx.outputs.monitor }}* failure (no confident fix). Needs you. Failed run: ${{ steps.ctx.outputs.url }}"
+          fi
+          curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "text=${MSG}" -d parse_mode=Markdown >/dev/null || true
