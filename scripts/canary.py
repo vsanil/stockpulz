@@ -299,6 +299,14 @@ def check_mutations(admin: str) -> None:
             if _pos(px):
                 total = 1000.0
                 shares = round(total / float(px), 6)
+                # The synthetic-user bot paper-buys daily and drains cash over time
+                # (was $271 with 33 positions). paper_buy correctly REJECTS a buy it
+                # can't afford and stores nothing → false "position not stored". Top
+                # up first; the snapshot restores user_paper.json so real cash is
+                # byte-identical after the run.
+                from paper_trader import paper_add_cash
+                if (load_user_paper(admin).get("cash") or 0) < total + 10:
+                    paper_add_cash(total + 100, admin)
                 paper_buy("AAPL", shares, admin, price=float(px))
                 data = load_user_paper(admin)
                 pos = next((p for p in data.get("positions", []) if p.get("ticker") == "AAPL"), None)
@@ -368,6 +376,9 @@ def check_mutations(admin: str) -> None:
                 before_sh = float(_before.get("shares", 0)) if _before else 0.0
                 before_entry = (float(_before.get("entry_price"))
                                 if _before and _pos(_before.get("entry_price")) else float(cpx))
+                from paper_trader import paper_add_cash   # ensure funds (synthetic bot drains cash)
+                if (load_user_paper(admin).get("cash") or 0) < 210:
+                    paper_add_cash(300, admin)            # restored by snapshot
                 paper_buy("ETH", csh, admin, price=float(cpx))
                 cpos = next((p for p in load_user_paper(admin).get("positions", [])
                              if p.get("ticker") == "ETH"), None)
