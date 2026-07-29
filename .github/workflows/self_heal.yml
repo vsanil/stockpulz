@@ -127,22 +127,24 @@ jobs:
             echo "green=false" >> "$GITHUB_OUTPUT"; tail -20 /tmp/pytest.txt || true
           fi
 
-      - name: Ship (auto-merge on green) or open PR
+      - name: Ship — push to main (auto+green), branch (auto+red), or report (test)
         id: ship
         run: |
           BR=$(cat /tmp/branch); git add -A
           if git diff --cached --quiet; then echo "outcome=nofix" >> "$GITHUB_OUTPUT"; exit 0; fi
-          git commit -m "auto: self-heal ${{ steps.ctx.outputs.monitor }} failure"
-          git push -u origin "$BR"
-          BODY="Autonomous fix for a failed **${{ steps.ctx.outputs.monitor }}** run (${{ steps.ctx.outputs.url }}). Tests green: **${{ steps.verify.outputs.green }}**."
-          if [ "${{ steps.verify.outputs.green }}" = "true" ] && [ "$AUTO_MERGE" = "true" ]; then
-            PR=$(gh pr create --title "🤖 Auto-fix: ${{ steps.ctx.outputs.monitor }} failure" --base main --head "$BR" --body "$BODY")
-            gh pr merge "$BR" --squash --delete-branch --admin
-            echo "outcome=merged" >> "$GITHUB_OUTPUT"; echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          NF=$(git diff --cached --name-only | tr '\n' ' ')
+          git commit -m "auto: self-heal ${{ steps.ctx.outputs.monitor }} failure
+
+          Autonomous fix for a failed ${{ steps.ctx.outputs.monitor }} run (${{ steps.ctx.outputs.url }})."
+          echo "files=$NF" >> "$GITHUB_OUTPUT"
+          if [ "$AUTO_MERGE" != "true" ]; then
+            echo "outcome=testfix" >> "$GITHUB_OUTPUT"          # manual test → do NOT push
+          elif [ "${{ steps.verify.outputs.green }}" = "true" ]; then
+            git push origin "HEAD:main"                          # green → to main → Render deploys
+            echo "outcome=merged" >> "$GITHUB_OUTPUT"
           else
-            DRAFT=""; [ "${{ steps.verify.outputs.green }}" = "true" ] || DRAFT="--draft"
-            PR=$(gh pr create $DRAFT --title "🤖 Auto-fix: ${{ steps.ctx.outputs.monitor }} failure" --base main --head "$BR" --body "$BODY")
-            echo "outcome=pr" >> "$GITHUB_OUTPUT"; echo "pr=$PR" >> "$GITHUB_OUTPUT"
+            git push -u origin "$BR"                             # red → branch for review, no deploy
+            echo "outcome=branch" >> "$GITHUB_OUTPUT"; echo "branch=$BR" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Post-deploy health check
@@ -161,14 +163,17 @@ jobs:
       - name: Notify admin — result
         if: always()
         run: |
-          O="${{ steps.ship.outputs.outcome }}"; PR="${{ steps.ship.outputs.pr }}"; H="${{ steps.health.outputs.status }}"
+          O="${{ steps.ship.outputs.outcome }}"; H="${{ steps.health.outputs.status }}"
+          BR="${{ steps.ship.outputs.branch }}"; FILES="${{ steps.ship.outputs.files }}"
+          M="${{ steps.ctx.outputs.monitor }}"; URL="${{ steps.ctx.outputs.url }}"
           case "$O" in
             merged)
-              if [ "$H" = "ok" ]; then MSG="✅ Auto-fixed *${{ steps.ctx.outputs.monitor }}* — tests green, merged & deployed, /health OK. ${PR}";
-              else MSG="🚨 Auto-fixed & deployed *${{ steps.ctx.outputs.monitor }}* but /health is NOT responding after deploy — check now / roll back in Render. ${PR}"; fi ;;
-            pr)    MSG="⚠️ Auto-fix for *${{ steps.ctx.outputs.monitor }}* is ready but NOT auto-merged (tests red or manual run) — review the PR: ${PR}" ;;
-            nofix) MSG="⚠️ Couldn't confidently auto-fix *${{ steps.ctx.outputs.monitor }}* — needs you. Failed run: ${{ steps.ctx.outputs.url }}" ;;
-            *)     MSG="⚠️ Self-heal for *${{ steps.ctx.outputs.monitor }}* ended without a result — check the Actions log." ;;
+              if [ "$H" = "ok" ]; then MSG="✅ Auto-fixed *$M* — tests green, merged to main & deployed, /health OK. Files: ${FILES}";
+              else MSG="🚨 Auto-fixed & deployed *$M* but /health is NOT responding after deploy — check now / roll back in Render. Files: ${FILES}"; fi ;;
+            branch)  MSG="⚠️ Auto-fix for *$M* did NOT deploy (tests red) — pushed to branch \`$BR\` for you to review." ;;
+            testfix) MSG="🧪 Self-heal TEST: produced a fix for *$M* (files: ${FILES}), tests green — NOT merged (manual run)." ;;
+            nofix)   MSG="⚠️ Couldn't confidently auto-fix *$M* — needs you. Failed run: ${URL}" ;;
+            *)       MSG="⚠️ Self-heal for *$M* ended without a result / errored — check the Actions log." ;;
           esac
           curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=${MSG}" -d parse_mode=Markdown >/dev/null || true
