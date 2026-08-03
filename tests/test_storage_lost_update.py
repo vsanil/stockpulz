@@ -71,3 +71,63 @@ class TestCrossUserLostUpdate:
         cm._update_user_keyed_file("f.json", "u2", {"v": "b"})
         assert _LaggyGist.server["f.json"]["u1"] == {"v": "theirs"}, \
             "an expired echo must not resurrect our stale value"
+
+
+class _Server:
+    """A gist whose reads are always current — models a SECOND PROCESS that can
+    write between a caller's load and its save."""
+    data = {}
+
+    def read_strict(self, filename):
+        import copy
+        return copy.deepcopy(_Server.data.get(filename))
+
+    def write(self, filename, d):
+        import copy
+        _Server.data[filename] = copy.deepcopy(d)
+
+    def name(self):
+        return "server"
+
+
+class TestSameUserCrossProcessRace:
+    """close_trade must not clobber a concurrent write to the SAME user made by
+    another process (e.g. the user logs a position in the mini-app while a
+    scheduled job closes a trade for them)."""
+
+    @pytest.fixture(autouse=True)
+    def _wire(self, monkeypatch):
+        import storage
+        _Server.data = {}
+        cm._recent_user_writes.clear()
+        cm._gist_read_cache.clear()
+        monkeypatch.setattr(storage, "GistBackend", _Server)
+        yield
+
+    def test_concurrent_position_log_survives_a_close(self):
+        import trade_logger as tl
+        F = cm.USER_TRADES_FILE
+        _Server.data[F] = {"u1": {"open": [{"ticker": "AAA", "entry_price": 10.0}],
+                                  "closed": [], "watchlist": []}}
+        # a caller reads here (stale snapshot) …
+        stale = _Server().read_strict(F)
+        assert len(stale["u1"]["open"]) == 1
+        # … meanwhile ANOTHER PROCESS logs a new position for the same user
+        cur = _Server().read_strict(F)
+        cur["u1"]["open"].append({"ticker": "BBB", "entry_price": 20.0})
+        _Server().write(F, cur)
+        # now the close runs — it must see BBB, not the stale snapshot
+        closed = tl.close_trade("AAA", "u1", exit_price=11.0)
+        final = _Server.data[F]["u1"]
+        assert closed and closed["ticker"] == "AAA"
+        assert [t["ticker"] for t in final["open"]] == ["BBB"], \
+            "the concurrent position log was clobbered by the close"
+        assert [t["ticker"] for t in final["closed"]] == ["AAA"]
+
+    def test_close_of_missing_ticker_is_a_safe_noop(self):
+        import trade_logger as tl
+        F = cm.USER_TRADES_FILE
+        _Server.data[F] = {"u1": {"open": [{"ticker": "ZZZ", "entry_price": 5.0}],
+                                  "closed": [], "watchlist": []}}
+        assert tl.close_trade("NOPE", "u1", exit_price=1.0) is None
+        assert [t["ticker"] for t in _Server.data[F]["u1"]["open"]] == ["ZZZ"]
