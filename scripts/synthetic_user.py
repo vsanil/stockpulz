@@ -79,11 +79,29 @@ def _state(chat_id: str) -> dict:
         return {}
 
 
-def _save_state(chat_id: str, st: dict) -> None:
-    requests.patch(f"https://api.github.com/gists/{_GID}",
-                   headers={"Authorization": f"token {_TOK}"},
-                   json={"files": {_state_file(chat_id): {"content": json.dumps(st, indent=2)}}},
-                   timeout=20)
+def _save_state(chat_id: str, st: dict) -> bool:
+    """Persist state, VERIFYING the write. GitHub rate-limits (409/403) rapid
+    successive PATCHes to the same gist, and a run does several writes
+    (close_trade → paper_sell → state × 2 accounts). The old fire-and-forget
+    version ignored the response, so a throttled save failed SILENTLY: a sold
+    ticker stayed 'tracked', and — far worse — a freshly opened position could
+    fail to persist and be orphaned (never sold at target or stop)."""
+    import time
+    body = {"files": {_state_file(chat_id): {"content": json.dumps(st, indent=2)}}}
+    last = ""
+    for attempt in range(1, 6):
+        try:
+            r = requests.patch(f"https://api.github.com/gists/{_GID}",
+                               headers={"Authorization": f"token {_TOK}"},
+                               json=body, timeout=25)
+            if r.status_code < 400:
+                return True
+            last = f"{r.status_code} {r.text[:80]}"
+        except Exception as exc:
+            last = str(exc)
+        time.sleep(1.5 * attempt)
+    print(f"[synthetic_user] STATE SAVE FAILED for {chat_id}: {last}")
+    return False
 
 
 def _raw_picks() -> dict:
@@ -140,7 +158,9 @@ def phase_open(admin: str, dry: bool) -> list[str]:
         st.setdefault("paper", []).extend(new_paper)
         st["real"] = list(dict.fromkeys(st["real"]))
         st["paper"] = list(dict.fromkeys(st["paper"]))
-        _save_state(admin, st)
+        if not _save_state(admin, st):
+            acts.append("🚨 STATE SAVE FAILED — a position just opened may be "
+                        "orphaned (never sold at target/stop). Check the log.")
 
     try:
         held_real = {x["ticker"] for x in load_user_trade_log(admin).get("open", [])}
@@ -290,7 +310,10 @@ def _manage_account(admin: str, dry: bool) -> list[str]:
 
     if not dry:
         st["real"], st["paper"] = still_real, still_paper
-        _save_state(admin, st)
+        if not _save_state(admin, st):
+            # Surface it — a silent failure leaves sold tickers "tracked" and, on
+            # the open path, can orphan a live position.
+            acts.append(f"⚠️ state save FAILED for {admin} — tracking may be stale")
     # NOTE: returns ONLY actionable events (sells/cuts/errors). An empty list
     # means "nothing to do" — main() then stays silent (no Telegram spam).
     return acts
