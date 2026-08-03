@@ -69,3 +69,40 @@ class TestPaperCoversEveryPick:
         uni = su._universe(picks)
         assert len(uni) == 5                      # every section represented
         assert su._MAX_PAPER >= len(uni)          # cap never truncates a normal day
+
+
+class TestStateSaveIsVerified:
+    """A silently-failed state save is how a live position gets orphaned — the
+    gist rate-limits rapid PATCHes, so the write MUST be checked and retried."""
+
+    def test_save_returns_false_and_warns_on_persistent_failure(self, monkeypatch, capsys):
+        class _Resp:
+            status_code = 403
+            text = "rate limited"
+        monkeypatch.setattr(su.requests, "patch", lambda *a, **k: _Resp())
+        monkeypatch.setattr(su.time if hasattr(su, "time") else su, "sleep", lambda *_: None,
+                            raising=False)
+        import time as _t
+        monkeypatch.setattr(_t, "sleep", lambda *_: None)
+        assert su._save_state("900000001", {"real": [], "paper": []}) is False
+        assert "STATE SAVE FAILED" in capsys.readouterr().out
+
+    def test_save_returns_true_on_success(self, monkeypatch):
+        class _Resp:
+            status_code = 200
+            text = "ok"
+        monkeypatch.setattr(su.requests, "patch", lambda *a, **k: _Resp())
+        assert su._save_state("900000001", {"real": ["X"], "paper": []}) is True
+
+    def test_save_retries_then_succeeds(self, monkeypatch):
+        calls = {"n": 0}
+        class _Resp:
+            def __init__(self, code): self.status_code, self.text = code, "x"
+        def _patch(*a, **k):
+            calls["n"] += 1
+            return _Resp(200 if calls["n"] >= 2 else 409)
+        monkeypatch.setattr(su.requests, "patch", _patch)
+        import time as _t
+        monkeypatch.setattr(_t, "sleep", lambda *_: None)
+        assert su._save_state("900000001", {"real": [], "paper": []}) is True
+        assert calls["n"] == 2, "must retry a throttled write, not give up"
