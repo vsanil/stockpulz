@@ -150,6 +150,15 @@ USER_PAPER_FILE        = "user_paper.json"      # Per-user paper portfolios
 FEEDBACK_FILE          = "feedback.json"        # User feedback submissions
 BACKTEST_TRADES_FILE   = "backtest_trades.json" # Simulated trades seeded from backtester (per-user)
 
+# Files whose TOP-LEVEL KEYS are chat_ids. On a row-capable backend these become
+# one row PER USER (the whole point of the Supabase migration: writing user A can
+# never clobber user B, and same-user writes get real compare-and-swap). On the
+# Gist they stay single JSON blobs.
+USER_KEYED_FILES = {
+    USER_CONFIGS_FILE, USER_TRADES_FILE, USER_PAPER_FILE,
+    PRICE_ALERTS_FILE, BACKTEST_TRADES_FILE, PENDING_USERS_FILE,
+}
+
 # ── User activity log (per-user, for admin troubleshooting) ──────────────────
 _USER_LOG_MAX       = 150   # max events kept per user in Gist
 _USER_LOG_FLUSH_AT  = 8     # flush in-memory buffer to Gist after this many events
@@ -780,8 +789,14 @@ def _load_gist_file(filename: str) -> dict | None:
     if cached is not None:
         return cached
     try:
-        from storage import GistBackend
-        result = GistBackend().read(filename)
+        from storage import get_storage_backend as get_backend   # Gist unless SUPABASE_* is set
+        backend = get_backend()
+        # On a row backend the per-user files live as one row PER USER, so
+        # reassemble the {chat_id: record} mapping every caller still expects.
+        if backend.supports_rows() and filename in USER_KEYED_FILES:
+            result = backend.read_all_users(filename)
+        else:
+            result = backend.read(filename)
         if result is not None:
             _cache_set(filename, result)
         return result
@@ -801,8 +816,8 @@ def _write_gist_file(filename: str, data: dict) -> None:
     Same fix applied to _write_config (Jun 08).
     """
     _cache_invalidate(filename)   # invalidate before write so stale data is never served
-    from storage import GistBackend
-    GistBackend().write(filename, data)
+    from storage import get_storage_backend as get_backend   # Gist unless SUPABASE_* is set
+    get_backend().write(filename, data)
 
 
 # ── Safe per-user write (concurrency + clobber protection) ───────────────────
@@ -865,15 +880,26 @@ def _update_user_keyed_file(filename: str, chat_id: str, value) -> None:
     (A same-user concurrent mutation across processes is still last-writer-wins —
     the full fix is etag/If-Match or a row store; this kills the data-loss cases.)
     """
-    from storage import GistBackend
+    from storage import get_storage_backend as get_backend   # Gist unless SUPABASE_* is set
     uid = str(chat_id)
+    backend = get_backend()
+
+    # Row-per-user backend: write ONLY this user's row. No whole-file rewrite, so
+    # a concurrent write for a DIFFERENT user cannot be clobbered, and there is no
+    # read-after-write lag to produce a stale merge base.
+    if backend.supports_rows():
+        _, version = backend.read_user(filename, uid)
+        backend.write_user(filename, uid, value, version)
+        _cache_invalidate(filename)
+        return
+
     with _lock_for(filename):
-        current  = GistBackend().read_strict(filename)   # raises on fetch error → no clobber
+        current  = backend.read_strict(filename)   # raises on fetch error → no clobber
         all_data = current if isinstance(current, dict) else {}
         _reapply_recent_writes(filename, all_data, skip_uid=uid)
         all_data[uid] = value
         _cache_invalidate(filename)
-        GistBackend().write(filename, all_data)
+        backend.write(filename, all_data)
         _cache_set(filename, all_data)   # keep cache coherent with what we just wrote
         _record_write(filename, uid, value)
 
@@ -899,10 +925,29 @@ def mutate_user_record(filename: str, chat_id: str, mutator, default=None):
     NOTE: this shrinks the race window from seconds to milliseconds; it cannot
     eliminate it without server-side CAS or row-level storage.
     """
-    from storage import GistBackend
+    from storage import get_storage_backend as get_backend   # Gist unless SUPABASE_* is set
     uid = str(chat_id)
+    backend = get_backend()
+
+    # Row backend: TRUE compare-and-swap. write_user returns None when another
+    # writer bumped the version first — we then re-run the mutator against the
+    # fresh record instead of clobbering it. This is what the Gist could never
+    # do (its PATCH rejects If-Match), and it closes the same-user cross-process
+    # race rather than merely narrowing it.
+    if backend.supports_rows():
+        for attempt in range(1, 6):
+            record, version = backend.read_user(filename, uid)
+            if record is None:
+                record = {} if default is None else default
+            new_record, result = mutator(record)
+            if backend.write_user(filename, uid, new_record, version) is not None:
+                _cache_invalidate(filename)
+                return result
+            print(f"[config] CAS conflict on {filename}[{uid}] — retry {attempt}")
+        raise RuntimeError(f"mutate_user_record: CAS kept failing for {filename}[{uid}]")
+
     with _lock_for(filename):
-        current  = GistBackend().read_strict(filename)   # raises on fetch error → no clobber
+        current  = backend.read_strict(filename)   # raises on fetch error → no clobber
         all_data = current if isinstance(current, dict) else {}
         _reapply_recent_writes(filename, all_data, skip_uid=uid)
         record = all_data.get(uid)
@@ -911,7 +956,7 @@ def mutate_user_record(filename: str, chat_id: str, mutator, default=None):
         new_record, result = mutator(record)
         all_data[uid] = new_record
         _cache_invalidate(filename)
-        GistBackend().write(filename, all_data)
+        backend.write(filename, all_data)
         _cache_set(filename, all_data)
         _record_write(filename, uid, new_record)
         return result
@@ -934,14 +979,14 @@ def mutate_gist_file(filename: str, mutator, default=None):
     clobber). Use for shared multi-user files (e.g. price_alerts) where the whole
     blob is rewritten so a naive load→mutate→save loses concurrent edits.
     """
-    from storage import GistBackend
+    from storage import get_storage_backend as get_backend   # Gist unless SUPABASE_* is set
     with _lock_for(filename):
-        current = GistBackend().read_strict(filename)
+        current = get_backend().read_strict(filename)
         if current is None:
             current = {} if default is None else default
         new_contents, result = mutator(current)
         _cache_invalidate(filename)
-        GistBackend().write(filename, new_contents)
+        get_backend().write(filename, new_contents)
         _cache_set(filename, new_contents)
         return result
 

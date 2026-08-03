@@ -29,6 +29,9 @@ class _LaggyGist:
     def name(self):
         return "laggy"
 
+    def supports_rows(self):
+        return False          # blob backend — exercises the whole-file path
+
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
@@ -37,6 +40,10 @@ def _reset(monkeypatch):
     cm._recent_user_writes.clear()
     cm._gist_read_cache.clear()
     monkeypatch.setattr(storage, "GistBackend", _LaggyGist)
+    # config_manager now resolves the backend through the factory, so patch that
+    # too (and clear its cached instance) — otherwise it returns a real Gist.
+    monkeypatch.setattr(storage, "get_storage_backend", lambda: _LaggyGist())
+    storage.reset_backend()
     yield
     cm._recent_user_writes.clear()
 
@@ -89,6 +96,9 @@ class _Server:
     def name(self):
         return "server"
 
+    def supports_rows(self):
+        return False
+
 
 class TestSameUserCrossProcessRace:
     """close_trade must not clobber a concurrent write to the SAME user made by
@@ -102,6 +112,8 @@ class TestSameUserCrossProcessRace:
         cm._recent_user_writes.clear()
         cm._gist_read_cache.clear()
         monkeypatch.setattr(storage, "GistBackend", _Server)
+        monkeypatch.setattr(storage, "get_storage_backend", lambda: _Server())
+        storage.reset_backend()
         yield
 
     def test_concurrent_position_log_survives_a_close(self):

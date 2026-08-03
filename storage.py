@@ -44,6 +44,34 @@ class StorageBackend(ABC):
     def name(self) -> str:
         """Human-readable backend name for logging."""
 
+    # ── Optional row-level API (fixes the storage races) ──────────────────────
+    # A backend that stores ONE ROW PER USER can do what a whole-file blob store
+    # cannot: writes for different users never touch the same bytes, and a
+    # same-user write can compare-and-swap on a version token. Backends that
+    # can't do this return False and callers keep the whole-file path.
+    def read_strict(self, filename: str) -> dict | list | None:
+        """Like read() but MUST raise on a transport error rather than return
+        None — a caller doing read-modify-write must never mistake a failed read
+        for 'empty' and clobber everyone. Default is read(); backends that
+        swallow errors in read() MUST override this."""
+        return self.read(filename)
+
+    def supports_rows(self) -> bool:
+        return False
+
+    def read_user(self, filename: str, chat_id: str) -> tuple:
+        """Return (content, version). version is opaque; pass it back to write_user."""
+        raise NotImplementedError
+
+    def write_user(self, filename: str, chat_id: str, content, expected_version):
+        """Compare-and-swap. Returns the new version, or None on version
+        conflict (someone else wrote first) so the caller can retry."""
+        raise NotImplementedError
+
+    def read_all_users(self, filename: str) -> dict:
+        """Reassemble the whole {chat_id: content} mapping from rows."""
+        raise NotImplementedError
+
 
 # ── Gist backend (current) ────────────────────────────────────────────────────
 
@@ -157,6 +185,16 @@ class SupabaseBackend(StorageBackend):
         t.join(timeout=2.0)  # max 2s — fall back to Gist if slower
         return result[0]
 
+    def read_strict(self, filename: str) -> dict | list | None:
+        """read() above swallows errors and returns None, which a read-modify-write
+        caller would misread as 'empty' and then clobber. This variant RAISES."""
+        resp = (self._client.table("documents")
+                .select("content").eq("filename", filename)
+                .maybe_single().execute())
+        if resp is not None and resp.data:
+            return resp.data["content"]
+        return None
+
     def write(self, filename: str, data: dict | list) -> None:
         try:
             self._client.table("documents").upsert(
@@ -174,6 +212,51 @@ class SupabaseBackend(StorageBackend):
 
     def name(self) -> str:
         return "supabase"
+
+    # ── Row-level API (one row per user) ──────────────────────────────────────
+    # This is the whole point of the migration. On the Gist, saving one user
+    # meant rewriting the file every other user shares, so a concurrent write
+    # was clobbered and GitHub's read-after-write lag made a stale merge base
+    # likely. Here each user is an independent row with a version token, so
+    # different users never collide and same-user writes get true CAS.
+    def supports_rows(self) -> bool:
+        return True
+
+    def read_user(self, filename: str, chat_id: str) -> tuple:
+        try:
+            resp = (self._client.table("user_records")
+                    .select("content,version")
+                    .eq("filename", filename).eq("chat_id", str(chat_id))
+                    .maybe_single().execute())
+            if resp is not None and resp.data:
+                return resp.data["content"], resp.data["version"]
+        except Exception as exc:
+            print(f"[storage/supabase] read_user({filename},{chat_id}) failed: {exc}")
+            raise
+        return None, None
+
+    def write_user(self, filename: str, chat_id: str, content, expected_version):
+        """Atomic CAS via the upsert_user_record() SQL function.
+        Returns the new version, or None if another writer got there first."""
+        resp = self._client.rpc("upsert_user_record", {
+            "p_filename": filename,
+            "p_chat_id": str(chat_id),
+            "p_content": content,
+            "p_expected_version": expected_version,
+        }).execute()
+        return resp.data if resp is not None else None
+
+    def read_all_users(self, filename: str) -> dict:
+        out: dict = {}
+        try:
+            resp = (self._client.table("user_records")
+                    .select("chat_id,content").eq("filename", filename).execute())
+            for row in (resp.data or []):
+                out[row["chat_id"]] = row["content"]
+        except Exception as exc:
+            print(f"[storage/supabase] read_all_users({filename}) failed: {exc}")
+            raise
+        return out
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────

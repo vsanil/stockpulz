@@ -40,8 +40,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/config_manager.py": {
-    "mtime": 1785781506.9455543,
-    "ast_hash": "101f14d8f225b9a6ebed196e6a8989d2",
+    "mtime": 1785782381.355822,
+    "ast_hash": "f90ec32b86cc921d243f197308c877ea",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/formatters.py": {
@@ -120,8 +120,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/storage.py": {
-    "mtime": 1782631092.8157318,
-    "ast_hash": "b7651104e5afd5b165276ccbf76a072f",
+    "mtime": 1785782115.559855,
+    "ast_hash": "49a9af9dd780b3a0b395c2e870e9617d",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/agent.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/CLAUDE.md": {
-    "mtime": 1785781661.5617688,
-    "ast_hash": "c1e4a7b9b1036b7db433ec929845dd49",
+    "mtime": 1785782687.3926024,
+    "ast_hash": "8988183df622880d4d744507e663a454",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/docs/index.html": {
@@ -565,8 +565,23 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_storage_lost_update.py": {
-    "mtime": 1785781600.234574,
-    "ast_hash": "465e669a7b20d8dc7bed52709ab0bc04",
+    "mtime": 1785782428.6861448,
+    "ast_hash": "edc18fbc0a8bd289e3d253346c0b8d1f",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/supabase_schema.sql": {
+    "mtime": 1785782036.1051838,
+    "ast_hash": "b0caf23b75cb2b8eefa5af6dad845a64",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_row_backend_cas.py": {
+    "mtime": 1785782563.5019236,
+    "ast_hash": "d0d8516b1290a2bd7cc27491f05f61c5",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/migrate_to_supabase.py": {
+    "mtime": 1785782625.2353976,
+    "ast_hash": "488a1094039a9eb53409a834c68d3584",
     "semantic_hash": ""
   }
 }
