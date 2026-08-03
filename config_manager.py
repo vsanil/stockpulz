@@ -818,6 +818,40 @@ def _lock_for(filename: str) -> threading.Lock:
         return lk
 
 
+# ── Read-after-write lag guard (cross-user lost update) ───────────────────────
+# The lock serializes our own writes, and read_strict RAISES on a fetch error, but
+# neither protects against GitHub's read-after-write LAG: a fresh GET moments after
+# a PATCH can still return the PRE-write copy. Writing user A then user B then
+# re-read that stale copy for B's merge and wrote it back — silently erasing A.
+# (Observed live: tagging the owner's 34 trades then the test account's 4 lost the
+# owner's entirely.) Fix: remember what we just wrote per (file, uid) and re-apply
+# any echo the server hasn't shown us yet. Costs no extra network calls.
+_recent_user_writes: dict[str, dict[str, tuple]] = {}
+_WRITE_ECHO_TTL = 30   # s — gist lag is normally <5s; keep the window tight so a
+                       # genuinely newer write from another process isn't stomped.
+
+
+def _record_write(filename: str, uid: str, value) -> None:
+    _recent_user_writes.setdefault(filename, {})[uid] = (value, time.time())
+
+
+def _reapply_recent_writes(filename: str, all_data: dict, skip_uid: str | None = None) -> None:
+    """Re-apply our own very recent writes that the fresh read is missing."""
+    echoes = _recent_user_writes.get(filename)
+    if not echoes:
+        return
+    now = time.time()
+    for uid, (value, ts) in list(echoes.items()):
+        if now - ts > _WRITE_ECHO_TTL:
+            echoes.pop(uid, None)                 # expired — server has caught up
+            continue
+        if uid == skip_uid:
+            continue
+        if all_data.get(uid) != value:            # server copy hasn't caught up yet
+            all_data[uid] = value
+            print(f"[config] read-after-write lag: re-applied {filename}[{uid}]")
+
+
 def _update_user_keyed_file(filename: str, chat_id: str, value) -> None:
     """
     Safely set all_data[chat_id] = value in a chat_id-keyed multi-user file.
@@ -832,13 +866,16 @@ def _update_user_keyed_file(filename: str, chat_id: str, value) -> None:
     the full fix is etag/If-Match or a row store; this kills the data-loss cases.)
     """
     from storage import GistBackend
+    uid = str(chat_id)
     with _lock_for(filename):
         current  = GistBackend().read_strict(filename)   # raises on fetch error → no clobber
         all_data = current if isinstance(current, dict) else {}
-        all_data[str(chat_id)] = value
+        _reapply_recent_writes(filename, all_data, skip_uid=uid)
+        all_data[uid] = value
         _cache_invalidate(filename)
         GistBackend().write(filename, all_data)
         _cache_set(filename, all_data)   # keep cache coherent with what we just wrote
+        _record_write(filename, uid, value)
 
 
 def mutate_gist_file(filename: str, mutator, default=None):
