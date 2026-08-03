@@ -302,6 +302,33 @@ def get_allowed_users() -> list[str]:
     return users
 
 
+# ── Synthetic TEST accounts (single source of truth) ──────────────────────────
+# The synthetic-user bot trades on a VIRTUAL chat_id so the owner's real account
+# stays clean. That id is NOT a real Telegram user, so:
+#   • it must stay OUT of get_allowed_users() → no broadcasts, and (deliberately)
+#     excluded from community stats + the LLM pick-feedback loop, which both
+#     iterate allowed users. A robot's mechanical fills must never steer real picks.
+#   • any send to it must be skipped (telegram_api.is_test_user) — a dead chat_id
+#     costs ~10s of retries per send and would spam "chat not found" forever,
+#     masking a REAL user who blocked the bot.
+DEFAULT_TEST_CHAT_ID = "900000001"
+
+
+def get_test_users() -> list[str]:
+    """Virtual/synthetic chat_ids. Pure env+constant (no Gist read) so it is safe
+    to call on the hot send path."""
+    ids = {DEFAULT_TEST_CHAT_ID}
+    env = (os.environ.get("SYNTHETIC_CHAT_ID") or "").strip()
+    if env:
+        ids.add(env)
+    return sorted(ids)
+
+
+def is_test_user(chat_id) -> bool:
+    s = str(chat_id or "").strip()
+    return bool(s) and s in set(get_test_users())
+
+
 def add_allowed_user(chat_id: str) -> list[str]:
     """Add a chat_id to allowed_users. Returns updated list."""
     config = get_config()

@@ -66,6 +66,22 @@ def _chat_id() -> str:
     return chat_id
 
 
+def _skip_test_user(chat_id) -> bool:
+    """True if chat_id is a synthetic/test account — skip the network send.
+
+    The synthetic-user bot trades on a VIRTUAL chat_id with no real Telegram user
+    behind it. Telegram answers those with HTTP 400 "chat not found", which misses
+    the 429/parse-entity branches below and burns 2×RETRY_DELAY (~10s) per send —
+    across 37 per-user send sites plus every fired price alert. Worse, it would log
+    "chat not found" forever and mask a REAL user who blocked the bot. Skipping is
+    both faster and keeps the logs meaningful."""
+    try:
+        from config_manager import is_test_user
+        return is_test_user(chat_id)
+    except Exception:
+        return False
+
+
 # ── Send helpers ──────────────────────────────────────────────────────────────
 
 def send_message(text: str, chat_id: str | None = None) -> bool:
@@ -75,6 +91,8 @@ def send_message(text: str, chat_id: str | None = None) -> bool:
     """
     token   = _bot_token()
     chat_id = chat_id or _chat_id()
+    if _skip_test_user(chat_id):
+        return True
     url     = TELEGRAM_API.format(token=token, method="sendMessage")
 
     # Split long messages — respect HTML blockquote boundaries to preserve expandable sections
@@ -157,6 +175,8 @@ def send_inline_keyboard(text: str, buttons: list[list[dict]],
     """Send a message with an inline keyboard for user selection. Retries up to 3×."""
     token   = _bot_token()
     chat_id = chat_id or _chat_id()
+    if _skip_test_user(chat_id):
+        return True
     url     = TELEGRAM_API.format(token=token, method="sendMessage")
     payload = {
         "chat_id":      chat_id,
@@ -237,6 +257,8 @@ def send_photo(photo_bytes: bytes, caption: str = "", chat_id: str | None = None
     """Send a photo (PNG bytes) to a Telegram chat with an optional HTML caption."""
     token   = _bot_token()
     chat_id = chat_id or _chat_id()
+    if _skip_test_user(chat_id):
+        return True
     url     = TELEGRAM_API.format(token=token, method="sendPhoto")
     for attempt in range(1, MAX_RETRIES + 1):
         try:

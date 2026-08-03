@@ -1,13 +1,14 @@
 name: Synthetic User
 
-# An automated "active user" for stabilization testing. Opens real + paper
-# positions from the day's picks (with target alerts + watchlist) in the morning,
-# then manages them intraday (sell winners at target / cut at stop). It ONLY
-# touches the tickers it opened (tracked in synthetic_state.json) — never the
-# owner's real pre-existing positions. Reports every action to the admin.
+# An automated "active user" for stabilization testing + pick-quality evidence.
+# Opens real + paper positions from the day's picks (with target alerts +
+# watchlist) in the morning, then manages them intraday (sell at target / cut at
+# stop). It ONLY touches the tickers it opened (per-account state file).
 #
-# By design this logs REAL "I Bought This" positions (the owner uses the admin
-# account as a test account and will reset it before real use).
+# It trades on a VIRTUAL TEST account (SYNTHETIC_CHAT_ID, default 900000001) so
+# the owner's real account stays clean; REPORTS still go to the owner. That id is
+# deliberately NOT in allowed_users, so the robot's mechanical fills are excluded
+# from community stats and from the LLM pick-feedback loop.
 
 on:
   schedule:
@@ -51,6 +52,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Virtual test account it TRADES on (optional — code defaults to 900000001)
+          SYNTHETIC_CHAT_ID:  ${{ secrets.SYNTHETIC_CHAT_ID }}
           GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
           GITHUB_TOKEN:       ${{ secrets.GH_GIST_TOKEN }}
           GIST_ID:            ${{ secrets.GIST_ID }}
