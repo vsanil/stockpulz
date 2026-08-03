@@ -40,8 +40,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/config_manager.py": {
-    "mtime": 1785778646.1701477,
-    "ast_hash": "5a807cba2b09dec8e8c21f45bc39541e",
+    "mtime": 1785780605.6623843,
+    "ast_hash": "9238acb9f796e9bfe56cc641a940e362",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/formatters.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/CLAUDE.md": {
-    "mtime": 1785779012.0127807,
-    "ast_hash": "73dbef11803fdbb859adc48f7c8f0fa2",
+    "mtime": 1785780660.6528373,
+    "ast_hash": "858d556f595ee8eadef41b57cdaec59c",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/docs/index.html": {
@@ -562,6 +562,11 @@
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_synthetic_trade_exclusion.py": {
     "mtime": 1785778992.5706017,
     "ast_hash": "03b8f3ee3fa052865747d58928460f70",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_storage_lost_update.py": {
+    "mtime": 1785780589.3380067,
+    "ast_hash": "69cce1601e226ece926cfa229b61582c",
     "semantic_hash": ""
   }
 }
