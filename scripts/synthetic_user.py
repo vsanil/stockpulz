@@ -189,7 +189,14 @@ def phase_open(admin: str, dry: bool) -> list[str]:
                     continue
                 shares = round(_PAPER_USD / px, 8)
                 if not dry:
-                    paper_buy(u["t"], shares, admin, price=float(px))
+                    # Pass the pick's levels — WITHOUT them the position stores
+                    # target_price/stop_loss = None, so manage's paper branch
+                    # (`if tgt and px >= tgt`) can never fire: paper positions
+                    # would accumulate forever, never exercise paper_sell, and
+                    # drain the paper cash (38 stale positions before this fix).
+                    paper_buy(u["t"], shares, admin, price=float(px),
+                              stop_loss=(float(u["stop"]) if _pos(u.get("stop")) else None),
+                              target_price=(float(u["target"]) if _pos(u.get("target")) else None))
                 new_paper.append(u["t"]); watch.append(u["t"])
                 acts.append(f"📄 PAPER {u['t']} @ ${px:.2f} · {shares} sh")
             except Exception as e:
