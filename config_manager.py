@@ -878,6 +878,52 @@ def _update_user_keyed_file(filename: str, chat_id: str, value) -> None:
         _record_write(filename, uid, value)
 
 
+def mutate_user_record(filename: str, chat_id: str, mutator, default=None):
+    """Read-modify-write ONE user's record with the read INSIDE the lock.
+
+    Fixes the same-user CROSS-PROCESS race. The racy pattern is:
+
+        log = load_user_trade_log(uid)      # ← process B writes here …
+        log["open"].append(trade)
+        save_user_trade_log(uid, log)       # ← … and this silently clobbers it
+
+    Between the caller's load and save (often seconds — price fetches, LLM calls)
+    another PROCESS can write the same user, and the save wipes it. GitHub's Gist
+    API has NO compare-and-swap (verified: PATCH rejects If-Match with 400), so
+    the fix is to shrink the window instead of locking: `mutator(record)` runs on
+    a FRESH read taken microseconds before the write, not on a stale snapshot the
+    caller took earlier.
+
+    mutator(record) -> (new_record, result). `result` is returned to the caller.
+
+    NOTE: this shrinks the race window from seconds to milliseconds; it cannot
+    eliminate it without server-side CAS or row-level storage.
+    """
+    from storage import GistBackend
+    uid = str(chat_id)
+    with _lock_for(filename):
+        current  = GistBackend().read_strict(filename)   # raises on fetch error → no clobber
+        all_data = current if isinstance(current, dict) else {}
+        _reapply_recent_writes(filename, all_data, skip_uid=uid)
+        record = all_data.get(uid)
+        if record is None:
+            record = {} if default is None else default
+        new_record, result = mutator(record)
+        all_data[uid] = new_record
+        _cache_invalidate(filename)
+        GistBackend().write(filename, all_data)
+        _cache_set(filename, all_data)
+        _record_write(filename, uid, new_record)
+        return result
+
+
+def mutate_user_trade_log(chat_id: str, mutator):
+    """mutate_user_record for the trade log — the highest-collision file
+    (web 'I Bought This' vs a scheduled job closing a trade for the same user)."""
+    return mutate_user_record(USER_TRADES_FILE, chat_id, mutator,
+                              default={"open": [], "closed": [], "watchlist": []})
+
+
 def mutate_gist_file(filename: str, mutator, default=None):
     """
     Atomically read-modify-write a whole Gist file under a per-file lock.

@@ -353,32 +353,40 @@ def close_trade(ticker: str, chat_id: str, exit_price: float | None = None) -> d
     Called by the Mini App sell flow.
     """
     today  = et_today().isoformat()
-    log    = load_user_trade_log(chat_id)
     ticker = ticker.upper()
 
-    for i, trade in enumerate(log["open"]):
-        if trade["ticker"] == ticker:
-            entry      = trade.get("entry_price")
-            return_pct = 0.0
-            gain_usd   = 0.0
-            if entry and exit_price:
-                return_pct = (float(exit_price) - float(entry)) / float(entry) * 100
-                allocation = float(trade.get("allocation") or 0)
-                gain_usd   = round(allocation * return_pct / 100, 2)
-            closed = {
-                **trade,
-                "closed_date":  today,
-                "closed_price": round(float(exit_price), 4) if exit_price else None,
-                "outcome":      "manual",
-                "return_pct":   round(return_pct, 2),
-                "gain_usd":     gain_usd,
-            }
-            log["open"].pop(i)
-            log["closed"].append(closed)
-            save_user_trade_log(chat_id, log)
-            print(f"[trade_logger] Closed {ticker} manually @ ${exit_price} ({return_pct:+.1f}%) for {chat_id}")
-            return closed
-    return None
+    # Mutator form: the log is read FRESH inside the storage lock, microseconds
+    # before the write. The old load→modify→save left a seconds-wide window in
+    # which a scheduled job writing the SAME user was silently clobbered.
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        for i, trade in enumerate(log.get("open", [])):
+            if trade["ticker"] == ticker:
+                entry      = trade.get("entry_price")
+                return_pct = 0.0
+                gain_usd   = 0.0
+                if entry and exit_price:
+                    return_pct = (float(exit_price) - float(entry)) / float(entry) * 100
+                    allocation = float(trade.get("allocation") or 0)
+                    gain_usd   = round(allocation * return_pct / 100, 2)
+                closed = {
+                    **trade,
+                    "closed_date":  today,
+                    "closed_price": round(float(exit_price), 4) if exit_price else None,
+                    "outcome":      "manual",
+                    "return_pct":   round(return_pct, 2),
+                    "gain_usd":     gain_usd,
+                }
+                log["open"].pop(i)
+                log.setdefault("closed", []).append(closed)
+                return log, closed
+        return log, None            # not found — write is a no-op rewrite
+
+    from config_manager import mutate_user_trade_log
+    closed = mutate_user_trade_log(chat_id, _mut)
+    if closed:
+        print(f"[trade_logger] Closed {ticker} manually @ ${exit_price} ({closed['return_pct']:+.1f}%) for {chat_id}")
+    return closed
 
 
 def remove_holding(ticker: str, chat_id: str) -> bool:
