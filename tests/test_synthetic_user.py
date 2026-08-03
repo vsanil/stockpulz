@@ -106,3 +106,28 @@ class TestStateSaveIsVerified:
         monkeypatch.setattr(_t, "sleep", lambda *_: None)
         assert su._save_state("900000001", {"real": [], "paper": []}) is True
         assert calls["n"] == 2, "must retry a throttled write, not give up"
+
+
+class TestLevelsBracketFill:
+    """Pick levels are relative to the PICK's entry. If the live fill has moved
+    past one, inheriting it blindly creates a position born already stopped-out —
+    manage closes it instantly and books a fabricated loss (live: paper FICO
+    filled at $1,177.74 carrying the pick's $1,290 stop)."""
+
+    def test_stop_above_fill_is_replaced(self):
+        s, t = su._levels_for(1177.74, 1290.0, 1540.0)   # the real FICO case
+        assert s < 1177.74 < t
+        assert s == round(1177.74 * 0.95, 4)
+
+    def test_target_below_fill_is_replaced(self):
+        s, t = su._levels_for(100.0, 90.0, 95.0)
+        assert s < 100.0 < t
+        assert t == round(100.0 * 1.08, 4)
+
+    def test_valid_pick_levels_are_kept(self):
+        s, t = su._levels_for(100.0, 92.0, 115.0)
+        assert (s, t) == (92.0, 115.0), "must not override levels that already bracket the fill"
+
+    def test_missing_levels_are_filled(self):
+        s, t = su._levels_for(50.0, None, None)          # LT picks carry no stop
+        assert s < 50.0 < t
