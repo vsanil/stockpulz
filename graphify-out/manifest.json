@@ -20,8 +20,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/telegram_api.py": {
-    "mtime": 1782662436.615709,
-    "ast_hash": "0f45640cf848ce8a6c55d6235fe60484",
+    "mtime": 1785764688.5859785,
+    "ast_hash": "b459489da3b74cb53e640e9e3f4817d5",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/market_regime.py": {
@@ -40,8 +40,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/config_manager.py": {
-    "mtime": 1782631206.8049335,
-    "ast_hash": "cfd42abbef2c30b502f56246c5bd97e6",
+    "mtime": 1785764639.8264074,
+    "ast_hash": "3484fae33063dd046193dfd980ccc352",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/formatters.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/CLAUDE.md": {
-    "mtime": 1785341731.7895596,
-    "ast_hash": "ef97d3cbd6d6c442bda69f109340d93b",
+    "mtime": 1785765125.821566,
+    "ast_hash": "7e816ad239552aeb31bbfb39c2a2a200",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/docs/index.html": {
@@ -490,7 +490,7 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/canary.py": {
-    "mtime": 1785336839.072778,
+    "mtime": 1785345920.945718,
     "ast_hash": "79bc3b7c0f3d01a7f8f1a23f35abd196",
     "semantic_hash": ""
   },
@@ -505,18 +505,18 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_synthetic_user.py": {
-    "mtime": 1783060686.4649434,
-    "ast_hash": "5166462a1a9a7282c5b58739e28285ee",
+    "mtime": 1785764838.9178398,
+    "ast_hash": "716b47c4439e549d5449bc8805ed315c",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/synthetic_user.py": {
-    "mtime": 1785337270.7982872,
-    "ast_hash": "cb7ee89bbf4c2fb05c9a44b91e09b90d",
+    "mtime": 1785764783.24449,
+    "ast_hash": "e8ad6bced9af227ac8ca4e9a6aada615",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.github/workflows/synthetic_user.yml": {
-    "mtime": 1783061994.1324317,
-    "ast_hash": "8cfb5fab33378251bacda04d866a20fc",
+    "mtime": 1785764872.0641713,
+    "ast_hash": "bf55df17bb445333383afba05d7df302",
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_full_sweep.py": {
@@ -540,8 +540,23 @@
     "semantic_hash": ""
   },
   "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.github/workflows/self_heal.yml": {
-    "mtime": 1785341670.7105846,
-    "ast_hash": "b1bbffe2663534872978f6670812ae15",
+    "mtime": 1785345214.0563114,
+    "ast_hash": "71970cb8def9899653d7253e244d7a89",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/tests/test_evaluate_picks.py": {
+    "mtime": 1785764990.4860377,
+    "ast_hash": "3d3b123a86c8195152c69462deded7eb",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/scripts/evaluate_picks.py": {
+    "mtime": 1785765017.8498316,
+    "ast_hash": "e3434a1a2fb93af6d8689ed1f3bae491",
+    "semantic_hash": ""
+  },
+  "/Users/vsanil/Documents/Claude/Projects/Cowork/stock-agent/.github/workflows/evaluate_picks.yml": {
+    "mtime": 1785765041.1824653,
+    "ast_hash": "d7277d464f8c861717319a7ba761b0a9",
     "semantic_hash": ""
   }
 }

@@ -1,0 +1,65 @@
+name: Pick Evaluation
+
+# Measures whether the daily picks are actually BENEFICIAL — every pick scored
+# against its own target/stop AND against simply buying SPY over the same window.
+#
+# Cadence is deliberate: RECORD daily (evidence accumulates), REPORT weekly.
+# Reporting daily would invite reacting to noise; with a small sample every wiggle
+# looks like a signal. The script itself refuses to call anything conclusive below
+# ~30 matured picks and prints a 95% confidence interval so the uncertainty is
+# impossible to ignore.
+#
+# This is SEPARATE from pick generation and is never fed into the LLM prompt —
+# measuring the engine must not contaminate it.
+
+on:
+  schedule:
+    - cron: "0 13 * * *"      # daily 9 AM ET — record today's picks (silent)
+    - cron: "30 13 * * 6"     # Sat 9:30 AM ET — full report to the owner
+  workflow_dispatch:
+    inputs:
+      report:
+        description: "send the report now (true/false)"
+        required: false
+        default: "true"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - run: pip install -r requirements.txt
+
+      - name: Decide mode (weekly = report, daily = silent record)
+        id: m
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            [[ "${{ github.event.inputs.report }}" == "false" ]] && echo "flag=--quiet" >> $GITHUB_OUTPUT || echo "flag=" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.schedule }}" == "30 13 * * 6" ]]; then
+            echo "flag=" >> $GITHUB_OUTPUT
+          else
+            echo "flag=--quiet" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Evaluate picks
+        run: python scripts/evaluate_picks.py ${{ steps.m.outputs.flag }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
+          GITHUB_TOKEN:       ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID:            ${{ secrets.GIST_ID }}
+          FINNHUB_API_KEY:    ${{ secrets.FINNHUB_API_KEY }}
+          ALPACA_KEY_ID:      ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}

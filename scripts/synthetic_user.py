@@ -2,19 +2,28 @@
 """
 synthetic_user.py — an automated "active user" for stabilization testing.
 
-Runs a few times a day as the ADMIN account and performs the full user lifecycle
-so real-usage bugs (P&L drift over days, alerts firing, position tracking) surface:
+Runs several times a day on a dedicated VIRTUAL TEST account and performs the full
+user lifecycle, so real-usage bugs (P&L drift over days, alerts firing, position
+tracking) surface — without polluting the owner's real account:
 
-  --phase open    (once, ~after the morning picks): from today's picks, LOG a
-                  couple of REAL "I Bought This" positions + PAPER-buy a couple,
-                  set target alerts, and add them to the watchlist.
-  --phase manage  (midday + near close): check the bot's own positions and SELL
+  --phase open    (once, ~after the morning picks): from today's picks, LOG REAL
+                  "I Bought This" positions + PAPER-buy EVERY pick, set target
+                  alerts, and add them to the watchlist.
+  --phase manage  (hourly, market hours): check the bot's own positions and SELL
                   winners at target / cut at stop (real via close_trade, paper via
                   paper_sell).
 
-SAFETY: the bot tracks the tickers IT opened in a state file (synthetic_state.json)
-and ONLY manages those — it never touches the owner's real pre-existing positions.
-By design this LOGS REAL positions (owner will reset the account before real use).
+ACCOUNTS (do not conflate):
+  • _TRADE_ID  — the VIRTUAL test account it trades on (SYNTHETIC_CHAT_ID). Kept
+    OUT of allowed_users on purpose, so it gets no broadcasts and is excluded from
+    community stats + the LLM pick-feedback loop (a robot's mechanical fills must
+    never steer real users' picks). Sends to it are skipped in telegram_api.
+  • _OWNER_ID  — the real admin (TELEGRAM_CHAT_ID). Receives the REPORTS only.
+
+SAFETY: the bot tracks the tickers IT opened in a PER-ACCOUNT state file and ONLY
+manages those — it never touches positions a human opened. The pre-split owner
+state (synthetic_state.json) is wound down, never added to: `manage` keeps selling
+those legacy positions at target/stop so the account switch cannot orphan them.
 
 Usage: python3 scripts/synthetic_user.py --phase open|manage [--dry-run]
 """
@@ -28,11 +37,17 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 
+from config_manager import DEFAULT_TEST_CHAT_ID
+
 _GID = os.environ.get("GIST_ID")
 _TOK = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN")
-_STATE_FILE = "synthetic_state.json"
-_MAX_REAL = 2      # real "I Bought This" positions the bot opens per day
-_MAX_PAPER = 2     # paper positions per day
+
+_TRADE_ID = (os.environ.get("SYNTHETIC_CHAT_ID") or DEFAULT_TEST_CHAT_ID).strip()
+_OWNER_ID = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+
+_LEGACY_STATE_FILE = "synthetic_state.json"   # owner's pre-split state — wind-down only
+_MAX_REAL = 4       # real "I Bought This" positions opened per day (test account)
+_MAX_PAPER = 20     # paper-buy EVERY pick — max independent samples for evaluation
 _REAL_USD = 1000.0
 _PAPER_USD = 500.0
 
@@ -45,20 +60,29 @@ def _pos(x) -> bool:
         return False
 
 
-def _state() -> dict:
+def _state_file(chat_id: str) -> str:
+    """State is PER-ACCOUNT. Before the test-account split the bot kept one global
+    file for the owner; reusing that name for a different account would make
+    `manage` look up the owner's tickers in the test account's log, not find them,
+    and silently erase them from state — permanently orphaning real positions that
+    would then never be sold at target or stop."""
+    return _LEGACY_STATE_FILE if chat_id == _OWNER_ID else f"synthetic_state_{chat_id}.json"
+
+
+def _state(chat_id: str) -> dict:
     try:
         files = requests.get(f"https://api.github.com/gists/{_GID}",
                              headers={"Authorization": f"token {_TOK}"}, timeout=20
                              ).json().get("files", {})
-        return json.loads(files.get(_STATE_FILE, {}).get("content") or "{}")
+        return json.loads(files.get(_state_file(chat_id), {}).get("content") or "{}")
     except Exception:
         return {}
 
 
-def _save_state(st: dict) -> None:
+def _save_state(chat_id: str, st: dict) -> None:
     requests.patch(f"https://api.github.com/gists/{_GID}",
                    headers={"Authorization": f"token {_TOK}"},
-                   json={"files": {_STATE_FILE: {"content": json.dumps(st, indent=2)}}},
+                   json={"files": {_state_file(chat_id): {"content": json.dumps(st, indent=2)}}},
                    timeout=20)
 
 
@@ -97,13 +121,15 @@ def phase_open(admin: str, dry: bool) -> list[str]:
     uni = _universe(_raw_picks())
     if not uni:
         return ["no picks today — nothing to open"]
-    st = _state()
+    st = _state(admin)
     opened = set(st.get("real", [])) | set(st.get("paper", []))
     acts, new_real, new_paper, watch = [], [], [], []
 
-    real_cands  = [u for u in uni if u["atype"] == "stock" and u["t"] not in opened][:_MAX_REAL]
-    paper_cands = [u for u in uni if u["atype"] in ("crypto", "etf") and u["t"] not in opened][:_MAX_PAPER] \
-                  or [u for u in uni if u["t"] not in opened][:_MAX_PAPER]
+    real_cands = [u for u in uni if u["atype"] == "stock" and u["t"] not in opened][:_MAX_REAL]
+    # Paper-buy EVERY pick (all asset types). Paper costs nothing and each pick is
+    # one independent sample — this is what makes the pick-quality evaluation
+    # statistically meaningful over time, instead of 2 arbitrary picks a day.
+    paper_cands = [u for u in uni if u["t"] not in opened][:_MAX_PAPER]
 
     def _persist():
         """Save state so a logged position is NEVER orphaned, even if a later
@@ -114,7 +140,7 @@ def phase_open(admin: str, dry: bool) -> list[str]:
         st.setdefault("paper", []).extend(new_paper)
         st["real"] = list(dict.fromkeys(st["real"]))
         st["paper"] = list(dict.fromkeys(st["paper"]))
-        _save_state(st)
+        _save_state(admin, st)
 
     try:
         held_real = {x["ticker"] for x in load_user_trade_log(admin).get("open", [])}
@@ -147,10 +173,11 @@ def phase_open(admin: str, dry: bool) -> list[str]:
             try:
                 from paper_trader import paper_add_cash
                 _cash = load_user_paper(admin).get("cash") or 0
-                _need = _MAX_PAPER * _PAPER_USD + 200          # a day's buys + buffer
-                if _cash < _need:
-                    paper_add_cash(round(5000 + _need - _cash, 2), admin)
-                    acts.append(f"💵 paper cash topped up (was ${_cash:.0f})")
+                _day  = len(paper_cands) * _PAPER_USD           # today's intended buys
+                if _cash < _day + 500:
+                    _target = max(_day * 3, 10_000)             # ~3 days of headroom
+                    paper_add_cash(round(_target - _cash, 2), admin)
+                    acts.append(f"💵 paper cash topped up (was ${_cash:.0f} → ${_target:,.0f})")
             except Exception as e:
                 acts.append(f"   ⚠️ paper top-up skipped: {e}")
 
@@ -180,12 +207,27 @@ def phase_open(admin: str, dry: bool) -> list[str]:
     return acts
 
 
-def phase_manage(admin: str, dry: bool) -> list[str]:
+def phase_manage(dry: bool) -> list[str]:
+    """Manage the TEST account, then wind down any legacy owner positions.
+
+    The owner's pre-split state is managed (sold at target/stop) but never added
+    to, so the account switch cannot orphan the positions the bot already opened
+    there. Once that state empties, the legacy pass is a no-op forever."""
+    acts = _manage_account(_TRADE_ID, dry)
+    if _OWNER_ID and _OWNER_ID != _TRADE_ID:
+        legacy = _state(_OWNER_ID)
+        if legacy.get("real") or legacy.get("paper"):
+            for a in _manage_account(_OWNER_ID, dry):
+                acts.append(f"[owner wind-down] {a}")
+    return acts
+
+
+def _manage_account(admin: str, dry: bool) -> list[str]:
     from market_data import get_live_price
     from trade_logger import load_user_trade_log, close_trade
     from paper_trader import load_user_paper, paper_sell
 
-    st = _state()
+    st = _state(admin)
     acts = []
 
     # Only manage the bot's OWN real tickers (never the owner's real positions).
@@ -241,7 +283,7 @@ def phase_manage(admin: str, dry: bool) -> list[str]:
 
     if not dry:
         st["real"], st["paper"] = still_real, still_paper
-        _save_state(st)
+        _save_state(admin, st)
     # NOTE: returns ONLY actionable events (sells/cuts/errors). An empty list
     # means "nothing to do" — main() then stays silent (no Telegram spam).
     return acts
@@ -252,27 +294,30 @@ def main() -> int:
     ap.add_argument("--phase", choices=["open", "manage"], required=True)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    admin = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not admin:
-        print("TELEGRAM_CHAT_ID not set"); return 2
+    if not _TRADE_ID:
+        print("no trade account resolved (SYNTHETIC_CHAT_ID)"); return 2
 
-    acts = phase_open(admin, args.dry_run) if args.phase == "open" else phase_manage(admin, args.dry_run)
+    # TRADES on the virtual test account; REPORTS to the real owner.
+    acts = (phase_open(_TRADE_ID, args.dry_run) if args.phase == "open"
+            else phase_manage(args.dry_run))
 
     # manage runs hourly during market hours — only DM when it actually did
     # something (sold/cut/error), else stay silent so the reports don't become
     # noise. open always reports (it opens positions every time).
     actionable = bool(acts)
     if not acts:  # manage with nothing to do — log a held summary to stdout only
-        st = _state()
+        st = _state(_TRADE_ID)
         acts = [f"held all (real: {st.get('real')}, paper: {st.get('paper')})"]
     body = "\n".join(f"  {a}" for a in acts)
-    print(f"[synthetic_user] phase={args.phase} dry={args.dry_run}\n{body}")
+    print(f"[synthetic_user] phase={args.phase} dry={args.dry_run} "
+          f"trade_account={_TRADE_ID}\n{body}")
 
     should_send = (not args.dry_run) and (args.phase == "open" or actionable)
-    if should_send:
+    if should_send and _OWNER_ID:
         try:
             from telegram_api import send_message
-            send_message(f"🤖 <b>Synthetic user — {args.phase}</b>\n{body}", chat_id=admin)
+            send_message(f"🤖 <b>Synthetic user — {args.phase}</b>  "
+                         f"<i>(test acct {_TRADE_ID})</i>\n{body}", chat_id=_OWNER_ID)
         except Exception as e:
             print(f"[synthetic_user] report send failed: {e}")
     return 0
