@@ -314,6 +314,25 @@ def get_allowed_users() -> list[str]:
 DEFAULT_TEST_CHAT_ID = "900000001"
 
 
+# A trade opened by the synthetic bot, not by a human. Tagged (never deleted) so
+# the record stays complete while being EXCLUDED from every user-facing aggregate
+# and from the LLM pick-feedback prompt — a robot's mechanical stop-outs must not
+# be shown as a user track record, nor steer tomorrow's real picks.
+SYNTHETIC_SOURCE = "synthetic_bot"
+
+
+def is_synthetic_trade(trade: dict) -> bool:
+    """True if this trade was opened by the synthetic bot (any account)."""
+    if not isinstance(trade, dict):
+        return False
+    return str(trade.get("source") or "") == SYNTHETIC_SOURCE
+
+
+def human_trades(trades) -> list:
+    """Drop synthetic-bot trades from a list. Use at every aggregation point."""
+    return [t for t in (trades or []) if not is_synthetic_trade(t)]
+
+
 def get_test_users() -> list[str]:
     """Virtual/synthetic chat_ids. Pure env+constant (no Gist read) so it is safe
     to call on the hot send path."""

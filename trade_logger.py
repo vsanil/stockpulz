@@ -229,7 +229,8 @@ def get_performance_stats(chat_id: str, asset_type: str | None = None) -> dict |
 def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
                 entry_override=None, stop_override=None,
                 shares_override=None, timeframe_override=None,
-                target_override=None, asset_type_override=None) -> tuple[dict, bool]:
+                target_override=None, asset_type_override=None,
+                source: str | None = None) -> tuple[dict, bool]:
     """
     Add a ticker to a user's portfolio (no price/qty needed).
     Uses today's pick levels for target/stop alerts if available.
@@ -334,6 +335,11 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
         "manual":       True,
         "shares":       float(shares_override) if shares_override is not None else None,
     }
+    # Provenance. `manual` is True for every add_holding call (it's the "I Bought
+    # This" path) so it can NOT distinguish a bot from a human — `source` can.
+    # close_trade spreads **trade, so this carries into the closed record too.
+    if source:
+        trade["source"] = source
     log["open"].append(trade)
     save_user_trade_log(chat_id, log)
     print(f"[trade_logger] Added holding: {ticker} entry={entry} stop={stop} for {chat_id}")
