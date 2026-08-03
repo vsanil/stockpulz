@@ -37,7 +37,7 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 
-from config_manager import DEFAULT_TEST_CHAT_ID
+from config_manager import DEFAULT_TEST_CHAT_ID, SYNTHETIC_SOURCE
 
 _GID = os.environ.get("GIST_ID")
 _TOK = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN")
@@ -196,7 +196,8 @@ def phase_open(admin: str, dry: bool) -> list[str]:
                 if not dry:
                     add_holding(u["t"], admin, entry_override=float(px),
                                 stop_override=_s, target_override=_t,
-                                shares_override=shares, asset_type_override=u["atype"])
+                                shares_override=shares, asset_type_override=u["atype"],
+                                source=SYNTHETIC_SOURCE)   # tag provenance; never counted as a user trade
                 # record in state IMMEDIATELY — the position is now real
                 new_real.append(u["t"]); watch.append(u["t"])
                 acts.append(f"🟢 REAL {u['t']} @ ${px:.2f} · {shares} sh · target ${u['target']}")

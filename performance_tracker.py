@@ -10,7 +10,11 @@ import math
 import requests
 import yfinance as yf
 
-from config_manager import load_weekly_picks
+from config_manager import human_trades,  load_weekly_picks
+
+# Honesty floors — a percentage off a handful of trades is noise, not a record.
+_MIN_COMMUNITY_TRADES = 10   # public "community track record"
+_MIN_RECENT_TRADES    = 5    # morning perf bar
 
 COINGECKO_SIMPLE = "https://api.coingecko.com/api/v3/simple/price"
 
@@ -198,11 +202,13 @@ def get_recent_stats(trade_logs: list[dict], days: int = 30) -> dict | None:
 
     all_closed = []
     for log in trade_logs:
-        for t in log.get("closed", []):
+        # human_trades() drops synthetic-bot trades: a robot's mechanical fills
+        # must never be presented as a user/community track record.
+        for t in human_trades(log.get("closed", [])):
             if t.get("closed_date", "") >= cutoff and t.get("return_pct") is not None:
                 all_closed.append(t)
 
-    if len(all_closed) < 3:
+    if len(all_closed) < _MIN_RECENT_TRADES:
         return None
 
     def _cat_stats(trades):
@@ -272,12 +278,19 @@ def build_community_stats(user_trade_logs: list[dict]) -> dict | None:
     """
     all_closed = []
     for log in user_trade_logs:
-        closed = log.get("closed", [])
+        closed = human_trades(log.get("closed", []))
         for trade in closed:
             if trade.get("return_pct") is not None:
                 all_closed.append(trade)
 
-    if not all_closed:
+    # Minimum sample for a PUBLIC track record. A win rate off 1-3 trades is
+    # noise, and it is exactly the number a prospective user judges the app by:
+    # after excluding synthetic-bot trades this briefly read "100% win rate"
+    # off 3 winners, which is far more misleading than showing nothing.
+    # Below the floor, callers get None and render their existing empty state.
+    if len(all_closed) < _MIN_COMMUNITY_TRADES:
+        print(f"[performance_tracker] community stats hidden — only "
+              f"{len(all_closed)} human trades (need {_MIN_COMMUNITY_TRADES}+).")
         return None
 
     # Fetch SPY 30-day return as benchmark (NaN-safe, drops NaN closes)
@@ -296,7 +309,7 @@ def build_community_stats(user_trade_logs: list[dict]) -> dict | None:
     # Count users on hot streak (≥3 consecutive wins in their most recent trades)
     hot_streak_users = 0
     for log in user_trade_logs:
-        recent = sorted(log.get("closed", []), key=lambda t: t.get("closed_date", ""), reverse=True)[:5]
+        recent = sorted(human_trades(log.get("closed", [])), key=lambda t: t.get("closed_date", ""), reverse=True)[:5]
         streak = 0
         for t in recent:
             if float(t.get("return_pct", 0)) > 0:

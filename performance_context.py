@@ -9,7 +9,7 @@ Called once per morning run — ~200ms, no external API needed.
 """
 
 from datetime import date, timedelta
-from config_manager import get_allowed_users, load_user_trade_log
+from config_manager import human_trades,  get_allowed_users, load_user_trade_log
 
 
 def get_performance_stats(lookback_days: int = 30) -> dict:
@@ -23,7 +23,9 @@ def get_performance_stats(lookback_days: int = 30) -> dict:
     try:
         for uid in get_allowed_users():
             log = load_user_trade_log(uid)
-            for t in log.get("closed", []):
+            # EXCLUDE synthetic-bot trades — this text is injected into Claude's
+            # stock-picking prompt, so a robot's stop-outs would steer real picks.
+            for t in human_trades(log.get("closed", [])):
                 if t.get("closed_date", "") >= cutoff:
                     all_trades.append(t)
     except Exception as exc:
@@ -62,7 +64,9 @@ def get_performance_context(lookback_days: int = 30) -> str:
     try:
         for uid in get_allowed_users():
             log = load_user_trade_log(uid)
-            for t in log.get("closed", []):
+            # EXCLUDE synthetic-bot trades — this text is injected into Claude's
+            # stock-picking prompt, so a robot's stop-outs would steer real picks.
+            for t in human_trades(log.get("closed", [])):
                 if t.get("closed_date", "") >= cutoff:
                     all_trades.append(t)
     except Exception as exc:
