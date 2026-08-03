@@ -60,6 +60,28 @@ def _pos(x) -> bool:
         return False
 
 
+_FALLBACK_STOP_PCT   = 5.0
+_FALLBACK_TARGET_PCT = 8.0
+
+
+def _levels_for(px: float, stop, target) -> tuple[float, float]:
+    """Levels that actually bracket the price we FILLED at.
+
+    A pick's stop/target are relative to the pick's entry. If the live price has
+    since moved past one of them, inheriting them blindly creates a position born
+    already stopped-out (or already at target) — the next manage run closes it
+    instantly and books a fabricated loss/gain. Seen live: a paper FICO filled at
+    $1,177.74 carrying the pick's $1,290 stop. Fall back to a % of the real fill."""
+    px = float(px)
+    s = float(stop) if _pos(stop) else None
+    t = float(target) if _pos(target) else None
+    if s is None or s >= px:
+        s = round(px * (1 - _FALLBACK_STOP_PCT / 100), 4)
+    if t is None or t <= px:
+        t = round(px * (1 + _FALLBACK_TARGET_PCT / 100), 4)
+    return s, t
+
+
 def _state_file(chat_id: str) -> str:
     """State is PER-ACCOUNT. Before the test-account split the bot kept one global
     file for the owner; reusing that name for a different account would make
@@ -170,9 +192,10 @@ def phase_open(admin: str, dry: bool) -> list[str]:
                 if not _pos(px) or u["t"] in held_real:
                     continue
                 shares = round(_REAL_USD / px, 4)
+                _s, _t = _levels_for(px, u.get("stop"), u.get("target"))
                 if not dry:
                     add_holding(u["t"], admin, entry_override=float(px),
-                                stop_override=u["stop"], target_override=u["target"],
+                                stop_override=_s, target_override=_t,
                                 shares_override=shares, asset_type_override=u["atype"])
                 # record in state IMMEDIATELY — the position is now real
                 new_real.append(u["t"]); watch.append(u["t"])
@@ -214,9 +237,9 @@ def phase_open(admin: str, dry: bool) -> list[str]:
                     # (`if tgt and px >= tgt`) can never fire: paper positions
                     # would accumulate forever, never exercise paper_sell, and
                     # drain the paper cash (38 stale positions before this fix).
+                    _ps, _pt = _levels_for(px, u.get("stop"), u.get("target"))
                     paper_buy(u["t"], shares, admin, price=float(px),
-                              stop_loss=(float(u["stop"]) if _pos(u.get("stop")) else None),
-                              target_price=(float(u["target"]) if _pos(u.get("target")) else None))
+                              stop_loss=_ps, target_price=_pt)
                 new_paper.append(u["t"]); watch.append(u["t"])
                 acts.append(f"📄 PAPER {u['t']} @ ${px:.2f} · {shares} sh")
             except Exception as e:
