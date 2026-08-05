@@ -980,13 +980,38 @@ def mutate_gist_file(filename: str, mutator, default=None):
     blob is rewritten so a naive load→mutate→save loses concurrent edits.
     """
     from storage import get_storage_backend as get_backend   # Gist unless SUPABASE_* is set
+    backend = get_backend()
+
+    # A user-keyed file lives as ROWS on a row backend. Reading it back via
+    # backend.read()/write() would hit the whole-blob `documents` table instead —
+    # a different place than _load_gist_file reads from — so alerts written here
+    # would be invisible to every reader. Reassemble from rows, let the mutator
+    # work on the familiar {chat_id: value} mapping, then persist only the rows
+    # it actually changed.
+    if backend.supports_rows() and filename in USER_KEYED_FILES:
+        with _lock_for(filename):
+            before  = backend.read_all_users(filename) or {}
+            current = dict(before)
+            new_contents, result = mutator(current)
+            new_contents = new_contents if isinstance(new_contents, dict) else {}
+            for uid, val in new_contents.items():
+                if before.get(uid) != val:
+                    _, ver = backend.read_user(filename, str(uid))
+                    backend.write_user(filename, str(uid), val, ver)
+            for uid in before:
+                if uid not in new_contents:          # emptied, not deleted — same
+                    _, ver = backend.read_user(filename, str(uid))
+                    backend.write_user(filename, str(uid), [], ver)
+            _cache_invalidate(filename)
+            return result
+
     with _lock_for(filename):
-        current = get_backend().read_strict(filename)
+        current = backend.read_strict(filename)
         if current is None:
             current = {} if default is None else default
         new_contents, result = mutator(current)
         _cache_invalidate(filename)
-        get_backend().write(filename, new_contents)
+        backend.write(filename, new_contents)
         _cache_set(filename, new_contents)
         return result
 
