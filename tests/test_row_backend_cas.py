@@ -112,3 +112,36 @@ class TestCompareAndSwap:
         rb.hook = _always
         with pytest.raises(RuntimeError, match="CAS"):
             cm.mutate_user_record("f.json", "u1", lambda r: ({"n": 1}, "x"))
+
+
+class TestMutateGistFileIsRowAware:
+    """price_alerts.json is USER-KEYED, but add_alert/remove_alert go through
+    mutate_gist_file. If that wrote the whole-blob `documents` table while readers
+    reassembled from `user_records` rows, alerts would be written to one place and
+    read from another — silently broken on switchover, and green in Gist testing."""
+
+    def test_user_keyed_mutation_persists_as_rows(self, rb):
+        F = cm.PRICE_ALERTS_FILE
+        cm.mutate_gist_file(F, lambda cur: ({**cur, "u1": [{"ticker": "AAPL"}]}, "ok"),
+                            default={})
+        # must land in ROWS (where readers look), not the blob table
+        assert rb.read_user(F, "u1")[0] == [{"ticker": "AAPL"}]
+        assert F not in rb.blobs, "must not write the whole-blob documents table"
+
+    def test_second_user_mutation_preserves_the_first(self, rb):
+        F = cm.PRICE_ALERTS_FILE
+        cm.mutate_gist_file(F, lambda c: ({**c, "u1": [{"t": "A"}]}, None), default={})
+        cm.mutate_gist_file(F, lambda c: ({**c, "u2": [{"t": "B"}]}, None), default={})
+        assert rb.read_user(F, "u1")[0] == [{"t": "A"}]
+        assert rb.read_user(F, "u2")[0] == [{"t": "B"}]
+
+    def test_mutator_sees_existing_rows(self, rb):
+        F = cm.PRICE_ALERTS_FILE
+        cm.mutate_gist_file(F, lambda c: ({**c, "u1": ["x"]}, None), default={})
+        seen = {}
+        cm.mutate_gist_file(F, lambda c: (seen.update(c) or c, None), default={})
+        assert seen == {"u1": ["x"]}, "mutator must receive the reassembled mapping"
+
+    def test_non_user_keyed_file_still_uses_the_blob_path(self, rb):
+        cm.mutate_gist_file("picks.json", lambda c: ({"a": 1}, None), default={})
+        assert rb.blobs["picks.json"] == {"a": 1}
