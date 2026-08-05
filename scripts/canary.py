@@ -177,16 +177,27 @@ def check_live_prices() -> None:
     missing = [t for t in basket if not _pos(prices.get(t))]
     _check("prices.stocks", not missing,
            f"missing/invalid: {missing}" if missing else f"{', '.join(f'{t}=${prices[t]:.0f}' for t in basket if prices.get(t))}")
-    # crypto via cg cache
-    from price_checker import cg_prices, _SYMBOL_TO_CG_ID
-    cg = cg_prices([_SYMBOL_TO_CG_ID["BTC"], _SYMBOL_TO_CG_ID["ETH"]])
-    btc = cg.get(_SYMBOL_TO_CG_ID["BTC"])
-    eth = cg.get(_SYMBOL_TO_CG_ID["ETH"])
+    # ── Crypto: check the path USERS actually get ─────────────────────────────
+    # Previously this called cg_prices() directly — raw CoinGecko with NO
+    # fallback — so a transient CoinGecko blip failed the canary even though the
+    # app itself was fine (get_live_price falls back to yfinance -USD). That made
+    # it a CoinGecko uptime monitor, not a check of user-visible behaviour.
+    from market_data import get_live_price
+    btc = get_live_price("BTC")
+    eth = get_live_price("ETH")
     _check("prices.btc_sane", _pos(btc) and 10_000 <= btc <= 500_000, f"BTC=${btc}")
     _check("prices.eth_sane", _pos(eth) and 300 <= eth <= 30_000, f"ETH=${eth}")
-    # cache: 2nd call must not change / must return same
-    cg2 = cg_prices([_SYMBOL_TO_CG_ID["BTC"]])
-    _check("prices.cg_cache", cg2.get(_SYMBOL_TO_CG_ID["BTC"]) == btc, "cached BTC stable")
+
+    # Cache coherence. MUST assert a REAL price, not just equality: the old check
+    # compared cg2 == btc, and when CoinGecko returned nothing BOTH were None —
+    # `None == None` PASSED while crypto pricing was completely broken.
+    from price_checker import cg_prices, _SYMBOL_TO_CG_ID
+    _bid = _SYMBOL_TO_CG_ID["BTC"]
+    c1 = cg_prices([_bid]).get(_bid)
+    c2 = cg_prices([_bid]).get(_bid)          # 2nd call must hit the 60s cache
+    _check("prices.cg_cache", _pos(c1) and c1 == c2,
+           f"cached BTC stable at ${c1}" if _pos(c1)
+           else f"CoinGecko returned {c1} — cache cannot be verified")
 
 
 def check_sizing() -> None:
