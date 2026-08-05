@@ -256,6 +256,33 @@ def check_price_guard() -> None:
            "plausible_price rejects a real quote/drop — alerts would be suppressed")
 
 
+def check_storage_headroom() -> None:
+    """Warn BEFORE the Gist hits GitHub's ~1 MB per-file API limit.
+
+    Past that, the API returns the file truncated. GistBackend now refetches via
+    raw_url so it degrades safely rather than corrupting — but a whole-file
+    rewrite per save is already the wrong shape at that size. At current per-user
+    growth (~11-13 KB/user for user_trades and price_alerts) that wall arrives
+    around 75-90 users, which is the real trigger to migrate to a row store —
+    NOT some far-off 10k. This check makes the runway visible instead of a
+    surprise."""
+    WARN = 700_000          # ~70% of the limit — migrate when this trips
+    try:
+        files = _gist_all()
+    except Exception as e:
+        _check("storage.headroom", False, f"could not read gist: {e}")
+        return
+    biggest, worst = None, 0
+    for name, meta in files.items():
+        size = meta.get("size") or len(meta.get("content") or "")
+        if size > worst:
+            biggest, worst = name, size
+    ok = worst < WARN
+    _check("storage.headroom", ok,
+           f"largest file {biggest} = {worst/1024:.0f} KB "
+           f"({worst/1_000_000*100:.0f}% of the ~1 MB limit)"
+           + ("" if ok else "  → TIME TO MIGRATE to a row store"))
+
 def check_cron_delivery() -> None:
     from config_manager import get_config
     cfg = get_config()
@@ -480,7 +507,8 @@ def main() -> int:
         return 2
 
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
-               check_backtest_math, check_price_guard, check_cron_delivery,
+               check_backtest_math, check_price_guard, check_storage_headroom,
+               check_cron_delivery,
                check_endpoints):
         try:
             fn()

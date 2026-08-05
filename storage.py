@@ -73,6 +73,21 @@ class StorageBackend(ABC):
         raise NotImplementedError
 
 
+
+# GitHub omits/truncates file content over ~1 MB in the gist API response and
+# sets truncated=True, handing back a raw_url instead. Reading `content` blindly
+# then yields PARTIAL JSON — which either raises (best case) or, on the swallowing
+# read() path, looks like "file missing" and invites a clobber. At current
+# per-user sizes user_trades/price_alerts cross 1 MB around ~75-90 users, so this
+# is a real wall, not a hypothetical.
+def _gist_content(meta: dict, headers: dict) -> str:
+    raw = meta.get("content", "")
+    if meta.get("truncated") and meta.get("raw_url"):
+        resp = requests.get(meta["raw_url"], headers=headers, timeout=20)
+        resp.raise_for_status()
+        return resp.text
+    return raw
+
 # ── Gist backend (current) ────────────────────────────────────────────────────
 
 class GistBackend(StorageBackend):
@@ -106,7 +121,7 @@ class GistBackend(StorageBackend):
             files = resp.json().get("files", {})
             if filename not in files:
                 return None
-            raw = files[filename].get("content", "")
+            raw = _gist_content(files[filename], self._headers())
             return json.loads(raw) if raw else None
         except Exception as exc:
             print(f"[storage/gist] read({filename}) failed: {exc}")
@@ -124,7 +139,7 @@ class GistBackend(StorageBackend):
         files = resp.json().get("files", {})
         if filename not in files:
             return None
-        raw = files[filename].get("content", "")
+        raw = _gist_content(files[filename], self._headers())
         return json.loads(raw) if raw else None
 
     def write(self, filename: str, data: dict | list) -> None:
