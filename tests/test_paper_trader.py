@@ -18,6 +18,7 @@ from paper_trader import (
     paper_add_cash, paper_reset, paper_history, paper_remove_history,
     paper_cancel,
 )
+from config_manager import NO_WRITE
 
 CHAT = "test_chat_999"
 _LIVE_PRICE = 100.0   # fixed live price for all tickers in tests
@@ -46,8 +47,21 @@ def mem_portfolio(tmp_path):
         import json
         store[chat_id] = json.loads(json.dumps(data))
 
+    def _mutate(filename, chat_id, mutator, default=None):
+        """Stand-in for config_manager.mutate_user_record: hands the mutator the
+        CURRENT record and persists what it returns — unless it returns NO_WRITE,
+        which must leave the store untouched (reject paths)."""
+        record = store.get(str(chat_id))
+        if record is None:
+            record = {} if default is None else default
+        new_record, result = mutator(record)
+        if new_record is not NO_WRITE:
+            _save(str(chat_id), new_record)
+        return result
+
     with patch("paper_trader.load_user_paper", side_effect=_load), \
-         patch("paper_trader.save_user_paper", side_effect=_save):
+         patch("paper_trader.save_user_paper", side_effect=_save), \
+         patch("paper_trader.mutate_user_record", side_effect=_mutate):
         yield store
 
 

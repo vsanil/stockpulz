@@ -19,7 +19,29 @@ from __future__ import annotations
 
 from datetime import date
 import yfinance as yf
-from config_manager import load_user_paper, save_user_paper, et_today
+from config_manager import (load_user_paper, save_user_paper, et_today,
+                            mutate_user_record, NO_WRITE, USER_PAPER_FILE)
+
+
+def _mutate_paper(chat_id: str, mutator):
+    """Read-modify-write the paper portfolio with the read taken microseconds
+    before the write, instead of on a snapshot the caller took earlier.
+
+    These functions used to `load_user_paper()` → mutate → `save_user_paper()`.
+    A price fetch sits between, so a scheduled job (the synthetic bot's manage
+    phase) and a user's own mini-app buy could interleave and silently erase
+    each other — cash and positions are the two things that must never be lost.
+    The mutator sees the CURRENT record; returning NO_WRITE declines the write.
+    """
+    def _wrapped(data):
+        data = dict(data or {})
+        data.setdefault("positions", [])
+        data.setdefault("history", [])
+        data.setdefault("starting_cash", 10_000.0)
+        data.setdefault("cash", data["starting_cash"])
+        return mutator(data)
+
+    return mutate_user_record(USER_PAPER_FILE, chat_id, _wrapped, default={})
 
 
 def _live_price(ticker: str) -> float | None:
@@ -64,39 +86,43 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
     buy_price = price if price else live
     cost      = round(buy_price * shares, 2)
 
-    data = load_user_paper(chat_id)
-    if cost > data["cash"]:
-        return (f"❌ Insufficient paper cash.\n"
-                f"Need ${cost:,.2f}, have ${data['cash']:,.2f}")
+    def _mut(data):
+        if cost > data["cash"]:
+            return NO_WRITE, {"error": (f"❌ Insufficient paper cash.\n"
+                                        f"Need ${cost:,.2f}, have ${data['cash']:,.2f}")}
 
-    # Check if already holding this ticker
-    existing = next((p for p in data["positions"] if p["ticker"] == ticker), None)
-    if existing:
-        # Average down/up
-        total_shares = existing["shares"] + shares
-        avg_price    = (existing["avg_price"] * existing["shares"] + buy_price * shares) / total_shares
-        existing["shares"]     = round(total_shares, 4)
-        existing["avg_price"]  = round(avg_price, 2)
-        existing["entry_price"] = round(avg_price, 2)
-        existing["cost_basis"] = round(avg_price * total_shares, 2)
-        # Update stop/target if provided on scale-in
-        if stop_loss   is not None: existing["stop_loss"]    = round(stop_loss, 4)
-        if target_price is not None: existing["target_price"] = round(target_price, 4)
-    else:
-        pos = {
-            "ticker":      ticker,
-            "shares":      round(shares, 4),
-            "avg_price":   round(buy_price, 2),
-            "entry_price": round(buy_price, 2),
-            "cost_basis":  cost,
-            "bought_date": et_today().isoformat(),
-        }
-        if stop_loss   is not None: pos["stop_loss"]    = round(stop_loss, 4)
-        if target_price is not None: pos["target_price"] = round(target_price, 4)
-        data["positions"].append(pos)
+        # Check if already holding this ticker
+        existing = next((p for p in data["positions"] if p["ticker"] == ticker), None)
+        if existing:
+            # Average down/up
+            total_shares = existing["shares"] + shares
+            avg_price    = (existing["avg_price"] * existing["shares"] + buy_price * shares) / total_shares
+            existing["shares"]     = round(total_shares, 4)
+            existing["avg_price"]  = round(avg_price, 2)
+            existing["entry_price"] = round(avg_price, 2)
+            existing["cost_basis"] = round(avg_price * total_shares, 2)
+            # Update stop/target if provided on scale-in
+            if stop_loss   is not None: existing["stop_loss"]    = round(stop_loss, 4)
+            if target_price is not None: existing["target_price"] = round(target_price, 4)
+        else:
+            pos = {
+                "ticker":      ticker,
+                "shares":      round(shares, 4),
+                "avg_price":   round(buy_price, 2),
+                "entry_price": round(buy_price, 2),
+                "cost_basis":  cost,
+                "bought_date": et_today().isoformat(),
+            }
+            if stop_loss   is not None: pos["stop_loss"]    = round(stop_loss, 4)
+            if target_price is not None: pos["target_price"] = round(target_price, 4)
+            data["positions"].append(pos)
 
-    data["cash"] = round(data["cash"] - cost, 2)
-    save_user_paper(chat_id, data)
+        data["cash"] = round(data["cash"] - cost, 2)
+        return data, {"cash": data["cash"]}
+
+    res = _mutate_paper(chat_id, _mut)
+    if res.get("error"):
+        return res["error"]
 
     # ── Auto-register price alerts for stop-loss and target ───────────────────
     try:
@@ -114,7 +140,7 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
         f"📄 <b>Paper Buy</b>\n"
         f"<b>{ticker}</b> × {shares} shares @ ${buy_price:,.2f}\n"
         f"Cost: <b>${cost:,.2f}</b>\n"
-        f"Remaining cash: ${data['cash']:,.2f}"
+        f"Remaining cash: ${res['cash']:,.2f}"
     )
 
 
@@ -127,49 +153,58 @@ def paper_sell(ticker: str, chat_id: str, shares: float | None = None,
         return f"❌ Could not fetch price for <b>{ticker}</b>."
 
     sell_price = price if price else live
-    data       = load_user_paper(chat_id)
-    position   = next((p for p in data["positions"] if p["ticker"] == ticker), None)
 
-    if not position:
-        return f"❌ No open paper position for <b>{ticker}</b>."
+    # The share count, cost basis and proceeds all derive from the position as it
+    # stands RIGHT NOW — computing them from an earlier snapshot could sell shares
+    # a concurrent write already sold, so the whole calculation lives in the mutator.
+    def _mut(data):
+        position = next((p for p in data["positions"] if p["ticker"] == ticker), None)
+        if not position:
+            return NO_WRITE, {"error": f"❌ No open paper position for <b>{ticker}</b>."}
 
-    sell_shares = shares if shares else position["shares"]
-    if sell_shares > position["shares"]:
-        sell_shares = position["shares"]
+        sell_shares = shares if shares else position["shares"]
+        if sell_shares > position["shares"]:
+            sell_shares = position["shares"]
 
-    proceeds   = round(sell_price * sell_shares, 2)
-    cost       = round(position["avg_price"] * sell_shares, 2)
-    gain       = round(proceeds - cost, 2)
-    gain_pct   = round(gain / cost * 100, 2) if cost > 0 else 0
+        proceeds   = round(sell_price * sell_shares, 2)
+        cost       = round(position["avg_price"] * sell_shares, 2)
+        gain       = round(proceeds - cost, 2)
+        gain_pct   = round(gain / cost * 100, 2) if cost > 0 else 0
 
-    # Record in history
-    data["history"].append({
-        "ticker":      ticker,
-        "shares":      sell_shares,
-        "buy_price":   position["avg_price"],
-        "sell_price":  round(sell_price, 2),
-        "gain":        gain,
-        "gain_pct":    gain_pct,
-        "closed_date": et_today().isoformat(),
-    })
+        # Record in history
+        data["history"].append({
+            "ticker":      ticker,
+            "shares":      sell_shares,
+            "buy_price":   position["avg_price"],
+            "sell_price":  round(sell_price, 2),
+            "gain":        gain,
+            "gain_pct":    gain_pct,
+            "closed_date": et_today().isoformat(),
+        })
 
-    # Update position
-    remaining = round(position["shares"] - sell_shares, 4)
-    if remaining <= 0.001:
-        data["positions"] = [p for p in data["positions"] if p["ticker"] != ticker]
-    else:
-        position["shares"]    = remaining
-        position["cost_basis"] = round(position["avg_price"] * remaining, 2)
+        # Update position
+        remaining = round(position["shares"] - sell_shares, 4)
+        if remaining <= 0.001:
+            data["positions"] = [p for p in data["positions"] if p["ticker"] != ticker]
+        else:
+            position["shares"]    = remaining
+            position["cost_basis"] = round(position["avg_price"] * remaining, 2)
 
-    data["cash"] = round(data["cash"] + proceeds, 2)
-    save_user_paper(chat_id, data)
+        data["cash"] = round(data["cash"] + proceeds, 2)
+        return data, {"sell_shares": sell_shares, "proceeds": proceeds,
+                      "gain": gain, "gain_pct": gain_pct, "cash": data["cash"]}
 
+    res = _mutate_paper(chat_id, _mut)
+    if res.get("error"):
+        return res["error"]
+
+    gain  = res["gain"]
     emoji = "✅" if gain >= 0 else "❌"
     return (
         f"📄 <b>Paper Sell</b>\n"
-        f"<b>{ticker}</b> × {sell_shares} shares @ ${sell_price:,.2f}\n"
-        f"Proceeds: ${proceeds:,.2f} | {emoji} <b>{gain_pct:+.1f}%</b> (${gain:+.2f})\n"
-        f"Cash: ${data['cash']:,.2f}"
+        f"<b>{ticker}</b> × {res['sell_shares']} shares @ ${sell_price:,.2f}\n"
+        f"Proceeds: ${res['proceeds']:,.2f} | {emoji} <b>{res['gain_pct']:+.1f}%</b> (${gain:+.2f})\n"
+        f"Cash: ${res['cash']:,.2f}"
     )
 
 
@@ -267,24 +302,31 @@ def paper_add_cash(amount: float, chat_id: str) -> str:
     """Add cash to a user's paper portfolio (and increase starting_cash baseline)."""
     if amount <= 0:
         return "❌ Amount must be greater than zero."
-    data = load_user_paper(chat_id)
-    data["cash"]          = round(data["cash"] + amount, 2)
-    data["starting_cash"] = round(data["starting_cash"] + amount, 2)
-    save_user_paper(chat_id, data)
+    def _mut(data):
+        data["cash"]          = round(data["cash"] + amount, 2)
+        data["starting_cash"] = round(data["starting_cash"] + amount, 2)
+        return data, {"cash": data["cash"], "starting_cash": data["starting_cash"]}
+
+    res = _mutate_paper(chat_id, _mut)
     return (
         f"💵 <b>Cash Added</b>\n"
         f"Added: <b>${amount:,.2f}</b>\n"
-        f"Available cash: <b>${data['cash']:,.2f}</b>\n"
-        f"Starting baseline: ${data['starting_cash']:,.2f}"
+        f"Available cash: <b>${res['cash']:,.2f}</b>\n"
+        f"Starting baseline: ${res['starting_cash']:,.2f}"
     )
 
 
 def paper_reset(chat_id: str, starting_cash: float | None = None) -> str:
     """Wipe a user's paper portfolio and start fresh with the given cash (or keep existing amount)."""
-    current = load_user_paper(chat_id)
-    amount  = starting_cash if starting_cash is not None else current.get("starting_cash", 10_000.0)
-    save_user_paper(chat_id, {"positions": [], "history": [], "starting_cash": amount, "cash": amount})
-    return f"🔄 Paper portfolio reset. Starting cash: <b>${amount:,.2f}</b>"
+    def _mut(data):
+        amount = (starting_cash if starting_cash is not None
+                  else data.get("starting_cash", 10_000.0))
+        return ({"positions": [], "history": [],
+                 "starting_cash": amount, "cash": amount},
+                {"amount": amount})
+
+    res = _mutate_paper(chat_id, _mut)
+    return f"🔄 Paper portfolio reset. Starting cash: <b>${res['amount']:,.2f}</b>"
 
 
 def paper_history(chat_id: str) -> list[dict]:
@@ -299,48 +341,60 @@ def paper_remove_history(chat_id: str, idx: int) -> str:
     - Restore shares to the position (recreate if fully sold)
     Returns a confirmation message.
     """
-    data    = load_user_paper(chat_id)
-    history = data.get("history", [])
+    # `idx` indexes the history list, so it MUST be resolved against the list as
+    # it stands at write time — a concurrent sell appending an entry would
+    # otherwise make the caller's index point at a different trade.
+    def _mut(data):
+        history = data.get("history", [])
+        if idx < 0 or idx >= len(history):
+            return NO_WRITE, {"error": "⚠️ Trade not found — it may have already been removed."}
 
-    if idx < 0 or idx >= len(history):
-        return "⚠️ Trade not found — it may have already been removed."
+        entry      = history[idx]
+        ticker     = entry["ticker"]
+        shares     = float(entry.get("shares", 0))
+        sell_price = float(entry.get("sell_price", 0))
+        buy_price  = float(entry.get("buy_price", 0))
+        proceeds   = round(sell_price * shares, 2)
 
-    entry      = history[idx]
-    ticker     = entry["ticker"]
-    shares     = float(entry.get("shares", 0))
-    sell_price = float(entry.get("sell_price", 0))
-    buy_price  = float(entry.get("buy_price", 0))
-    proceeds   = round(sell_price * shares, 2)
+        # Deduct proceeds from cash (reverse the sale)
+        data["cash"] = round(data.get("cash", 0) - proceeds, 2)
 
-    # Deduct proceeds from cash (reverse the sale)
-    data["cash"] = round(data.get("cash", 0) - proceeds, 2)
+        # Restore shares to position
+        positions = data.get("positions", [])
+        existing  = next((p for p in positions if p["ticker"] == ticker), None)
+        if existing:
+            total_shares    = round(existing["shares"] + shares, 6)
+            total_cost      = existing["avg_price"] * existing["shares"] + buy_price * shares
+            existing["avg_price"]  = round(total_cost / total_shares, 4)
+            existing["shares"]     = total_shares
+            existing["cost_basis"] = round(existing["avg_price"] * total_shares, 2)
+        else:
+            positions.append({
+                "ticker":     ticker,
+                "shares":     shares,
+                "avg_price":  buy_price,
+                "cost_basis": round(buy_price * shares, 2),
+                "entry_date": entry.get("closed_date", ""),
+            })
+        data["positions"] = positions
 
-    # Restore shares to position
-    positions = data.get("positions", [])
-    existing  = next((p for p in positions if p["ticker"] == ticker), None)
-    if existing:
-        total_shares    = round(existing["shares"] + shares, 6)
-        total_cost      = existing["avg_price"] * existing["shares"] + buy_price * shares
-        existing["avg_price"]  = round(total_cost / total_shares, 4)
-        existing["shares"]     = total_shares
-        existing["cost_basis"] = round(existing["avg_price"] * total_shares, 2)
-    else:
-        positions.append({
-            "ticker":     ticker,
-            "shares":     shares,
-            "avg_price":  buy_price,
-            "cost_basis": round(buy_price * shares, 2),
-            "entry_date": entry.get("closed_date", ""),
-        })
-    data["positions"] = positions
+        # Remove the history entry
+        data["history"] = [h for i, h in enumerate(history) if i != idx]
+        return data, {"ticker": ticker, "shares": shares, "sell_price": sell_price,
+                      "proceeds": proceeds, "gain": entry.get("gain", 0),
+                      "gain_pct": entry.get("gain_pct", 0)}
 
-    # Remove the history entry
-    data["history"] = [h for i, h in enumerate(history) if i != idx]
-    save_user_paper(chat_id, data)
+    res = _mutate_paper(chat_id, _mut)
+    if res.get("error"):
+        return res["error"]
 
-    gain     = entry.get("gain", 0)
-    gain_pct = entry.get("gain_pct", 0)
-    sign     = "+" if gain >= 0 else ""
+    ticker     = res["ticker"]
+    shares     = res["shares"]
+    sell_price = res["sell_price"]
+    proceeds   = res["proceeds"]
+    gain       = res["gain"]
+    gain_pct   = res["gain_pct"]
+    sign       = "+" if gain >= 0 else ""
     return (
         f"↩️ <b>Paper trade reversed: {ticker}</b>\n"
         f"{shares} shares @ <code>${sell_price}</code> removed from history\n"
@@ -352,17 +406,23 @@ def paper_remove_history(chat_id: str, idx: int) -> str:
 def paper_cancel(ticker: str, chat_id: str) -> str:
     """Remove a paper position without recording it as a sale (undo an accidental paper_buy)."""
     ticker  = ticker.upper()
-    data    = load_user_paper(chat_id)
-    positions = data.get("positions", [])
-    match   = next((p for p in positions if p["ticker"] == ticker), None)
-    if not match:
-        return f"⚠️ No paper position found for <b>{ticker}</b>."
-    # Refund the cash — use stored cost_basis, fall back to avg_price × shares
-    cost         = float(match.get("cost_basis") or
-                         float(match.get("avg_price", 0)) * float(match.get("shares", 0)))
-    data["cash"] = round(data.get("cash", 0) + cost, 2)
-    data["positions"] = [p for p in positions if p["ticker"] != ticker]
-    save_user_paper(chat_id, data)
+
+    def _mut(data):
+        positions = data.get("positions", [])
+        match     = next((p for p in positions if p["ticker"] == ticker), None)
+        if not match:
+            return NO_WRITE, {"error": f"⚠️ No paper position found for <b>{ticker}</b>."}
+        # Refund the cash — use stored cost_basis, fall back to avg_price × shares
+        cost         = float(match.get("cost_basis") or
+                             float(match.get("avg_price", 0)) * float(match.get("shares", 0)))
+        data["cash"] = round(data.get("cash", 0) + cost, 2)
+        data["positions"] = [p for p in positions if p["ticker"] != ticker]
+        return data, {"cost": cost}
+
+    res = _mutate_paper(chat_id, _mut)
+    if res.get("error"):
+        return res["error"]
+    cost = res["cost"]
     return (
         f"🗑 <b>Paper position removed: {ticker}</b>\n"
         f"<code>${cost:,.2f}</code> refunded to your paper cash.\n"

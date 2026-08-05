@@ -1967,8 +1967,7 @@ def _check_stale_positions(uid: str, current_prices: dict) -> list:
             )
 
     if dirty:
-        log["open"] = open_trades
-        save_user_trade_log(uid, log)
+        _persist_notify_flags(uid, open_trades, ("_notified_stale",))
 
     return stale_blocks
 
@@ -3250,11 +3249,35 @@ def _check_trailing_stops(current_prices: dict, uid: str,
                     )
 
     if dirty:
-        log["open"] = open_trades
-        save_user_trade_log(uid, log)
+        _persist_notify_flags(uid, open_trades,
+                              ("_notified_target_hit", "_notified_partial_profit"))
 
 
 # ── Quiet hours guard ────────────────────────────────────────────────────────
+
+def _persist_notify_flags(uid: str, trades: list, flag_names: tuple) -> None:
+    """Persist notification-dedup flags via a FRESH read of the trade log.
+
+    These loops read the log, spend seconds fetching prices / building messages,
+    then saved the WHOLE stale snapshot back — so a scheduled job and a user's
+    mini-app action on the same account raced, and whoever wrote last erased the
+    other. Only the flags matter here, so re-apply just those to the current
+    record instead of writing back a snapshot taken seconds ago."""
+    marks = {t.get("ticker"): [f for f in flag_names if t.get(f)]
+             for t in trades if any(t.get(f) for f in flag_names)}
+    if not marks:
+        return
+    from config_manager import mutate_user_trade_log
+
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        for tr in log.get("open", []):
+            for f in marks.get(tr.get("ticker"), []):
+                tr[f] = True
+        return log, None
+
+    mutate_user_trade_log(uid, _mut)
+
 
 def _is_quiet_hours(uid: str) -> bool:
     """

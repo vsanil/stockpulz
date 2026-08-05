@@ -16,7 +16,8 @@ Trades expire after 28 days if neither target nor stop is hit.
 from __future__ import annotations
 
 from datetime import date
-from config_manager import load_user_trade_log, save_user_trade_log, et_today
+from config_manager import (load_user_trade_log, save_user_trade_log, et_today,
+                            mutate_user_trade_log, NO_WRITE)
 
 
 # ── Open trades (morning run) ─────────────────────────────────────────────────
@@ -27,56 +28,65 @@ def open_trades(picks: dict, chat_id: str) -> None:
     Skips duplicates — safe to call multiple times.
     """
     today = et_today().isoformat()
-    log   = load_user_trade_log(chat_id)
-
-    open_tickers = {t["ticker"] for t in log["open"]}
-    new_count    = 0
 
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})
 
-    for timeframe in ("short_term", "long_term"):
-        for s in stocks.get(timeframe, []):
-            ticker = s.get("ticker")
-            if not ticker or ticker in open_tickers:
-                continue
-            log["open"].append({
-                "ticker":       ticker,
-                "asset_type":   "stock",
-                "entry_price":  s.get("entry_price"),
-                "target_price": s.get("target_price"),
-                "stop_loss":    s.get("stop_loss"),
-                "allocation":   s.get("allocation"),
-                "conviction":   s.get("conviction"),
-                "thesis":       s.get("thesis", ""),
-                "timeframe":    timeframe,
-                "opened_date":  today,
-            })
-            open_tickers.add(ticker)
-            new_count += 1
+    # The duplicate check must run against the log as it stands at WRITE time —
+    # this runs in a scheduled job, so a user logging a position from the
+    # mini-app in the same window was previously erased by this save.
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        log.setdefault("open", [])
+        open_tickers = {t["ticker"] for t in log["open"]}
+        new_count    = 0
 
-    for timeframe in ("short_term", "long_term"):
-        for c in crypto.get(timeframe, []):
-            ticker = c.get("symbol", "").upper()
-            if not ticker or ticker in open_tickers:
-                continue
-            log["open"].append({
-                "ticker":       ticker,
-                "asset_type":   "crypto",
-                "entry_price":  c.get("entry_price"),
-                "target_price": c.get("target_price"),
-                "stop_loss":    c.get("stop_loss"),
-                "allocation":   c.get("allocation"),
-                "conviction":   c.get("conviction"),
-                "thesis":       c.get("thesis", ""),
-                "timeframe":    timeframe,
-                "opened_date":  today,
-            })
-            open_tickers.add(ticker)
-            new_count += 1
+        for timeframe in ("short_term", "long_term"):
+            for s in stocks.get(timeframe, []):
+                ticker = s.get("ticker")
+                if not ticker or ticker in open_tickers:
+                    continue
+                log["open"].append({
+                    "ticker":       ticker,
+                    "asset_type":   "stock",
+                    "entry_price":  s.get("entry_price"),
+                    "target_price": s.get("target_price"),
+                    "stop_loss":    s.get("stop_loss"),
+                    "allocation":   s.get("allocation"),
+                    "conviction":   s.get("conviction"),
+                    "thesis":       s.get("thesis", ""),
+                    "timeframe":    timeframe,
+                    "opened_date":  today,
+                })
+                open_tickers.add(ticker)
+                new_count += 1
 
+        for timeframe in ("short_term", "long_term"):
+            for c in crypto.get(timeframe, []):
+                ticker = c.get("symbol", "").upper()
+                if not ticker or ticker in open_tickers:
+                    continue
+                log["open"].append({
+                    "ticker":       ticker,
+                    "asset_type":   "crypto",
+                    "entry_price":  c.get("entry_price"),
+                    "target_price": c.get("target_price"),
+                    "stop_loss":    c.get("stop_loss"),
+                    "allocation":   c.get("allocation"),
+                    "conviction":   c.get("conviction"),
+                    "thesis":       c.get("thesis", ""),
+                    "timeframe":    timeframe,
+                    "opened_date":  today,
+                })
+                open_tickers.add(ticker)
+                new_count += 1
+
+        if not new_count:
+            return NO_WRITE, 0
+        return log, new_count
+
+    new_count = mutate_user_trade_log(chat_id, _mut)
     if new_count:
-        save_user_trade_log(chat_id, log)
         print(f"[trade_logger] Opened {new_count} new trade(s) for {chat_id}.")
     else:
         print(f"[trade_logger] No new trades to open for {chat_id} (already logged or no picks).")
@@ -91,68 +101,79 @@ def check_and_close_trades(current_prices: dict, chat_id: str) -> list[dict]:
     Returns list of newly closed trades (empty if none).
     """
     today = et_today().isoformat()
-    log   = load_user_trade_log(chat_id)
 
-    if not log["open"]:
-        return []
+    # Which trades qualify depends on the CURRENT open list — this runs in the
+    # confirmation job, so evaluating a snapshot taken earlier could close a
+    # position the user already closed, or drop one they just opened.
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        log.setdefault("open", [])
+        log.setdefault("closed", [])
+        if not log["open"]:
+            return NO_WRITE, []
 
-    still_open    = []
-    newly_closed  = []
+        still_open    = []
+        newly_closed  = []
 
-    for trade in log["open"]:
-        ticker  = trade["ticker"]
-        current = current_prices.get(ticker)
+        for trade in log["open"]:
+            ticker  = trade["ticker"]
+            current = current_prices.get(ticker)
 
-        if current is None:
-            still_open.append(trade)
-            continue
+            if current is None:
+                still_open.append(trade)
+                continue
 
-        entry  = trade.get("entry_price")
-        target = trade.get("target_price")
-        stop   = trade.get("stop_loss")
+            entry  = trade.get("entry_price")
+            target = trade.get("target_price")
+            stop   = trade.get("stop_loss")
 
-        if not entry:
-            still_open.append(trade)
-            continue
+            if not entry:
+                still_open.append(trade)
+                continue
 
-        outcome = None
+            outcome = None
 
-        # Check stop first (worst case priority)
-        if stop and float(current) <= float(stop):
-            outcome = "stop"
-        elif target and float(current) >= float(target):
-            outcome = "target"
-        else:
-            # Expire after 28 calendar days
-            try:
-                days_open = (et_today() - date.fromisoformat(trade["opened_date"])).days
-                if days_open >= 28:
-                    outcome = "expired"
-            except Exception:
-                pass
+            # Check stop first (worst case priority)
+            if stop and float(current) <= float(stop):
+                outcome = "stop"
+            elif target and float(current) >= float(target):
+                outcome = "target"
+            else:
+                # Expire after 28 calendar days
+                try:
+                    days_open = (et_today() - date.fromisoformat(trade["opened_date"])).days
+                    if days_open >= 28:
+                        outcome = "expired"
+                except Exception:
+                    pass
 
-        if outcome:
-            return_pct  = (float(current) - float(entry)) / float(entry) * 100
-            allocation  = float(trade.get("allocation") or 0)
-            gain_usd    = round(allocation * return_pct / 100, 2)
-            closed      = {
-                **trade,
-                "closed_date":  today,
-                "closed_price": round(float(current), 2),
-                "outcome":      outcome,
-                "return_pct":   round(return_pct, 2),
-                "gain_usd":     gain_usd,
-            }
-            log["closed"].append(closed)
-            newly_closed.append(closed)
-            print(f"[trade_logger] Closed {ticker} — {outcome} "
-                  f"@ ${current} ({return_pct:+.1f}%) for {chat_id}")
-        else:
-            still_open.append(trade)
+            if outcome:
+                return_pct  = (float(current) - float(entry)) / float(entry) * 100
+                allocation  = float(trade.get("allocation") or 0)
+                gain_usd    = round(allocation * return_pct / 100, 2)
+                closed      = {
+                    **trade,
+                    "closed_date":  today,
+                    "closed_price": round(float(current), 2),
+                    "outcome":      outcome,
+                    "return_pct":   round(return_pct, 2),
+                    "gain_usd":     gain_usd,
+                }
+                log["closed"].append(closed)
+                newly_closed.append(closed)
+            else:
+                still_open.append(trade)
 
-    if newly_closed:
+        if not newly_closed:
+            return NO_WRITE, []
         log["open"] = still_open
-        save_user_trade_log(chat_id, log)
+        return log, newly_closed
+
+    newly_closed = mutate_user_trade_log(chat_id, _mut)
+    # Logged AFTER the write lands, so a CAS retry can't print a close twice.
+    for c in newly_closed:
+        print(f"[trade_logger] Closed {c['ticker']} — {c['outcome']} "
+              f"@ ${c['closed_price']} ({c['return_pct']:+.1f}%) for {chat_id}")
 
     return newly_closed
 
@@ -239,26 +260,13 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
     Returns (trade_dict, already_existed).
     """
     today  = et_today().isoformat()
-    log    = load_user_trade_log(chat_id)
     ticker = ticker.upper()
 
-    # Already watching — update price levels if overrides supplied, don't duplicate
-    for t in log["open"]:
-        if t["ticker"] == ticker:
-            updated = False
-            if entry_override is not None:
-                t["entry_price"] = float(entry_override)
-                updated = True
-            if stop_override is not None:
-                t["stop_loss"] = float(stop_override)
-                updated = True
-            if target_override is not None:
-                t["target_price"] = float(target_override)
-                updated = True
-            if updated:
-                save_user_trade_log(chat_id, log)
-                print(f"[trade_logger] Updated levels for existing {ticker} ({chat_id})")
-            return t, True
+    # Everything below up to `trade` is read-only preparation (pick lookup, user
+    # settings, override resolution) — it does NOT touch the trade log, so it is
+    # deliberately done BEFORE the mutator. Only the duplicate check and the
+    # append happen against the freshly-read log, so a concurrent write to the
+    # same user (a scheduled job) can no longer be clobbered by this one.
 
     # Look up pick levels from today's picks
     entry = target = stop = None
@@ -340,8 +348,35 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
     # close_trade spreads **trade, so this carries into the closed record too.
     if source:
         trade["source"] = source
-    log["open"].append(trade)
-    save_user_trade_log(chat_id, log)
+
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        log.setdefault("open", [])
+        # Already watching — update price levels if overrides supplied, don't duplicate
+        for t in log["open"]:
+            if t["ticker"] == ticker:
+                updated = False
+                if entry_override is not None:
+                    t["entry_price"] = float(entry_override)
+                    updated = True
+                if stop_override is not None:
+                    t["stop_loss"] = float(stop_override)
+                    updated = True
+                if target_override is not None:
+                    t["target_price"] = float(target_override)
+                    updated = True
+                if not updated:
+                    return NO_WRITE, {"trade": t, "existed": True, "updated": False}
+                return log, {"trade": t, "existed": True, "updated": True}
+        log["open"].append(trade)
+        return log, {"trade": trade, "existed": False, "updated": False}
+
+    res = mutate_user_trade_log(chat_id, _mut)
+    if res["existed"]:
+        if res["updated"]:
+            print(f"[trade_logger] Updated levels for existing {ticker} ({chat_id})")
+        return res["trade"], True
+
     print(f"[trade_logger] Added holding: {ticker} entry={entry} stop={stop} for {chat_id}")
     return trade, False
 
@@ -382,7 +417,6 @@ def close_trade(ticker: str, chat_id: str, exit_price: float | None = None) -> d
                 return log, closed
         return log, None            # not found — write is a no-op rewrite
 
-    from config_manager import mutate_user_trade_log
     closed = mutate_user_trade_log(chat_id, _mut)
     if closed:
         print(f"[trade_logger] Closed {ticker} manually @ ${exit_price} ({closed['return_pct']:+.1f}%) for {chat_id}")
@@ -394,15 +428,21 @@ def remove_holding(ticker: str, chat_id: str) -> bool:
     Remove a ticker from a user's portfolio.
     Returns True if found and removed, False if not in portfolio.
     """
-    log    = load_user_trade_log(chat_id)
     ticker = ticker.upper()
-    before = len(log["open"])
-    log["open"] = [t for t in log["open"] if t["ticker"] != ticker]
-    if len(log["open"]) < before:
-        save_user_trade_log(chat_id, log)
+
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        log.setdefault("open", [])
+        before = len(log["open"])
+        log["open"] = [t for t in log["open"] if t["ticker"] != ticker]
+        if len(log["open"]) == before:
+            return NO_WRITE, False
+        return log, True
+
+    removed = mutate_user_trade_log(chat_id, _mut)
+    if removed:
         print(f"[trade_logger] Removed holding: {ticker} for {chat_id}")
-        return True
-    return False
+    return removed
 
 
 def get_weekly_closed_trades(chat_id: str) -> list[dict]:
