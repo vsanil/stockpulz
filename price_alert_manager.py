@@ -37,6 +37,17 @@ def _save_alerts(alerts: dict) -> None:
     _write_gist_file(ALERTS_FILENAME, alerts)
 
 
+def _alert_key(a: dict) -> tuple:
+    """Identity of an alert: ticker + direction + target. Used to match an alert
+    from an earlier snapshot against the same alert in a freshly-read list, so a
+    write can remove exactly what fired without touching anything added since."""
+    try:
+        target = round(float(a.get("target") or 0), 4)
+    except (TypeError, ValueError):
+        target = 0.0
+    return (str(a.get("ticker", "")).upper(), a.get("direction"), target)
+
+
 def _current_price(ticker: str) -> float | None:
     """Fetch current price. Crypto tickers use TICKER-USD format for yfinance."""
     ticker = ticker.upper()
@@ -227,14 +238,15 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
         if p is not None and p > 0:   # a 0/nan price is a failed fetch, not a real quote
             prices[t] = p
 
-    triggered = []
-    remaining = []
+    triggered       = []   # formatted messages returned to the caller
+    fired           = []   # the alert dicts that actually triggered
+    recurring_readds = []  # recurring alerts to re-arm at the new price
+    history_entries = []
 
     for a in chat_alerts:
         t       = a["ticker"]
         current = prices.get(t)
         if current is None or current <= 0:   # no/failed price → never trigger ($0.00 bug)
-            remaining.append(a)
             continue
 
         # Plausibility guard: a failed feed can return tiny garbage ($0.01 TSLA,
@@ -245,7 +257,6 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
         from market_data import plausible_price
         ref = a.get("price_at_set") or a.get("target")
         if not plausible_price(current, ref):
-            remaining.append(a)
             continue
 
         hit = (
@@ -265,17 +276,15 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
                 f"<i>Change since alert set: {change:+.1f}%</i>"
             )
             triggered.append(msg)
+            fired.append(a)
             # Record history so the Mini App can show "fired at $X · Nh ago"
-            hist_key = f"_history_{chat_id}"
-            hist     = alerts.setdefault(hist_key, [])
-            hist.append({
+            history_entries.append({
                 "ticker":          t,
                 "triggered_price": round(current, 2),
                 "triggered_at":    datetime.now(timezone.utc).isoformat(),
                 "target":          a["target"],
                 "direction":       a["direction"],
             })
-            alerts[hist_key] = hist[-50:]  # keep last 50 per user
             if send_keyboard_fn:
                 keyboard = [[{
                     "text": f"🔔 Re-arm at ${a['target']:,.2f}",
@@ -292,17 +301,37 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
                 send_fn(msg)  # _alert() broadcasts to all; no chat_id needed
             # If recurring, re-add alert with updated price_at_set
             if a.get("recurring"):
-                remaining.append({
+                recurring_readds.append({
                     **a,
                     "price_at_set": round(current, 2),
                     "set_at":       datetime.now(timezone.utc).isoformat(),
                 })
-        else:
-            remaining.append(a)
 
     if triggered:
-        alerts[str(chat_id)] = remaining
-        _save_alerts(alerts)
+        # The snapshot above is SECONDS old — one price fetch per ticker sits
+        # between the read and this write. The old code wrote that whole stale
+        # snapshot back, so an alert the user added from the mini-app in the
+        # meantime was erased (and `_load_alerts()`'s `or {}` on a failed read
+        # would have wiped EVERY user's alerts). Re-derive against a fresh read:
+        # drop only what actually fired, keep everything else as it stands now.
+        fired_keys = {_alert_key(a) for a in fired}
+
+        def _mut(all_alerts):
+            all_alerts = all_alerts or {}
+            uid   = str(chat_id)
+            fresh = list(all_alerts.get(uid) or [])
+            kept  = [a for a in fresh if _alert_key(a) not in fired_keys]
+            kept.extend(recurring_readds)
+            all_alerts[uid] = kept
+
+            hist_key = f"_history_{chat_id}"
+            hist     = list(all_alerts.get(hist_key) or [])
+            hist.extend(history_entries)
+            all_alerts[hist_key] = hist[-50:]   # keep last 50 per user
+            return all_alerts, None
+
+        from config_manager import mutate_gist_file
+        mutate_gist_file(ALERTS_FILENAME, _mut, default={})
 
     return triggered
 
@@ -324,10 +353,12 @@ def check_all_alerts(send_fn=None, send_keyboard_fn=None) -> int:
 
 def clear_alerts(chat_id: str) -> int:
     """Remove all alerts for a chat. Returns count removed."""
-    alerts      = _load_alerts()
-    chat_alerts = alerts.get(str(chat_id), [])
-    count       = len(chat_alerts)
-    if count:
-        alerts[str(chat_id)] = []
-        _save_alerts(alerts)
-    return count
+    def _mut(all_alerts):
+        all_alerts = all_alerts or {}
+        uid   = str(chat_id)
+        count = len(all_alerts.get(uid) or [])
+        all_alerts[uid] = []
+        return all_alerts, count
+
+    from config_manager import mutate_gist_file
+    return mutate_gist_file(ALERTS_FILENAME, _mut, default={})

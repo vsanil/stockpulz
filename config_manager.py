@@ -233,25 +233,35 @@ def get_user_config(chat_id: str) -> dict:
 
 
 def update_user_config(chat_id: str, key: str, value) -> dict:
-    """Update a single key for a user. Returns updated user config."""
-    all_configs = _load_gist_file(USER_CONFIGS_FILE) or {}
-    uid = str(chat_id)
-    if uid not in all_configs:
-        all_configs[uid] = {}
-    all_configs[uid][key] = value
-    _write_gist_file(USER_CONFIGS_FILE, all_configs)
-    return get_user_config(uid)
+    """Update a single key for a user. Returns updated user config.
+
+    These two are the app's most-called writers (every settings toggle, budget
+    change and preference flip routes through them). They used the forbidden
+    `_load_gist_file(F) or {}` → `_write_gist_file(F, whole_file)` pattern:
+    `_load_gist_file` SWALLOWS a transient read error and returns None, so the
+    `or {}` turned one failed read into a write of {this_user: …} — erasing
+    every other user's config. Routing through mutate_user_record gets
+    read_strict (raises instead of clobbering), a fresh read inside the lock,
+    and row-level CAS once the backend supports rows.
+    """
+    def _mut(record):
+        record = dict(record or {})
+        record[key] = value
+        return record, None
+
+    mutate_user_record(USER_CONFIGS_FILE, chat_id, _mut, default={})
+    return get_user_config(chat_id)
 
 
 def update_user_config_multi(chat_id: str, updates: dict) -> dict:
     """Update multiple keys for a user at once. Returns updated user config."""
-    all_configs = _load_gist_file(USER_CONFIGS_FILE) or {}
-    uid = str(chat_id)
-    if uid not in all_configs:
-        all_configs[uid] = {}
-    all_configs[uid].update(updates)
-    _write_gist_file(USER_CONFIGS_FILE, all_configs)
-    return get_user_config(uid)
+    def _mut(record):
+        record = dict(record or {})
+        record.update(updates)
+        return record, None
+
+    mutate_user_record(USER_CONFIGS_FILE, chat_id, _mut, default={})
+    return get_user_config(chat_id)
 
 
 def save_user_config(chat_id: str, ucfg: dict) -> None:
@@ -904,6 +914,13 @@ def _update_user_keyed_file(filename: str, chat_id: str, value) -> None:
         _record_write(filename, uid, value)
 
 
+#: Returned by a mutator INSTEAD of a record to mean "nothing changed, don't write".
+#: Reject paths (insufficient paper cash, position not found) must not burn a
+#: storage write — on the Gist a wasted PATCH counts against GitHub's secondary
+#: rate limit, which is what wiped data during the full-sweep incident.
+NO_WRITE = object()
+
+
 def mutate_user_record(filename: str, chat_id: str, mutator, default=None):
     """Read-modify-write ONE user's record with the read INSIDE the lock.
 
@@ -940,6 +957,8 @@ def mutate_user_record(filename: str, chat_id: str, mutator, default=None):
             if record is None:
                 record = {} if default is None else default
             new_record, result = mutator(record)
+            if new_record is NO_WRITE:
+                return result
             if backend.write_user(filename, uid, new_record, version) is not None:
                 _cache_invalidate(filename)
                 return result
@@ -954,6 +973,8 @@ def mutate_user_record(filename: str, chat_id: str, mutator, default=None):
         if record is None:
             record = {} if default is None else default
         new_record, result = mutator(record)
+        if new_record is NO_WRITE:
+            return result
         all_data[uid] = new_record
         _cache_invalidate(filename)
         backend.write(filename, all_data)
