@@ -1366,7 +1366,7 @@ def admin_fix_ticker():
     """Rename a ticker across all users' open + closed trade logs.
     Body: {"from": "AVERY", "to": "AVY"}
     One-time migration tool — idempotent if run again."""
-    from config_manager import get_allowed_users, load_user_trade_log, save_user_trade_log
+    from config_manager import get_allowed_users, load_user_trade_log
     body    = request.get_json(silent=True) or {}
     old_t   = str(body.get("from", "")).upper().strip()
     new_t   = str(body.get("to",   "")).upper().strip()
@@ -1377,17 +1377,22 @@ def admin_fix_ticker():
     owner    = os.environ.get("TELEGRAM_CHAT_ID", "")
     all_uids = list({*get_allowed_users(), *([ owner] if owner else [])})
 
-    total = 0
-    for uid in all_uids:
-        log     = load_user_trade_log(uid)
+    from config_manager import mutate_user_trade_log, NO_WRITE
+
+    def _rename(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
         changed = 0
         for trade in log.get("open", []) + log.get("closed", []):
             if trade.get("ticker") == old_t:
                 trade["ticker"] = new_t
                 changed += 1
-        if changed:
-            save_user_trade_log(uid, log)
-            total += changed
+        if not changed:
+            return NO_WRITE, 0
+        return log, changed
+
+    total = 0
+    for uid in all_uids:
+        total += mutate_user_trade_log(uid, _rename)
 
     return jsonify({"ok": True, "renamed": total, "from": old_t, "to": new_t})
 
@@ -2653,33 +2658,34 @@ def miniapp_regime():
 def miniapp_update_position():
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
-    from config_manager import load_user_trade_log, save_user_trade_log
+    from config_manager import mutate_user_trade_log, NO_WRITE
     body = request.get_json(silent=True) or {}
     ticker = (body.get("ticker") or "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400
-    log = load_user_trade_log(chat_id)
-    updated = False
-    for t in log.get("open", []):
-        if t.get("ticker") == ticker:
-            if "stop_loss" in body:
-                val = body["stop_loss"]
-                t["stop_loss"] = float(val) if val not in (None, "", "null") else None
-            if "target_price" in body:
-                val = body["target_price"]
-                t["target_price"] = float(val) if val not in (None, "", "null") else None
-            if "entry_price" in body:
-                val = body["entry_price"]
-                t["entry_price"] = float(val) if val not in (None, "", "null") else None
-            if "notes" in body:
-                t["notes"] = str(body["notes"]).strip()[:500]  # cap at 500 chars
-            if "shares" in body:
-                val = body["shares"]
-                t["shares"] = float(val) if val not in (None, "", "null") else None
-            updated = True
-            break
-    if not updated:
+
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        for t in log.get("open", []):
+            if t.get("ticker") == ticker:
+                if "stop_loss" in body:
+                    val = body["stop_loss"]
+                    t["stop_loss"] = float(val) if val not in (None, "", "null") else None
+                if "target_price" in body:
+                    val = body["target_price"]
+                    t["target_price"] = float(val) if val not in (None, "", "null") else None
+                if "entry_price" in body:
+                    val = body["entry_price"]
+                    t["entry_price"] = float(val) if val not in (None, "", "null") else None
+                if "notes" in body:
+                    t["notes"] = str(body["notes"]).strip()[:500]  # cap at 500 chars
+                if "shares" in body:
+                    val = body["shares"]
+                    t["shares"] = float(val) if val not in (None, "", "null") else None
+                return log, True
+        return NO_WRITE, False
+
+    if not mutate_user_trade_log(chat_id, _mut):
         return jsonify({"error": "position not found"}), 404
-    save_user_trade_log(chat_id, log)
     return jsonify({"ok": True})
 
 
@@ -3519,16 +3525,20 @@ def _save_watchlist(chat_id, tickers: list) -> list:
     user_config is mirrored so legacy readers stay consistent. Returns the
     cleaned list actually stored.
     """
-    from config_manager import (load_user_trade_log, save_user_trade_log,
+    from config_manager import (mutate_user_trade_log,
                                  get_user_config, save_user_config)
     clean, seen = [], set()
     for t in tickers:
         u = (t or "").upper()
         if u and u not in seen:
             seen.add(u); clean.append(u)
-    log = load_user_trade_log(chat_id)
-    log["watchlist"] = clean
-    save_user_trade_log(chat_id, log)
+
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        log["watchlist"] = clean
+        return log, None
+
+    mutate_user_trade_log(chat_id, _mut)
     try:
         ucfg = get_user_config(chat_id)
         ucfg["watchlist"] = clean
@@ -3579,7 +3589,7 @@ def miniapp_watchlist_add():
     """
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
-    from config_manager import load_user_trade_log, save_user_trade_log
+    from config_manager import load_user_trade_log
     body   = request.get_json(silent=True) or {}
     ticker = (body.get("ticker") or "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400
@@ -3619,7 +3629,7 @@ def miniapp_watchlist_remove():
     """Remove a ticker from the user's watchlist."""
     chat_id = _miniapp_auth()
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
-    from config_manager import load_user_trade_log, save_user_trade_log
+    from config_manager import load_user_trade_log
     body   = request.get_json(silent=True) or {}
     ticker = (body.get("ticker") or "").strip().upper()
     if not ticker: return jsonify({"error": "ticker required"}), 400

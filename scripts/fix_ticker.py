@@ -13,7 +13,8 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from config_manager import get_allowed_users, load_user_trade_log, save_user_trade_log
+from config_manager import (get_allowed_users, load_user_trade_log,
+                            mutate_user_trade_log, NO_WRITE)
 
 
 def fix_ticker(old: str, new: str, apply: bool = False):
@@ -25,24 +26,26 @@ def fix_ticker(old: str, new: str, apply: bool = False):
 
     total = 0
     for uid in users:
-        log     = load_user_trade_log(uid)
-        changed = 0
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            changed = 0
+            for trade in log.get("open", []) + log.get("closed", []):
+                if trade.get("ticker") == old:
+                    trade["ticker"] = new
+                    changed += 1
+            if not changed:
+                return NO_WRITE, 0
+            return log, changed
 
-        for trade in log.get("open", []):
-            if trade.get("ticker") == old:
-                trade["ticker"] = new
-                changed += 1
-
-        for trade in log.get("closed", []):
-            if trade.get("ticker") == old:
-                trade["ticker"] = new
-                changed += 1
+        if apply:
+            changed = mutate_user_trade_log(uid, _mut)
+        else:
+            # dry run: evaluate against a read-only copy, never write
+            _, changed = _mut(load_user_trade_log(uid))
 
         if changed:
-            print(f"  user {uid}: {changed} entry/entries updated")
-            if apply:
-                save_user_trade_log(uid, log)
-                print(f"  user {uid}: saved.")
+            print(f"  user {uid}: {changed} entry/entries updated"
+                  f"{' · saved.' if apply else ''}")
             total += changed
         else:
             print(f"  user {uid}: no entries found")

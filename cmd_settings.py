@@ -483,20 +483,28 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
         )
 
     if text.startswith("TRACK "):
-        from config_manager import load_user_trade_log, save_user_trade_log
+        from config_manager import mutate_user_trade_log, NO_WRITE
         ticker = text[len("TRACK "):].strip().upper()
         if not ticker:
             return "⚠️ Please provide a ticker, e.g. <code>/track NVDA</code>"
-        log = load_user_trade_log(chat_id)
-        watchlist = log.get("watchlist", [])
-        if ticker in watchlist:
+
+        # The duplicate check must run against the watchlist as it stands at
+        # write time — the mini-app writes the same list (_save_watchlist).
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            watchlist = list(log.get("watchlist") or [])
+            if ticker in watchlist:
+                return NO_WRITE, (True, len(watchlist))
+            watchlist.append(ticker)
+            log["watchlist"] = watchlist
+            return log, (False, len(watchlist))
+
+        already, count = mutate_user_trade_log(chat_id, _mut)
+        if already:
             return f"👁 <b>{ticker}</b> is already on your watchlist."
-        watchlist.append(ticker)
-        log["watchlist"] = watchlist
-        save_user_trade_log(chat_id, log)
         return (
             f"✅ <b>{ticker}</b> added to your price watchlist.\n"
-            f"You now have {len(watchlist)} ticker(s) tracked.\n"
+            f"You now have {count} ticker(s) tracked.\n"
             f"<i>View live prices in the dashboard or with /prices</i>"
         )
 
@@ -508,17 +516,21 @@ def _cmd_settings(text: str, original: str, chat_id: str) -> "str | None":
         )
 
     if text.startswith("UNTRACK "):
-        from config_manager import load_user_trade_log, save_user_trade_log
+        from config_manager import mutate_user_trade_log, NO_WRITE
         ticker = text[len("UNTRACK "):].strip().upper()
         if not ticker:
             return "⚠️ Please provide a ticker, e.g. <code>/untrack NVDA</code>"
-        log = load_user_trade_log(chat_id)
-        watchlist = log.get("watchlist", [])
-        if ticker not in watchlist:
+
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            watchlist = list(log.get("watchlist") or [])
+            if ticker not in watchlist:
+                return NO_WRITE, False
+            log["watchlist"] = [t for t in watchlist if t != ticker]
+            return log, True
+
+        if not mutate_user_trade_log(chat_id, _mut):
             return f"⚠️ <b>{ticker}</b> is not on your watchlist."
-        watchlist = [t for t in watchlist if t != ticker]
-        log["watchlist"] = watchlist
-        save_user_trade_log(chat_id, log)
         return f"🗑 <b>{ticker}</b> removed from your watchlist."
 
     # ── /share ───────────────────────────────────────────────────────────────

@@ -38,7 +38,8 @@ from config_manager import (
     get_user_config, update_user_config, update_user_config_multi, reset_user_config,
     load_picks,
     load_pending_state, save_pending_state, clear_pending_state,
-    load_user_trade_log, save_user_trade_log,
+    load_user_trade_log,
+    mutate_user_trade_log, NO_WRITE,
     load_user_paper,
     get_pending_users, add_pending_user, remove_pending_user,
     get_allowed_users,
@@ -445,9 +446,11 @@ def handle_callback_query(callback_query: dict) -> None:
         goal_value = parts[1] if len(parts) > 1 else ""
         if not goal_value:
             return
-        log_g = load_user_trade_log(chat_id)
-        log_g.setdefault("settings", {})["investment_goal"] = goal_value
-        save_user_trade_log(chat_id, log_g)
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            log.setdefault("settings", {})["investment_goal"] = goal_value
+            return log, None
+        mutate_user_trade_log(chat_id, _mut)
         # Proceed to time horizon step
         send_inline_keyboard(
             (
@@ -473,9 +476,11 @@ def handle_callback_query(callback_query: dict) -> None:
         horizon_value = parts[1] if len(parts) > 1 else ""
         if not horizon_value:
             return
-        log_h = load_user_trade_log(chat_id)
-        log_h.setdefault("settings", {})["time_horizon"] = horizon_value
-        save_user_trade_log(chat_id, log_h)
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            log.setdefault("settings", {})["time_horizon"] = horizon_value
+            return log, None
+        mutate_user_trade_log(chat_id, _mut)
         # Proceed to asset class step (final question)
         send_inline_keyboard(
             "<b>Last question \u2014 Which asset classes do you want picks for?</b>\n"
@@ -525,14 +530,16 @@ def handle_callback_query(callback_query: dict) -> None:
         portfolio_value = parts[1] if len(parts) > 1 else ""
         if not portfolio_value:
             return
-        log_p = load_user_trade_log(chat_id)
-        log_p.setdefault("settings", {})
-        if portfolio_value != "skip":
-            try:
-                log_p["settings"]["total_portfolio_size"] = int(portfolio_value)
-            except ValueError:
-                pass
-        save_user_trade_log(chat_id, log_p)
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            log.setdefault("settings", {})
+            if portfolio_value != "skip":
+                try:
+                    log["settings"]["total_portfolio_size"] = int(portfolio_value)
+                except ValueError:
+                    pass
+            return log, None
+        mutate_user_trade_log(chat_id, _mut)
         # Proceed to risk profile step
         send_message(
             "⚖️ <b>Risk Profile</b>\n\n"
@@ -670,14 +677,17 @@ def handle_callback_query(callback_query: dict) -> None:
         ticker = parts[1].upper() if len(parts) > 1 else ""
         if not ticker:
             return
-        log             = load_user_trade_log(chat_id)
-        open_before     = len(log.get("open",   []))
-        closed_before   = len(log.get("closed", []))
-        log["open"]     = [t for t in log.get("open",   []) if t["ticker"] != ticker]
-        log["closed"]   = [t for t in log.get("closed", []) if t["ticker"] != ticker]
-        removed = (len(log["open"]) < open_before) or (len(log["closed"]) < closed_before)
-        if removed:
-            save_user_trade_log(chat_id, log)
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            open_before   = len(log.get("open",   []))
+            closed_before = len(log.get("closed", []))
+            log["open"]   = [t for t in log.get("open",   []) if t["ticker"] != ticker]
+            log["closed"] = [t for t in log.get("closed", []) if t["ticker"] != ticker]
+            if len(log["open"]) < open_before or len(log["closed"]) < closed_before:
+                return log, True
+            return NO_WRITE, False
+
+        if mutate_user_trade_log(chat_id, _mut):
             send_message(f"✅ <b>{ticker}</b> removed from your trade history.", chat_id=chat_id)
         else:
             send_message(f"⚠️ <b>{ticker}</b> not found in your history.", chat_id=chat_id)
@@ -957,15 +967,17 @@ def handle_callback_query(callback_query: dict) -> None:
             # Override stop/target in trade log if we have them
             if stop_raw or target_raw:
                 try:
-                    log = load_user_trade_log(chat_id)
-                    for t in log.get("open", []):
-                        if t["ticker"] == ticker:
-                            if stop_raw:
-                                t["stop_loss"] = float(stop_raw)
-                            if target_raw:
-                                t["target_price"] = float(target_raw)
-                            break
-                    save_user_trade_log(chat_id, log)
+                    def _mut(log):
+                        log = log or {"open": [], "closed": [], "watchlist": []}
+                        for t in log.get("open", []):
+                            if t["ticker"] == ticker:
+                                if stop_raw:
+                                    t["stop_loss"] = float(stop_raw)
+                                if target_raw:
+                                    t["target_price"] = float(target_raw)
+                                return log, True
+                        return NO_WRITE, False
+                    mutate_user_trade_log(chat_id, _mut)
                 except Exception as exc2:
                     print(f"[bot] confirm_buy stop/target override failed (non-critical): {exc2}")
             entry_str  = f"<code>${_p(float(entry_raw))}</code>" if entry_raw else ""
@@ -1761,12 +1773,14 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
             return "⚠️ Please send just the price, e.g. <code>170.00</code>"
         stop_price = float(raw_stop)
         try:
-            _log = load_user_trade_log(chat_id)
-            for t in _log.get("open", []):
-                if t["ticker"] == ticker:
-                    t["stop_loss"] = stop_price
-                    break
-            save_user_trade_log(chat_id, _log)
+            def _mut(log):
+                log = log or {"open": [], "closed": [], "watchlist": []}
+                for t in log.get("open", []):
+                    if t["ticker"] == ticker:
+                        t["stop_loss"] = stop_price
+                        return log, True
+                return NO_WRITE, False
+            mutate_user_trade_log(chat_id, _mut)
             return f"🛑 Stop loss set for <b>{ticker}</b> at <code>${_p(stop_price)}</code>\n<i>I'll alert you if the price drops to this level.</i>"
         except Exception as exc:
             return f"⚠️ Couldn't set stop loss: {exc}"
@@ -1803,16 +1817,16 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         note_text = text.strip()[:500]
         if not note_text:
             return "⚠️ Note can't be empty."
-        log = load_user_trade_log(chat_id)
-        saved = False
-        for t in log.get("open", []):
-            if t["ticker"] == ticker:
-                t["notes"] = note_text
-                saved = True
-                break
-        if not saved:
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            for t in log.get("open", []):
+                if t["ticker"] == ticker:
+                    t["notes"] = note_text
+                    return log, True
+            return NO_WRITE, False
+
+        if not mutate_user_trade_log(chat_id, _mut):
             return f"⚠️ <b>{ticker}</b> not found in your open positions."
-        save_user_trade_log(chat_id, log)
         return f"📝 Note saved for <b>{ticker}</b>:\n<i>{note_text[:200]}</i>"
 
     if command == "journal_note":
@@ -1821,16 +1835,18 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         note_text = text.strip()[:600]
         if not note_text:
             return "⚠️ Note can't be empty — skipping journal entry."
-        log = load_user_trade_log(chat_id)
-        # Store on the most-recently-closed trade for this ticker
-        saved = False
-        for t in reversed(log.get("closed", [])):
-            if t.get("ticker") == ticker:
-                t["journal_note"] = note_text
-                saved = True
-                break
-        if saved:
-            save_user_trade_log(chat_id, log)
+        # "most-recently-closed" must be resolved against the log at WRITE time —
+        # a close landing in this window would otherwise get the note attached to
+        # the wrong trade.
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            for t in reversed(log.get("closed", [])):
+                if t.get("ticker") == ticker:
+                    t["journal_note"] = note_text
+                    return log, True
+            return NO_WRITE, False
+
+        if mutate_user_trade_log(chat_id, _mut):
             return (
                 f"📓 <b>Journal saved</b> for {ticker}:\n"
                 f"<i>{_esc(note_text[:300])}</i>\n\n"
@@ -1897,24 +1913,30 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
         if not ticker:
             return ("📌 <b>Usage:</b> <code>/track NVDA</code> — track a price in your watchlist\n"
                     "<code>/untrack NVDA</code> — remove it")
-        log = load_user_trade_log(chat_id)
-        watchlist = log.get("watchlist", [])
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            watchlist = list(log.get("watchlist") or [])
+            if command == "track":
+                if ticker in watchlist:
+                    return NO_WRITE, (False, len(watchlist))
+                watchlist.append(ticker)
+            else:  # untrack
+                if ticker not in watchlist:
+                    return NO_WRITE, (False, len(watchlist))
+                watchlist = [t for t in watchlist if t != ticker]
+            log["watchlist"] = watchlist
+            return log, (True, len(watchlist))
+
+        changed, count = mutate_user_trade_log(chat_id, _mut)
         if command == "track":
-            if ticker in watchlist:
+            if not changed:
                 return f"👁 <b>{ticker}</b> is already on your watchlist."
-            watchlist.append(ticker)
-            log["watchlist"] = watchlist
-            save_user_trade_log(chat_id, log)
             return (f"✅ <b>{ticker}</b> added to your price watchlist.\n"
-                    f"You now have {len(watchlist)} ticker(s) tracked.\n"
+                    f"You now have {count} ticker(s) tracked.\n"
                     f"<i>Open the dashboard to view live prices.</i>")
-        else:  # untrack
-            if ticker not in watchlist:
-                return f"⚠️ <b>{ticker}</b> is not on your watchlist."
-            watchlist = [t for t in watchlist if t != ticker]
-            log["watchlist"] = watchlist
-            save_user_trade_log(chat_id, log)
-            return f"🗑 <b>{ticker}</b> removed from your watchlist."
+        if not changed:
+            return f"⚠️ <b>{ticker}</b> is not on your watchlist."
+        return f"🗑 <b>{ticker}</b> removed from your watchlist."
 
     if command == "exclude":
         return _parse_and_execute(f"EXCLUDE {text}", original=f"/exclude {text}", chat_id=chat_id)

@@ -431,3 +431,220 @@ class TestHighTrafficWritersAreClobberSafe:
         assert pam.clear_alerts("u1") == 1
         assert _Server.data[F]["u1"] == []
         assert len(_Server.data[F]["u2"]) == 1, "another user's alerts were cleared"
+
+
+class TestCommandLayerIsMutatorForm:
+    """The command/web-layer sites converted on Aug 5.
+
+    IMPORTANT about what these prove. On a BLOB backend `mutate_user_record`
+    shrinks the race window, it does not close it (only row-level CAS does).
+    So the race is only reproducible — and only fixable — where the site had
+    real PREP between its load and its save. `_execute_add` / `_execute_trim`
+    fetch a live price there, which is a network call taking seconds; the
+    concurrent write is injected inside that fetch, exactly where it lands in
+    production. Sites with no prep (watchlist, /fixticker, level updates) had a
+    microsecond window either way — for those the conversion buys uniformity and
+    the NO_WRITE no-op guard, so they are asserted on behaviour, not on the race.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _wire(self, monkeypatch):
+        import storage, price_alert_manager as pam
+        _Server.data = {}
+        cm._recent_user_writes.clear()
+        cm._gist_read_cache.clear()
+        monkeypatch.setattr(storage, "GistBackend", _Server)
+        monkeypatch.setattr(storage, "get_storage_backend", lambda: _Server())
+        monkeypatch.setattr(cm,  "_load_gist_file", lambda fn: _Server().read(fn))
+        monkeypatch.setattr(pam, "_load_gist_file", lambda fn: _Server().read(fn))
+        storage.reset_backend()
+        yield
+
+    def _seed(self, open_trades, closed=None, watchlist=None):
+        F = cm.USER_TRADES_FILE
+        _Server.data[F] = {"u1": {"open": open_trades,
+                                  "closed": closed or [],
+                                  "watchlist": watchlist or []}}
+        return F
+
+    @staticmethod
+    def _scale_in_during_fetch(F, price, shares=20.0):
+        """A price fetch that ALSO lands a concurrent same-user write — this is
+        the real interleaving: the old code read the log, spent seconds here,
+        then wrote its stale snapshot back over whatever arrived meanwhile."""
+        def _fetch(_ticker):
+            cur = _Server().read_strict(F)
+            cur["u1"]["open"][0]["shares"] = shares
+            _Server().write(F, cur)
+            cm._gist_read_cache.clear()
+            return price
+        return _fetch
+
+    # ── _execute_add — genuine race regression ───────────────────────────────
+    def test_add_averages_against_a_scale_in_that_lands_during_the_price_fetch(self, monkeypatch):
+        import cmd_trade_exec as ex
+        F = self._seed([{"ticker": "AAA", "entry_price": 100.0, "shares": 10.0}])
+        monkeypatch.setattr(ex, "_fetch_live_price", self._scale_in_during_fetch(F, 200.0))
+
+        ex._execute_add("AAA", "u1", add_shares=10.0)   # no price → triggers the fetch
+        pos = _Server.data[F]["u1"]["open"][0]
+        assert pos["shares"] == 30.0, \
+            f"averaged against a stale share count — got {pos['shares']}, want 30.0"
+        assert pos["entry_price"] == pytest.approx(133.3333, abs=1e-3)
+
+    # ── _execute_trim — genuine race regression ──────────────────────────────
+    def test_trim_uses_a_share_count_that_changed_during_the_price_fetch(self, monkeypatch):
+        import cmd_trade_exec as ex
+        F = self._seed([{"ticker": "AAA", "entry_price": 100.0, "shares": 10.0}])
+        monkeypatch.setattr(ex, "_fetch_live_price", self._scale_in_during_fetch(F, 110.0))
+
+        ex._execute_trim("AAA", "u1", trim_shares=5.0)  # no price → triggers the fetch
+        assert _Server.data[F]["u1"]["open"][0]["shares"] == 15.0, \
+            "trimmed off a stale share count, leaving phantom shares"
+
+    def test_trim_defaults_to_half_of_the_fresh_share_count(self, monkeypatch):
+        import cmd_trade_exec as ex
+        F = self._seed([{"ticker": "AAA", "entry_price": 100.0, "shares": 10.0}])
+        monkeypatch.setattr(ex, "_fetch_live_price", self._scale_in_during_fetch(F, 110.0))
+
+        ex._execute_trim("AAA", "u1")                   # shares=None → "sell half"
+        assert _Server.data[F]["u1"]["open"][0]["shares"] == 10.0, \
+            "'sell half' halved the stale count, not what is actually held"
+
+    # ── NO_WRITE no-op guards (behaviour, not race) ──────────────────────────
+    def test_add_to_missing_position_writes_nothing(self, monkeypatch):
+        import cmd_trade_exec as ex
+        F = self._seed([{"ticker": "AAA", "entry_price": 1.0, "shares": 1.0}])
+        monkeypatch.setattr(ex, "_fetch_live_price", lambda t: 5.0)
+        before = _Server().read_strict(F)
+        assert "not found" in ex._execute_add("NOPE", "u1", add_price=5.0, add_shares=1.0)
+        assert _Server.data[F] == before
+
+    def test_trim_that_would_close_everything_writes_nothing(self, monkeypatch):
+        import cmd_trade_exec as ex
+        F = self._seed([{"ticker": "AAA", "entry_price": 100.0, "shares": 5.0}])
+        monkeypatch.setattr(ex, "_fetch_live_price", lambda t: 110.0)
+        before = _Server().read_strict(F)
+        assert "entire position" in ex._execute_trim("AAA", "u1", trim_shares=5.0, trim_price=110.0)
+        assert _Server.data[F] == before
+
+    def test_update_level_missing_ticker_writes_nothing(self):
+        import cmd_trade_exec as ex
+        F = self._seed([{"ticker": "AAA", "entry_price": 1.0}])
+        before = _Server().read_strict(F)
+        assert "not found" in ex._execute_update_level("NOPE", "stop_loss", 1.0, "u1")
+        assert _Server.data[F] == before
+
+    def test_fixticker_no_op_writes_nothing(self):
+        import cmd_admin
+        F = self._seed([{"ticker": "OLD", "entry_price": 1.0}])
+        before = _Server().read_strict(F)
+        assert "not found" in (cmd_admin._cmd_admin("FIXTICKER GONE OTHER", "", "u1") or "")
+        assert _Server.data[F] == before, "a no-op rename burned a storage write"
+
+    # ── behaviour preserved through the conversion ───────────────────────────
+    def test_update_level_sets_the_field_and_clears_trail_flags(self):
+        import cmd_trade_exec as ex
+        F = self._seed([{"ticker": "AAA", "entry_price": 100.0, "shares": 1.0,
+                         "_notified_trail_15": True}])
+        ex._execute_update_level("AAA", "stop_loss", 90.0, "u1")
+        pos = _Server.data[F]["u1"]["open"][0]
+        assert pos["stop_loss"] == 90.0
+        assert "_notified_trail_15" not in pos, "trailing nudge flag was not reset"
+
+    def test_fixticker_renames_open_and_closed(self):
+        import cmd_admin
+        F = self._seed([{"ticker": "OLD", "entry_price": 1.0}],
+                       closed=[{"ticker": "OLD", "return_pct": 1.0}])
+        assert "Renamed" in (cmd_admin._cmd_admin("FIXTICKER OLD NEW", "", "u1") or "")
+        rec = _Server.data[F]["u1"]
+        assert rec["open"][0]["ticker"] == "NEW"
+        assert rec["closed"][0]["ticker"] == "NEW"
+
+    def test_save_watchlist_dedupes_and_keeps_positions(self, monkeypatch):
+        import webhook
+        F = self._seed([{"ticker": "AAA", "entry_price": 1.0}], watchlist=["OLD"])
+        monkeypatch.setattr(webhook, "get_user_config", lambda cid: {}, raising=False)
+        webhook._save_watchlist("u1", ["spy", "qqq", "SPY"])
+        rec = _Server.data[F]["u1"]
+        assert rec["watchlist"] == ["SPY", "QQQ"]
+        assert [t["ticker"] for t in rec["open"]] == ["AAA"]
+
+
+class TestConfigManagerWholeFileWriters:
+    """The last four `_load_gist_file(F) or {} → _write_gist_file(F, whole)` sites.
+    A swallowed read error turned each into a write that erased everyone else."""
+
+    @pytest.fixture(autouse=True)
+    def _wire(self, monkeypatch):
+        import storage
+        _Server.data = {}
+        cm._recent_user_writes.clear()
+        cm._gist_read_cache.clear()
+        monkeypatch.setattr(storage, "GistBackend", _Server)
+        monkeypatch.setattr(storage, "get_storage_backend", lambda: _Server())
+        monkeypatch.setattr(cm, "_load_gist_file", lambda fn: _Server().read(fn))
+        storage.reset_backend()
+        yield
+
+    def test_add_pending_user_keeps_the_others(self):
+        F = cm.PENDING_USERS_FILE
+        _Server.data[F] = {"u1": {"first_name": "A"}}
+        cm.add_pending_user("u2", "B", "bee")
+        assert set(_Server.data[F]) == {"u1", "u2"}
+        assert _Server.data[F]["u1"] == {"first_name": "A"}, "existing pending user erased"
+
+    def test_remove_pending_user_only_removes_that_one(self):
+        F = cm.PENDING_USERS_FILE
+        _Server.data[F] = {"u1": {"first_name": "A"}, "u2": {"first_name": "B"}}
+        cm.remove_pending_user("u1")
+        assert "u1" not in cm.get_pending_users()
+        assert cm.get_pending_users()["u2"] == {"first_name": "B"}
+
+    def test_removing_a_missing_pending_user_writes_nothing(self):
+        F = cm.PENDING_USERS_FILE
+        _Server.data[F] = {"u1": {"first_name": "A"}}
+        before = _Server().read_strict(F)
+        cm.remove_pending_user("nobody")
+        assert _Server.data[F] == before
+
+    def test_empty_pending_record_is_not_a_waiting_user(self):
+        """On a row backend a removal writes an empty record rather than deleting
+        the row — that tombstone must not read back as someone awaiting approval."""
+        _Server.data[cm.PENDING_USERS_FILE] = {"u1": {}, "u2": {"first_name": "B"}}
+        assert list(cm.get_pending_users()) == ["u2"]
+
+    def test_backtest_trades_save_keeps_other_users(self):
+        F = cm.BACKTEST_TRADES_FILE
+        _Server.data[F] = {"u1": [{"ticker": "AAA"}]}
+        cm.save_backtest_trades("u2", [{"ticker": "BBB"}])
+        assert _Server.data[F]["u1"] == [{"ticker": "AAA"}], "another user's backtest erased"
+        assert _Server.data[F]["u2"] == [{"ticker": "BBB"}]
+
+    def test_buy_count_increments_off_a_fresh_read(self):
+        from datetime import date
+        F, today = cm.BUY_COUNTS_FILE, date.today().isoformat()
+        _Server.data[F] = {"date": today, "counts": {"AAA": 1}}
+        # another user buys the same ticker between our read and our write
+        cur = _Server().read_strict(F)
+        cur["counts"]["AAA"] = 5
+        _Server().write(F, cur)
+        cm._gist_read_cache.clear()
+        assert cm.increment_buy_count("AAA") == 6, "a concurrent buy was lost"
+        assert _Server.data[F]["counts"]["AAA"] == 6
+
+    def test_buy_count_resets_on_a_new_day(self):
+        from datetime import date
+        F = cm.BUY_COUNTS_FILE
+        _Server.data[F] = {"date": "1999-01-01", "counts": {"AAA": 9}}
+        assert cm.increment_buy_count("AAA") == 1
+        assert _Server.data[F]["date"] == date.today().isoformat()
+
+    def test_mutate_gist_file_honours_no_write(self):
+        """Regression: mutate_gist_file used to write the NO_WRITE sentinel object
+        itself as the file contents, corrupting the file."""
+        F = "some_shared_file.json"
+        _Server.data[F] = {"keep": "me"}
+        out = cm.mutate_gist_file(F, lambda cur: (cm.NO_WRITE, "skipped"), default={})
+        assert out == "skipped"
+        assert _Server.data[F] == {"keep": "me"}

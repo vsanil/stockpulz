@@ -400,8 +400,16 @@ class TestTradeLoggerUnit:
                             lambda ticker, chat_id, picks=None, **kw: (fake_trade, False))
         monkeypatch.setattr(market_data, "validate_ticker", lambda t: True)
         monkeypatch.setattr(market_data, "get_live_price", lambda t: 199.99)
-        monkeypatch.setattr(cmd_trade_exec, "load_user_trade_log", lambda cid: {"open": [fake_trade]})
-        monkeypatch.setattr(cmd_trade_exec, "save_user_trade_log", lambda cid, log: saved.update(log=log))
+        _store = {"open": [fake_trade], "closed": [], "watchlist": []}
+        monkeypatch.setattr(cmd_trade_exec, "load_user_trade_log", lambda cid: _store)
+
+        def _fake_mutate(cid, mutator):
+            from config_manager import NO_WRITE
+            new_log, result = mutator(_store)
+            if new_log is not NO_WRITE:
+                saved["log"] = new_log
+            return result
+        monkeypatch.setattr(cmd_trade_exec, "mutate_user_trade_log", _fake_mutate)
 
         cmd_trade_exec._execute_bought("AAPL", "999")  # no explicit price
 
