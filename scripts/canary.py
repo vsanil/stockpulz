@@ -30,9 +30,15 @@ import requests
 RESULTS: list[tuple[str, bool, str]] = []
 
 
-def _check(name: str, ok: bool, detail: str = "") -> None:
-    RESULTS.append((name, bool(ok), detail))
-    print(f"{'PASS' if ok else 'FAIL'}  {name}  {('· ' + detail) if detail else ''}")
+def _check(name: str, ok: bool, detail: str = "", fail_detail: str = "") -> None:
+    """`detail` is the note shown when the check PASSES (state the fact observed);
+    `fail_detail` is shown when it FAILS (state the consequence). They were one
+    field, so a check whose note was written as a warning printed that warning
+    on a PASS line — e.g. price_guard read "lets a $0.01/spike through" while
+    green, which is the exact opposite of what happened."""
+    note = (detail if ok else (fail_detail or detail))
+    RESULTS.append((name, bool(ok), note))
+    print(f"{'PASS' if ok else 'FAIL'}  {name}  {('· ' + note) if note else ''}")
 
 
 def _fin(x) -> bool:
@@ -259,12 +265,14 @@ def check_price_guard() -> None:
                and not plausible_price(float("nan"), 100.0)
                and not plausible_price(4000.0, 354.0))  # 11x spike
     _check("price_guard.rejects_garbage", rejects,
-           "plausible_price lets a $0.01/spike through — false alerts will fire")
+           "rejected $0.01/$0.004/0/nan/11x-spike vs their references",
+           fail_detail="plausible_price lets a $0.01/spike through — false alerts will fire")
     accepts = (plausible_price(354.0, 360.0)          # real quote
                and plausible_price(570.31, 651.0)     # BNB real −12.4% stop
                and plausible_price(50.0, 100.0))      # legit −50% below-alert
     _check("price_guard.accepts_real", accepts,
-           "plausible_price rejects a real quote/drop — alerts would be suppressed")
+           "accepted a real quote, a real −12.4% stop and a legit −50% below-alert",
+           fail_detail="plausible_price rejects a real quote/drop — alerts would be suppressed")
 
 
 def check_storage_headroom() -> None:
