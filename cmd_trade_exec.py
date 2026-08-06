@@ -8,7 +8,8 @@ import threading
 
 from datetime import date
 from telegram_api import send_message, send_photo, send_inline_keyboard
-from config_manager import load_picks, load_user_trade_log, save_user_trade_log, et_today
+from config_manager import (load_picks, load_user_trade_log, et_today,
+                            mutate_user_trade_log, NO_WRITE)
 from formatters import _p, _esc
 from cmd_helpers import _resolve_ticker_candidates, _fetch_live_price
 
@@ -182,18 +183,22 @@ def _execute_bought(ticker: str, chat_id: str,
     if price is not None:
         try:
             entry_val = float(str(price).replace(",", ""))
-            log = load_user_trade_log(chat_id)
-            for t in log.get("open", []):
-                if t["ticker"] == ticker:
-                    t["entry_price"] = entry_val
-                    if shares:
-                        try:
-                            t["shares"] = float(str(shares).replace(",", ""))
-                            t["allocation"] = round(entry_val * t["shares"], 2)
-                        except Exception:
-                            pass
-                    break
-            save_user_trade_log(chat_id, log)
+
+            def _mut(log):
+                log = log or {"open": [], "closed": [], "watchlist": []}
+                for t in log.get("open", []):
+                    if t["ticker"] == ticker:
+                        t["entry_price"] = entry_val
+                        if shares:
+                            try:
+                                t["shares"] = float(str(shares).replace(",", ""))
+                                t["allocation"] = round(entry_val * t["shares"], 2)
+                            except Exception:
+                                pass
+                        return log, True
+                return NO_WRITE, False
+
+            mutate_user_trade_log(chat_id, _mut)
             trade["entry_price"] = entry_val
         except Exception:
             pass
@@ -326,81 +331,97 @@ def _execute_add(ticker: str, chat_id: str,
     If position doesn't exist, suggests /bought instead.
     """
     ticker = ticker.upper()
-    log    = load_user_trade_log(chat_id)
 
-    for trade in log.get("open", []):
-        if trade.get("ticker") != ticker:
-            continue
+    # Cheap existence check first, so we don't fetch a price for a ticker the
+    # user doesn't hold. The authoritative check happens inside the mutator.
+    if not any(t.get("ticker") == ticker
+               for t in (load_user_trade_log(chat_id).get("open") or [])):
+        return (
+            f"⚠️ <b>{ticker}</b> not found in your open positions.\n"
+            f"To open a new position use <code>/bought {ticker}</code>."
+        )
 
-        old_entry  = trade.get("entry_price")
-        old_shares = trade.get("shares")
+    if add_price is None:
+        # Fall back to live price — a NETWORK call, so it is hoisted out of the
+        # mutator: it must run once and must not repeat on a CAS retry.
+        try:
+            add_price = _fetch_live_price(ticker)
+        except Exception:
+            pass
 
-        if add_price is None:
-            # Fall back to live price
-            try:
-                add_price = _fetch_live_price(ticker)
-            except Exception:
-                pass
+    if add_price is None:
+        return (
+            f"⚠️ Couldn't fetch a price for <b>{ticker}</b>.\n"
+            f"Use: <code>/add {ticker} PRICE SHARES</code>"
+        )
 
-        if add_price is None:
-            return (
-                f"⚠️ Couldn't fetch a price for <b>{ticker}</b>.\n"
-                f"Use: <code>/add {ticker} PRICE SHARES</code>"
-            )
+    add_price_f  = float(add_price)
+    add_shares_f = float(add_shares) if add_shares else None
 
-        add_price_f  = float(add_price)
-        add_shares_f = float(add_shares) if add_shares else None
+    # The weighted average depends on the shares stored RIGHT NOW — averaging
+    # against a stale snapshot would silently drop a concurrent scale-in.
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        for trade in log.get("open", []):
+            if trade.get("ticker") != ticker:
+                continue
 
-        lines = []
+            old_entry  = trade.get("entry_price")
+            old_shares = trade.get("shares")
+            lines = []
 
-        if old_entry and old_shares and add_shares_f:
-            old_e_f  = float(old_entry)
-            old_s_f  = float(old_shares)
-            new_s_f  = old_s_f + add_shares_f
-            new_avg  = round((old_e_f * old_s_f + add_price_f * add_shares_f) / new_s_f, 4)
-            trade["entry_price"] = new_avg
-            trade["shares"]      = new_s_f
-            trade["allocation"]  = round(new_avg * new_s_f, 2)
-            lines.append(
-                f"✅ <b>{ticker}</b> scaled in: added <b>{add_shares_f:g} shares</b> @ "
-                f"<code>${_p(add_price_f)}</code>\n"
-                f"New avg entry: <code>${_p(new_avg)}</code>  ·  "
-                f"Total: <b>{new_s_f:g} shares</b>"
-            )
-        elif add_shares_f:
-            # No prior shares tracked — just update entry to new price, set shares
-            trade["entry_price"] = add_price_f
-            trade["shares"]      = add_shares_f
-            lines.append(
-                f"✅ <b>{ticker}</b> updated: "
-                f"<b>{add_shares_f:g} shares</b> @ <code>${_p(add_price_f)}</code>"
-            )
-        else:
-            # No shares provided — just note the add-on price
-            lines.append(
-                f"✅ <b>{ticker}</b> add-on recorded @ <code>${_p(add_price_f)}</code>\n"
-                f"<i>Tip: include share count to track your average entry: "
-                f"<code>/add {ticker} {_p(add_price_f)} SHARES</code></i>"
-            )
+            if old_entry and old_shares and add_shares_f:
+                old_e_f  = float(old_entry)
+                old_s_f  = float(old_shares)
+                new_s_f  = old_s_f + add_shares_f
+                new_avg  = round((old_e_f * old_s_f + add_price_f * add_shares_f) / new_s_f, 4)
+                trade["entry_price"] = new_avg
+                trade["shares"]      = new_s_f
+                trade["allocation"]  = round(new_avg * new_s_f, 2)
+                lines.append(
+                    f"✅ <b>{ticker}</b> scaled in: added <b>{add_shares_f:g} shares</b> @ "
+                    f"<code>${_p(add_price_f)}</code>\n"
+                    f"New avg entry: <code>${_p(new_avg)}</code>  ·  "
+                    f"Total: <b>{new_s_f:g} shares</b>"
+                )
+            elif add_shares_f:
+                # No prior shares tracked — just update entry to new price, set shares
+                trade["entry_price"] = add_price_f
+                trade["shares"]      = add_shares_f
+                lines.append(
+                    f"✅ <b>{ticker}</b> updated: "
+                    f"<b>{add_shares_f:g} shares</b> @ <code>${_p(add_price_f)}</code>"
+                )
+            else:
+                # No shares provided — just note the add-on price
+                lines.append(
+                    f"✅ <b>{ticker}</b> add-on recorded @ <code>${_p(add_price_f)}</code>\n"
+                    f"<i>Tip: include share count to track your average entry: "
+                    f"<code>/add {ticker} {_p(add_price_f)} SHARES</code></i>"
+                )
 
-        # vs current stop/target
-        stop   = trade.get("stop_loss")
-        target = trade.get("target_price")
-        new_e  = trade.get("entry_price", add_price_f)
-        if stop:
-            risk_pct = (float(new_e) - float(stop)) / float(new_e) * 100
-            lines.append(f"Risk to stop: <code>{risk_pct:.1f}%</code>  (<code>${_p(stop)}</code>)")
-        if target:
-            upside = (float(target) - float(new_e)) / float(new_e) * 100
-            lines.append(f"Upside to target: <code>{upside:.1f}%</code>  (<code>${_p(target)}</code>)")
+            # vs current stop/target
+            stop   = trade.get("stop_loss")
+            target = trade.get("target_price")
+            new_e  = trade.get("entry_price", add_price_f)
+            if stop:
+                risk_pct = (float(new_e) - float(stop)) / float(new_e) * 100
+                lines.append(f"Risk to stop: <code>{risk_pct:.1f}%</code>  (<code>${_p(stop)}</code>)")
+            if target:
+                upside = (float(target) - float(new_e)) / float(new_e) * 100
+                lines.append(f"Upside to target: <code>{upside:.1f}%</code>  (<code>${_p(target)}</code>)")
 
-        save_user_trade_log(chat_id, log)
-        return "\n".join(lines)
+            return log, "\n".join(lines)
 
-    return (
-        f"⚠️ <b>{ticker}</b> not found in your open positions.\n"
-        f"To open a new position use <code>/bought {ticker}</code>."
-    )
+        return NO_WRITE, None
+
+    result = mutate_user_trade_log(chat_id, _mut)
+    if result is None:
+        return (
+            f"⚠️ <b>{ticker}</b> not found in your open positions.\n"
+            f"To open a new position use <code>/bought {ticker}</code>."
+        )
+    return result
 
 
 def _execute_trim(ticker: str, chat_id: str,
@@ -411,94 +432,108 @@ def _execute_trim(ticker: str, chat_id: str,
     Records partial P&L, reduces remaining shares, keeps position open.
     """
     ticker = ticker.upper()
-    log    = load_user_trade_log(chat_id)
 
-    for trade in log.get("open", []):
-        if trade.get("ticker") != ticker:
-            continue
+    # Existence check before the network call (see _execute_add).
+    if not any(t.get("ticker") == ticker
+               for t in (load_user_trade_log(chat_id).get("open") or [])):
+        return (
+            f"⚠️ <b>{ticker}</b> not found in your open positions.\n"
+            f"Use <code>/positions</code> to see your open trades."
+        )
 
-        entry      = trade.get("entry_price")
-        cur_shares = trade.get("shares")
+    if trim_price is None:
+        try:
+            trim_price = _fetch_live_price(ticker)   # network — hoisted out
+        except Exception:
+            pass
+    if trim_price is None:
+        return (
+            f"⚠️ Couldn't fetch a price for <b>{ticker}</b>.\n"
+            f"Use: <code>/trim {ticker} SHARES PRICE</code>"
+        )
 
-        if trim_price is None:
-            try:
-                trim_price = _fetch_live_price(ticker)
-            except Exception:
-                pass
-        if trim_price is None:
-            return (
-                f"⚠️ Couldn't fetch a price for <b>{ticker}</b>.\n"
-                f"Use: <code>/trim {ticker} SHARES PRICE</code>"
-            )
+    trim_p = float(trim_price)
 
-        trim_p = float(trim_price)
+    # How many shares to sell, and whether that would close the position, both
+    # depend on the CURRENT share count — so those decisions live in the mutator.
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        for trade in log.get("open", []):
+            if trade.get("ticker") != ticker:
+                continue
 
-        if trim_shares is None:
-            if cur_shares:
-                trim_shares = round(float(cur_shares) / 2, 0)  # default: sell half
+            entry      = trade.get("entry_price")
+            cur_shares = trade.get("shares")
+
+            if trim_shares is None:
+                if cur_shares:
+                    trim_s = round(float(cur_shares) / 2, 0)  # default: sell half
+                else:
+                    return NO_WRITE, (
+                        f"⚠️ Specify how many shares to sell: "
+                        f"<code>/trim {ticker} SHARES</code>"
+                    )
             else:
-                return (
-                    f"⚠️ Specify how many shares to sell: "
-                    f"<code>/trim {ticker} SHARES</code>"
+                trim_s = float(trim_shares)
+
+            if cur_shares and trim_s >= float(cur_shares):
+                return NO_WRITE, (
+                    f"⚠️ That would close the entire position.\n"
+                    f"Use <code>/sold {ticker}</code> to fully close, or specify fewer shares."
                 )
 
-        trim_s = float(trim_shares)
+            # Compute partial P&L
+            lines = []
+            if entry:
+                entry_f  = float(entry)
+                ret_pct  = (trim_p - entry_f) / entry_f * 100
+                pnl_usd  = (trim_p - entry_f) * trim_s
+                sign     = "+" if ret_pct >= 0 else ""
+                emoji    = "📈" if ret_pct >= 0 else "📉"
+                lines.append(
+                    f"{emoji} <b>{ticker}</b> partial close: sold <b>{trim_s:g} shares</b> "
+                    f"@ <code>${_p(trim_p)}</code>\n"
+                    f"P&amp;L on trim: <b>{sign}{ret_pct:.1f}%</b>  ·  "
+                    f"<b>{sign}${abs(pnl_usd):,.2f}</b>"
+                )
+                # Log partial P&L into closed trades
+                partial_record = {
+                    "ticker":       ticker,
+                    "entry_price":  entry_f,
+                    "exit_price":   trim_p,
+                    "shares":       trim_s,
+                    "return_pct":   round(ret_pct, 2),
+                    "gain_usd":     round(pnl_usd, 2),
+                    "closed_date":  str(et_today()),
+                    "partial":      True,
+                }
+                log.setdefault("closed", []).append(partial_record)
+            else:
+                lines.append(
+                    f"✅ <b>{ticker}</b> trimmed: sold <b>{trim_s:g} shares</b> "
+                    f"@ <code>${_p(trim_p)}</code>"
+                )
 
-        if cur_shares and trim_s >= float(cur_shares):
-            return (
-                f"⚠️ That would close the entire position.\n"
-                f"Use <code>/sold {ticker}</code> to fully close, or specify fewer shares."
-            )
+            # Update remaining position
+            if cur_shares:
+                remaining = float(cur_shares) - trim_s
+                trade["shares"]     = remaining
+                trade["allocation"] = round(remaining * float(entry or trim_p), 2) if entry else None
+                lines.append(f"Remaining: <b>{remaining:g} shares</b> still open")
+            else:
+                lines.append(f"<i>Update shares manually if needed: <code>/add {ticker}</code></i>")
 
-        # Compute partial P&L
-        lines = []
-        if entry:
-            entry_f  = float(entry)
-            ret_pct  = (trim_p - entry_f) / entry_f * 100
-            pnl_usd  = (trim_p - entry_f) * trim_s
-            sign     = "+" if ret_pct >= 0 else ""
-            emoji    = "📈" if ret_pct >= 0 else "📉"
-            lines.append(
-                f"{emoji} <b>{ticker}</b> partial close: sold <b>{trim_s:g} shares</b> "
-                f"@ <code>${_p(trim_p)}</code>\n"
-                f"P&amp;L on trim: <b>{sign}{ret_pct:.1f}%</b>  ·  "
-                f"<b>{sign}${abs(pnl_usd):,.2f}</b>"
-            )
-            # Log partial P&L into closed trades
-            from datetime import date as _date
-            partial_record = {
-                "ticker":       ticker,
-                "entry_price":  entry_f,
-                "exit_price":   trim_p,
-                "shares":       trim_s,
-                "return_pct":   round(ret_pct, 2),
-                "gain_usd":     round(pnl_usd, 2),
-                "closed_date":  str(et_today()),
-                "partial":      True,
-            }
-            log.setdefault("closed", []).append(partial_record)
-        else:
-            lines.append(
-                f"✅ <b>{ticker}</b> trimmed: sold <b>{trim_s:g} shares</b> "
-                f"@ <code>${_p(trim_p)}</code>"
-            )
+            return log, "\n".join(lines)
 
-        # Update remaining position
-        if cur_shares:
-            remaining = float(cur_shares) - trim_s
-            trade["shares"]     = remaining
-            trade["allocation"] = round(remaining * float(entry or trim_p), 2) if entry else None
-            lines.append(f"Remaining: <b>{remaining:g} shares</b> still open")
-        else:
-            lines.append(f"<i>Update shares manually if needed: <code>/add {ticker}</code></i>")
+        return NO_WRITE, None
 
-        save_user_trade_log(chat_id, log)
-        return "\n".join(lines)
-
-    return (
-        f"⚠️ <b>{ticker}</b> not found in your open positions.\n"
-        f"Use <code>/positions</code> to see your open trades."
-    )
+    result = mutate_user_trade_log(chat_id, _mut)
+    if result is None:
+        return (
+            f"⚠️ <b>{ticker}</b> not found in your open positions.\n"
+            f"Use <code>/positions</code> to see your open trades."
+        )
+    return result
 
 
 def _execute_sold(ticker: str, chat_id: str,
@@ -653,62 +688,70 @@ def _execute_update_level(ticker: str, field: str, new_price: float, chat_id: st
     can re-fire if the position continues to move.
     """
     ticker = ticker.upper()
-    log    = load_user_trade_log(chat_id)
 
-    for trade in log.get("open", []):
-        if trade["ticker"] != ticker:
-            continue
+    def _mut(log):
+        log = log or {"open": [], "closed": [], "watchlist": []}
+        for trade in log.get("open", []):
+            if trade["ticker"] != ticker:
+                continue
 
-        old_val   = trade.get(field)
-        trade[field] = round(new_price, 2)
+            old_val      = trade.get(field)
+            trade[field] = round(new_price, 2)
 
-        # Reset trailing nudge flags so they can re-fire from the new level
-        if field == "stop_loss":
-            trade.pop("_notified_breakeven",  None)
-            trade.pop("_notified_trail_15",   None)
-            trade.pop("_notified_trail_90",   None)
+            # Reset trailing nudge flags so they can re-fire from the new level
+            if field == "stop_loss":
+                trade.pop("_notified_breakeven",  None)
+                trade.pop("_notified_trail_15",   None)
+                trade.pop("_notified_trail_90",   None)
 
-        save_user_trade_log(chat_id, log)
+            # entry/shares are read off the FRESH record so the risk check below
+            # reflects a concurrent scale-in rather than a stale share count.
+            return log, {"old_val": old_val,
+                         "entry":  trade.get("entry_price"),
+                         "shares": trade.get("shares")}
+        return NO_WRITE, None
 
-        label    = "stop-loss" if field == "stop_loss" else "target"
-        old_str  = f"${_p(old_val)}" if old_val else "none"
-        entry    = trade.get("entry_price")
-        vs_entry = ""
-        if entry:
-            pct = (new_price - float(entry)) / float(entry) * 100
-            vs_entry = f"  <i>({'+' if pct >= 0 else ''}{pct:.1f}% vs entry)</i>"
+    res = mutate_user_trade_log(chat_id, _mut)
+    if res is None:
+        return f"⚠️ <b>{ticker}</b> not found in your open positions."
 
-        result = (
-            f"✅ <b>{ticker}</b> {label} updated: "
-            f"<code>{old_str}</code> → <code>${_p(new_price)}</code>{vs_entry}"
-        )
+    old_val, entry = res["old_val"], res["entry"]
+    label    = "stop-loss" if field == "stop_loss" else "target"
+    old_str  = f"${_p(old_val)}" if old_val else "none"
+    vs_entry = ""
+    if entry:
+        pct = (new_price - float(entry)) / float(entry) * 100
+        vs_entry = f"  <i>({'+' if pct >= 0 else ''}{pct:.1f}% vs entry)</i>"
 
-        # ── Risk check when stop is moved ─────────────────────────────────────
-        # Warn if the new stop now risks more than the user's risk_per_trade rule.
-        if field == "stop_loss":
-            try:
-                from config_manager import get_user_config
-                u_cfg    = get_user_config(chat_id)
-                port_cfg = u_cfg.get("portfolio", {}) if isinstance(u_cfg.get("portfolio"), dict) else {}
-                cap      = port_cfg.get("portfolio_size")
-                risk_pct = float(port_cfg.get("risk_per_trade_pct", 1.0))
-                shares   = trade.get("shares")
-                if cap and shares and entry:
-                    allowed_risk = float(cap) * risk_pct / 100
-                    actual_risk  = abs(float(entry) - new_price) * float(shares)
-                    if actual_risk > allowed_risk * 1.05:   # 5% grace band
-                        over_pct = (actual_risk / allowed_risk - 1) * 100
-                        result += (
-                            f"\n\n⚠️ <b>Risk alert:</b> this stop risks "
-                            f"<code>${actual_risk:,.0f}</code> "
-                            f"({over_pct:.0f}% over your {risk_pct:.1f}% rule "
-                            f"of <code>${allowed_risk:,.0f}</code>).\n"
-                            f"<i>Consider reducing to {int(allowed_risk / max(abs(float(entry) - new_price), 0.01))} shares "
-                            f"or tightening your stop.</i>"
-                        )
-            except Exception:
-                pass
+    result = (
+        f"✅ <b>{ticker}</b> {label} updated: "
+        f"<code>{old_str}</code> → <code>${_p(new_price)}</code>{vs_entry}"
+    )
 
-        return result
+    # ── Risk check when stop is moved ─────────────────────────────────────────
+    # Warn if the new stop now risks more than the user's risk_per_trade rule.
+    if field == "stop_loss":
+        try:
+            from config_manager import get_user_config
+            u_cfg    = get_user_config(chat_id)
+            port_cfg = u_cfg.get("portfolio", {}) if isinstance(u_cfg.get("portfolio"), dict) else {}
+            cap      = port_cfg.get("portfolio_size")
+            risk_pct = float(port_cfg.get("risk_per_trade_pct", 1.0))
+            shares   = res["shares"]
+            if cap and shares and entry:
+                allowed_risk = float(cap) * risk_pct / 100
+                actual_risk  = abs(float(entry) - new_price) * float(shares)
+                if actual_risk > allowed_risk * 1.05:   # 5% grace band
+                    over_pct = (actual_risk / allowed_risk - 1) * 100
+                    result += (
+                        f"\n\n⚠️ <b>Risk alert:</b> this stop risks "
+                        f"<code>${actual_risk:,.0f}</code> "
+                        f"({over_pct:.0f}% over your {risk_pct:.1f}% rule "
+                        f"of <code>${allowed_risk:,.0f}</code>).\n"
+                        f"<i>Consider reducing to {int(allowed_risk / max(abs(float(entry) - new_price), 0.01))} shares "
+                        f"or tightening your stop.</i>"
+                    )
+        except Exception:
+            pass
 
-    return f"⚠️ <b>{ticker}</b> not found in your open positions."
+    return result

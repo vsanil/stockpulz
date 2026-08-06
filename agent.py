@@ -55,7 +55,7 @@ def _miniapp_url_btn(label: str, path: str, fallback_cb: str) -> dict:
 from config_manager import (
     get_config, update_config, save_picks, load_picks, save_weekly_pick,
     get_dynamic_pick_counts, get_user_config,
-    load_user_trade_log, save_user_trade_log,
+    load_user_trade_log,
     save_screener_cache, load_screener_cache, et_today,
 )
 from etf_screener import run_etf_screener

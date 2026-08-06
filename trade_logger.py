@@ -16,7 +16,7 @@ Trades expire after 28 days if neither target nor stop is hit.
 from __future__ import annotations
 
 from datetime import date
-from config_manager import (load_user_trade_log, save_user_trade_log, et_today,
+from config_manager import (load_user_trade_log, et_today,
                             mutate_user_trade_log, NO_WRITE)
 
 

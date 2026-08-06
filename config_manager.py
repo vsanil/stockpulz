@@ -393,28 +393,40 @@ def remove_allowed_user(chat_id: str) -> list[str]:
 # ── Pending users (awaiting admin approval) ──────────────────────────────────
 
 def get_pending_users() -> dict:
-    """Return pending users dict: { chat_id: {first_name, username, requested_at} }"""
-    return _load_gist_file(PENDING_USERS_FILE) or {}
+    """Return pending users dict: { chat_id: {first_name, username, requested_at} }
+
+    Empty records are filtered out: on a ROW backend a removal is written as an
+    empty record (rows are updated, not deleted), and a tombstone must not read
+    back as somebody still waiting for approval.
+    """
+    data = _load_gist_file(PENDING_USERS_FILE) or {}
+    return {uid: rec for uid, rec in data.items() if rec}
 
 
 def add_pending_user(chat_id: str, first_name: str = "", username: str = "") -> None:
     """Add a user to the pending approval list."""
     from datetime import datetime, timezone
-    pending = get_pending_users()
-    pending[str(chat_id)] = {
+    record = {
         "first_name":    first_name,
         "username":      username,
         "requested_at":  datetime.now(timezone.utc).isoformat(),
     }
-    _write_gist_file(PENDING_USERS_FILE, pending)
+    # Was `get_pending_users() or {}` → write-whole-file: one transient read
+    # error dropped everyone else waiting for approval.
+    mutate_user_record(PENDING_USERS_FILE, chat_id,
+                       lambda _rec: (record, None), default={})
 
 
 def remove_pending_user(chat_id: str) -> None:
     """Remove a user from the pending list (after approval or rejection)."""
-    pending = get_pending_users()
-    if str(chat_id) in pending:
+    def _mut(pending):
+        pending = pending or {}
+        if not pending.get(str(chat_id)):
+            return NO_WRITE, None
         del pending[str(chat_id)]
-        _write_gist_file(PENDING_USERS_FILE, pending)
+        return pending, None
+
+    mutate_gist_file(PENDING_USERS_FILE, _mut, default={})
 
 
 # ── Picks storage (for 10:30 AM confirmation run) ────────────────────────────
@@ -670,9 +682,8 @@ def load_screener_cache() -> dict | None:
 
 def save_backtest_trades(chat_id: str, trades: list) -> None:
     """Persist simulated backtest trades for a user (used to seed Performance tab)."""
-    all_data = _load_gist_file(BACKTEST_TRADES_FILE) or {}
-    all_data[str(chat_id)] = trades
-    _write_gist_file(BACKTEST_TRADES_FILE, all_data)
+    mutate_user_record(BACKTEST_TRADES_FILE, chat_id,
+                       lambda _rec: (trades, None), default=[])
     print(f"[config_manager] Saved {len(trades)} backtest trades for {chat_id}.")
 
 
@@ -707,15 +718,20 @@ def increment_buy_count(ticker: str) -> int:
     """
     from datetime import date
     today = date.today().isoformat()
-    data  = _load_gist_file(BUY_COUNTS_FILE) or {}
 
-    if data.get("date") != today:
-        data = {"date": today, "counts": {}}   # new day — reset counts
+    # Increment against a FRESH read — the old load→write pattern lost counts
+    # whenever two users bought the same ticker at once.
+    def _mut(data):
+        data = data or {}
+        if data.get("date") != today:
+            data = {"date": today, "counts": {}}   # new day — reset counts
+        data.setdefault("counts", {})
+        data["counts"][ticker] = data["counts"].get(ticker, 0) + 1
+        return data, data["counts"][ticker]
 
-    data["counts"][ticker] = data["counts"].get(ticker, 0) + 1
-    _write_gist_file(BUY_COUNTS_FILE, data)
-    print(f"[config_manager] Buy count for {ticker}: {data['counts'][ticker]}")
-    return data["counts"][ticker]
+    count = mutate_gist_file(BUY_COUNTS_FILE, _mut, default={})
+    print(f"[config_manager] Buy count for {ticker}: {count}")
+    return count
 
 
 # ── Macro cache (Fear & Greed + FRED rates, shared across all users) ─────────
@@ -999,6 +1015,9 @@ def mutate_gist_file(filename: str, mutator, default=None):
     written and `result` is returned to the caller. Read failures RAISE (no
     clobber). Use for shared multi-user files (e.g. price_alerts) where the whole
     blob is rewritten so a naive load→mutate→save loses concurrent edits.
+
+    A mutator may return NO_WRITE instead of new contents to mean "nothing
+    changed" — the write is skipped and `result` is still returned.
     """
     from storage import get_storage_backend as get_backend   # Gist unless SUPABASE_* is set
     backend = get_backend()
@@ -1014,6 +1033,8 @@ def mutate_gist_file(filename: str, mutator, default=None):
             before  = backend.read_all_users(filename) or {}
             current = dict(before)
             new_contents, result = mutator(current)
+            if new_contents is NO_WRITE:
+                return result
             new_contents = new_contents if isinstance(new_contents, dict) else {}
             for uid, val in new_contents.items():
                 if before.get(uid) != val:
@@ -1031,6 +1052,8 @@ def mutate_gist_file(filename: str, mutator, default=None):
         if current is None:
             current = {} if default is None else default
         new_contents, result = mutator(current)
+        if new_contents is NO_WRITE:
+            return result
         _cache_invalidate(filename)
         backend.write(filename, new_contents)
         _cache_set(filename, new_contents)

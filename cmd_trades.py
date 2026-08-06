@@ -14,6 +14,8 @@ from telegram_api import send_message, send_inline_keyboard, typing_until_done, 
 from formatters import _p, _esc
 from config_manager import (
     load_user_trade_log,
+    mutate_user_trade_log,
+    NO_WRITE,
     load_user_paper,
     save_pending_state,
     load_pending_state,
@@ -280,7 +282,6 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
 
     # ── /pause TICKER — mute nudges for a position (toggle) ─────────────────
     if text.startswith("PAUSE ") or text == "PAUSE":
-        from config_manager import save_user_trade_log
         raw = text[6:].strip().upper() if text.startswith("PAUSE ") else ""
         if not raw:
             return (
@@ -291,20 +292,23 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                 "for that position until you run <code>/pause TICKER</code> again to resume."
             )
         ticker = raw.split()[0]
-        log    = load_user_trade_log(chat_id)
-        found  = False
-        for trade in log.get("open", []):
-            if (trade.get("ticker") or "").upper() == ticker:
-                currently_paused = trade.get("_paused", False)
-                trade["_paused"] = not currently_paused
-                found = True
-                action = "🔇 <b>Nudges paused</b>" if trade["_paused"] else "🔔 <b>Nudges resumed</b>"
-                break
-        if not found:
+
+        # A TOGGLE must flip whatever is stored NOW — flipping a stale snapshot
+        # can write back the state the user just changed elsewhere.
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            for trade in log.get("open", []):
+                if (trade.get("ticker") or "").upper() == ticker:
+                    trade["_paused"] = not trade.get("_paused", False)
+                    return log, trade["_paused"]
+            return NO_WRITE, None
+
+        paused = mutate_user_trade_log(chat_id, _mut)
+        if paused is None:
             return f"❌ No open position found for <b>{ticker}</b>. Check <code>/positions</code>."
-        save_user_trade_log(chat_id, log)
-        verb = "paused" if trade.get("_paused") else "resumed"
-        note = " You won't receive trailing stop, stale, or partial profit alerts for this position." if trade.get("_paused") else " Nudges are active again."
+        action = "🔇 <b>Nudges paused</b>" if paused else "🔔 <b>Nudges resumed</b>"
+        note = (" You won't receive trailing stop, stale, or partial profit alerts for this position."
+                if paused else " Nudges are active again.")
         return f"{action} for <b>{ticker}</b>.{note}"
 
     # ── /import — bulk import CSV trade history ───────────────────────────────
@@ -326,7 +330,6 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
     if text.startswith("IMPORT\n") or text.startswith("IMPORT "):
         import csv as _csv
         import io as _io
-        from config_manager import save_user_trade_log
 
         # everything after "IMPORT" (strip leading newline or space)
         raw_csv = text[6:].lstrip("\n ")
@@ -337,7 +340,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
         imported = 0
         skipped  = 0
         errors   = []
-        log      = load_user_trade_log(chat_id)
+        records  = []   # parsed first; appended to the log in one mutate below
 
         for row_num, row in enumerate(reader, start=1):
             if not row or not any(c.strip() for c in row):
@@ -385,14 +388,18 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                     "closed_date":  exit_date,
                     "source":       "import",
                 }
-                log.setdefault("closed", []).append(record)
+                records.append(record)
                 imported += 1
             except Exception as exc:
                 errors.append(f"Row {row_num}: {exc}")
                 skipped += 1
 
         if imported:
-            save_user_trade_log(chat_id, log)
+            def _mut(log):
+                log = log or {"open": [], "closed": [], "watchlist": []}
+                log.setdefault("closed", []).extend(records)
+                return log, None
+            mutate_user_trade_log(chat_id, _mut)
 
         msg = f"📥 <b>Import complete</b> — <b>{imported}</b> trade{'s' if imported != 1 else ''} added."
         if skipped:
@@ -1080,17 +1087,16 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             )
             return ""
         # Save note
-        from config_manager import save_user_trade_log
-        log = load_user_trade_log(chat_id)
-        saved = False
-        for t in log.get("open", []):
-            if t["ticker"] == ticker:
-                t["notes"] = note_text[:500]
-                saved = True
-                break
-        if not saved:
+        def _mut(log):
+            log = log or {"open": [], "closed": [], "watchlist": []}
+            for t in log.get("open", []):
+                if t["ticker"] == ticker:
+                    t["notes"] = note_text[:500]
+                    return log, True
+            return NO_WRITE, False
+
+        if not mutate_user_trade_log(chat_id, _mut):
             return f"⚠️ <b>{ticker}</b> not found in your open positions."
-        save_user_trade_log(chat_id, log)
         return f"📝 Note saved for <b>{ticker}</b>:\n<i>{note_text[:200]}</i>"
 
     # ── /recap — daily open-position check-in ───────────────────────────────
