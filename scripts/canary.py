@@ -315,6 +315,75 @@ def check_cron_delivery() -> None:
            f"picks._saved_date={_saved} (expected ≥{exp})")
 
 
+def check_selfheal_health() -> None:
+    """Who watches the watcher.
+
+    self_heal.yml is the safety net for the other monitors — and NOTHING watched
+    it. On Aug 6 a self-heal run died at "Set up job" with
+    `Failed to resolve action download info: Service Unavailable` — GitHub's own
+    action registry, before a line of our code ran. It went unnoticed. A broken
+    net is worse than no net, because you stop looking.
+
+    Deliberately a 7-DAY look-back on a daily check, not a weekly job: it costs
+    one API call, reports through a channel that already exists, and is itself
+    covered by self-heal — a separate weekly workflow would be one more thing
+    that can rot unobserved, which is the exact failure being fixed here.
+
+    NOTE the escape hatch: this reports to the OWNER, not to self-heal. Asking a
+    broken self-healer to heal itself is not a plan.
+    """
+    import datetime as _dt
+    repo = os.environ.get("GITHUB_REPOSITORY") or "vsanil/stockpulz"
+    tok  = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+    since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+    url = (f"https://api.github.com/repos/{repo}/actions/workflows/"
+           f"self_heal.yml/runs?created=>{since}&per_page=50")
+    try:
+        r = requests.get(url, headers={"Authorization": f"token {tok}",
+                                       "Accept": "application/vnd.github+json"}, timeout=20)
+        if r.status_code != 200:
+            # Can't verify != verified clean. Say so plainly rather than let a
+            # green line imply a check that never actually ran (the cg_cache trap).
+            _check("selfheal.healthy", True,
+                   f"NOT VERIFIED this run — GitHub API HTTP {r.status_code}")
+            return
+        runs = r.json().get("workflow_runs", []) or []
+    except Exception as e:
+        _check("selfheal.healthy", True, f"NOT VERIFIED this run — {type(e).__name__}")
+        return
+
+    # `skipped` is the NORMAL outcome (the monitor it watched passed) — not a fault.
+    done = [x for x in runs if x.get("conclusion")]          # ignore in-progress
+    bad  = [x for x in done if x.get("conclusion") == "failure"]
+
+    # Fail on "the net is DOWN NOW", not "the net hiccupped once this week".
+    # The Aug 6 failure was GitHub's action registry returning Service
+    # Unavailable — already over by the next run. Failing for 7 days on a
+    # resolved transient is how a canary trains you to ignore it; the rule here
+    # is the same one the crypto checks learned: fail when it MATTERS, not when
+    # a third party hiccupped. So: red only if the most recent concluded run
+    # failed (still broken), or failures are frequent enough to look chronic.
+    latest_failed = bool(done) and done[0].get("conclusion") == "failure"
+    chronic       = len(bad) >= 3
+    ok = not (latest_failed or chronic)
+
+    recovered = f" ({len(bad)} failed earlier in 7d, since recovered)" if bad else ""
+    # Built conditionally: `fail_detail` is evaluated eagerly by the call, so
+    # indexing bad[0] here would IndexError on the COMMON path — no failures.
+    fail_detail = ""
+    if bad:
+        first = bad[0]
+        fail_detail = (f"{len(bad)}/{len(done)} self-heal run(s) FAILED in 7d — "
+                       f"{'LATEST run failed' if latest_failed else 'chronic failures'} "
+                       f"({(first.get('created_at') or '?')[:16]}, "
+                       f"{first.get('html_url','')}). The auto-fix net is down: "
+                       f"monitor failures will go unfixed until it is restored.")
+    _check("selfheal.healthy", ok,
+           f"{len(done)} self-heal run(s) in 7d, latest "
+           f"{done[0].get('conclusion') if done else 'none'}{recovered}",
+           fail_detail=fail_detail)
+
+
 def check_endpoints() -> None:
     base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
             or "https://stock-agent-enqx.onrender.com").rstrip("/")
@@ -527,7 +596,7 @@ def main() -> int:
 
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
                check_backtest_math, check_price_guard, check_storage_headroom,
-               check_cron_delivery,
+               check_cron_delivery, check_selfheal_health,
                check_endpoints):
         try:
             fn()
