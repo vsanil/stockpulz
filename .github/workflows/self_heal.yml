@@ -16,7 +16,7 @@ name: Self-Heal on Monitor Failure
 
 on:
   workflow_run:
-    workflows: ["Daily Canary", "Synthetic User", "Full Sweep"]
+    workflows: ["Daily Canary", "Synthetic User", "Full Sweep", "Pick Evaluation"]
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -101,6 +101,7 @@ jobs:
 
           STEP 2 — diagnose the ROOT cause and classify:
             - FALSE ALARM: the monitor/check assumes something no longer true (clean slate, exact date, sufficient cash). Fix = make the check robust in scripts/. NEVER weaken a guard that is correctly catching a real problem.
+            - TRANSIENT INFRASTRUCTURE, NOT A BUG: if "Pick Evaluation" failed with "LEDGER SAVE FAILED", that is GitHub rate-limiting a gist PATCH (409/403). The retry/backoff already exists and the exit-1 is deliberate so a lost day is loud. Make NO code change — a speculative edit here would auto-deploy for nothing. Just stop and say it was transient. (The lost day itself is NOT recoverable in code: record_today only reads TODAY's picks.json.)
             - REAL APP BUG: fix the app code and ADD a regression test.
             If you are NOT confident it is a genuine fix, make NO changes and stop — a wrong auto-merged fix would deploy live to real users.
 
