@@ -116,11 +116,30 @@ def _load_ledger() -> tuple[list, dict, str]:
     return rows, shard, name
 
 
-def _save_ledger(led: dict, name: str = _LEDGER_FILE) -> None:
-    requests.patch(f"https://api.github.com/gists/{_GID}",
-                   headers=_headers(),
-                   json={"files": {name: {"content": json.dumps(led, indent=2)}}},
-                   timeout=25)
+def _save_ledger(led: dict, name: str = _LEDGER_FILE) -> bool:
+    """Persist the shard, VERIFYING the write. This was fire-and-forget, which is
+    worse here than anywhere else in the project: `record_today` only ever reads
+    TODAY's picks.json, so a silently throttled PATCH (GitHub 409/403 on rapid
+    successive writes) loses that day's picks PERMANENTLY — there is no next run
+    that can recover them. And a lost day isn't random: it correlates with the
+    busy morning-run window, which would quietly bias the sample the launch
+    decision rests on. Retries with backoff and reports loudly."""
+    import time
+    body = {"files": {name: {"content": json.dumps(led, indent=2)}}}
+    last = ""
+    for attempt in range(1, 6):
+        try:
+            r = requests.patch(f"https://api.github.com/gists/{_GID}",
+                               headers=_headers(), json=body, timeout=25)
+            if r.status_code < 400:
+                return True
+            last = f"{r.status_code} {r.text[:80]}"
+        except Exception as exc:
+            last = str(exc)
+        time.sleep(1.5 * attempt)
+    print(f"[evaluate] 🚨 LEDGER SAVE FAILED ({name}): {last} — "
+          f"today's picks are NOT recorded and cannot be recovered.")
+    return False
 
 
 def _pos(x) -> bool:
@@ -464,7 +483,21 @@ def main() -> int:
         before = len(shard.get("picks", []))
         added = record_today(shard, known=other)
         if added and not args.dry_run:
-            _save_ledger(shard, shard_name)
+            if not _save_ledger(shard, shard_name):
+                # Loud, and a non-zero exit so the workflow goes red and
+                # self-heal picks it up. A silent loss here is unrecoverable —
+                # it must NEVER be swallowed the way a report failure can be.
+                try:
+                    from telegram_api import send_message
+                    owner = os.environ.get("TELEGRAM_CHAT_ID", "")
+                    if owner:
+                        send_message(
+                            f"🚨 <b>Pick ledger save FAILED</b>\n{added} pick(s) from "
+                            f"today were not recorded and cannot be recovered.",
+                            chat_id=owner)
+                except Exception as exc:
+                    print(f"[evaluate] alert send failed: {exc}")
+                return 1
         # newly appended rows are in the shard but not yet in all_rows
         all_rows = all_rows + shard["picks"][before:]
     rows = all_rows

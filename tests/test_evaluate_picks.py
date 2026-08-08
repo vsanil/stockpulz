@@ -371,3 +371,39 @@ class TestShardedLedger:
         assert ev.record_today(shard, known=prior) == 0
         assert shard["picks"] == []
         assert ev.record_today({"picks": []}, known=set()) == 1
+
+
+class TestLedgerSaveIsVerified:
+    """A silently-dropped ledger write is UNRECOVERABLE: record_today only ever
+    reads today's picks.json, so there is no later run that can backfill the
+    missing day — and a lost day isn't random, it correlates with the busy
+    morning window, quietly biasing the sample the launch call rests on."""
+
+    class _Resp:
+        def __init__(self, code): self.status_code, self.text = code, "throttled"
+
+    def test_returns_true_on_success(self, monkeypatch):
+        monkeypatch.setattr(ev.requests, "patch", lambda *a, **k: self._Resp(200))
+        assert ev._save_ledger({"picks": []}, "pick_ledger_2026.json") is True
+
+    def test_retries_then_reports_failure(self, monkeypatch):
+        calls = {"n": 0}
+        def _patch(*a, **k):
+            calls["n"] += 1
+            return self._Resp(403)
+        monkeypatch.setattr(ev.requests, "patch", _patch)
+        import time as _t
+        monkeypatch.setattr(_t, "sleep", lambda s: None)
+        assert ev._save_ledger({"picks": []}, "x.json") is False
+        assert calls["n"] == 5, "must retry, not give up on the first throttle"
+
+    def test_exception_is_retried_not_swallowed(self, monkeypatch):
+        calls = {"n": 0}
+        def _boom(*a, **k):
+            calls["n"] += 1
+            raise RuntimeError("network down")
+        monkeypatch.setattr(ev.requests, "patch", _boom)
+        import time as _t
+        monkeypatch.setattr(_t, "sleep", lambda s: None)
+        assert ev._save_ledger({"picks": []}, "x.json") is False
+        assert calls["n"] == 5
