@@ -534,6 +534,7 @@ def _build_user_prompt(
     pick_mode: str = "both",
     etf_candidates: list[dict] | None = None,
     commodity_candidates: list[dict] | None = None,
+    strategy=None,
 ) -> str:
     # Pre-build conditional blocks (backslashes not allowed inside f-string expressions)
     # Performance feedback: aggregate closed trade track record
@@ -541,6 +542,13 @@ def _build_user_prompt(
         perf_context = get_performance_context(lookback_days=30)
     except Exception:
         perf_context = ""
+
+    # A/B arm directive. EMPTY for the default strategy, which is what keeps the
+    # production prompt byte-identical (golden-hash guarded) — an arm changes
+    # Claude's SELECTION, not just the screener's ranking, or the two variants
+    # would differ far less than their names suggest.
+    _sd = getattr(strategy, "prompt_directive", "") or ""
+    strategy_note = (_sd + chr(10) + chr(10)) if _sd else ""
 
     if recent_losers:
         losers_block = (
@@ -667,7 +675,7 @@ def _build_user_prompt(
     stocks_block += stock_alloc_note
 
     return f"""Analyze these stock AND crypto candidates for a personal investor.
-{f"{mode_note}" + chr(10) if mode_note else ""}{(perf_context + chr(10) + chr(10)) if perf_context else ""}
+{f"{mode_note}" + chr(10) if mode_note else ""}{strategy_note}{(perf_context + chr(10) + chr(10)) if perf_context else ""}
 ST STOCK CONVICTION RUBRIC — applies to short_term stock picks only:
   ★★★★★ (5) — EXCEPTIONAL: 4+ confirming signals below. Reserved for rare high-conviction setups.
   ★★★★  (4) — STRONG: 3 confirming signals. Clear setup with multi-factor confirmation.
@@ -1261,6 +1269,7 @@ def analyze_with_claude(
     crypto_results: dict | None = None,
     recent_losers: list[str] | None = None,
     etf_results: dict | None = None,
+    strategy=None,
 ) -> dict:
     """
     Main entry point. Accepts stock screener output + optional crypto + ETF screener output.
@@ -1303,6 +1312,7 @@ def analyze_with_claude(
         pick_mode=config.get("pick_mode", "both"),
         etf_candidates=etf_candidates or [],
         commodity_candidates=commodity_candidates,
+        strategy=strategy,
     )
 
     # Sonnet for main analysis — quality matters for picks.

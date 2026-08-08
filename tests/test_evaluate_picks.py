@@ -367,7 +367,7 @@ class TestShardedLedger:
             "stocks": {"short_term": [{"ticker": "AAA", "entry_price": 10.0}],
                        "long_term": [], "near_misses": {}}})
         shard = {"picks": []}
-        prior = {("2026-12-31", "AAA")}          # lives in another shard
+        prior = {("2026-12-31", "AAA", None)}    # lives in another shard (date,ticker,arm)
         assert ev.record_today(shard, known=prior) == 0
         assert shard["picks"] == []
         assert ev.record_today({"picks": []}, known=set()) == 1

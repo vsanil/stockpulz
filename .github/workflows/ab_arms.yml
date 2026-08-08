@@ -1,0 +1,53 @@
+name: A/B Arms
+
+# Runs engine VARIANTS side by side on the same market day, paper only, into
+# their own test accounts. Production picks are never touched.
+#
+# 🔴 DELIBERATELY workflow_dispatch ONLY — no schedule. Each arm is a full
+# screener pass plus a Claude call, and until the Sep 9 evaluator report says
+# whether breakout and pullback actually differ, running these daily would spend
+# API budget and hammer Yahoo/Finnhub to measure a difference we have no
+# evidence exists yet. Add a cron ONLY after that report justifies it.
+on:
+  workflow_dispatch:
+    inputs:
+      arms:
+        description: "comma-separated arms (breakout,pullback)"
+        required: false
+        default: "breakout,pullback"
+      dry_run:
+        description: "true = screen + analyse but write nothing"
+        required: false
+        default: "true"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45          # each arm is a full 600-ticker screen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - run: pip install -r requirements.txt
+      - name: Run arms
+        run: |
+          FLAG=""
+          [ "${{ github.event.inputs.dry_run }}" = "true" ] && FLAG="--dry-run"
+          python scripts/run_arms.py --arms "${{ github.event.inputs.arms }}" $FLAG
+        env:
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
+          GITHUB_TOKEN:       ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID:            ${{ secrets.GIST_ID }}
+          FINNHUB_API_KEY:    ${{ secrets.FINNHUB_API_KEY }}
+          ALPACA_KEY_ID:      ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
