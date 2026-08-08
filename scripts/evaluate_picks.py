@@ -149,6 +149,45 @@ def _pos(x) -> bool:
         return False
 
 
+def _key(r: dict) -> tuple:
+    """Ledger identity. Includes the ARM so the same ticker picked on the same
+    day by two different arms is two independent observations, not a duplicate —
+    without this the second arm's pick would be silently dropped and the
+    comparison would quietly measure nothing."""
+    return (r["date"], r["ticker"], r.get("arm"))
+
+
+def record_picks(led: dict, picks: dict, day: str, arm: str | None = None,
+                 known: set | None = None) -> int:
+    """Append one run's picks. `arm=None` is production; an arm name marks an
+    A/B variant, which the report segments separately and NEVER mixes into the
+    headline (same rule as controls)."""
+    rows = led.setdefault("picks", [])
+    seen = {_key(r) for r in rows} | (known or set())
+    added = 0
+    for sec, atype, key in (("stocks", "stock", "ticker"), ("crypto", "crypto", "symbol"),
+                            ("etfs", "etf", "ticker"), ("commodities", "commodity", "ticker")):
+        for tf in ("short_term", "long_term"):
+            for p in (picks.get(sec, {}) or {}).get(tf, []) or []:
+                t = (p.get(key) or p.get("ticker") or p.get("symbol") or "").upper()
+                if not t or not _pos(p.get("entry_price")):
+                    continue
+                row = {"date": day, "ticker": t, "asset": atype, "timeframe": tf,
+                       "entry": float(p["entry_price"]),
+                       "target": p.get("target_price"), "stop": p.get("stop_loss"),
+                       "conviction": p.get("conviction")}
+                if arm:
+                    row["arm"] = arm
+                scr = p.get("_screen")
+                if isinstance(scr, dict):
+                    row["screen"] = scr
+                if _key(row) in seen:
+                    continue
+                rows.append(row)
+                seen.add(_key(row)); added += 1
+    return added
+
+
 def record_today(led: dict, known: set | None = None) -> int:
     """Append today's picks to the CURRENT shard. Deduped by (date, ticker) so
     re-runs and the hourly cadence never double-count a pick. `known` carries the
@@ -159,14 +198,14 @@ def record_today(led: dict, known: set | None = None) -> int:
     if not day:
         return 0
     rows = led.setdefault("picks", [])
-    seen = {(r["date"], r["ticker"]) for r in rows} | (known or set())
+    seen = {_key(r) for r in rows} | (known or set())
     added = 0
     for sec, atype, key in (("stocks", "stock", "ticker"), ("crypto", "crypto", "symbol"),
                             ("etfs", "etf", "ticker"), ("commodities", "commodity", "ticker")):
         for tf in ("short_term", "long_term"):
             for p in (picks.get(sec, {}) or {}).get(tf, []) or []:
                 t = (p.get(key) or p.get("ticker") or p.get("symbol") or "").upper()
-                if not t or (day, t) in seen:
+                if not t or (day, t, None) in seen:
                     continue
                 if not _pos(p.get("entry_price")):
                     continue
@@ -188,7 +227,7 @@ def record_today(led: dict, known: set | None = None) -> int:
                 if isinstance(scr, dict):
                     row["screen"] = scr
                 rows.append(row)
-                seen.add((day, t)); added += 1
+                seen.add((day, t, None)); added += 1
 
     # ── Control group: the runners-up we did NOT pick ─────────────────────────
     # The screener already surfaces the top few candidates that ranked but lost
@@ -208,7 +247,7 @@ def record_today(led: dict, known: set | None = None) -> int:
         for c in nm.get(tf, []) or []:
             t = (c.get("ticker") or "").upper()
             px = c.get("current_price")
-            if not t or (day, t) in seen or not _pos(px):
+            if not t or (day, t, None) in seen or not _pos(px):
                 continue
             rows.append({
                 "date":      day,
@@ -219,7 +258,7 @@ def record_today(led: dict, known: set | None = None) -> int:
                 "control":   True,
                 "screen":    {"score": c.get("score"), "setup_type": setup_type(c)},
             })
-            seen.add((day, t)); added += 1
+            seen.add((day, t, None)); added += 1
     return added
 
 
@@ -479,7 +518,7 @@ def main() -> int:
     all_rows, shard, shard_name = _load_ledger()
     added = 0
     if not args.report_only:
-        other = {(r["date"], r["ticker"]) for r in all_rows}
+        other = {_key(r) for r in all_rows}
         before = len(shard.get("picks", []))
         added = record_today(shard, known=other)
         if added and not args.dry_run:

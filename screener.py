@@ -300,6 +300,10 @@ def get_sp500_tickers() -> list[str]:
 @dataclass(frozen=True)
 class Strategy:
     name: str = "default"
+    # Injected into the pick prompt so an arm differs in Claude's SELECTION too,
+    # not only in screener ranking. MUST stay "" for default — an empty string
+    # keeps the production prompt byte-identical (guarded by a golden hash).
+    prompt_directive: str = ""
     # pullback leg — "momentum building, not overbought"
     rsi_lo: float = 35.0
     rsi_hi: float = 55.0
@@ -335,10 +339,20 @@ STRATEGIES: dict[str, Strategy] = {
     "default":  DEFAULT_STRATEGY,
     # Momentum only: ignore the mean-reversion signals entirely.
     "breakout": Strategy(name="breakout", w_rsi=0, w_bb_bounce=0,
-                         w_breakout=25, w_near_high=20, w_vol_surge=25),
+                         w_breakout=25, w_near_high=20, w_vol_surge=25,
+                         prompt_directive=(
+                             "STRATEGY FOR THIS RUN — BREAKOUT/MOMENTUM ONLY: select only "
+                             "names breaking to new highs on expanding volume. Do NOT select "
+                             "oversold bounces, mean-reversion or 'buy the dip' setups, even "
+                             "if they look cheap. If fewer names qualify, return fewer picks.")),
     # Mean-reversion only: ignore the breakout signals entirely.
     "pullback": Strategy(name="pullback", w_breakout=0, w_near_high=0,
-                         w_rsi=35, w_bb_bounce=25),
+                         w_rsi=35, w_bb_bounce=25,
+                         prompt_directive=(
+                             "STRATEGY FOR THIS RUN — PULLBACK/MEAN-REVERSION ONLY: select only "
+                             "names pulling back to support within an uptrend (RSI mid-range, "
+                             "near lower Bollinger, holding above trend). Do NOT select breakouts "
+                             "or names at new highs. If fewer names qualify, return fewer picks.")),
 }
 
 

@@ -352,10 +352,21 @@ def human_trades(trades) -> list:
     return [t for t in (trades or []) if not is_synthetic_trade(t)]
 
 
+# A/B arm accounts. Each arm paper-trades its own variant of the engine into its
+# own account. They MUST be test users: a dead chat_id otherwise burns ~10s of
+# Telegram retries per send, and they must never appear in community stats or
+# the LLM pick prompt (they are also absent from allowed_users, which is what
+# actually excludes them from both).
+ARM_CHAT_IDS: dict[str, str] = {
+    "breakout": "900000010",
+    "pullback": "900000011",
+}
+
+
 def get_test_users() -> list[str]:
     """Virtual/synthetic chat_ids. Pure env+constant (no Gist read) so it is safe
     to call on the hot send path."""
-    ids = {DEFAULT_TEST_CHAT_ID}
+    ids = {DEFAULT_TEST_CHAT_ID} | set(ARM_CHAT_IDS.values())
     env = (os.environ.get("SYNTHETIC_CHAT_ID") or "").strip()
     if env:
         ids.add(env)
