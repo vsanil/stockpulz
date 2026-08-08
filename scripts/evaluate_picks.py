@@ -53,21 +53,73 @@ _BENCH        = "SPY"
 
 # ── ledger I/O ────────────────────────────────────────────────────────────────
 
+def _headers() -> dict:
+    return {"Authorization": f"token {_TOK}"}
+
+
+def _content(meta: dict) -> str:
+    """GitHub omits file content past ~1 MB and sets truncated=True, handing back
+    a raw_url. Reading `content` blindly then parses PARTIAL JSON — which on this
+    script's swallowing path looks like an EMPTY ledger and would re-record every
+    pick. Same guard as storage._gist_content."""
+    if meta.get("truncated") and meta.get("raw_url"):
+        r = requests.get(meta["raw_url"], headers=_headers(), timeout=25)
+        r.raise_for_status()
+        return r.text
+    return meta.get("content") or "{}"
+
+
 def _gist_file(name: str) -> dict:
     try:
         files = requests.get(f"https://api.github.com/gists/{_GID}",
-                             headers={"Authorization": f"token {_TOK}"}, timeout=20
-                             ).json().get("files", {})
-        return json.loads(files.get(name, {}).get("content") or "{}")
+                             headers=_headers(), timeout=20).json().get("files", {})
+        return json.loads(_content(files.get(name, {})))
     except Exception as exc:
         print(f"[evaluate] read {name} failed: {exc}")
         return {}
 
 
-def _save_ledger(led: dict) -> None:
+# ── Year-sharded ledger ───────────────────────────────────────────────────────
+# The ledger is append-only and kept forever, and a Gist file is unreadable past
+# ~1 MB. Picks (~700 KB/yr) plus controls (~370 KB/yr) cross that inside ONE
+# year, so a single file would silently truncate. Shard by year: reads merge
+# every shard, writes touch only the current year, and the legacy
+# `pick_ledger.json` is read-only history that is never rewritten (so it can
+# never be clobbered).
+def _shard_name(year: int) -> str:
+    return f"pick_ledger_{year}.json"
+
+
+def _load_ledger() -> tuple[list, dict, str]:
+    """Return (all rows across shards, current-year shard, its filename)."""
+    name = _shard_name(dt.date.today().year)
+    try:
+        files = requests.get(f"https://api.github.com/gists/{_GID}",
+                             headers=_headers(), timeout=20).json().get("files", {})
+    except Exception as exc:
+        print(f"[evaluate] ledger read failed: {exc}")
+        return [], {"picks": []}, name
+
+    rows, shard = [], {"picks": []}
+    for fname, meta in sorted(files.items()):
+        if fname != _LEDGER_FILE and not fname.startswith("pick_ledger_"):
+            continue
+        try:
+            data = json.loads(_content(meta))
+        except Exception as exc:
+            print(f"[evaluate] shard {fname} unreadable ({exc}) — skipped")
+            continue
+        rows.extend(data.get("picks", []) or [])
+        if fname == name:
+            shard = data
+    shard.setdefault("picks", [])
+    return rows, shard, name
+
+
+def _save_ledger(led: dict, name: str = _LEDGER_FILE) -> None:
     requests.patch(f"https://api.github.com/gists/{_GID}",
-                   headers={"Authorization": f"token {_TOK}"},
-                   json={"files": {_LEDGER_FILE: {"content": json.dumps(led, indent=2)}}},
+                   headers=_headers(),
+                   json={"files": {name: {"content": json.dumps(led, indent=2)}}},
                    timeout=25)
 
 
@@ -78,15 +130,17 @@ def _pos(x) -> bool:
         return False
 
 
-def record_today(led: dict) -> int:
-    """Append today's picks to the ledger. Deduped by (date, ticker) so re-runs
-    and the hourly cadence never double-count a pick."""
+def record_today(led: dict, known: set | None = None) -> int:
+    """Append today's picks to the CURRENT shard. Deduped by (date, ticker) so
+    re-runs and the hourly cadence never double-count a pick. `known` carries the
+    keys already present in OTHER shards — without it, a pick recorded in last
+    year's shard could be re-recorded after a year rollover."""
     picks = _gist_file("picks.json")
     day   = picks.get("_saved_date")
     if not day:
         return 0
     rows = led.setdefault("picks", [])
-    seen = {(r["date"], r["ticker"]) for r in rows}
+    seen = {(r["date"], r["ticker"]) for r in rows} | (known or set())
     added = 0
     for sec, atype, key in (("stocks", "stock", "ticker"), ("crypto", "crypto", "symbol"),
                             ("etfs", "etf", "ticker"), ("commodities", "commodity", "ticker")):
@@ -116,6 +170,37 @@ def record_today(led: dict) -> int:
                     row["screen"] = scr
                 rows.append(row)
                 seen.add((day, t)); added += 1
+
+    # ── Control group: the runners-up we did NOT pick ─────────────────────────
+    # The screener already surfaces the top few candidates that ranked but lost
+    # the final cut (near_misses). Recording them answers the question the
+    # headline cannot: did the LAST step — dedup + Claude's choice — actually
+    # pick better than the alternatives it passed over? Without a control, a
+    # 60% win rate is unreadable: it might just be the market that month.
+    #
+    # Scope limit worth remembering: this grades the SELECTION step only. It says
+    # nothing about whether the 600-ticker screen surfaced the right pool.
+    #
+    # Compact schema on purpose — controls never need target/stop/conviction,
+    # and this file is kept forever against a ~1 MB Gist wall.
+    from screener import setup_type                    # one definition (rubric's owner)
+    nm = (picks.get("stocks", {}) or {}).get("near_misses", {}) or {}
+    for tf in ("short_term", "long_term"):
+        for c in nm.get(tf, []) or []:
+            t = (c.get("ticker") or "").upper()
+            px = c.get("current_price")
+            if not t or (day, t) in seen or not _pos(px):
+                continue
+            rows.append({
+                "date":      day,
+                "ticker":    t,
+                "asset":     "stock",
+                "timeframe": tf,
+                "entry":     float(px),
+                "control":   True,
+                "screen":    {"score": c.get("score"), "setup_type": setup_type(c)},
+            })
+            seen.add((day, t)); added += 1
     return added
 
 
@@ -191,11 +276,19 @@ def score_pick(row: dict) -> dict | None:
         bc = bc.iloc[:, 0] if hasattr(bc, "columns") else bc
         spy_ret = (float(bc.iloc[-1]) - float(bc.iloc[0])) / float(bc.iloc[0]) * 100.0
 
+    # Mark-to-market at the horizon, ALWAYS — ignoring target/stop. A pick can
+    # exit early at its target; a control has no levels at all, so comparing
+    # `ret_pct` between them would flatter whichever had levels. This is the one
+    # number that means the same thing for both.
+    mtm = (float(closes.iloc[-1]) - entry) / entry * 100.0
+
     return {
         **row,
         "outcome":  outcome,
         "exit":     round(exit_px, 4),
         "ret_pct":  round(ret, 2),
+        "mtm_pct":  round(mtm, 2),
+        "mtm_alpha_pct": (round(mtm - spy_ret, 2) if spy_ret is not None else None),
         "spy_pct":  round(spy_ret, 2) if spy_ret is not None else None,
         "alpha_pct": round(ret - spy_ret, 2) if spy_ret is not None else None,
     }
@@ -246,6 +339,13 @@ def _agg(rows: list[dict]) -> dict:
 
 
 def build_report(scored: list[dict]) -> str:
+    # 🔴 Controls are the runners-up we did NOT pick. They exist only as a
+    # baseline and must NEVER enter the headline, the slices, or any number a
+    # user sees — mixing them in would dilute the engine's record with trades it
+    # never recommended. Split first, before anything is aggregated.
+    controls = [r for r in scored if r.get("control")]
+    scored   = [r for r in scored if not r.get("control")]
+
     if not scored:
         return ("📊 <b>Pick evaluation</b>\n\n<i>No picks have matured yet "
                 f"({_HORIZON_DAYS}-day horizon). Nothing to conclude — by design.</i>")
@@ -311,6 +411,38 @@ def build_report(scored: list[dict]) -> str:
               f"features; earlier picks predate the instrumentation and are "
               f"excluded from the setup/score slices.</i>", ""]
 
+    # ── Picked vs not-picked ─────────────────────────────────────────────────
+    # Compared on mark-to-market only: controls have no target/stop, so this is
+    # the one basis that means the same thing for both.
+    if controls:
+        def _mtm(rows):
+            v = [r["mtm_pct"] for r in rows if r.get("mtm_pct") is not None]
+            a = [r["mtm_alpha_pct"] for r in rows if r.get("mtm_alpha_pct") is not None]
+            return (len(v),
+                    round(sum(v) / len(v), 2) if v else None,
+                    round(sum(a) / len(a), 2) if a else None)
+        pn, pret, pa = _mtm(scored)
+        cn, cret, ca = _mtm(controls)
+        L.append("<b>Picked vs the runners-up we passed over</b>")
+        if pret is None or cret is None:
+            L.append("  <i>not enough matured rows on both sides yet</i>")
+        else:
+            L += [f"  picked:     n={pn} · {pret:+.2f}% (α {pa:+.2f}%)" if pa is not None
+                  else f"  picked:     n={pn} · {pret:+.2f}%",
+                  f"  not picked: n={cn} · {cret:+.2f}% (α {ca:+.2f}%)" if ca is not None
+                  else f"  not picked: n={cn} · {cret:+.2f}%"]
+            edge = pret - cret
+            if min(pn, cn) < _MIN_N:
+                L.append(f"  <i>edge {edge:+.2f}% — but below n={_MIN_N} on at least "
+                         f"one side, so this is NOT a finding yet.</i>")
+            elif edge > 0:
+                L.append(f"  🟢 selection added <b>{edge:+.2f}%</b> over the alternatives.")
+            else:
+                L.append(f"  🔴 selection <b>cost</b> {abs(edge):.2f}% vs just taking "
+                         f"the runners-up — the final pick step is not adding value.")
+        L += ["  <i>Grades the SELECTION step only — says nothing about whether "
+              "the screen surfaced the right pool.</i>", ""]
+
     L.append("<i>Signal quality on every pick, traded or not. Not financial advice.</i>")
     return "\n".join([x for x in L if x != ""] + [""])
 
@@ -325,14 +457,20 @@ def main() -> int:
                          "sent weekly, so nobody is tempted to react to noise.")
     args = ap.parse_args()
 
-    led = _gist_file(_LEDGER_FILE) or {}
+    all_rows, shard, shard_name = _load_ledger()
     added = 0
     if not args.report_only:
-        added = record_today(led)
+        other = {(r["date"], r["ticker"]) for r in all_rows}
+        before = len(shard.get("picks", []))
+        added = record_today(shard, known=other)
         if added and not args.dry_run:
-            _save_ledger(led)
-    rows = led.get("picks", [])
-    print(f"[evaluate] ledger={len(rows)} picks (+{added} today)")
+            _save_ledger(shard, shard_name)
+        # newly appended rows are in the shard but not yet in all_rows
+        all_rows = all_rows + shard["picks"][before:]
+    rows = all_rows
+    n_ctl = sum(1 for r in rows if r.get("control"))
+    print(f"[evaluate] ledger={len(rows)} rows ({len(rows) - n_ctl} picks + "
+          f"{n_ctl} controls, +{added} today) · shard={shard_name}")
 
     scored = []
     for r in rows:

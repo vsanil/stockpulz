@@ -5,6 +5,7 @@ that in, because a silently-confident report on n=8 is how an engine gets tuned
 into overfitting.
 """
 import os
+import json
 import importlib.util
 
 _PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -147,11 +148,16 @@ class TestScreenProvenanceAttach:
         return importlib.import_module("ai_analyzer")
 
     def test_setup_type_separates_breakout_from_pullback(self):
-        a = self._mod()
-        assert a._setup_type({"breakout_today": True, "rsi": 67.8}) == "breakout"
-        assert a._setup_type({"breakout_today": False, "rsi": 45.0}) == "pullback"
-        assert a._setup_type({"breakout_today": False, "rsi": 78.0}) == "other"
-        assert a._setup_type({}) == "other"
+        """One definition, living in screener.py — the rubric's owner."""
+        import importlib, sys, os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        st = importlib.import_module("screener").setup_type
+        assert st({"breakout_today": True, "rsi": 67.8}) == "breakout"
+        assert st({"breakout_today": False, "rsi": 45.0}) == "pullback"
+        assert st({"breakout_today": False, "rsi": 78.0}) == "other"
+        assert st({}) == "other"
 
     def test_attach_joins_by_ticker_and_symbol_and_compresses(self):
         a = self._mod()
@@ -193,3 +199,175 @@ class TestScreenProvenanceAttach:
         a._attach_screen_provenance({}, [])
         a._attach_screen_provenance({"stocks": {"short_term": None}}, None)
         a._attach_screen_provenance({"stocks": {}}, [{"no_ticker": 1}])
+
+
+class TestControlGroup:
+    """Near-misses are recorded as CONTROLS — the runners-up we passed over —
+    to answer whether the final selection step beats its own alternatives."""
+
+    def _picks(self, nm_st=(), nm_lt=()):
+        return {"_saved_date": "2026-08-10",
+                "stocks": {
+                    "short_term": [{"ticker": "PICKED", "entry_price": 100.0,
+                                    "target_price": 110.0, "stop_loss": 95.0,
+                                    "conviction": 5, "_screen": {"score": 95,
+                                                                 "setup_type": "breakout"}}],
+                    "long_term": [],
+                    "near_misses": {"short_term": list(nm_st), "long_term": list(nm_lt)}}}
+
+    def test_near_misses_are_recorded_as_controls(self, monkeypatch):
+        nm = [{"ticker": "RUNNERUP", "current_price": 50.0, "score": 88,
+               "rsi": 45.0, "breakout_today": False}]
+        monkeypatch.setattr(ev, "_gist_file", lambda n: self._picks(nm_st=nm))
+        led = {}
+        assert ev.record_today(led) == 2
+        ctl = [r for r in led["picks"] if r.get("control")]
+        assert len(ctl) == 1
+        assert ctl[0]["ticker"] == "RUNNERUP" and ctl[0]["entry"] == 50.0
+        assert ctl[0]["screen"] == {"score": 88, "setup_type": "pullback"}
+        # the real pick is NOT flagged as a control
+        assert not [r for r in led["picks"] if r["ticker"] == "PICKED"][0].get("control")
+
+    def test_control_without_a_usable_price_is_skipped(self, monkeypatch):
+        nm = [{"ticker": "NOPRICE", "current_price": 0, "score": 80},
+              {"ticker": "NONE_PX", "score": 80}]
+        monkeypatch.setattr(ev, "_gist_file", lambda n: self._picks(nm_st=nm))
+        led = {}
+        ev.record_today(led)
+        assert [r["ticker"] for r in led["picks"]] == ["PICKED"]
+
+    def test_a_control_never_shadows_a_real_pick_of_the_same_ticker(self, monkeypatch):
+        nm = [{"ticker": "PICKED", "current_price": 99.0, "score": 80}]
+        monkeypatch.setattr(ev, "_gist_file", lambda n: self._picks(nm_st=nm))
+        led = {}
+        assert ev.record_today(led) == 1
+        assert not led["picks"][0].get("control")
+
+    # ── the guard that matters ───────────────────────────────────────────────
+    def test_controls_never_enter_the_headline_or_the_slices(self):
+        """A control is a trade we did NOT recommend. If it leaked into the
+        headline it would dilute the engine's record with picks it never made."""
+        picks = _rows(30)                       # all winners-ish, alpha +1.0
+        ctl = _rows(30)
+        for r in ctl:
+            r["control"] = True
+            r["ret_pct"] = -99.0                # catastrophic, unmistakable
+            r["alpha_pct"] = -99.0
+            r["mtm_pct"] = -99.0
+            r["mtm_alpha_pct"] = -99.0
+        for r in picks:
+            r["mtm_pct"] = r["ret_pct"]
+            r["mtm_alpha_pct"] = r["alpha_pct"]
+        out = ev.build_report(picks + ctl)
+        assert "-99" not in out.split("not picked")[0], \
+            "control returns leaked into the headline/slices"
+        assert "30 matured picks" in out, "headline n must count picks only"
+
+    def test_picked_vs_control_reports_the_edge_and_gates_on_n(self):
+        picks = _rows(30)
+        ctl = _rows(30)
+        for r in picks:
+            r["mtm_pct"], r["mtm_alpha_pct"] = 5.0, 3.0
+        for r in ctl:
+            r["control"] = True
+            r["mtm_pct"], r["mtm_alpha_pct"] = 1.0, -1.0
+        out = ev.build_report(picks + ctl)
+        assert "Picked vs the runners-up" in out
+        assert "selection added" in out and "+4.00%" in out
+
+    def test_edge_below_the_gate_is_not_presented_as_a_finding(self):
+        picks, ctl = _rows(30), _rows(5)
+        for r in picks:
+            r["mtm_pct"], r["mtm_alpha_pct"] = 5.0, 3.0
+        for r in ctl:
+            r["control"] = True
+            r["mtm_pct"], r["mtm_alpha_pct"] = 1.0, -1.0
+        out = ev.build_report(picks + ctl)
+        assert "NOT a finding yet" in out
+        assert "selection added" not in out
+
+    def test_negative_edge_is_stated_plainly(self):
+        picks, ctl = _rows(30), _rows(30)
+        for r in picks:
+            r["mtm_pct"], r["mtm_alpha_pct"] = 1.0, -1.0
+        for r in ctl:
+            r["control"] = True
+            r["mtm_pct"], r["mtm_alpha_pct"] = 6.0, 4.0
+        out = ev.build_report(picks + ctl)
+        assert "not adding value" in out, "a negative result must not be softened"
+
+
+class TestNearMissReason:
+    """The reason shown under 'Near misses' in the morning message. It read a
+    NESTED st_metrics key that flattened candidates don't have, so `m` was always
+    {} and every near-miss rendered the same boilerplate regardless of why it
+    actually missed."""
+
+    def _sc(self):
+        import importlib, sys, os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        return importlib.import_module("screener")
+
+    def test_opposite_candidates_get_different_reasons(self):
+        sc = self._sc()
+        strong = {"ticker": "A", "score": 88, "rsi": 45.0, "macd_crossover": True,
+                  "volume_ratio": 2.5, "above_ema20": True}
+        weak = {"ticker": "B", "score": 60, "rsi": 72.0, "macd_crossover": False,
+                "volume_ratio": 0.8, "above_ema20": False}
+        r1 = sc._add_near_miss_reason(strong, is_st=True)["near_miss_reason"]
+        r2 = sc._add_near_miss_reason(weak, is_st=True)["near_miss_reason"]
+        assert r1 != r2, "every near-miss showed identical boilerplate"
+        assert "overbought" in r2 and "72" in r2
+        assert "no MACD crossover" not in r1, "a candidate WITH a crossover must not be told it lacks one"
+
+    def test_nested_metrics_still_work(self):
+        """Raw (un-flattened) candidates must keep working."""
+        sc = self._sc()
+        nested = {"ticker": "C", "st_metrics": {"rsi": 72.0, "macd_crossover": True}}
+        assert "overbought" in sc._add_near_miss_reason(nested, is_st=True)["near_miss_reason"]
+
+
+class TestShardedLedger:
+    """The ledger is append-only and kept forever; a Gist file is unreadable past
+    ~1 MB. Picks + controls cross that inside one year, so it shards by year."""
+
+    def test_shard_name_is_per_year(self):
+        assert ev._shard_name(2026) == "pick_ledger_2026.json"
+        assert ev._shard_name(2027) == "pick_ledger_2027.json"
+
+    def test_truncated_file_is_refetched_not_parsed_partially(self, monkeypatch):
+        """A truncated read parsed as JSON looks like an EMPTY ledger, which
+        would re-record every pick ever made."""
+        calls = {}
+        class _R:
+            text = '{"picks": [{"date": "2026-01-01", "ticker": "FULL"}]}'
+            def raise_for_status(self): pass
+        def _get(url, **kw):
+            calls["raw"] = url
+            return _R()
+        monkeypatch.setattr(ev.requests, "get", _get)
+        out = ev._content({"truncated": True, "raw_url": "https://raw/x",
+                           "content": '{"picks": [{"date": "2026-01-01"'})  # partial
+        assert json.loads(out)["picks"][0]["ticker"] == "FULL"
+        assert calls["raw"] == "https://raw/x"
+
+    def test_untruncated_file_uses_inline_content(self, monkeypatch):
+        def _boom(*a, **kw):
+            raise AssertionError("must not refetch an untruncated file")
+        monkeypatch.setattr(ev.requests, "get", _boom)
+        assert ev._content({"content": '{"picks": []}'}) == '{"picks": []}'
+
+    def test_dedupe_spans_shards_across_a_year_rollover(self, monkeypatch):
+        """A pick already recorded in LAST year's shard must not be re-recorded
+        into this year's."""
+        monkeypatch.setattr(ev, "_gist_file", lambda n: {
+            "_saved_date": "2026-12-31",
+            "stocks": {"short_term": [{"ticker": "AAA", "entry_price": 10.0}],
+                       "long_term": [], "near_misses": {}}})
+        shard = {"picks": []}
+        prior = {("2026-12-31", "AAA")}          # lives in another shard
+        assert ev.record_today(shard, known=prior) == 0
+        assert shard["picks"] == []
+        assert ev.record_today({"picks": []}, known=set()) == 1
