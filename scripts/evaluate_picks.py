@@ -97,7 +97,7 @@ def record_today(led: dict) -> int:
                     continue
                 if not _pos(p.get("entry_price")):
                     continue
-                rows.append({
+                row = {
                     "date":       day,
                     "ticker":     t,
                     "asset":      atype,
@@ -106,7 +106,15 @@ def record_today(led: dict) -> int:
                     "target":     p.get("target_price"),
                     "stop":       p.get("stop_loss"),
                     "conviction": p.get("conviction"),
-                })
+                }
+                # Screener features that justified this candidate (ai_analyzer
+                # attaches them as `_screen`). Recorded so the report can say
+                # WHICH signal earned the win, not just that there was one —
+                # these cannot be backfilled once the screener cache expires.
+                scr = p.get("_screen")
+                if isinstance(scr, dict):
+                    row["screen"] = scr
+                rows.append(row)
                 seen.add((day, t)); added += 1
     return added
 
@@ -206,6 +214,19 @@ def _wilson(wins: int, n: int) -> tuple[float, float]:
     return (max(0.0, (centre - half) * 100), min(100.0, (centre + half) * 100))
 
 
+def _score_band(r: dict) -> str:
+    """Bucket the screener's own score. The rubric's components sum well past
+    100 and the top candidates bunch at 90-95, so if the score is doing real
+    work the bands should separate — and if they don't, that is the finding."""
+    sc = (r.get("screen") or {}).get("score")
+    if not isinstance(sc, (int, float)):
+        return "?"
+    if sc >= 95: return "95+"
+    if sc >= 85: return "85-94"
+    if sc >= 70: return "70-84"
+    return "<70"
+
+
 def _agg(rows: list[dict]) -> dict:
     n = len(rows)
     if not n:
@@ -259,19 +280,36 @@ def build_report(scored: list[dict]) -> str:
                  if ci_lo > 50 else
                  f"Win rate is NOT distinguishable from a coin flip (CI low end {ci_lo}%)."), ""]
 
+    # Slices. `setup_type` and `score band` come from the screener features
+    # recorded at pick time — they answer WHICH part of the engine is working,
+    # which the overall number cannot. Every slice carries its own n and is
+    # tagged (low n) below the gate: a 6-pick slice must never read as a finding.
     for label, keyfn in (("By conviction", lambda r: f"★{r.get('conviction') or '?'}"),
                          ("By asset", lambda r: r.get("asset", "?")),
-                         ("By timeframe", lambda r: r.get("timeframe", "?"))):
+                         ("By timeframe", lambda r: r.get("timeframe", "?")),
+                         ("By setup", lambda r: (r.get("screen") or {}).get("setup_type", "?")),
+                         ("By screener score", _score_band)):
         groups: dict[str, list] = {}
         for r in scored:
             groups.setdefault(keyfn(r), []).append(r)
+        if set(groups) == {"?"}:          # nothing recorded yet — skip the section
+            continue
         L.append(f"<b>{label}</b>")
         for k in sorted(groups):
             g = _agg(groups[k])
             tag = "" if g["n"] >= _MIN_N else "  <i>(low n)</i>"
             a = f"{g['avg_alpha']:+.2f}%" if g["avg_alpha"] is not None else "n/a"
-            L.append(f"  {k}: n={g['n']} · win {g['win_rate']}% · α {a}{tag}")
+            ci = f" · CI {g['win_ci'][0]:.0f}-{g['win_ci'][1]:.0f}%" if g["n"] >= _MIN_N else ""
+            L.append(f"  {k}: n={g['n']} · win {g['win_rate']}% · α {a}{ci}{tag}")
         L.append("")
+
+    # How much of the ledger predates the instrumentation — otherwise a slice
+    # built on a subset silently looks like it covers everything.
+    instrumented = sum(1 for r in scored if r.get("screen"))
+    if instrumented < len(scored):
+        L += [f"<i>Note: {instrumented}/{len(scored)} matured picks carry screener "
+              f"features; earlier picks predate the instrumentation and are "
+              f"excluded from the setup/score slices.</i>", ""]
 
     L.append("<i>Signal quality on every pick, traded or not. Not financial advice.</i>")
     return "\n".join([x for x in L if x != ""] + [""])
