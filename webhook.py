@@ -981,6 +981,58 @@ function closeDrawer(){
   _dData=null;
 }
 
+// ── Position audit ─────────────────────────────────────────────────────────
+// Arithmetic integrity of stored positions. This is where the synthetic bot
+// earns its keep: it has surfaced three defects (paper targets stored as null,
+// drained paper cash, inverted levels) that no win-rate would ever have shown,
+// because each only appears when a real position is built by the real path.
+// Uses the existing card/pill/fb-row styles — no new CSS to drift.
+function auditSection(a){
+  if(!a) return '';
+  var f=a.findings||[], s=a.summary||{};
+  var badge = s.live_open
+    ? '<span class="pill p-pending">'+s.live_open+' live</span>'
+    : '<span class="pill p-active">clean</span>';
+  var reop = s.reopened ? ' <span class="pill p-pending">'+s.reopened+' reopened</span>' : '';
+  var head='<div class="card-title">Position audit '+badge+reop+'</div>';
+  if(!f.length)
+    return '<div class="card">'+head+'<p class="empty">No integrity problems found.</p></div>';
+
+  var rows=f.map(function(x){
+    var handled = (x.status==='resolved'||x.status==='ignored');
+    var acts = handled
+      ? '<button class="btn-sm" onclick="setAudit(\\''+x.id+'\\',\\'open\\')">reopen</button>'
+      : '<button class="btn-success" onclick="setAudit(\\''+x.id+'\\',\\'resolved\\')">resolved</button> '
+        +'<button class="btn-sm" onclick="setAudit(\\''+x.id+'\\',\\'ignored\\')">ignore</button>';
+    var tag = x.status==='reopened'
+        ? '<span class="pill p-pending">reopened</span>'
+        : (handled ? '<span class="pill p-idle">'+x.status+'</span>'
+                   : (x.live ? '<span class="pill p-pending">live</span>'
+                             : '<span class="pill p-idle">historical</span>'));
+    return '<div class="fb-row">'
+      +'<div class="fb-meta"><b>'+x.ticker+'</b> · '+x.check+' · '+(x.opened||'')+' '+tag+'</div>'
+      +'<div class="fb-text">'+x.detail+'</div>'
+      +'<div style="margin-top:6px">'+acts+'</div>'
+      +'</div>';
+  }).join('');
+
+  return '<div class="card">'+head
+    +'<div class="fb-meta" style="margin-bottom:8px">Derived fresh on every load &mdash; only your '
+    +'resolved/ignored marks are stored. A <b>live</b> finding you resolve that is still present '
+    +'next load returns as <b>reopened</b>.</div>'
+    +rows+'</div>';
+}
+
+async function setAudit(id,status){
+  try{
+    var r=await fetch('/admin/audit/'+encodeURIComponent(id),
+      {method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({status:status})});
+    if(!r.ok){alert('Failed: HTTP '+r.status);return;}
+    load();
+  }catch(e){alert('Network error');}
+}
+
 async function load(){
   var r;
   try{r=await fetch('/admin/data');}
@@ -999,7 +1051,8 @@ async function load(){
     +'<div class="grid2">'
       +'<div class="card"><div class="card-title">Today&rsquo;s picks</div>'+picksPanel(d.picks)+'</div>'
       +'<div class="card"><div class="card-title">Feedback</div>'+feedback(d.feedback)+'</div>'
-    +'</div>';
+    +'</div>'
+    +auditSection(d.audit);
   document.getElementById('ts').textContent='Updated '+new Date().toLocaleTimeString();
 }
 
@@ -1091,6 +1144,36 @@ def admin_dashboard():
     return _ADMIN_DASH_HTML, 200
 
 
+def _build_audit_findings() -> dict:
+    """Arithmetic integrity of every stored position, across real users AND the
+    synthetic/arm accounts.
+
+    The synthetic bot's data has only ever been useful as a BUG DETECTOR — this
+    turns what used to be "Claude noticed it in a session" into a standing
+    worklist the owner can act on and mark off. Findings are derived fresh each
+    call; only dispositions persist.
+    """
+    from config_manager import (get_allowed_users, load_user_trade_log,
+                                load_user_paper, load_audit_dispositions,
+                                DEFAULT_TEST_CHAT_ID, ARM_CHAT_IDS)
+    from position_audit import audit_account, apply_dispositions, summarise
+    try:
+        accounts = list(dict.fromkeys(
+            [*get_allowed_users(), DEFAULT_TEST_CHAT_ID, *ARM_CHAT_IDS.values()]))
+        raw = []
+        for a in accounts:
+            try:
+                raw += audit_account(a, load_user_trade_log(a), load_user_paper(a))
+            except Exception as exc:      # one bad account never hides the rest
+                print(f"[admin] audit failed for {a}: {exc}")
+        findings = apply_dispositions(raw, load_audit_dispositions())
+        return {"findings": findings, "summary": summarise(findings)}
+    except Exception as exc:
+        print(f"[admin] audit build failed: {exc}")
+        return {"findings": [], "summary": {"total": 0, "live_open": 0, "reopened": 0},
+                "error": str(exc)[:120]}
+
+
 def _enrich_feedback(entries: list, users: list) -> list:
     """Merge live user stats into feedback entries for admin triage."""
     user_map = {str(u["id"]): u for u in users}
@@ -1104,6 +1187,24 @@ def _enrich_feedback(entries: list, users: list) -> list:
             "is_active":      u.get("is_active", False),
         })
     return result
+
+
+@app.route("/admin/audit/<finding_id>", methods=["POST"])
+@_require_admin
+def admin_audit_disposition(finding_id):
+    """Mark a finding resolved / ignored / open.
+
+    Note what 'resolved' does NOT mean: a LIVE finding marked resolved that is
+    still present next load comes back as REOPENED (see position_audit), because
+    otherwise resolving would just hide a defect that is still in production.
+    """
+    from config_manager import set_audit_disposition
+    body   = request.get_json(silent=True) or {}
+    status = str(body.get("status", "")).strip().lower()
+    if status not in ("resolved", "ignored", "open"):
+        return jsonify({"error": "status must be resolved|ignored|open"}), 400
+    rec = set_audit_disposition(finding_id, status, body.get("note", ""))
+    return jsonify({"ok": True, "status": status, "record": rec})
 
 
 @app.route("/admin/data")
@@ -1123,6 +1224,7 @@ def admin_data():
 
     cfg     = get_config()
     owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
+    audit   = _build_audit_findings()
     now_utc = _dt.now(_tz.utc)
     users   = []
     total_open   = 0
@@ -1206,6 +1308,7 @@ def admin_data():
             "options_plays":  opts,
         },
         "feedback":         _enrich_feedback(load_feedback()[:20], users),
+        "audit":            audit,
         "cron":             cron,
         "last_morning_run": cfg.get("last_morning_run", ""),
     })
