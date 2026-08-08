@@ -321,6 +321,20 @@ class Strategy:
     breakout_vol_min: float = 1.3
     near_high_pct: float = 3.0
     w_near_high: int = 10
+    # long-term leg — fundamentals. Parameterised so an arm's LT picks differ
+    # too; before this they were ~80% identical between arms (measured on the
+    # Aug 8 dry run: 4/5 overlap), i.e. half of every arm was a duplicate.
+    w_pe_at_or_below: int = 30
+    w_pe_moderate: int = 15
+    w_pe_high: int = 5
+    pe_moderate_mult: float = 1.5
+    pe_high_mult: float = 2.5
+    rev_growth_min: float = 0.10
+    w_rev_growth: int = 25
+    net_margin_min: float = 0.10
+    w_net_margin: int = 20
+    w_low_debt: int = 15
+    w_above_200ma: int = 10
     # candlestick / chart patterns
     w_bull_flag: int = 15
     w_bullish_engulfing: int = 15
@@ -344,7 +358,10 @@ STRATEGIES: dict[str, Strategy] = {
                              "STRATEGY FOR THIS RUN — BREAKOUT/MOMENTUM ONLY: select only "
                              "names breaking to new highs on expanding volume. Do NOT select "
                              "oversold bounces, mean-reversion or 'buy the dip' setups, even "
-                             "if they look cheap. If fewer names qualify, return fewer picks.")),
+                             "if they look cheap. If fewer names qualify, return fewer picks."),
+                         # growth tilt: tolerate a premium, require the uptrend
+                         w_pe_at_or_below=10, w_pe_moderate=10, w_pe_high=10,
+                         w_rev_growth=35, w_above_200ma=20),
     # Mean-reversion only: ignore the breakout signals entirely.
     "pullback": Strategy(name="pullback", w_breakout=0, w_near_high=0,
                          w_rsi=35, w_bb_bounce=25,
@@ -352,7 +369,10 @@ STRATEGIES: dict[str, Strategy] = {
                              "STRATEGY FOR THIS RUN — PULLBACK/MEAN-REVERSION ONLY: select only "
                              "names pulling back to support within an uptrend (RSI mid-range, "
                              "near lower Bollinger, holding above trend). Do NOT select breakouts "
-                             "or names at new highs. If fewer names qualify, return fewer picks.")),
+                             "or names at new highs. If fewer names qualify, return fewer picks."),
+                         # value tilt: reward cheapness, discount momentum
+                         w_pe_at_or_below=40, w_pe_moderate=20, w_pe_high=0,
+                         w_above_200ma=0),
 }
 
 
@@ -751,6 +771,40 @@ _FINNHUB_INDUSTRY_MAP = {
 }
 
 
+# ── Per-run fetch memo (makes A/B arms affordable) ───────────────────────────
+# Each arm is a full screener pass, so N arms meant N× the Finnhub calls. The
+# Aug 8 dry run proved that is not theoretical: two arms produced **196 Finnhub
+# 429s**, and an arm running on degraded fundamentals measures the API rather
+# than the strategy — which would silently corrupt the very comparison the arms
+# exist to make.
+#
+# These fetches are deterministic for a given ticker within one run, so memoise
+# them process-wide: arm 2 pays nothing. It also cuts load on the normal single
+# screener pass, where the same ticker is looked up by more than one code path.
+#
+# Returns a DEEP COPY — callers mutate these dicts (metrics get flattened up
+# into candidates), and handing out the cached object would poison later reads.
+_FETCH_MEMO: dict = {}
+
+
+def clear_fetch_memo() -> None:
+    """Drop the per-run memo. Call between logical runs, and in tests."""
+    _FETCH_MEMO.clear()
+
+
+def _memoised(fn):
+    import copy, functools
+
+    @functools.wraps(fn)
+    def _inner(*args, **kwargs):
+        key = (fn.__name__, args, tuple(sorted(kwargs.items())))
+        if key not in _FETCH_MEMO:
+            _FETCH_MEMO[key] = fn(*args, **kwargs)
+        return copy.deepcopy(_FETCH_MEMO[key])
+    return _inner
+
+
+@_memoised
 def _get_finnhub_profile(ticker: str) -> dict:
     """
     Fetch company name and sector from Finnhub /stock/profile2.
@@ -779,6 +833,7 @@ def _get_finnhub_profile(ticker: str) -> dict:
 
 # ── Finnhub fundamental metrics ───────────────────────────────────────────────
 
+@_memoised
 def _get_finnhub_metrics(ticker: str) -> dict:
     """
     Fetch basic financial metrics from Finnhub /stock/metric.
@@ -809,6 +864,7 @@ def _get_finnhub_metrics(ticker: str) -> dict:
 
 # ── Finnhub analyst price targets ────────────────────────────────────────────
 
+@_memoised
 def _get_analyst_target(ticker: str) -> dict:
     """
     Fetch analyst consensus price target from Finnhub /stock/price-target.
@@ -838,6 +894,7 @@ def _get_analyst_target(ticker: str) -> dict:
 
 # ── Finnhub EPS surprise history ─────────────────────────────────────────────
 
+@_memoised
 def _get_eps_surprises(ticker: str) -> dict:
     """
     Fetch last 4 quarters of EPS surprise from Finnhub /stock/earnings (free tier).
@@ -880,6 +937,7 @@ def _get_eps_surprises(ticker: str) -> dict:
 
 # ── Finnhub analyst buy/hold/sell count ───────────────────────────────────────
 
+@_memoised
 def _get_analyst_recommendations(ticker: str) -> dict:
     """
     Fetch analyst buy/hold/sell consensus from Finnhub /stock/recommendation (free tier).
@@ -1016,6 +1074,7 @@ def _long_term_score(
     fh: dict,
     dynamic_sector_pe: dict | None = None,
     ticker: str = "",
+    strat: Strategy = DEFAULT_STRATEGY,
 ) -> tuple[int, dict]:
     """
     Score a ticker for long-term investing (out of 100).
@@ -1041,23 +1100,23 @@ def _long_term_score(
     metrics["pe_ratio"] = round(pe, 1) if pe else None
     if pe and 0 < pe:
         if pe < median_pe:
-            score += 30          # at or below median — value opportunity
-        elif pe < median_pe * 1.5:
-            score += 15          # moderate growth premium — still reasonable
-        elif pe < median_pe * 2.5:
-            score += 5           # high growth premium — acceptable for top-tier compounders
+            score += strat.w_pe_at_or_below   # at or below median — value opportunity
+        elif pe < median_pe * strat.pe_moderate_mult:
+            score += strat.w_pe_moderate      # moderate growth premium
+        elif pe < median_pe * strat.pe_high_mult:
+            score += strat.w_pe_high          # high premium — top-tier compounders only
 
     # ── Revenue growth > 10% YoY (25 pts) ────────────────────────────────────
     rev_growth = fh.get("revenueGrowthTTMYoy") or info.get("revenueGrowth")
     metrics["revenue_growth"] = rev_growth
-    if rev_growth and rev_growth > 0.10:
-        score += 25
+    if rev_growth and rev_growth > strat.rev_growth_min:
+        score += strat.w_rev_growth
 
     # ── Net margin > 10% — replaces FCF (more reliably available) (20 pts) ───
     net_margin = fh.get("netMarginTTM") or info.get("profitMargins")
     metrics["net_margin"] = round(net_margin, 3) if net_margin else None
-    if net_margin and net_margin > 0.10:
-        score += 20
+    if net_margin and net_margin > strat.net_margin_min:
+        score += strat.w_net_margin
 
     # ── Debt-to-equity < 1.0 (15 pts) ────────────────────────────────────────
     # Finnhub: ratio (1.2 = 120%)  |  yfinance: percentage (120 = 1.2x)
@@ -1073,7 +1132,7 @@ def _long_term_score(
         dte, dte_ok = None, False
     metrics["debt_to_equity"] = dte
     if dte_ok:
-        score += 15
+        score += strat.w_low_debt
 
     # ── Market cap > $10B — gate only, not scored ────────────────────────────
     # Large-cap is a quality minimum, not a scoring differentiator.
@@ -1096,14 +1155,14 @@ def _long_term_score(
             above_ma = cur_px > ma200
             metrics["above_200ma"] = above_ma
             if above_ma:
-                score += 10
+                score += strat.w_above_200ma
         elif not hist_lt.empty:
             # < 200 days data — use what we have (50-day proxy)
             ma_proxy = float(hist_lt["Close"].rolling(min(50, len(hist_lt))).mean().iloc[-1])
             cur_px   = float(hist_lt["Close"].iloc[-1])
             metrics["above_200ma"] = cur_px > ma_proxy
             if cur_px > ma_proxy:
-                score += 10
+                score += strat.w_above_200ma
     except Exception:
         metrics["above_200ma"] = None
 
@@ -1463,7 +1522,8 @@ def run_screener(
         congress = get_congressional_signal(ticker, congressional_trades)
 
         try:
-            lt_score, lt_metrics = _long_term_score(info, fh_metrics, _dynamic_sector_pe, ticker=ticker)
+            lt_score, lt_metrics = _long_term_score(info, fh_metrics, _dynamic_sector_pe,
+                                                    ticker=ticker, strat=strategy)
         except Exception as exc:
             print(f"[screener] LT score failed for {ticker}: {exc}")
             lt_score, lt_metrics = 0, {}
