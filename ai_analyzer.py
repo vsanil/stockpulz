@@ -1171,6 +1171,65 @@ def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
     return result
 
 
+# ── Pick provenance (measurement only — never feeds back into selection) ──────
+# Claude returns ticker/entry/target/stop/conviction; the screener features that
+# justified the candidate are DROPPED from its response. Without them the pick
+# evaluator can only say "picks won X%" — never WHICH signal earned it, and the
+# features cannot be recovered later (screener_cache has a 1-day TTL and stores
+# survivors only). So re-join them onto each pick under `_screen` at the one
+# point where both the candidate and the final pick are in scope.
+#
+# This is INSTRUMENTATION, not input: `_screen` is written to picks.json and read
+# by scripts/evaluate_picks.py. It is never sent back to the model and never
+# changes what gets picked — measuring the engine must not contaminate it.
+_SCREEN_FIELDS = ("score", "rsi", "macd_crossover", "volume_ratio",
+                  "breakout_today", "obv_positive", "atr_pct", "sector",
+                  "market_cap", "patterns", "rs_vs_spy")
+
+
+def _setup_type(m: dict) -> str:
+    """Which STRATEGY produced this pick. RSI-in-band (+25) and breakout (+15)
+    are scored as if additive but in practice never co-occur — they are two
+    different trades (buy-the-pullback vs buy-the-breakout) collapsed onto one
+    scale. Tagging them lets the evaluator score each regime separately."""
+    rsi = m.get("rsi")
+    if m.get("breakout_today"):
+        return "breakout"
+    if isinstance(rsi, (int, float)) and 35 <= rsi <= 55:
+        return "pullback"
+    return "other"
+
+
+def _attach_screen_provenance(picks: dict, candidates: list) -> None:
+    """Attach each pick's originating screener features, in place."""
+    by_sym = {}
+    for c in candidates or []:
+        sym = (c.get("ticker") or c.get("symbol") or "").upper()
+        if sym:
+            by_sym[sym] = c
+    for section in ("stocks", "crypto", "etfs", "commodities"):
+        for tf in ("short_term", "long_term"):
+            for p in (picks.get(section, {}) or {}).get(tf, []) or []:
+                sym = (p.get("ticker") or p.get("symbol") or "").upper()
+                cand = by_sym.get(sym)
+                if not cand:
+                    continue
+                scr = {k: cand[k] for k in _SCREEN_FIELDS if cand.get(k) is not None}
+                if not scr:
+                    continue
+                # Compress: this row is kept forever in pick_ledger.json, and the
+                # Gist truncates a file past ~1 MB. Full-precision floats and a
+                # raw market cap roughly double the row for no analytical gain.
+                for k in ("rsi", "volume_ratio", "atr_pct", "rs_vs_spy"):
+                    if isinstance(scr.get(k), float):
+                        scr[k] = round(scr[k], 2)
+                mcap = scr.pop("market_cap", None)
+                if isinstance(mcap, (int, float)) and mcap > 0:
+                    scr["mcap_b"] = round(mcap / 1e9, 1)
+                scr["setup_type"] = _setup_type(cand)
+                p["_screen"] = scr
+
+
 # ── Claude call ───────────────────────────────────────────────────────────────
 
 def _call_claude(system: str, user: str, model: str = "claude-sonnet-4-6",
@@ -1279,6 +1338,11 @@ def analyze_with_claude(
 
     # Fill in allocations now that we know actual pick counts
     _backfill_allocations(picks, config)
+    # Record WHY each pick was a candidate (measurement only — see _attach_screen_provenance)
+    try:
+        _attach_screen_provenance(picks, stock_candidates + crypto_candidates)
+    except Exception as exc:      # never let instrumentation break the morning run
+        print(f"[ai_analyzer] screen provenance attach failed (non-critical): {exc}")
     return picks
 
 
