@@ -419,3 +419,61 @@ class TestFinnhubRateLimit:
 
     def test_cap_leaves_headroom_under_the_free_tier(self):
         assert screener._FINNHUB_MAX_PER_MIN < 60, "Finnhub free tier is 60/min"
+
+
+class TestDataQualityAccounting:
+    """The screener records what it ACTUALLY got, because only the run knows.
+    The Finnhub failure was a RATE limit — a probe of one ticker would have
+    succeeded and reported green while 65% of candidates got nothing."""
+
+    def test_counts_successes_and_failures(self):
+        screener.dq_reset()
+        screener.dq_record("finnhub_profile", True)
+        screener.dq_record("finnhub_profile", True)
+        screener.dq_record("finnhub_profile", False)
+        assert screener.dq_snapshot()["finnhub_profile"] == {"ok": 2, "total": 3}
+
+    def test_bulk_sources_can_report_zero(self):
+        screener.dq_reset()
+        screener.dq_set("congressional", 0, 1)
+        assert screener.dq_snapshot()["congressional"]["ok"] == 0
+
+    def test_counting_is_threadsafe(self):
+        import threading
+        screener.dq_reset()
+        def bump():
+            for _ in range(200):
+                screener.dq_record("x", True)
+        ts = [threading.Thread(target=bump) for _ in range(8)]
+        for t in ts: t.start()
+        for t in ts: t.join()
+        assert screener.dq_snapshot()["x"]["total"] == 1600, "lost counts under concurrency"
+        screener.dq_reset()
+
+    def test_publish_writes_coverage_percentages(self, monkeypatch):
+        import config_manager
+        screener.dq_reset()
+        screener.dq_record("finnhub_metrics", True)
+        screener.dq_record("finnhub_metrics", False)
+        written = {}
+        monkeypatch.setattr(config_manager, "_write_gist_file",
+                            lambda f, d: written.update({f: d}))
+        screener._publish_data_quality()
+        got = written["data_quality.json"]["sources"]["finnhub_metrics"]
+        assert got == {"ok": 1, "total": 2, "coverage_pct": 50.0}
+        screener.dq_reset()
+
+    def test_a_publish_failure_never_breaks_a_run(self, monkeypatch):
+        """Telemetry must never take down a screener run that otherwise worked."""
+        import config_manager
+        monkeypatch.setattr(config_manager, "_write_gist_file",
+                            lambda f, d: (_ for _ in ()).throw(RuntimeError("gist down")))
+        screener.dq_reset()
+        screener.dq_record("finnhub_profile", True)
+        with pytest.raises(RuntimeError):
+            screener._publish_data_quality()      # raises on its own …
+        # … and run_screener wraps it in try/except so the run survives
+        import inspect
+        src = inspect.getsource(screener.run_screener)
+        assert "_publish_data_quality()" in src and "non-critical" in src
+        screener.dq_reset()

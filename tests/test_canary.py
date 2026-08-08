@@ -120,3 +120,64 @@ class TestCanaryHelpers:
         canary.check_selfheal_health()
         ok, note = self._result()
         assert ok and "latest skipped" in note
+
+    # ── data completeness ────────────────────────────────────────────────────
+    def _dq(self, monkeypatch, sources, date=None):
+        import json, datetime
+        payload = {"date": date or datetime.date.today().isoformat(), "sources": sources}
+        monkeypatch.setattr(canary, "_gist_all",
+                            lambda: {"data_quality.json": {"content": json.dumps(payload)}})
+        canary.RESULTS.clear()
+        canary.check_data_completeness()
+        name, ok, note = canary.RESULTS[-1]
+        canary.RESULTS.clear()
+        return ok, note
+
+    def test_full_coverage_passes(self, monkeypatch):
+        ok, note = self._dq(monkeypatch, {
+            "finnhub_profile": {"ok": 79, "total": 79, "coverage_pct": 100.0},
+            "finnhub_metrics": {"ok": 79, "total": 79, "coverage_pct": 100.0}})
+        assert ok and "finnhub_profile=100.0%" in note
+
+    def test_the_finnhub_bug_would_now_be_caught(self, monkeypatch):
+        """The exact live failure: 51 of 79 candidates got no fundamentals, and
+        every existing monitor stayed green for weeks."""
+        ok, note = self._dq(monkeypatch, {
+            "finnhub_profile": {"ok": 28, "total": 79, "coverage_pct": 35.4},
+            "finnhub_metrics": {"ok": 28, "total": 79, "coverage_pct": 35.4}})
+        assert not ok, "a 35% fundamentals run must fail the canary"
+        assert "long-term scoring is ~90% fundamentals" in note
+
+    def test_optional_sources_are_reported_but_do_not_page(self, monkeypatch):
+        """Congressional is at 0% live right now. Visible, but a flaky
+        third-party feed must not cry wolf — the crypto-check lesson."""
+        ok, note = self._dq(monkeypatch, {
+            "finnhub_profile": {"ok": 79, "total": 79, "coverage_pct": 100.0},
+            "finnhub_metrics": {"ok": 79, "total": 79, "coverage_pct": 100.0},
+            "congressional":   {"ok": 0,  "total": 1,  "coverage_pct": 0.0}})
+        assert ok, "an optional feed at 0% must not fail the canary"
+        assert "congressional=0.0%" in note, "but it MUST be visible in the note"
+
+    def test_a_stale_report_fails(self, monkeypatch):
+        ok, note = self._dq(monkeypatch, {
+            "finnhub_profile": {"ok": 79, "total": 79, "coverage_pct": 100.0}},
+            date="2020-01-01")
+        assert not ok and "stale" in note
+
+    def test_missing_file_says_not_verified_rather_than_green(self, monkeypatch):
+        monkeypatch.setattr(canary, "_gist_all", lambda: {})
+        canary.RESULTS.clear()
+        canary.check_data_completeness()
+        _, ok, note = canary.RESULTS[-1]
+        canary.RESULTS.clear()
+        assert ok and "NOT VERIFIED" in note
+
+    def test_an_unreachable_gist_says_not_verified(self, monkeypatch):
+        def _boom():
+            raise RuntimeError("gist down")
+        monkeypatch.setattr(canary, "_gist_all", _boom)
+        canary.RESULTS.clear()
+        canary.check_data_completeness()
+        _, ok, note = canary.RESULTS[-1]
+        canary.RESULTS.clear()
+        assert ok and "NOT VERIFIED" in note

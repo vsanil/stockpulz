@@ -19,6 +19,7 @@ import re
 import time
 import collections
 import threading
+import datetime as dt
 import warnings
 from dataclasses import dataclass
 from io import StringIO
@@ -773,6 +774,43 @@ _FINNHUB_INDUSTRY_MAP = {
 }
 
 
+# ── Data-quality accounting ──────────────────────────────────────────────────
+# The Finnhub rate-limit bug starved 65% of candidates of fundamentals on EVERY
+# production run for weeks while canary, full sweep, synthetic bot and evaluator
+# all stayed green — because they all check that things RESPOND, never that the
+# data behind them is COMPLETE. A degraded input silently corrupts every number
+# downstream of it, and nothing was watching.
+#
+# 🔴 Note why this is recorded by the SCREENER rather than probed by the canary:
+# the bug was a RATE limit. A canary probing one ticker would have succeeded and
+# reported green. Only the run itself knows what it actually got.
+_DQ_LOCK = threading.Lock()
+_DQ: dict[str, dict[str, int]] = {}
+
+
+def dq_record(source: str, ok: bool) -> None:
+    with _DQ_LOCK:
+        d = _DQ.setdefault(source, {"ok": 0, "total": 0})
+        d["total"] += 1
+        d["ok"] += 1 if ok else 0
+
+
+def dq_set(source: str, ok: int, total: int) -> None:
+    """For sources counted in bulk rather than per call."""
+    with _DQ_LOCK:
+        _DQ[source] = {"ok": int(ok), "total": int(total)}
+
+
+def dq_snapshot() -> dict:
+    with _DQ_LOCK:
+        return {k: dict(v) for k, v in _DQ.items()}
+
+
+def dq_reset() -> None:
+    with _DQ_LOCK:
+        _DQ.clear()
+
+
 # ── Finnhub rate limiting ────────────────────────────────────────────────────
 # 🔴 The old guard was `threading.Semaphore(4)` commented "stays under 60/min".
 # It does not. A semaphore bounds CONCURRENCY, not RATE: four workers issuing
@@ -876,8 +914,10 @@ def _get_finnhub_profile(ticker: str) -> dict:
         name     = data.get("name") or ticker
         industry = data.get("finnhubIndustry") or "Unknown"
         sector   = _FINNHUB_INDUSTRY_MAP.get(industry, "Unknown")
+        dq_record("finnhub_profile", True)
         return {"company": name, "sector": sector}
     except Exception as exc:
+        dq_record("finnhub_profile", False)
         print(f"[screener] Finnhub profile error for {ticker}: {exc}")
         return {"company": ticker, "sector": "Unknown"}
 
@@ -908,8 +948,10 @@ def _get_finnhub_metrics(ticker: str) -> dict:
             timeout=8,
         )
         resp.raise_for_status()
+        dq_record("finnhub_metrics", True)
         return resp.json().get("metric", {})
     except Exception as exc:
+        dq_record("finnhub_metrics", False)
         print(f"[screener] Finnhub metrics error for {ticker}: {exc}")
         return {}
 
@@ -1482,6 +1524,8 @@ def run_screener(
 
     # ── Step 4c: Congressional trading (one fetch, cached 24h) ───────────────
     congressional_trades = get_all_congressional_trades()
+    # 0 tickers means the upstream source is down — visible, not fatal.
+    dq_set("congressional", len(congressional_trades), max(len(congressional_trades), 1))
     print(f"[screener] Congressional data: {len(congressional_trades)} tickers tracked.")
 
     # ── Step 5: Fetch .info for union of both pools (concurrent, deduplicated) ──
@@ -1795,12 +1839,46 @@ def run_screener(
     nm_lt = [_add_near_miss_reason(c, is_st=False)
              for c in long_candidates  if c["ticker"] not in _top_lt_tickers][:3]
 
+    # Publish what this run ACTUALLY got, so the canary can assert on completeness
+    # rather than on liveness. Best-effort: a telemetry failure must never break
+    # a screener run that otherwise succeeded.
+    try:
+        _publish_data_quality()
+    except Exception as exc:
+        print(f"[screener] data-quality publish failed (non-critical): {exc}")
+
     return {
         "short_term":  short_top,
         "long_term":   long_top,
         "regime":      regime_info,
         "near_misses": {"short_term": nm_st, "long_term": nm_lt},
     }
+
+
+DATA_QUALITY_FILE = "data_quality.json"
+
+
+def _publish_data_quality() -> None:
+    """Write this run's source coverage so the canary can see silent degradation.
+
+    Only the run itself can measure this: the Finnhub failure was a RATE limit,
+    so a canary probing a single ticker would have succeeded and reported green
+    while 65% of candidates were being scored on missing fundamentals.
+    """
+    from config_manager import _write_gist_file, et_today
+    snap = dq_snapshot()
+    payload = {
+        "date": et_today().isoformat(),
+        "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "sources": {
+            k: {"ok": v["ok"], "total": v["total"],
+                "coverage_pct": round(v["ok"] / v["total"] * 100, 1) if v["total"] else 0.0}
+            for k, v in snap.items()
+        },
+    }
+    _write_gist_file(DATA_QUALITY_FILE, payload)
+    for k, v in sorted(payload["sources"].items()):
+        print(f"[screener] data quality · {k}: {v['ok']}/{v['total']} ({v['coverage_pct']}%)")
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────
