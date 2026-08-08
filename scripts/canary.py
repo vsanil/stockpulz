@@ -384,6 +384,66 @@ def check_selfheal_health() -> None:
            fail_detail=fail_detail)
 
 
+def check_data_completeness() -> None:
+    """Did the last screener run actually GET its data?
+
+    Every existing monitor checks that things RESPOND. None checked that the
+    data behind them is COMPLETE — which is how the Finnhub rate-limit bug ran
+    on every production run for weeks, starving 65% of candidates of
+    fundamentals and visibly changing 4 of 5 long-term picks, while canary, full
+    sweep, synthetic bot and evaluator all stayed green.
+
+    This reads what the RUN recorded, not what a probe can reach. That
+    distinction is the whole point: the bug was a RATE limit, so probing a
+    single ticker would have succeeded and reported green.
+
+    FAILS only on fundamentals — they carry ~90% of the long-term score, so
+    missing them makes LT picks close to arbitrary and users are affected.
+    Optional signals (congressional, sentiment) are REPORTED in the note so
+    degradation is visible daily, but do not page: a flaky third-party feed is
+    not a reason to cry wolf (the lesson from the crypto checks).
+    """
+    FUNDAMENTAL_MIN = 80.0        # % of attempted fetches that must succeed
+    try:
+        import json as _json
+        dq = _json.loads(_gist_all().get("data_quality.json", {}).get("content") or "{}")
+    except Exception as e:
+        _check("data.completeness", True, f"NOT VERIFIED this run — {type(e).__name__}")
+        return
+    if not dq or not dq.get("sources"):
+        _check("data.completeness", True,
+               "NOT VERIFIED — no data_quality.json yet (written by the next screener run)")
+        return
+
+    src = dq["sources"]
+    stamp = (dq.get("date") or "")[:10]
+    fresh = _delivery_fresh(stamp, _expected_delivery_date())
+
+    fundamentals = {k: v for k, v in src.items() if k.startswith("finnhub_")}
+    worst_name, worst_cov = None, 100.0
+    for k, v in fundamentals.items():
+        cov = float(v.get("coverage_pct") or 0)
+        if cov < worst_cov:
+            worst_name, worst_cov = k, cov
+
+    others = "  ·  ".join(f"{k}={v.get('coverage_pct')}%"
+                          for k, v in sorted(src.items()) if not k.startswith("finnhub_"))
+    detail = (f"[{stamp}] " + "  ·  ".join(f"{k}={v.get('coverage_pct')}%"
+                                           for k, v in sorted(src.items())))
+
+    if not fundamentals:
+        _check("data.completeness", True, detail + "  (no fundamentals recorded)")
+        return
+    ok = worst_cov >= FUNDAMENTAL_MIN and fresh
+    _check("data.completeness", ok, detail,
+           fail_detail=(f"{detail} — "
+                        + (f"{worst_name} coverage {worst_cov}% is below {FUNDAMENTAL_MIN}%: "
+                           f"long-term scoring is ~90% fundamentals, so LT picks are being "
+                           f"chosen on missing data"
+                           if worst_cov < FUNDAMENTAL_MIN
+                           else f"stale — last screener run recorded {stamp}")))
+
+
 def check_endpoints() -> None:
     base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
             or "https://stock-agent-enqx.onrender.com").rstrip("/")
@@ -596,7 +656,7 @@ def main() -> int:
 
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
                check_backtest_math, check_price_guard, check_storage_headroom,
-               check_cron_delivery, check_selfheal_health,
+               check_cron_delivery, check_selfheal_health, check_data_completeness,
                check_endpoints):
         try:
             fn()
