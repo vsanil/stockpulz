@@ -477,3 +477,52 @@ class TestDataQualityAccounting:
         src = inspect.getsource(screener.run_screener)
         assert "_publish_data_quality()" in src and "non-critical" in src
         screener.dq_reset()
+
+
+class TestCongressionalDormant:
+    """No free structured source of congressional trades exists any more
+    (verified Aug 8 2026): House Stock Watcher's domain is dead and its S3
+    buckets 403, Finnhub's endpoint is premium, and the official House Clerk ZIP
+    carries filing metadata only — no tickers. The feature is DORMANT, not
+    broken, and must be reported as such."""
+
+    def test_no_key_means_no_network_call_at_all(self, monkeypatch):
+        """It used to call Quiver unauthenticated (a guaranteed 401) and then a
+        dead domain (DNS failure + retries) on EVERY screener run."""
+        import congressional_tracker as ct
+        monkeypatch.delenv("QUIVER_API_KEY", raising=False)
+        def _boom(*a, **k):
+            raise AssertionError("must not hit the network with no key configured")
+        monkeypatch.setattr(ct.requests, "get", _boom)
+        assert ct._fetch_raw() == []
+
+    def test_the_dead_source_is_gone(self):
+        import congressional_tracker as ct
+        src = open(ct.__file__).read()
+        assert "housestockwatcher" not in src.lower().split("docstring")[0].replace(
+            "House Stock Watcher", ""), "the dead domain must not be called"
+        assert not hasattr(ct, "HOUSE_API")
+
+    def test_a_key_re_enables_it_with_proper_auth(self, monkeypatch):
+        import congressional_tracker as ct
+        monkeypatch.setenv("QUIVER_API_KEY", "tok123")
+        seen = {}
+        class _R:
+            status_code = 200
+            def json(self): return [{"ticker": "AAPL"}]
+        def _get(url, headers=None, timeout=None):
+            seen["auth"] = (headers or {}).get("Authorization")
+            return _R()
+        monkeypatch.setattr(ct.requests, "get", _get)
+        assert ct._fetch_raw() == [{"ticker": "AAPL"}]
+        assert seen["auth"] == "Bearer tok123", "must send the token, not call unauthenticated"
+
+    def test_dormant_is_recorded_as_not_configured_not_as_zero_coverage(self, monkeypatch):
+        """Reporting a dormant feed as 0% sends the owner chasing a breakage
+        that does not exist."""
+        monkeypatch.delenv("QUIVER_API_KEY", raising=False)
+        screener.dq_reset()
+        configured = bool(__import__("os").environ.get("QUIVER_API_KEY", "").strip())
+        screener.dq_set("congressional", 0, 1 if configured else 0)
+        assert screener.dq_snapshot()["congressional"]["total"] == 0
+        screener.dq_reset()

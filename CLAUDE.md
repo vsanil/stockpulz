@@ -347,6 +347,16 @@ Rules:
 - **Every slice carries its own n + `(low n)` tag below `_MIN_N`**, and the report states how many matured picks predate the instrumentation, so a partial slice can't read as covering everything.
 - **⚠️ Ledger growth**: `screen` adds ~250 bytes/pick → **~700 KB/year** at 8 picks/day, against the Gist's ~1 MB truncation wall. Values are rounded and `market_cap` stored as `mcap_b` to halve it. The canary `check_storage_headroom()` tripwire at 700 KB will fire on `pick_ledger.json` within ~1 year — **that is expected, not a bug**; it is the signal to move the ledger to the row store (which the ~50-user migration would do anyway).
 
+### Congressional signal is DORMANT — no free source exists (verified Aug 8 2026)
+- **Do not "fix" this by hunting for another endpoint — all of them were checked:**
+  * **House Stock Watcher** — domain no longer resolves; its public S3 buckets (`house-stock-watcher-data`, `senate-stock-watcher-data`) return **403**. Project shut down. REMOVED from the code.
+  * **Finnhub `/stock/congressional-trading`** — **403**, premium tier only (our key is otherwise valid and at 100% coverage for profile/metrics).
+  * **Official House Clerk** (`disclosures-clerk.house.gov`) — **alive (200)**, but the annual ZIP holds only filing METADATA (member, filing type, date, DocID). Ticker-level trades live in thousands of individual PDFs, and disclosure lags up to **45 days by law**, so even parsing them yields a stale signal.
+  * **Quiver Quantitative** — works, but **paid**. This is the only realistic route.
+- **The code was calling Quiver with NO credentials (guaranteed 401) and then the dead domain (DNS failure + retries) on EVERY screener run** — two futile round-trips whose only effect was a log line nobody read. Now: no `QUIVER_API_KEY` → returns `[]` in 0.00s with one clear log line. **Set `QUIVER_API_KEY` and it lights up again with no other change** (sends `Authorization: Bearer …`, which the old code never did).
+- **Impact if restored**: `congress_score ≥ 6` → +8 to the LT score, `≥ 3` → +4 (out of 100). A modest bonus, LT only.
+- **🔴 Dormant ≠ broken in the data-quality report.** `dq_set("congressional", n, 0)` when unconfigured, and the canary renders `total == 0` as **`n/a (not configured)`** rather than `0%` — reporting a dormant feed as 0% coverage sends the owner chasing a breakage that does not exist. Guards: `TestCongressionalDormant`, and the canary case asserting `0.0%` never appears for it.
+
 ### Data completeness — every monitor checked LIVENESS, none checked COMPLETENESS (Aug 8)
 - The Finnhub bug ran on every production run for weeks with canary, full sweep, synthetic bot and evaluator **all green**, because they all verify things RESPOND, never that the data behind them is COMPLETE. A degraded input silently corrupts every number downstream and nothing was watching.
 - **🔴 The SCREENER records coverage; the canary does NOT probe.** This distinction is the whole point: the failure was a RATE limit, so a canary probing a single ticker would have succeeded and reported green. Only the run itself knows what it actually got. `screener.dq_record/dq_set/dq_snapshot` (threadsafe — enrichment is parallel) → `_publish_data_quality()` writes `data_quality.json` at the end of `run_screener`, wrapped in try/except so telemetry can never break a run that otherwise worked.

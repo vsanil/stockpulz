@@ -181,3 +181,13 @@ class TestCanaryHelpers:
         _, ok, note = canary.RESULTS[-1]
         canary.RESULTS.clear()
         assert ok and "NOT VERIFIED" in note
+
+    def test_a_dormant_source_reads_as_not_configured(self, monkeypatch):
+        """Congressional has no free source; reporting it as 0% would send the
+        owner chasing a breakage that does not exist."""
+        ok, note = self._dq(monkeypatch, {
+            "finnhub_profile": {"ok": 79, "total": 79, "coverage_pct": 100.0},
+            "congressional":   {"ok": 0,  "total": 0,  "coverage_pct": 0.0}})
+        assert ok
+        assert "congressional=n/a (not configured)" in note
+        assert "congressional=0.0%" not in note
