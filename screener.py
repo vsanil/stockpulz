@@ -18,6 +18,7 @@ import os
 import re
 import time
 import warnings
+from dataclasses import dataclass
 from io import StringIO
 import requests
 import pandas as pd
@@ -283,8 +284,70 @@ def get_sp500_tickers() -> list[str]:
 
 # ── Technical indicators (short-term scoring) ─────────────────────────────────
 
-def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
-    """Score a ticker for short-term trading (out of 100). Returns (score, metrics)."""
+# ── Strategy parameters (for A/B arms; default reproduces today's engine) ─────
+# The scoring rubric's weights and thresholds were hand-set with no evidence
+# behind them, and two of the biggest components — the RSI pullback band (+25)
+# and breakout (+15) — never fire on the same candidate, so one score is really
+# two strategies averaged together (see setup_type()).
+#
+# Making them parameters lets variants run as PARALLEL PAPER ARMS on the SAME
+# market days, which is the only way to compare them without the regime
+# confound of "v1 in July vs v2 in August".
+#
+# 🔴 DEFAULT MUST REPRODUCE THE LIVE ENGINE EXACTLY. Real users get `default`;
+# every field below is the literal that was hardcoded here before. Guard:
+# TestStrategyDefaultsAreUnchanged pins scores against golden values.
+@dataclass(frozen=True)
+class Strategy:
+    name: str = "default"
+    # pullback leg — "momentum building, not overbought"
+    rsi_lo: float = 35.0
+    rsi_hi: float = 55.0
+    w_rsi: int = 25
+    w_bb_bounce: int = 15
+    bb_vol_min: float = 1.2
+    # trend / momentum leg
+    w_macd: int = 25
+    w_ema20: int = 15
+    w_obv: int = 10
+    vol_surge_min: float = 1.5
+    w_vol_surge: int = 20
+    # breakout leg — mutually exclusive with the pullback leg in practice
+    w_breakout: int = 15
+    breakout_vol_min: float = 1.3
+    near_high_pct: float = 3.0
+    w_near_high: int = 10
+    # candlestick / chart patterns
+    w_bull_flag: int = 15
+    w_bullish_engulfing: int = 15
+    w_three_white_soldiers: int = 10
+    w_hammer: int = 10
+    w_morning_star: int = 10
+
+
+DEFAULT_STRATEGY = Strategy()
+
+# Arms worth running. These are deliberately FAR APART — two variants that
+# disagree on only a few picks need more data than we will ever have, because
+# only the picks where arms differ carry information. breakout vs pullback is
+# the one split we have measured evidence for.
+STRATEGIES: dict[str, Strategy] = {
+    "default":  DEFAULT_STRATEGY,
+    # Momentum only: ignore the mean-reversion signals entirely.
+    "breakout": Strategy(name="breakout", w_rsi=0, w_bb_bounce=0,
+                         w_breakout=25, w_near_high=20, w_vol_surge=25),
+    # Mean-reversion only: ignore the breakout signals entirely.
+    "pullback": Strategy(name="pullback", w_breakout=0, w_near_high=0,
+                         w_rsi=35, w_bb_bounce=25),
+}
+
+
+def _short_term_score(hist: pd.DataFrame,
+                      strat: Strategy = DEFAULT_STRATEGY) -> tuple[int, dict]:
+    """Score a ticker for short-term trading. Returns (score, metrics).
+
+    `strat` carries the weights/thresholds. The default IS the live engine —
+    changing it changes what real users get; pass a variant only for arms."""
     score   = 0
     metrics = {}
 
@@ -296,8 +359,8 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
         rsi_val = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
         rsi     = round(float(rsi_val), 2) if not pd.isna(rsi_val) else None
         metrics["rsi"] = rsi
-        if rsi and 35 <= rsi <= 55:
-            score += 25
+        if rsi and strat.rsi_lo <= rsi <= strat.rsi_hi:
+            score += strat.w_rsi
 
         # MACD crossover in last 3 days
         macd_ind  = ta.trend.MACD(close, window_fast=12, window_slow=26, window_sign=9)
@@ -312,13 +375,13 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
                 break
         metrics["macd_crossover"] = crossed
         if crossed:
-            score += 25
+            score += strat.w_macd
 
         # Volume surge (today vs 20-day avg)
         vol_ratio = float(volume.iloc[-1] / volume.iloc[-21:-1].mean()) if len(volume) >= 21 else None
         metrics["volume_ratio"] = round(vol_ratio, 2) if vol_ratio else None
-        if vol_ratio and vol_ratio > 1.5:
-            score += 20
+        if vol_ratio and vol_ratio > strat.vol_surge_min:
+            score += strat.w_vol_surge
 
         # Price above 20-day EMA (uptrend confirmation)
         ema20_val     = ta.trend.EMAIndicator(close, window=20).ema_indicator().iloc[-1]
@@ -328,7 +391,7 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
             ema_val          = float(ema20_val)
             metrics["ema20"] = round(ema_val, 2)
             if current_price >= ema_val:
-                score += 15
+                score += strat.w_ema20
 
         # Breakout today — price closed above 20-day rolling high (momentum breakout).
         # This is the William O'Neil breakout definition: new multi-week high with volume.
@@ -336,15 +399,16 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
         try:
             high_20d = float(close.rolling(20).max().shift(1).iloc[-1])   # prior 20d high
             metrics["breakout_today"] = (not pd.isna(high_20d) and current_price > high_20d)
-            if metrics["breakout_today"] and vol_ratio and vol_ratio > 1.3:
-                score += 15   # breakout + volume confirmation
+            if (metrics["breakout_today"] and vol_ratio
+                    and vol_ratio > strat.breakout_vol_min):
+                score += strat.w_breakout   # breakout + volume confirmation
 
             # Near 52-week high (within 3%) — approaching breakout zone
             if not pd.isna(week_high) and week_high > 0:
                 pct_from_high = (week_high - current_price) / week_high * 100
                 metrics["pct_from_52w_high"] = round(pct_from_high, 1)
-                if 0 <= pct_from_high <= 3:
-                    score += 10   # within 3% of 52w high — breakout setup
+                if 0 <= pct_from_high <= strat.near_high_pct:
+                    score += strat.w_near_high   # near 52w high — breakout setup
         except Exception:
             pass
 
@@ -362,9 +426,9 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
             last_open = None
         if (not pd.isna(lower_band)
                 and current_price <= lower_band * 1.05
-                and vol_ratio and vol_ratio > 1.2
+                and vol_ratio and vol_ratio > strat.bb_vol_min
                 and (last_open is None or current_price >= last_open)):
-            score += 15
+            score += strat.w_bb_bounce
 
         # OBV slope — positive = smart money accumulating (+10 pts)
         # Positive OBV slope means up-day volume dominates down-day volume.
@@ -375,7 +439,7 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
                 obv_slope = float(obv_clean.tail(10).diff().mean())
                 metrics["obv_positive"] = obv_slope > 0
                 if obv_slope > 0:
-                    score += 10
+                    score += strat.w_obv
         except Exception:
             pass
 
@@ -400,15 +464,15 @@ def _short_term_score(hist: pd.DataFrame) -> tuple[int, dict]:
         if patterns:
             metrics["patterns"] = list(patterns.keys())
             if patterns.get("bull_flag"):
-                score += 15
+                score += strat.w_bull_flag
             if patterns.get("bullish_engulfing"):
-                score += 15
+                score += strat.w_bullish_engulfing
             if patterns.get("three_white_soldiers"):
-                score += 10
+                score += strat.w_three_white_soldiers
             if patterns.get("hammer"):
-                score += 10
+                score += strat.w_hammer
             if patterns.get("morning_star"):
-                score += 10
+                score += strat.w_morning_star
 
     except Exception as exc:
         print(f"[screener] Short-term indicator error: {exc}")
@@ -1101,6 +1165,7 @@ def _add_near_miss_reason(pick: dict, is_st: bool) -> dict:
 def run_screener(
     watchlist: list[str] | None = None,
     excluded_sectors: list[str] | None = None,
+    strategy: Strategy = DEFAULT_STRATEGY,
 ) -> dict:
     """
     Screen S&P 500 stocks and return top candidates.
@@ -1210,7 +1275,7 @@ def run_screener(
                     continue
 
                 if compute_st:
-                    st_score, st_metrics = _short_term_score(hist)
+                    st_score, st_metrics = _short_term_score(hist, strategy)
                 else:
                     # Young IPO: too few bars for trustworthy technicals. Admit it
                     # with a zero ST score (won't surface as an ST momentum pick)
