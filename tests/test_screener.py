@@ -265,3 +265,89 @@ class TestStrategyArms:
         p = inspect.signature(screener.run_screener).parameters
         assert "strategy" in p
         assert p["strategy"].default is screener.DEFAULT_STRATEGY
+
+
+class TestLongTermStrategy:
+    """The LT leg is parameterised too. Before this, arms shared ~80% of their
+    long-term picks (measured 4/5 overlap on the Aug 8 dry run) — half of every
+    arm was a duplicate, so half the experiment measured nothing."""
+    GOLDEN = [65, 50, 40, 35, 35, 40, 65, 50]
+    CASES = [(12.0, 0.20, 0.25, 0.4), (28.0, 0.05, 0.08, 1.8), (45.0, 0.35, 0.30, 0.2),
+             (90.0, 0.12, 0.15, 0.9), (None, 0.11, 0.11, None), (18.0, 0.00, 0.05, 2.5),
+             (22.0, 0.15, 0.12, 0.99), (33.0, 0.101, 0.101, 1.01)]
+
+    def _score(self, monkeypatch, case, strat=None):
+        import numpy as np, pandas as pd
+        # Pin the 200MA leg: it fetches bars, and on a machine behind a TLS
+        # proxy that fetch fails and silently scores 0 — the golden would then
+        # disagree between laptop and CI.
+        monkeypatch.setattr(screener, "_alpaca_single_bars",
+                            lambda sym, days=365: pd.DataFrame({"Close": np.linspace(50, 150, 260)}))
+        pe, rg, nm, dte = case
+        info = {"sector": "Technology", "marketCap": 50e9}
+        fh = {"peBasicExclExtraTTM": pe,
+              "revenueGrowthTTMYoy": (rg * 100 if rg is not None else None),
+              "netProfitMarginTTM": (nm * 100 if nm is not None else None),
+              "totalDebt/totalEquityQuarterly": dte, "marketCapitalization": 50_000}
+        kw = {"strat": strat} if strat else {}
+        return screener._long_term_score(info, fh, ticker="X", **kw)[0]
+
+    def test_default_lt_scores_match_the_pre_refactor_engine(self, monkeypatch):
+        got = [self._score(monkeypatch, c) for c in self.CASES]
+        assert got == self.GOLDEN, f"LT default changed — got {got}, want {self.GOLDEN}"
+
+    def test_lt_defaults_match_the_literals_they_replaced(self):
+        d = screener.DEFAULT_STRATEGY
+        assert (d.w_pe_at_or_below, d.w_pe_moderate, d.w_pe_high) == (30, 15, 5)
+        assert (d.pe_moderate_mult, d.pe_high_mult) == (1.5, 2.5)
+        assert (d.rev_growth_min, d.w_rev_growth) == (0.10, 25)
+        assert (d.net_margin_min, d.w_net_margin) == (0.10, 20)
+        assert (d.w_low_debt, d.w_above_200ma) == (15, 10)
+
+    def test_arms_diverge_on_the_long_term_leg_too(self, monkeypatch):
+        bo = [self._score(monkeypatch, c, screener.STRATEGIES["breakout"]) for c in self.CASES]
+        pb = [self._score(monkeypatch, c, screener.STRATEGIES["pullback"]) for c in self.CASES]
+        differing = sum(1 for x, y in zip(bo, pb) if x != y)
+        assert differing >= 5, f"LT arms too similar to learn from ({differing}/8 differ)"
+
+
+class TestFetchMemo:
+    """Arms made the same Finnhub calls N times. The Aug 8 dry run produced 196
+    429s — an arm on degraded fundamentals measures the API, not the strategy."""
+
+    def test_repeat_lookups_hit_the_network_once(self):
+        screener.clear_fetch_memo()
+        calls = {"n": 0}
+        def fake(ticker):
+            calls["n"] += 1
+            return {"pe": 20.0, "nested": {"x": 1}}
+        memoised = screener._memoised(fake)
+        memoised("AAPL"); memoised("AAPL"); memoised("MSFT"); memoised("AAPL")
+        assert calls["n"] == 2, "the memo did not dedupe repeat lookups"
+        screener.clear_fetch_memo()
+
+    def test_a_caller_mutating_the_result_cannot_poison_the_cache(self):
+        """Screener code flattens metrics up into candidates — handing out the
+        cached object itself would corrupt every later read of that ticker."""
+        screener.clear_fetch_memo()
+        memoised = screener._memoised(lambda t: {"nested": {"x": 1}})
+        first = memoised("AAPL")
+        first["nested"]["x"] = 999
+        assert memoised("AAPL")["nested"]["x"] == 1
+        screener.clear_fetch_memo()
+
+    def test_clear_actually_clears(self):
+        screener.clear_fetch_memo()
+        calls = {"n": 0}
+        def fake(t):
+            calls["n"] += 1
+            return {}
+        m = screener._memoised(fake)
+        m("AAPL"); screener.clear_fetch_memo(); m("AAPL")
+        assert calls["n"] == 2
+
+    def test_the_finnhub_fetches_are_actually_memoised(self):
+        for fn in ("_get_finnhub_profile", "_get_finnhub_metrics", "_get_analyst_target",
+                   "_get_eps_surprises", "_get_analyst_recommendations"):
+            f = getattr(screener, fn)
+            assert hasattr(f, "__wrapped__"), f"{fn} is not memoised — arms will re-fetch it"
