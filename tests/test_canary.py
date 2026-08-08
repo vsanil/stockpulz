@@ -47,3 +47,76 @@ class TestCanaryHelpers:
             assert "lets a $0.01" not in note and "rejects a real" not in note, \
                 f"{name} printed failure wording on a PASS line: {note}"
         canary.RESULTS.clear()
+
+    # ── self-heal watchdog ───────────────────────────────────────────────────
+    def _runs(self, *conclusions):
+        return {"workflow_runs": [
+            {"conclusion": c, "created_at": "2026-08-06T16:21:00Z",
+             "html_url": "https://x/run"} for c in conclusions]}
+
+    def _wire(self, monkeypatch, payload, status=200, boom=False):
+        class _R:
+            status_code = status
+            def json(self_inner): return payload
+        def _get(url, **kw):
+            if boom:
+                raise RuntimeError("network down")
+            return _R()
+        monkeypatch.setattr(canary.requests, "get", _get)
+        canary.RESULTS.clear()
+
+    def _result(self):
+        name, ok, note = canary.RESULTS[-1]
+        canary.RESULTS.clear()
+        return ok, note
+
+    def test_selfheal_skipped_runs_are_not_failures(self, monkeypatch):
+        """`skipped` is the NORMAL outcome — the monitor it watched passed."""
+        self._wire(monkeypatch, self._runs("skipped", "skipped", "success"))
+        canary.check_selfheal_health()
+        ok, note = self._result()
+        assert ok and "latest skipped" in note
+
+    def test_selfheal_latest_failure_is_reported(self, monkeypatch):
+        self._wire(monkeypatch, self._runs("failure", "skipped"))
+        canary.check_selfheal_health()
+        ok, note = self._result()
+        assert not ok
+        assert "LATEST run failed" in note and "auto-fix net is down" in note
+
+    def test_a_resolved_transient_does_not_page_for_a_week(self, monkeypatch):
+        """The Aug 6 failure was GitHub's action registry returning Service
+        Unavailable — over by the next run. Going red for 7 days on a resolved
+        blip is how a canary teaches you to ignore it."""
+        self._wire(monkeypatch, self._runs("skipped", "skipped", "failure"))
+        canary.check_selfheal_health()
+        ok, note = self._result()
+        assert ok, "a recovered transient must not fail the canary"
+        assert "since recovered" in note, "but it must still be visible, not hidden"
+
+    def test_chronic_failures_are_caught_even_if_the_latest_passed(self, monkeypatch):
+        self._wire(monkeypatch, self._runs("skipped", "failure", "failure", "failure"))
+        canary.check_selfheal_health()
+        ok, note = self._result()
+        assert not ok and "chronic" in note
+
+    def test_unverifiable_says_so_instead_of_implying_clean(self, monkeypatch):
+        """A green line must never mean 'the check could not run' — that is the
+        false-pass trap prices.cg_cache fell into."""
+        self._wire(monkeypatch, {}, status=503)
+        canary.check_selfheal_health()
+        ok, note = self._result()
+        assert ok and "NOT VERIFIED" in note
+
+        self._wire(monkeypatch, {}, boom=True)
+        canary.check_selfheal_health()
+        ok, note = self._result()
+        assert ok and "NOT VERIFIED" in note
+
+    def test_in_progress_runs_are_ignored(self, monkeypatch):
+        self._wire(monkeypatch, {"workflow_runs": [
+            {"conclusion": None, "created_at": "2026-08-08T00:00:00Z"},
+            {"conclusion": "skipped", "created_at": "2026-08-07T00:00:00Z"}]})
+        canary.check_selfheal_health()
+        ok, note = self._result()
+        assert ok and "latest skipped" in note
