@@ -346,6 +346,20 @@ def format_daily_message(picks: dict, config: dict,
         t = _re.sub(r';\s+', ' · ', t)
         return t.strip().rstrip('.')
 
+    def _summary(s):
+        """The one-line 'why' for the DAILY message.
+
+        Prefer `plain_english` — the model is already asked for "one sentence
+        (max 20 words) for a complete beginner, no jargon" on every pick, and it
+        was being generated, stored, and then never rendered while the raw
+        `thesis` went out instead, leaking internal metric names to users
+        ("three_white_soldiers", "volume_ratio 2.02", "P/C=0.06"). Falls back to
+        thesis for picks that predate the field or don't carry it (crypto/ETF).
+        The full thesis AND edge still render in the mini-app pick sheet, so
+        nothing is lost — it just isn't re-read every morning.
+        """
+        return s.get("plain_english") or s.get("thesis")
+
     def _tline(thesis, catalyst):
         parts = [_esc(_clean_thesis(thesis))] if thesis else []
         if catalyst:
@@ -388,11 +402,10 @@ def format_daily_message(picks: dict, config: dict,
             if _lt_tgt: _note += f" → ${_p(_lt_tgt)}"
             if _lt_hz:  _note += f" ({_esc(_lt_hz)})"
             row += _note + "</i>"
-        tl = _tline(s.get("thesis"), s.get("catalyst"))
+        tl = _tline(_summary(s), s.get("catalyst"))
         if tl: row += f"\n{tl}"
-        edge = s.get("edge", "")
-        if edge:
-            row += f"\n  Edge: {_esc(edge)}"
+        # `edge` deliberately NOT rendered here — it restated the thesis with the
+        # same figures. It lives in the mini-app pick sheet.
         row += _iv_warn(s)
         ew = _entry_window(e, stop, budget=config.get("stock_budget"), is_long_term=False, is_crypto=False)
         if ew: row += f"\n{ew}"
@@ -405,11 +418,8 @@ def format_daily_message(picks: dict, config: dict,
         row = (f"<b>{_esc(t)}</b>{_name_tag(t)}{_conv_tag(s.get('conviction',3))}{held_badge}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(e,tgt)}</i>{hz}{_theme_tag(s)}")
-        tl = _tline(s.get("thesis"), s.get("catalyst"))
+        tl = _tline(_summary(s), s.get("catalyst"))
         if tl: row += f"\n{tl}"
-        edge = s.get("edge", "")
-        if edge:
-            row += f"\n  Edge: {_esc(edge)}"
         ew = _entry_window(e, None, budget=config.get("stock_budget"), is_long_term=True, is_crypto=False)
         if ew: row += f"\n{ew}"
         return row
@@ -420,7 +430,7 @@ def format_daily_message(picks: dict, config: dict,
         row = (f"<b>{_esc(sym)}</b>{_name_tag(sym)}{_conv_tag(c.get('conviction',3))}  "
                f"<code>${_p(e)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(e,tgt)}</i>{stop_str}")
-        tl = _tline(c.get("thesis"), c.get("catalyst"))
+        tl = _tline(_summary(c), c.get("catalyst"))
         if tl: row += f"\n{tl}"
         row += _iv_warn(c)
         ew = _entry_window(e, stop, budget=config.get("crypto_budget"), is_long_term=False, is_crypto=True)
@@ -435,7 +445,7 @@ def format_daily_message(picks: dict, config: dict,
         row = (f"<b>{_esc(t)}</b>{_name_tag(t)}  "
                f"<code>${_p(ep)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(ep,tgt)}</i>{stop_str}{hz}")
-        tl = _tline(e.get("thesis"), e.get("catalyst"))
+        tl = _tline(_summary(e), e.get("catalyst"))
         if tl: row += f"\n{tl}"
         return row
 
@@ -446,7 +456,7 @@ def format_daily_message(picks: dict, config: dict,
         row = (f"<b>{_esc(t)}</b>{_name_tag(t)}  "
                f"<code>${_p(ep)}</code> → <code>${_p(tgt)}</code>  "
                f"<i>{_upside(ep,tgt)}</i>{stop_str}")
-        tl = _tline(c.get("thesis"), c.get("catalyst"))
+        tl = _tline(_summary(c), c.get("catalyst"))
         if tl: row += f"\n{tl}"
         return row
 

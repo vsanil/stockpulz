@@ -500,3 +500,48 @@ class TestEmptySectionsCollapse:
     def test_thin_day_is_materially_shorter(self):
         msg = format_daily_message(self._empty(), _cfg())
         assert len(msg.splitlines()) < 20, "a no-setup day should be a short message"
+
+
+class TestDailyMessageUsesPlainEnglish:
+    """The model is asked for `plain_english` ("one sentence, max 20 words, for a
+    complete beginner, no jargon") on every pick. It was generated and stored on
+    every pick and then NEVER rendered — the raw `thesis` went out instead,
+    leaking internal metric names to users every morning."""
+
+    def _p(self, **extra):
+        p = _picks(st_tickers=("NWSA",), lt_tickers=())
+        p["stocks"]["short_term"][0].update(extra)
+        return p
+
+    def test_plain_english_is_preferred_over_thesis(self):
+        msg = format_daily_message(self._p(
+            thesis="Breakout with three_white_soldiers, volume_ratio 2.02, P/C=0.06",
+            plain_english="News Corp owns the Wall Street Journal — buying on a volume breakout"),
+            _cfg())
+        assert "News Corp owns the Wall Street Journal" in msg
+        assert "three_white_soldiers" not in msg, "internal metric name leaked to users"
+        assert "volume_ratio" not in msg and "P/C=" not in msg
+
+    def test_falls_back_to_thesis_when_plain_english_is_absent(self):
+        """Crypto/ETF picks and anything cached from before the field existed."""
+        msg = format_daily_message(self._p(thesis="Solid breakout setup."), _cfg())
+        assert "Solid breakout setup" in msg   # _clean_thesis strips the full stop
+
+    def test_edge_is_not_repeated_in_the_daily_message(self):
+        """`edge` restated the thesis with the same numbers (3/3 on a real
+        message). It still renders in the mini-app pick sheet."""
+        msg = format_daily_message(self._p(
+            plain_english="A simple summary.",
+            edge="Highest volume breakout in the candidate set"), _cfg())
+        assert "Edge:" not in msg
+        assert "Highest volume breakout" not in msg
+
+    def test_the_catalyst_still_shows(self):
+        msg = format_daily_message(self._p(plain_english="A simple summary.",
+                                           catalyst="Q4 earnings beat"), _cfg())
+        assert "Q4 earnings beat" in msg and "🎯" in msg
+
+    def test_levels_and_sizing_are_untouched(self):
+        """The two lines that carry the actual decision must not regress."""
+        msg = format_daily_message(self._p(plain_english="A simple summary."), _cfg())
+        assert "NWSA" in msg and "$100" in msg and "$115" in msg and "$90" in msg
