@@ -351,3 +351,71 @@ class TestFetchMemo:
                    "_get_eps_surprises", "_get_analyst_recommendations"):
             f = getattr(screener, fn)
             assert hasattr(f, "__wrapped__"), f"{fn} is not memoised — arms will re-fetch it"
+
+
+class TestFinnhubRateLimit:
+    """🔴 The live daily prescreener was making 96-98 Finnhub 429s EVERY run,
+    leaving 51 of 79 candidates (65%) with no fundamentals. Long-term scoring is
+    ~90% fundamentals, so LT picks were chosen largely on which tickers happened
+    to slip through the limit.
+
+    Root cause: `threading.Semaphore(4)` commented "stays under 60/min". A
+    semaphore bounds CONCURRENCY, not RATE — four threads doing ~100ms requests
+    is ~2,400 calls/min.
+    """
+
+    def test_a_semaphore_does_not_limit_rate(self):
+        """Pins the misconception, so nobody reintroduces it."""
+        import threading, time
+        sem = threading.Semaphore(4)
+        n, t0 = 40, time.monotonic()
+        def one():
+            sem.acquire(); sem.release()
+        ts = [threading.Thread(target=one) for _ in range(n)]
+        for t in ts: t.start()
+        for t in ts: t.join()
+        rate = n / max(time.monotonic() - t0, 1e-9) * 60
+        assert rate > 6000, "a semaphore should be shown to allow a huge call rate"
+
+    def test_limiter_never_exceeds_its_cap_in_any_window(self):
+        import threading, time
+        lim = screener._RateLimiter(10, 1.0)
+        stamps, lock = [], threading.Lock()
+        def one():
+            lim.acquire()
+            with lock: stamps.append(time.monotonic())
+        ts = [threading.Thread(target=one) for _ in range(25)]
+        for t in ts: t.start()
+        for t in ts: t.join()
+        worst = max(sum(1 for s in stamps if t - 1.0 < s <= t) for t in stamps)
+        assert worst <= 10, f"limiter leaked — {worst} calls in a 1s window (cap 10)"
+
+    def test_limiter_lets_traffic_through_under_the_cap(self):
+        """A limiter that throttles when it needn't would add minutes for nothing."""
+        import time
+        lim = screener._RateLimiter(50, 60.0)
+        t0 = time.monotonic()
+        for _ in range(20):
+            lim.acquire()
+        assert time.monotonic() - t0 < 0.5, "under the cap it must not block"
+
+    def test_every_finnhub_fetch_is_rate_limited(self):
+        for fn in ("_get_finnhub_profile", "_get_finnhub_metrics", "_get_analyst_target",
+                   "_get_eps_surprises", "_get_analyst_recommendations"):
+            f = getattr(screener, fn)
+            chain = []
+            while hasattr(f, "__wrapped__"):
+                chain.append(f.__name__)
+                f = f.__wrapped__
+            src = getattr(getattr(screener, fn), "__wrapped__", None)
+            assert src is not None, f"{fn} lost its decorators"
+        # the decorator itself must be applied under the memo, so cache hits are free
+        import inspect
+        code = inspect.getsource(screener)
+        for fn in ("_get_finnhub_profile", "_get_finnhub_metrics", "_get_analyst_target",
+                   "_get_eps_surprises", "_get_analyst_recommendations"):
+            assert f"@_memoised\n@_finnhub_ratelimited\ndef {fn}" in code, \
+                f"{fn} must be @_memoised over @_finnhub_ratelimited"
+
+    def test_cap_leaves_headroom_under_the_free_tier(self):
+        assert screener._FINNHUB_MAX_PER_MIN < 60, "Finnhub free tier is 60/min"
