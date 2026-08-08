@@ -472,15 +472,21 @@ def format_daily_message(picks: dict, config: dict,
     # ── Sections — each pick is its own expandable blockquote ─────────────────
     _near_misses = (picks.get("stocks") or {}).get("near_misses") or {}
 
+    # A section with NOTHING to say gets collapsed into one summary line at the
+    # end instead of its own header. On a thin day this was five lines announcing
+    # absence around one real pick. Sections that DO have something — picks, or
+    # near-misses worth reading — still render in full; only silence collapses.
+    _quiet: list[str] = []
+
     if st_picks:
         lines += ["", "📈 <b>STOCKS — SHORT TERM</b>"]
         for s in st_picks:
             lines += [f"<blockquote expandable>{_row_st(s)}</blockquote>"]
     elif show_st:
-        _st_skip = _closed_short or "no qualifying setup today"
-        lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· {_st_skip}</i>"]
         _nm_st = _near_misses.get("short_term") or []
         if _nm_st and not _closed_short:
+            _st_skip = _closed_short or "no qualifying setup today"
+            lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· {_st_skip}</i>"]
             lines += ["<i>Near misses — didn't clear the bar:</i>"]
             for nm in _nm_st[:3]:
                 tk    = nm.get("ticker", "")
@@ -489,6 +495,8 @@ def format_daily_message(picks: dict, config: dict,
                 why   = nm.get("near_miss_reason", "close to threshold")
                 p_str = f"  ${price:,.2f}" if price else ""
                 lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}/100  · <i>{why}</i>"]
+        else:
+            _quiet.append("📈 Stocks ST")
 
     if lt_picks:
         lines += ["", "🏦 <b>STOCKS — LONG TERM</b>"]
@@ -499,10 +507,10 @@ def format_daily_message(picks: dict, config: dict,
         _held = ", ".join(f"<b>{_esc(sym)}</b>" for sym in _lt_hold)
         lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_held} shown above (also long-term holds)</i>"]
     elif show_lt:
-        _lt_skip = _closed_short or "no stock cleared the quality bar today"
-        lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
         _nm_lt = _near_misses.get("long_term") or []
         if _nm_lt and not _closed_short:
+            _lt_skip = _closed_short or "no stock cleared the quality bar today"
+            lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
             lines += ["<i>Near misses — didn't clear the bar:</i>"]
             for nm in _nm_lt[:3]:
                 tk    = nm.get("ticker", "")
@@ -511,38 +519,41 @@ def format_daily_message(picks: dict, config: dict,
                 why   = nm.get("near_miss_reason", "close to threshold")
                 p_str = f"  ${price:,.2f}" if price else ""
                 lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}/100  · <i>{why}</i>"]
+        else:
+            _quiet.append("🏦 Stocks LT")
 
     if cst_picks:
         lines += ["", "🪙 <b>CRYPTO</b>  <i>· high risk</i>"]
         for c in cst_picks:
             lines += [f"<blockquote expandable>{_row_crypto(c)}</blockquote>"]
     elif show_crypto:
-        lines += ["", "🪙 <b>CRYPTO</b>  <i>· no setup today</i>"]
+        _quiet.append("🪙 Crypto")
 
     if etf_picks:
         lines += ["", "📦 <b>ETFs</b>"]
         for e in etf_picks:
             lines += [f"<blockquote expandable>{_row_etf(e)}</blockquote>"]
     else:
-        _etf_skip = _closed_short or "no alignment with current regime"
-        lines += ["", f"📦 <b>ETFs</b>  <i>· {_etf_skip}</i>"]
+        _quiet.append("📦 ETFs")
 
     if comm_picks:
         lines += ["", "🛢 <b>COMMODITIES</b>"]
         for c in comm_picks:
             lines += [f"<blockquote expandable>{_row_commodity(c)}</blockquote>"]
     else:
-        _comm_skip = _closed_short or "no setup today"
-        lines += ["", f"🛢 <b>COMMODITIES</b>  <i>· {_comm_skip}</i>"]
+        _quiet.append("🛢 Commodities")
 
     if options_plays:
         lines += ["", "🎯 <b>OPTIONS</b>  <i>· illustrative only</i>"]
         for o in options_plays:
             lines += [f"<blockquote expandable>{_row_options(o)}</blockquote>"]
-    elif st_picks:
-        lines += ["", "🎯 <b>OPTIONS</b>  <i>· no qualifying conviction today</i>"]
-    elif show_st and not _closed_short:
-        lines += ["", "🎯 <b>OPTIONS</b>  <i>· no underlying stock setups today</i>"]
+    elif st_picks or (show_st and not _closed_short):
+        _quiet.append("🎯 Options")
+
+    # One line for everything that had nothing to report (was one header each).
+    if _quiet:
+        _why = "market closed" if _closed_short else "no setups today"
+        lines += ["", f"<i>📭 {_why}: " + "  ·  ".join(_quiet) + "</i>"]
 
     # ── Watchlist: hit callout + "On Your Radar" section ─────────────────────
     if watchlist:

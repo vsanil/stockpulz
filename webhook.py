@@ -9,6 +9,7 @@ Or call the /register endpoint manually.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 import hmac
@@ -34,7 +35,7 @@ if _sentry_dsn:
         environment=os.environ.get("RENDER_EXTERNAL_URL", "development"),
     )
 
-from config_manager import get_config, get_allowed_users
+from config_manager import get_config, get_allowed_users, et_today
 from telegram_notifier import handle_incoming_command, handle_callback_query, set_webhook, send_typing_action, typing_until_done, send_message
 
 app = Flask(__name__)
@@ -1397,6 +1398,9 @@ def admin_fix_ticker():
     return jsonify({"ok": True, "renamed": total, "from": old_t, "to": new_t})
 
 
+# Only `tab:<name>` and `sheet:<name>` keys are recorded — see miniapp_usage.
+_USAGE_KEY_RE = re.compile(r"^(tab|sheet):[a-z0-9_-]{1,30}$")
+
 # ── Mini App routes ───────────────────────────────────────────────────────────
 
 _MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "miniapp")
@@ -1994,6 +1998,67 @@ def miniapp_toggle_paused():
     ucfg["paused"] = paused
     save_user_config(chat_id, ucfg)
     return jsonify({"ok": True, "paused": paused})
+
+
+@app.route("/api/miniapp/usage", methods=["POST"])
+def miniapp_usage():
+    """Record which tabs/sheets were actually opened.
+
+    Why this exists: the mini-app has 5 tabs and ~20 overlays, and there is no
+    way to know which are used. Deleting features on taste is how you remove the
+    one thing somebody relied on — same discipline as the pick evaluator, which
+    refuses to tune without evidence. This is the evidence.
+
+    Design constraints (all deliberate):
+      - The client BATCHES into localStorage and flushes once per app open, so
+        this is ~1 write per session, not one per tap. Gist writes are rate
+        limited and that limit has cost this project data before.
+      - Counts are aggregate per month, never per-event and never timestamped —
+        enough to answer "is this touched?", not enough to reconstruct a user's
+        session.
+      - Failure is silent on both sides: telemetry must never degrade the app.
+    """
+    chat_id = _miniapp_auth()
+    if not chat_id:
+        return jsonify({"error": "unauthorised"}), 403
+    if _rate_limited(chat_id, "usage", 12, 60):
+        return jsonify({"ok": True}), 200          # drop quietly, never surface
+
+    counts = (request.get_json(silent=True) or {}).get("counts") or {}
+    if not isinstance(counts, dict) or not counts:
+        return jsonify({"ok": True})
+
+    # Allowlist the keys we record — a client can't invent unbounded keys and
+    # grow the file without limit.
+    clean = {}
+    for k, v in list(counts.items())[:60]:
+        k = str(k)[:40]
+        if not _USAGE_KEY_RE.match(k):
+            continue
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if 0 < n <= 500:
+            clean[k] = n
+    if not clean:
+        return jsonify({"ok": True})
+
+    month = et_today().strftime("%Y-%m")
+
+    def _mut(data):
+        data = data or {}
+        bucket = data.setdefault(month, {})
+        for k, n in clean.items():
+            bucket[k] = bucket.get(k, 0) + n
+        return data, None
+
+    try:
+        from config_manager import mutate_gist_file
+        mutate_gist_file("usage_counts.json", _mut, default={})
+    except Exception as exc:
+        print(f"[webhook] usage record failed (non-critical): {exc}")
+    return jsonify({"ok": True})
 
 
 @app.route("/api/miniapp/feedback", methods=["POST"])

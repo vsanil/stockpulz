@@ -448,3 +448,55 @@ class TestEODImplausiblePriceGuard:
         prices = {"AAA": 110, "BNB": 570.31}        # real −12.4%, plausible
         msg = format_eod_full_summary(self._picks_min(), prices, positions)
         assert "stop hit" in msg and "price unavailable" not in msg
+
+
+class TestEmptySectionsCollapse:
+    """A section with nothing to say used to get its own header line. On a thin
+    day that was five lines announcing absence wrapped around one real pick."""
+
+    def _empty(self):
+        p = _picks(st_tickers=(), lt_tickers=())
+        p["daily_summary"] = "Quiet session."
+        return p
+
+    def test_all_empty_sections_become_one_line(self):
+        msg = format_daily_message(self._empty(), _cfg())
+        assert msg.count("📭") == 1, "the quiet summary must be a single line"
+        for gone in ("no qualifying setup today", "no stock cleared the quality bar",
+                     "no alignment with current regime", "no underlying stock setups"):
+            assert gone not in msg, f"per-section empty header still rendered: {gone}"
+        # every silent section is still ACCOUNTED for, just on one line
+        for label in ("Stocks ST", "Stocks LT", "ETFs", "Commodities"):
+            assert label in msg
+
+    def test_a_section_with_picks_still_renders_in_full(self):
+        msg = format_daily_message(_picks(st_tickers=("AAPL",),
+                                                     lt_tickers=()), _cfg())
+        assert "STOCKS — SHORT TERM" in msg and "AAPL" in msg
+        assert "📈 Stocks ST" not in msg, "a section WITH picks must not be called quiet"
+        assert "🏦 Stocks LT" in msg, "the empty LT section should be collapsed"
+
+    def test_near_misses_keep_their_own_section(self):
+        """Near-misses are real content — only true silence collapses."""
+        p = self._empty()
+        p["stocks"]["near_misses"] = {"short_term": [
+            {"ticker": "AMD", "current_price": 100.0, "score": 72,
+             "near_miss_reason": "RSI 72 — overbought"}], "long_term": []}
+        msg = format_daily_message(p, _cfg())
+        assert "STOCKS — SHORT TERM" in msg and "AMD" in msg
+        assert "📈 Stocks ST" not in msg, "a section showing near-misses is not quiet"
+        assert "🏦 Stocks LT" in msg
+
+    def test_sections_hidden_by_preference_are_not_listed_as_quiet(self):
+        """If a user turned crypto off, it isn't 'quiet' — it isn't theirs."""
+        msg = format_daily_message(self._empty(), _cfg(show_crypto=False))
+        assert "🪙 Crypto" not in msg
+
+    def test_market_closed_says_so_once(self):
+        msg = format_daily_message(self._empty(), _cfg(), market_closed=True)
+        assert msg.count("📭") == 1
+        assert "market closed" in msg
+
+    def test_thin_day_is_materially_shorter(self):
+        msg = format_daily_message(self._empty(), _cfg())
+        assert len(msg.splitlines()) < 20, "a no-setup day should be a short message"
