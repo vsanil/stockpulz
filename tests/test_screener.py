@@ -13,6 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+import screener
 from screener import _deduplicate_by_correlation
 
 
@@ -176,3 +177,91 @@ class TestRunScreenerRawScope:
         picks = [{"ticker": "AAPL", "score": 5}, {"ticker": "MSFT", "score": 4}]
         result = _deduplicate_by_correlation(picks, None, max_picks=2)
         assert len(result) == 2  # both returned since no correlation data
+
+
+# ── Strategy parameters / A-B arms ───────────────────────────────────────────
+
+def _synthetic_ohlcv(seed: int, n: int = 300):
+    """Deterministic bars — no network, identical on every machine and run."""
+    import numpy as np, pandas as pd
+    rng = np.random.default_rng(seed)
+    close = np.maximum(100 + np.cumsum(rng.normal(0.15, 1.6, n)), 5)
+    op    = close + rng.normal(0, .5, n)
+    high  = np.maximum(op, close) + np.abs(rng.normal(0, .8, n))
+    low   = np.minimum(op, close) - np.abs(rng.normal(0, .8, n))
+    vol   = np.abs(rng.normal(2e6, 6e5, n))
+    return pd.DataFrame({"Open": op, "High": high, "Low": low,
+                         "Close": close, "Volume": vol})
+
+
+class TestStrategyDefaultsAreUnchanged:
+    """🔴 The load-bearing test of the whole parameterisation.
+
+    Real users are served by `default`. Turning hardcoded weights into config
+    is only safe if the default reproduces the live engine EXACTLY — these
+    golden values were captured from the code before any field was extracted.
+    If this fails, the refactor silently changed what people are recommended.
+    """
+    GOLDEN = [60, 35, 35, 35, 35, 70, 45, 55, 45, 60, 25, 35]
+
+    def test_default_scores_match_the_pre_refactor_engine(self):
+        got = [screener._short_term_score(_synthetic_ohlcv(s))[0]
+               for s in range(len(self.GOLDEN))]
+        assert got == self.GOLDEN, (
+            "the default strategy no longer reproduces the live engine — "
+            f"got {got}, expected {self.GOLDEN}")
+
+    def test_passing_the_default_explicitly_is_the_same_as_omitting_it(self):
+        for s in range(6):
+            df = _synthetic_ohlcv(s)
+            assert (screener._short_term_score(df)[0]
+                    == screener._short_term_score(df, screener.DEFAULT_STRATEGY)[0])
+
+    def test_every_default_field_matches_the_literal_it_replaced(self):
+        d = screener.DEFAULT_STRATEGY
+        assert (d.rsi_lo, d.rsi_hi, d.w_rsi) == (35.0, 55.0, 25)
+        assert (d.w_macd, d.w_ema20, d.w_obv) == (25, 15, 10)
+        assert (d.vol_surge_min, d.w_vol_surge) == (1.5, 20)
+        assert (d.w_breakout, d.breakout_vol_min) == (15, 1.3)
+        assert (d.near_high_pct, d.w_near_high) == (3.0, 10)
+        assert (d.w_bb_bounce, d.bb_vol_min) == (15, 1.2)
+        assert (d.w_bull_flag, d.w_bullish_engulfing) == (15, 15)
+        assert (d.w_three_white_soldiers, d.w_hammer, d.w_morning_star) == (10, 10, 10)
+
+
+class TestStrategyArms:
+    def test_registry_has_the_arms_and_default_is_the_live_engine(self):
+        assert set(screener.STRATEGIES) >= {"default", "breakout", "pullback"}
+        assert screener.STRATEGIES["default"] is screener.DEFAULT_STRATEGY
+
+    def test_a_strategy_is_immutable(self):
+        """An arm must not be mutated at runtime — that would silently change
+        what a running arm is measuring."""
+        import dataclasses, pytest as _pytest
+        with _pytest.raises(dataclasses.FrozenInstanceError):
+            screener.DEFAULT_STRATEGY.w_rsi = 99   # type: ignore[misc]
+
+    def test_arms_actually_disagree(self):
+        """The whole point. Two variants that score alike carry no information —
+        only picks where arms DIFFER tell you anything."""
+        bo, pb = screener.STRATEGIES["breakout"], screener.STRATEGIES["pullback"]
+        a = [screener._short_term_score(_synthetic_ohlcv(s), bo)[0] for s in range(12)]
+        b = [screener._short_term_score(_synthetic_ohlcv(s), pb)[0] for s in range(12)]
+        differing = sum(1 for x, y in zip(a, b) if x != y)
+        assert differing >= 8, f"arms too similar to learn from ({differing}/12 differ)"
+
+    def test_zeroing_a_weight_removes_that_component(self):
+        no_rsi = screener.Strategy(name="t", w_rsi=0)
+        for s in range(8):
+            df = _synthetic_ohlcv(s)
+            base = screener._short_term_score(df)[0]
+            got  = screener._short_term_score(df, no_rsi)[0]
+            m    = screener._short_term_score(df)[1]
+            in_band = m.get("rsi") is not None and 35 <= m["rsi"] <= 55
+            assert got == base - (25 if in_band else 0)
+
+    def test_run_screener_accepts_a_strategy(self):
+        import inspect
+        p = inspect.signature(screener.run_screener).parameters
+        assert "strategy" in p
+        assert p["strategy"].default is screener.DEFAULT_STRATEGY
