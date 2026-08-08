@@ -1187,19 +1187,6 @@ _SCREEN_FIELDS = ("score", "rsi", "macd_crossover", "volume_ratio",
                   "market_cap", "patterns", "rs_vs_spy")
 
 
-def _setup_type(m: dict) -> str:
-    """Which STRATEGY produced this pick. RSI-in-band (+25) and breakout (+15)
-    are scored as if additive but in practice never co-occur — they are two
-    different trades (buy-the-pullback vs buy-the-breakout) collapsed onto one
-    scale. Tagging them lets the evaluator score each regime separately."""
-    rsi = m.get("rsi")
-    if m.get("breakout_today"):
-        return "breakout"
-    if isinstance(rsi, (int, float)) and 35 <= rsi <= 55:
-        return "pullback"
-    return "other"
-
-
 def _attach_screen_provenance(picks: dict, candidates: list) -> None:
     """Attach each pick's originating screener features, in place."""
     by_sym = {}
@@ -1226,7 +1213,8 @@ def _attach_screen_provenance(picks: dict, candidates: list) -> None:
                 mcap = scr.pop("market_cap", None)
                 if isinstance(mcap, (int, float)) and mcap > 0:
                     scr["mcap_b"] = round(mcap / 1e9, 1)
-                scr["setup_type"] = _setup_type(cand)
+                from screener import setup_type          # one definition, in the rubric's owner
+                scr["setup_type"] = setup_type(cand)
                 p["_screen"] = scr
 
 

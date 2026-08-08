@@ -1034,13 +1034,38 @@ def _long_term_score(
 
 # ── Near-miss reason helper ───────────────────────────────────────────────────
 
+def setup_type(m: dict) -> str:
+    """Which STRATEGY a candidate represents. THE single definition — imported by
+    ai_analyzer (pick provenance) and scripts/evaluate_picks (control rows).
+
+    Measured on live data: the RSI-in-band bonus (+25) and `breakout_today` (+15)
+    are scored as if additive but NEVER co-occur — a breakout has already pushed
+    RSI past 55. They are two different trades, buy-the-pullback and
+    buy-the-breakout, collapsed onto one scale. Tagging them lets the evaluator
+    score each regime separately instead of averaging them into mush.
+
+    Accepts a FLAT candidate or a metrics dict — both carry rsi/breakout_today.
+    """
+    if m.get("breakout_today"):
+        return "breakout"
+    rsi = m.get("rsi")
+    if isinstance(rsi, (int, float)) and 35 <= rsi <= 55:
+        return "pullback"
+    return "other"
+
+
 def _add_near_miss_reason(pick: dict, is_st: bool) -> dict:
     """
     Add a human-readable 'near_miss_reason' to a candidate that almost qualified.
     Reads the existing metrics dict to find the primary limiting factor.
     """
     pick = dict(pick)
-    m = pick.get("st_metrics" if is_st else "lt_metrics") or {}
+    # Candidates reaching here are FLATTENED (_flatten_short/_flatten_long spread
+    # st_metrics/lt_metrics up to the top level), so the nested key is absent and
+    # `m` was always {} — every near-miss rendered the same boilerplate reason
+    # ("no MACD crossover · below EMA20") regardless of why it actually missed.
+    # Read the flat candidate, falling back to the nested form for raw candidates.
+    m = pick.get("st_metrics" if is_st else "lt_metrics") or pick
     reasons = []
 
     if is_st:
