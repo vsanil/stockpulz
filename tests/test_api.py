@@ -1270,3 +1270,45 @@ class TestUsageCounters:
         monkeypatch.setattr(config_manager, "mutate_gist_file", _boom)
         r = post(client, "/api/miniapp/usage", {"counts": {"tab:picks": 1}})
         assert r.status_code == 200 and r.get_json()["ok"] is True
+
+
+class TestAdminAudit:
+    """Turns 'Claude noticed a broken position in a session' into a standing
+    worklist the owner can act on and mark off."""
+
+    def test_admin_data_includes_findings(self, client):
+        r = get(client, "/admin/data")
+        if r.status_code in (302, 401, 403):
+            pytest.skip("admin auth not wired in this test env")
+        d = r.get_json()
+        assert "audit" in d and "summary" in d["audit"] and "findings" in d["audit"]
+
+    def test_disposition_rejects_a_bad_status(self, client):
+        r = client.post("/admin/audit/abc123", json={"status": "banana"})
+        if r.status_code in (302, 401, 403):
+            pytest.skip("admin auth not wired in this test env")
+        assert r.status_code == 400
+
+    def test_audit_builder_survives_one_bad_account(self, monkeypatch):
+        """One unreadable account must never hide findings from the others."""
+        import webhook, config_manager
+        calls = {"n": 0}
+        def _flaky(uid):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("gist down for this user")
+            return {"open": [{"ticker": "BAD", "entry_price": 10.0, "target_price": 9.0}],
+                    "closed": [], "watchlist": []}
+        monkeypatch.setattr(config_manager, "load_user_trade_log", _flaky)
+        monkeypatch.setattr(config_manager, "load_user_paper", lambda u: {"positions": []})
+        monkeypatch.setattr(config_manager, "load_audit_dispositions", lambda: {})
+        out = webhook._build_audit_findings()
+        assert out["summary"]["total"] >= 1, "a failing account swallowed the rest"
+
+    def test_audit_builder_never_raises(self, monkeypatch):
+        """The admin dashboard must render even if the audit cannot."""
+        import webhook, config_manager
+        monkeypatch.setattr(config_manager, "get_allowed_users",
+                            lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        out = webhook._build_audit_findings()
+        assert out["findings"] == [] and "error" in out

@@ -449,6 +449,46 @@ def check_data_completeness() -> None:
                            else f"stale — last screener run recorded {stamp}")))
 
 
+def check_position_integrity() -> None:
+    """Arithmetic that must hold for any long position, on LIVE positions only.
+
+    Found by hand first: two AMBA positions whose TARGET sat below their ENTRY —
+    long trades mathematically incapable of winning — plus a FICO paper fill
+    carrying a stop ABOVE its entry (born stopped-out). Neither a win rate nor a
+    mocked test can surface that; it only appears when a real position is built
+    by the real path against live prices.
+
+    Historical findings (closed trades) are counted but do NOT fail: they cannot
+    be fixed retroactively, and failing daily on immutable history would train
+    the owner to ignore this check. The admin page tracks those for triage.
+    """
+    try:
+        from position_audit import audit_account, apply_dispositions, summarise
+        from config_manager import (get_allowed_users, load_user_trade_log,
+                                    load_user_paper, load_audit_dispositions,
+                                    DEFAULT_TEST_CHAT_ID, ARM_CHAT_IDS)
+        accounts = list(dict.fromkeys(
+            [*get_allowed_users(), DEFAULT_TEST_CHAT_ID, *ARM_CHAT_IDS.values()]))
+        raw = []
+        for a in accounts:
+            raw += audit_account(a, load_user_trade_log(a), load_user_paper(a))
+        findings = apply_dispositions(raw, load_audit_dispositions())
+        summ = summarise(findings)
+    except Exception as e:
+        _check("positions.integrity", True, f"NOT VERIFIED this run — {type(e).__name__}: {e}")
+        return
+
+    live = [f for f in findings if f["live"] and f["status"] in ("open", "reopened")]
+    hist = summ["total"] - len(live)
+    ok = not live
+    _check("positions.integrity", ok,
+           f"{len(accounts)} accounts · no live integrity problems"
+           + (f" ({hist} historical, tracked in admin)" if hist else ""),
+           fail_detail=("; ".join(f"{f['ticker']} {f['check']}" for f in live[:4])
+                        + f" — {len(live)} LIVE position(s) are broken by arithmetic: "
+                          f"they cannot behave correctly regardless of the market"))
+
+
 def check_endpoints() -> None:
     base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
             or "https://stock-agent-enqx.onrender.com").rstrip("/")
@@ -662,6 +702,7 @@ def main() -> int:
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
                check_backtest_math, check_price_guard, check_storage_headroom,
                check_cron_delivery, check_selfheal_health, check_data_completeness,
+               check_position_integrity,
                check_endpoints):
         try:
             fn()

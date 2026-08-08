@@ -149,6 +149,7 @@ USER_TRADES_FILE       = "user_trades.json"     # Per-user trade logs (open + cl
 USER_PAPER_FILE        = "user_paper.json"      # Per-user paper portfolios
 FEEDBACK_FILE          = "feedback.json"        # User feedback submissions
 BACKTEST_TRADES_FILE   = "backtest_trades.json" # Simulated trades seeded from backtester (per-user)
+AUDIT_DISPOSITIONS_FILE = "audit_dispositions.json"  # Owner's resolved/ignored marks on audit findings
 
 # Files whose TOP-LEVEL KEYS are chat_ids. On a row-capable backend these become
 # one row PER USER (the whole point of the Supabase migration: writing user A can
@@ -307,6 +308,37 @@ def load_user_paper(chat_id: str) -> dict:
 def save_user_paper(chat_id: str, data: dict) -> None:
     """Save paper portfolio for a specific user (clobber-safe, concurrency-safe)."""
     _update_user_keyed_file(USER_PAPER_FILE, chat_id, data)
+
+
+# ── Position-audit dispositions ───────────────────────────────────────────────
+# Findings themselves are DERIVED fresh every run (see position_audit) — only the
+# owner's disposition is stored. Persisting the findings instead would rot into a
+# stale worklist, which is how such lists stop being read.
+
+def load_audit_dispositions() -> dict:
+    return _load_gist_file(AUDIT_DISPOSITIONS_FILE) or {}
+
+
+def set_audit_disposition(finding_id: str, status: str, note: str = "") -> dict:
+    """status: 'resolved' | 'ignored' | 'open' (which clears the mark)."""
+    from datetime import datetime, timezone
+    fid = str(finding_id)[:64]
+
+    def _mut(data):
+        data = data or {}
+        if status == "open":
+            if fid not in data:
+                return NO_WRITE, {}
+            data.pop(fid, None)
+            return data, {}
+        rec = {"status": status, "note": str(note or "")[:300],
+               "updated_at": datetime.now(timezone.utc).isoformat()}
+        if data.get(fid) == rec:
+            return NO_WRITE, rec
+        data[fid] = rec
+        return data, rec
+
+    return mutate_gist_file(AUDIT_DISPOSITIONS_FILE, _mut, default={})
 
 
 # ── Multi-user allowlist helpers ─────────────────────────────────────────────
