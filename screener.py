@@ -1524,8 +1524,13 @@ def run_screener(
 
     # ── Step 4c: Congressional trading (one fetch, cached 24h) ───────────────
     congressional_trades = get_all_congressional_trades()
-    # 0 tickers means the upstream source is down — visible, not fatal.
-    dq_set("congressional", len(congressional_trades), max(len(congressional_trades), 1))
+    # Distinguish "configured and failing" from "not configured at all". The
+    # congressional feed has no free source (see congressional_tracker); with no
+    # QUIVER_API_KEY it is DORMANT, and reporting that as 0% coverage would read
+    # as a breakage the owner should chase.
+    _cong_configured = bool(os.environ.get("QUIVER_API_KEY", "").strip())
+    dq_set("congressional", len(congressional_trades),
+           max(len(congressional_trades), 1) if _cong_configured else 0)
     print(f"[screener] Congressional data: {len(congressional_trades)} tickers tracked.")
 
     # ── Step 5: Fetch .info for union of both pools (concurrent, deduplicated) ──

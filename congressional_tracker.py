@@ -17,13 +17,13 @@ Cached 24h — filings are batch-released, not real-time.
 """
 from __future__ import annotations
 
+import os
 import requests
 from datetime import date, datetime, timedelta, timezone
 
 from config_manager import load_signal_cache, save_signal_cache
 
 QUIVER_API    = "https://api.quiverquant.com/beta/live/congresstrading"
-HOUSE_API     = "https://housestockwatcher.com/api"
 CACHE_KEY     = "__congressional__"
 CACHE_TTL_HRS = 24
 
@@ -56,32 +56,50 @@ def _is_cache_fresh(cache: dict) -> bool:
 
 def _fetch_raw() -> list:
     """
-    Try Quiver Quantitative first, then House Stock Watcher.
-    Returns raw list of trade dicts, or [] on total failure.
+    Return raw congressional trade dicts, or [] when no source is configured.
+
+    🔴 STATE OF THE WORLD (verified Aug 8 2026) — there is NO free structured
+    source of ticker-level congressional trades:
+      * House Stock Watcher  — domain no longer resolves; its public S3 buckets
+                               return 403. The project shut down.
+      * Finnhub              — /stock/congressional-trading is premium: 403 on
+                               our key, which is otherwise valid.
+      * Official House Clerk — disclosures-clerk.house.gov IS alive, but the
+                               annual ZIP contains only filing METADATA (member,
+                               filing type, date, DocID). The actual trades are
+                               in thousands of individual PDFs, and disclosure
+                               lags up to 45 days by law, so even parsing them
+                               yields a stale signal.
+      * Quiver Quantitative  — paid. Works, but needs a subscription token.
+
+    So this feature is DORMANT rather than broken. It stays wired up: set
+    QUIVER_API_KEY and it lights up again with no other change.
+
+    Previously this called Quiver with NO credentials (guaranteed 401) and then
+    a dead domain (DNS failure + retries) on every single screener run — two
+    futile network round-trips per run, whose only visible effect was a log line
+    nobody read.
     """
-    # 1. Quiver Quantitative
+    token = os.environ.get("QUIVER_API_KEY", "").strip()
+    if not token:
+        print("[congressional] No QUIVER_API_KEY set — congressional signal is "
+              "DORMANT (no free source exists; see _fetch_raw docstring).")
+        return []
+
     try:
-        resp = requests.get(QUIVER_API, headers=HEADERS, timeout=15)
+        resp = requests.get(QUIVER_API,
+                            headers={**HEADERS, "Authorization": f"Bearer {token}"},
+                            timeout=15)
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list) and data:
                 print(f"[congressional] Quiver Quantitative: {len(data)} records.")
                 return data
+            print("[congressional] Quiver returned no records.")
+        else:
+            print(f"[congressional] Quiver HTTP {resp.status_code} — check QUIVER_API_KEY.")
     except Exception as exc:
         print(f"[congressional] Quiver fetch failed: {exc}")
-
-    # 2. House Stock Watcher fallback
-    try:
-        resp = requests.get(HOUSE_API, headers=HEADERS, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, list) and data:
-                print(f"[congressional] House Stock Watcher: {len(data)} records.")
-                return data
-    except Exception as exc:
-        print(f"[congressional] House Stock Watcher fetch failed: {exc}")
-
-    print("[congressional] All sources failed — no congressional data available.")
     return []
 
 

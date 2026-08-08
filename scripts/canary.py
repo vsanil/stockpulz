@@ -426,10 +426,15 @@ def check_data_completeness() -> None:
         if cov < worst_cov:
             worst_name, worst_cov = k, cov
 
-    others = "  ·  ".join(f"{k}={v.get('coverage_pct')}%"
-                          for k, v in sorted(src.items()) if not k.startswith("finnhub_"))
-    detail = (f"[{stamp}] " + "  ·  ".join(f"{k}={v.get('coverage_pct')}%"
-                                           for k, v in sorted(src.items())))
+    def _fmt(k, v):
+        # total == 0 means the source is not configured, which is NOT the same
+        # as configured-and-returning-nothing. Saying "0%" for a dormant feed
+        # sends the owner chasing a breakage that does not exist.
+        if not v.get("total"):
+            return f"{k}=n/a (not configured)"
+        return f"{k}={v.get('coverage_pct')}%"
+
+    detail = f"[{stamp}] " + "  ·  ".join(_fmt(k, v) for k, v in sorted(src.items()))
 
     if not fundamentals:
         _check("data.completeness", True, detail + "  (no fundamentals recorded)")
