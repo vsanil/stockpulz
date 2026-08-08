@@ -17,6 +17,8 @@ from __future__ import annotations
 import os
 import re
 import time
+import collections
+import threading
 import warnings
 from dataclasses import dataclass
 from io import StringIO
@@ -771,6 +773,54 @@ _FINNHUB_INDUSTRY_MAP = {
 }
 
 
+# ── Finnhub rate limiting ────────────────────────────────────────────────────
+# 🔴 The old guard was `threading.Semaphore(4)` commented "stays under 60/min".
+# It does not. A semaphore bounds CONCURRENCY, not RATE: four workers issuing
+# ~100ms requests is ~40 calls/second — roughly 2,400/min against Finnhub's
+# free-tier 60/min. Measured consequence on the LIVE daily prescreener:
+# **96-98 429s every run, with 51 of 79 candidates (65%) getting NO fundamentals
+# at all.** Long-term scoring is ~90% fundamentals (P/E 30, revenue growth 25,
+# net margin 20, debt/equity 15), so LT picks were being chosen largely on which
+# tickers happened to slip through — close to arbitrary.
+#
+# This is a real token bucket over a rolling window: it BLOCKS until a slot is
+# free, so callers cannot exceed the rate no matter how many threads run.
+_FINNHUB_MAX_PER_MIN = 50          # free tier is 60/min; leave headroom for other callers
+
+
+class _RateLimiter:
+    def __init__(self, max_calls: int, per_seconds: float) -> None:
+        self._max, self._per = max_calls, per_seconds
+        self._calls: "collections.deque[float]" = collections.deque()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                while self._calls and now - self._calls[0] >= self._per:
+                    self._calls.popleft()
+                if len(self._calls) < self._max:
+                    self._calls.append(now)
+                    return
+                wait = self._per - (now - self._calls[0])
+            time.sleep(max(wait, 0.01))      # sleep OUTSIDE the lock
+
+
+_FINNHUB_LIMITER = _RateLimiter(_FINNHUB_MAX_PER_MIN, 60.0)
+
+
+def _finnhub_ratelimited(fn):
+    """Applied BENEATH @_memoised, so a cache hit costs no rate budget."""
+    import functools
+
+    @functools.wraps(fn)
+    def _inner(*args, **kwargs):
+        _FINNHUB_LIMITER.acquire()
+        return fn(*args, **kwargs)
+    return _inner
+
+
 # ── Per-run fetch memo (makes A/B arms affordable) ───────────────────────────
 # Each arm is a full screener pass, so N arms meant N× the Finnhub calls. The
 # Aug 8 dry run proved that is not theoretical: two arms produced **196 Finnhub
@@ -805,6 +855,7 @@ def _memoised(fn):
 
 
 @_memoised
+@_finnhub_ratelimited
 def _get_finnhub_profile(ticker: str) -> dict:
     """
     Fetch company name and sector from Finnhub /stock/profile2.
@@ -834,6 +885,7 @@ def _get_finnhub_profile(ticker: str) -> dict:
 # ── Finnhub fundamental metrics ───────────────────────────────────────────────
 
 @_memoised
+@_finnhub_ratelimited
 def _get_finnhub_metrics(ticker: str) -> dict:
     """
     Fetch basic financial metrics from Finnhub /stock/metric.
@@ -865,6 +917,7 @@ def _get_finnhub_metrics(ticker: str) -> dict:
 # ── Finnhub analyst price targets ────────────────────────────────────────────
 
 @_memoised
+@_finnhub_ratelimited
 def _get_analyst_target(ticker: str) -> dict:
     """
     Fetch analyst consensus price target from Finnhub /stock/price-target.
@@ -895,6 +948,7 @@ def _get_analyst_target(ticker: str) -> dict:
 # ── Finnhub EPS surprise history ─────────────────────────────────────────────
 
 @_memoised
+@_finnhub_ratelimited
 def _get_eps_surprises(ticker: str) -> dict:
     """
     Fetch last 4 quarters of EPS surprise from Finnhub /stock/earnings (free tier).
@@ -938,6 +992,7 @@ def _get_eps_surprises(ticker: str) -> dict:
 # ── Finnhub analyst buy/hold/sell count ───────────────────────────────────────
 
 @_memoised
+@_finnhub_ratelimited
 def _get_analyst_recommendations(ticker: str) -> dict:
     """
     Fetch analyst buy/hold/sell consensus from Finnhub /stock/recommendation (free tier).
@@ -1449,7 +1504,9 @@ def run_screener(
     print(f"[screener] Fetching fundamentals for {len(all_candidates)} unique candidates (parallel)...")
 
     lt_pool_tickers: set[str] = {c["ticker"] for c in lt_pool}
-    _finnhub_lock = threading.Semaphore(4)   # max 4 concurrent Finnhub calls → stays under 60/min
+    # Bounds CONCURRENCY only — it is NOT a rate limit (that is _FINNHUB_LIMITER,
+    # applied on the fetch functions themselves so no call site can miss it).
+    _finnhub_lock = threading.Semaphore(4)
 
     # dynamic_sector_pe is populated AFTER the first enrichment pass (Step 5b below).
     # _enrich_one reads it via closure — first-pass calls see None (→ hardcoded fallback),
