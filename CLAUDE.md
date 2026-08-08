@@ -178,6 +178,17 @@ Rules:
 - **Money settings go through `parse_money`, never `float()`.** `/api/miniapp/update_settings` used `float()` + bare-except → "$1.5k"/"5%" silently dropped while still returning `ok:true`. It now uses `parse_money` and returns a `warning` listing any unparseable field. **Rule: never `try: float(user_value) except: pass` — use `parse_money` and surface failures.**
 - **User-supplied strings (Telegram name/photo_url) → DOM construction, never `innerHTML` interpolation.** The header avatar built an `<img onerror="...'${initials}'">` string; a quote in the display name broke out. Now uses `createElement` + `.src`/`.onerror`. **Rule: never interpolate `tg.initDataUnsafe.user.*` (or any user string) into an HTML template literal.**
 
+### Morning message: empty sections COLLAPSE to one line (Aug 8 — supersedes the earlier "keep them" preference)
+- Each silent section used to emit its own header. On a thin day that was **five lines announcing absence around one real pick** (measured: 25 lines / 1138 chars for a single BTC pick). Now they collapse to one: `📭 no setups today: 📈 Stocks ST · 🏦 Stocks LT · 📦 ETFs · 🛢 Commodities · 🎯 Options` → 17 lines / 989 chars, and the pick is the first thing on screen.
+- **Only true silence collapses.** A section with picks renders in full; a section with NEAR-MISSES still gets its own header + list (that's real content). A section hidden by user preference (`show_crypto=False`) is not listed as quiet — it isn't theirs. Market-closed says "market closed" once instead of per section.
+- **Rule: don't re-add a per-section "no setup today" header.** The `_quiet` list in `format_daily_message` is the one place absence is reported. Guard: `TestEmptySectionsCollapse`.
+
+### Usage counters — remove features on EVIDENCE, not taste (Aug 8)
+- The mini-app has 5 tabs and ~20 sheets and nobody knew which were used. `POST /api/miniapp/usage` records aggregate monthly counts to `usage_counts.json` (`{"YYYY-MM": {"tab:picks": N, "sheet:buypos": N}}`). Read it before deleting anything — this is the same discipline as the pick evaluator's `_MIN_N` gate: don't act without evidence.
+- **Design constraints that must not be broken**: the client batches into `localStorage` (`sp_usage_v1`) and flushes ONCE per app open, 4s after `_appReady` — never one write per tap, because gist writes are rate limited and that limit has already cost this project data. `_flushUsage` clears storage BEFORE sending (a failed send loses a few counts; a retry loop would spam). Both sides fail silently — telemetry must never degrade the app. Aggregate only: no timestamps, no per-event log.
+- Server-side allowlist `_USAGE_KEY_RE = ^(tab|sheet):[a-z0-9_-]{1,30}$` plus caps (≤60 keys/request, 0<n≤500) so a client can't invent keys and grow the file without bound. Rate-limited 12/min. Guard: `TestUsageCounters`, incl. a storage failure still returning 200.
+- One hook covers everything: `gotoTab()` bumps `tab:*`, `openOverlay()` bumps `sheet:*` (18 sheets). **A new sheet opened WITHOUT `openOverlay` won't be counted** — route it through `openOverlay`.
+
 ### Background jobs must fail silently to users
 - run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
 

@@ -3047,6 +3047,42 @@ function _moveNavIndicator(name) {
   indicator.style.left = (center - 10) + 'px';   // center the 20px-wide bar
 }
 
+// ── Usage counters ──────────────────────────────────────────────────────────
+// Which tabs/sheets actually get opened. Purpose: so features are removed on
+// EVIDENCE rather than taste — the app has 5 tabs and ~20 sheets and nobody
+// knows which are dead.
+//
+// Rules this must never break:
+//   - zero UX cost: no await, no spinner, no blocking. Counting is a dict bump.
+//   - ~1 network write per app OPEN, not per tap. Counts batch in localStorage
+//     and flush on the NEXT launch (gist writes are rate limited, and that limit
+//     has cost this project data before).
+//   - totally silent: any failure here must leave the app untouched.
+//   - aggregate only — no timestamps, no per-event log, nothing that could
+//     reconstruct a session.
+const _USAGE_LS_KEY = 'sp_usage_v1';
+
+function _bumpUsage(key) {
+  try {
+    const u = JSON.parse(localStorage.getItem(_USAGE_LS_KEY) || '{}');
+    u[key] = (u[key] || 0) + 1;
+    localStorage.setItem(_USAGE_LS_KEY, JSON.stringify(u));
+  } catch (e) { /* storage full or blocked — counting is never worth an error */ }
+}
+
+function _flushUsage() {
+  let u = {};
+  try {
+    u = JSON.parse(localStorage.getItem(_USAGE_LS_KEY) || '{}');
+    if (!u || !Object.keys(u).length) return;
+    localStorage.removeItem(_USAGE_LS_KEY);   // clear FIRST: a failed send loses
+  } catch (e) { return; }                     // a few counts, a retry loop spams
+  try {
+    api('/api/miniapp/usage', {method: 'POST', body: JSON.stringify({counts: u})})
+      .catch(() => {});                       // fire and forget, never surfaced
+  } catch (e) { /* ignore */ }
+}
+
 function gotoTab(name) {
   // Save current scroll
   _scrollPos[curTab] = window.scrollY;
@@ -3056,6 +3092,7 @@ function gotoTab(name) {
   document.getElementById('pane-' + name).classList.add('active');
   document.getElementById('nav-'  + name).classList.add('active');
   curTab = name;
+  _bumpUsage('tab:' + name);
   tg.HapticFeedback?.selectionChanged();
 
   // Stop live price refresh when leaving portfolio tab
@@ -3252,7 +3289,7 @@ function copyTicker(sym) {
 }
 
 // ── Overlay helpers ───────────────────────────────────────────────────────────
-function openOverlay(id)  { document.getElementById(id).classList.add('open');    document.body.style.overflow = 'hidden'; }
+function openOverlay(id)  { _bumpUsage('sheet:' + String(id).replace(/-overlay$|-sheet$/, '')); document.getElementById(id).classList.add('open');    document.body.style.overflow = 'hidden'; }
 function closeOverlay(id) { document.getElementById(id).classList.remove('open'); document.body.style.overflow = ''; }
 function handleOverlayTap(e, id) {
   // Close if user taps the dark backdrop (not the sheet itself)
@@ -10194,6 +10231,9 @@ requestAnimationFrame(() => _moveNavIndicator('picks'));
 loadPicks();
 // Signal deep-link handler that the app is ready
 window.dispatchEvent(new Event('_appReady'));
+// Flush last session's usage counts — deferred so it can never compete with
+// first paint or the initial data load.
+setTimeout(_flushUsage, 4000);
 
 // ── Onboarding check ─────────────────────────────────────────────────────────
 (async function _checkOnboarding() {

@@ -1212,3 +1212,61 @@ class TestTriggerMorning:
         r = client.post(f"/trigger/morning?secret={self.SECRET}")
         assert r.status_code == 200
         assert r.get_json().get("skipped") is True
+
+
+class TestUsageCounters:
+    """Records which tabs/sheets are opened, so dead features can be removed on
+    evidence instead of taste. Telemetry must never be able to hurt the app."""
+
+    def _store(self):
+        from config_manager import _load_gist_file
+        return _load_gist_file("usage_counts.json") or {}
+
+    def test_counts_are_recorded_and_accumulate(self, client):
+        r = post(client, "/api/miniapp/usage",
+                 {"counts": {"tab:picks": 2, "sheet:buypos": 1}})
+        assert r.status_code == 200 and r.get_json()["ok"] is True
+        post(client, "/api/miniapp/usage", {"counts": {"tab:picks": 3}})
+        month = next(iter(self._store()))
+        assert self._store()[month]["tab:picks"] == 5, "counts must add, not overwrite"
+        assert self._store()[month]["sheet:buypos"] == 1
+
+    def test_junk_keys_are_dropped(self, client):
+        """A client must not be able to invent keys and grow the file forever."""
+        before = self._store()
+        post(client, "/api/miniapp/usage",
+             {"counts": {"evil key": 1, "../etc/passwd": 1, "tab:" + "x" * 50: 1,
+                         "<script>": 1}})
+        month = next(iter(self._store()), None)
+        if month:
+            for k in self._store()[month]:
+                assert k.startswith(("tab:", "sheet:")), f"junk key stored: {k}"
+
+    def test_absurd_values_are_ignored(self, client):
+        post(client, "/api/miniapp/usage",
+             {"counts": {"tab:settings": 10_000, "tab:watchlist": -5,
+                         "tab:portfolio": "NaN"}})
+        month = next(iter(self._store()), None)
+        if month:
+            b = self._store()[month]
+            assert b.get("tab:settings", 0) <= 500
+            assert "tab:watchlist" not in b and "tab:portfolio" not in b
+
+    def test_empty_and_malformed_bodies_are_harmless(self, client):
+        for body in ({}, {"counts": None}, {"counts": []}, {"counts": {}}):
+            assert post(client, "/api/miniapp/usage", body).status_code == 200
+
+    def test_requires_auth(self, client):
+        # no chat_id in the body → _miniapp_auth rejects
+        r = client.post("/api/miniapp/usage", json={"counts": {"tab:picks": 1}})
+        assert r.status_code == 403
+
+    def test_a_storage_failure_never_fails_the_request(self, client, monkeypatch):
+        """Telemetry is the LEAST important thing in the app — if the write
+        breaks, the client must still get a clean 200 and notice nothing."""
+        import config_manager
+        def _boom(*a, **k):
+            raise RuntimeError("gist down")
+        monkeypatch.setattr(config_manager, "mutate_gist_file", _boom)
+        r = post(client, "/api/miniapp/usage", {"counts": {"tab:picks": 1}})
+        assert r.status_code == 200 and r.get_json()["ok"] is True
