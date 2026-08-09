@@ -60,8 +60,15 @@ def _check_one(pos: dict, account: str, live: bool, entry_key: str = "entry_pric
     shares = _num(pos.get("shares"))
 
     def add(check, detail):
+        # 🔴 The id must distinguish two positions in the SAME ticker opened on
+        # the SAME day — the bot opens those routinely (it scaled into AMBA twice
+        # on 2026-08-03). Hashing only (check, account, ticker, date) collided,
+        # so resolving one finding silently resolved the other. The levels are
+        # what the finding is ABOUT, so they belong in its identity; if a level
+        # is corrected the id changes, which is right — that is a different
+        # finding, and the old disposition should not carry over.
         out.append({
-            "id": _fid(check, account, tkr, when),
+            "id": _fid(check, account, tkr, when, entry, tgt, stop, shares),
             "check": check,
             "account": str(account),
             "ticker": tkr,
