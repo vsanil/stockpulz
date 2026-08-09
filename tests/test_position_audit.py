@@ -73,6 +73,28 @@ class TestIntegrityChecks:
         b = audit_account("u1", _log(open_=pos))
         assert a[0]["id"] == b[0]["id"]
 
+    def test_two_positions_same_ticker_same_day_get_different_ids(self):
+        """🔴 The bot scales into a ticker twice in one day routinely — it did
+        exactly that with AMBA on 2026-08-03. Hashing only
+        (check, account, ticker, date) collided, so resolving one finding in the
+        admin worklist silently resolved the other."""
+        f = audit_account("u1", _log(open_=[
+            {"ticker": "AMBA", "entry_price": 82.675, "target_price": 78.54,
+             "opened_date": "2026-08-03"},
+            {"ticker": "AMBA", "entry_price": 82.21, "target_price": 79.74,
+             "opened_date": "2026-08-03"}]))
+        assert len(f) == 2
+        assert f[0]["id"] != f[1]["id"], "two distinct positions collapsed to one finding"
+
+    def test_id_changes_when_the_level_is_corrected(self):
+        """A corrected position is a DIFFERENT finding — the old disposition
+        must not carry over and hide the new state."""
+        bad = audit_account("u1", _log(open_=[
+            {"ticker": "A", "entry_price": 10.0, "target_price": 9.0, "opened_date": "d"}]))
+        worse = audit_account("u1", _log(open_=[
+            {"ticker": "A", "entry_price": 10.0, "target_price": 8.0, "opened_date": "d"}]))
+        assert bad[0]["id"] != worse[0]["id"]
+
     def test_ids_differ_across_accounts(self):
         pos = [{"ticker": "A", "entry_price": 10.0, "target_price": 9.0}]
         assert (audit_account("u1", _log(open_=pos))[0]["id"]
