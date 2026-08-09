@@ -981,6 +981,44 @@ function closeDrawer(){
   _dData=null;
 }
 
+// ── Actionability ──────────────────────────────────────────────────────────
+// "Could a user have acted on this at the price we published?" — separate from
+// whether the pick was RIGHT (that is the evaluator, and it needs ~1,500 obs).
+// These are descriptive, so a few dozen fills already say something. Every
+// figure carries its n, because a percentage over 20 rows still misleads.
+function actionSection(a){
+  if(!a || a.error) return '';
+  var e=a.entry||{}, st=a.stops||{}, oc=a.outcomes||{};
+  if(!e.n) return '';
+  var breach = e.outside_pct||0;
+  var pill = breach>10 ? '<span class="pill p-pending">'+breach+'% unreachable</span>'
+                       : '<span class="pill p-active">'+breach+'% unreachable</span>';
+  var rows = (e.examples||[]).map(function(x){
+    return '<div class="fb-row"><div class="fb-meta"><b>'+x.ticker+'</b> · '+x.date+'</div>'
+      +'<div class="fb-text">published $'+x.pick_entry+' → filled $'+x.fill
+      +' &nbsp;<b>'+(x.slippage_pct>0?'+':'')+x.slippage_pct+'%</b>'
+      +' &nbsp;<span class="fb-meta">promised within '+x.window_pct+'%</span></div></div>';
+  }).join('');
+
+  var warn = a.sample_warning
+    ? '<div class="fb-meta" style="margin-top:6px">⚠️ '+a.sample_warning+'</div>' : '';
+  var ocline = oc.usable
+    ? '<div class="fb-meta">exits: '+JSON.stringify(oc.counts)+'</div>'
+    : '<div class="fb-meta">exit reason: <b>not recorded</b> — '+(oc.note||'')+'</div>';
+
+  return '<div class="card"><div class="card-title">Actionability '+pill+'</div>'
+    +'<div class="fb-meta" style="margin-bottom:8px">Did our own fills land inside the entry window the '
+    +'morning message promised? A pick that filled above it could not be taken by a user who followed '
+    +'the instruction.</div>'
+    +'<div class="fb-text"><b>'+e.outside_window+' of '+e.n+'</b> picks filled outside their window'
+    +' · median slippage <b>'+e.median_slippage_pct+'%</b>'
+    +' · worst <b>+'+e.worst_pct+'%</b></div>'
+    +rows
+    +'<div class="fb-text" style="margin-top:8px">Stops: median <b>'+st.median_stop_pct+'%</b> below entry'
+    +' · <b>'+st.tight+'</b> tighter than '+st.threshold_pct+'% (inside daily noise) · n='+st.n+'</div>'
+    +ocline+warn+'</div>';
+}
+
 // ── Position audit ─────────────────────────────────────────────────────────
 // Arithmetic integrity of stored positions. This is where the synthetic bot
 // earns its keep: it has surfaced three defects (paper targets stored as null,
@@ -1052,7 +1090,8 @@ async function load(){
       +'<div class="card"><div class="card-title">Today&rsquo;s picks</div>'+picksPanel(d.picks)+'</div>'
       +'<div class="card"><div class="card-title">Feedback</div>'+feedback(d.feedback)+'</div>'
     +'</div>'
-    +auditSection(d.audit);
+    +auditSection(d.audit)
+    +actionSection(d.actionability);
   document.getElementById('ts').textContent='Updated '+new Date().toLocaleTimeString();
 }
 
@@ -1174,6 +1213,31 @@ def _build_audit_findings() -> dict:
                 "error": str(exc)[:120]}
 
 
+def _build_actionability() -> dict:
+    """Could a user have ACTED on our picks at the price we published?
+
+    Deliberately separate from the evaluator, which asks whether picks were
+    RIGHT and needs ~1,500 observations. These are descriptive, so a few dozen
+    fills already say something — and they separate "the engine chose badly"
+    from "the stop was too tight", which a win rate conflates.
+    """
+    from config_manager import (_load_gist_file, load_user_trade_log,
+                                load_user_paper, DEFAULT_TEST_CHAT_ID)
+    from actionability import analyse
+    try:
+        rows = []
+        for fn in ("pick_ledger.json", "pick_ledger_2026.json"):
+            rows += (_load_gist_file(fn) or {}).get("picks", []) or []
+        log   = load_user_trade_log(DEFAULT_TEST_CHAT_ID)
+        paper = load_user_paper(DEFAULT_TEST_CHAT_ID)
+        positions = (log.get("open") or []) + (log.get("closed") or []) \
+                    + (paper.get("positions") or [])
+        return analyse(rows, positions, log.get("closed") or [])
+    except Exception as exc:
+        print(f"[admin] actionability build failed: {exc}")
+        return {"error": str(exc)[:120]}
+
+
 def _enrich_feedback(entries: list, users: list) -> list:
     """Merge live user stats into feedback entries for admin triage."""
     user_map = {str(u["id"]): u for u in users}
@@ -1225,6 +1289,7 @@ def admin_data():
     cfg     = get_config()
     owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
     audit   = _build_audit_findings()
+    action  = _build_actionability()
     now_utc = _dt.now(_tz.utc)
     users   = []
     total_open   = 0
@@ -1309,6 +1374,7 @@ def admin_data():
         },
         "feedback":         _enrich_feedback(load_feedback()[:20], users),
         "audit":            audit,
+        "actionability":    action,
         "cron":             cron,
         "last_morning_run": cfg.get("last_morning_run", ""),
     })
