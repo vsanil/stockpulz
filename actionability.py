@@ -22,11 +22,14 @@ from __future__ import annotations
 
 import statistics
 
-# The morning message promises these windows (formatters._entry_window):
-#   short term → "Enter within 2% — skip if above $X"
-#   long term  → "Patient entry — up to +3%"
-ENTRY_WINDOW_PCT = {"short_term": 2.0, "long_term": 3.0}
-_DEFAULT_WINDOW = 2.0
+# Derived from formatters, which OWNS the promise — never re-hardcode 2 or 3.
+# Three independent copies of this number is what let a short-term pick breach
+# its own published window while the gap check stayed silent.
+from formatters import entry_window_pct
+
+ENTRY_WINDOW_PCT = {"short_term": entry_window_pct(),
+                    "long_term":  entry_window_pct(is_long_term=True)}
+_DEFAULT_WINDOW = entry_window_pct()
 
 # A stop closer than this to entry is inside ordinary daily noise for most
 # equities — it will be taken out by random movement regardless of direction.

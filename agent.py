@@ -4370,14 +4370,18 @@ def _build_premarket_gap_warnings(picks: dict) -> dict[str, str]:
     if _now_et.hour > 9 or (_now_et.hour == 9 and _now_et.minute >= 30):
         return {}
 
+    # Tag each pick with the window the MESSAGE promised it, rather than
+    # applying one flat threshold. A short-term pick promises 2%; warning only
+    # above 3% meant a pick could breach its own published rule in silence —
+    # measured live: ANET +2.43% and NWSA +2.15% produced no warning at all.
+    from formatters import entry_window_pct
     all_picks: list[dict] = []
-    stocks = picks.get("stocks", picks)
-    for p in stocks.get("short_term", []) + stocks.get("long_term", []):
-        if p.get("ticker") and p.get("entry_price"):
-            all_picks.append(p)
-    for p in picks.get("etfs", {}).get("short_term", []) + picks.get("etfs", {}).get("long_term", []):
-        if p.get("ticker") and p.get("entry_price"):
-            all_picks.append(p)
+    for section, is_lt in (("stocks", False), ("etfs", False)):
+        sec = picks.get(section, picks if section == "stocks" else {}) or {}
+        for tf, lt in (("short_term", False), ("long_term", True)):
+            for p in sec.get(tf, []) or []:
+                if p.get("ticker") and p.get("entry_price"):
+                    all_picks.append({**p, "_window_pct": entry_window_pct(is_long_term=lt)})
 
     if not all_picks:
         return {}
@@ -4401,12 +4405,13 @@ def _build_premarket_gap_warnings(picks: dict) -> dict[str, str]:
             if entry <= 0:
                 return ticker, None
             gap_pct = (price - entry) / entry * 100
-            if gap_pct >= 3.0:
+            window  = float(pick.get("_window_pct") or 3.0)
+            if gap_pct > window:
                 price_fmt = f"${price:,.2f}" if price < 100 else f"${price:,.0f}"
                 entry_fmt = f"${entry:,.2f}" if entry < 100 else f"${entry:,.0f}"
                 return ticker, (
                     f"<b>{ticker}</b> gapping +{gap_pct:.1f}% pre-market ({price_fmt} vs entry {entry_fmt}) "
-                    f"— now above entry window. Wait for pullback or skip."
+                    f"— above its {window:g}% entry window. Wait for pullback or skip."
                 )
         except Exception:
             pass
