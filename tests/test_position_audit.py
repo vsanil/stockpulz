@@ -143,3 +143,60 @@ class TestDispositions:
         ]
         s = summarise(findings)
         assert s["total"] == 3 and s["live_open"] == 1
+
+
+class TestExitReasonIsRecorded:
+    """🔴 close_trade used to hardcode outcome='manual' for EVERY caller,
+    including the synthetic bot — which knows perfectly well whether it sold at
+    target or at stop. The reason was thrown away, so stop-vs-target could not
+    be measured, and that is the one number separating "the pick was wrong" from
+    "the stop was too tight" — problems with opposite fixes."""
+
+    def _wire(self, monkeypatch, log):
+        import trade_logger, config_manager
+        state = {"log": log}
+        def _mut(chat_id, mutator):
+            new, res = mutator(state["log"])
+            if new is not config_manager.NO_WRITE:
+                state["log"] = new
+            return res
+        monkeypatch.setattr(trade_logger, "mutate_user_trade_log", _mut)
+        return state
+
+    def test_the_bot_can_record_a_target_exit(self, monkeypatch):
+        import trade_logger
+        st = self._wire(monkeypatch, {"open": [{"ticker": "A", "entry_price": 10.0}],
+                                      "closed": [], "watchlist": []})
+        trade_logger.close_trade("A", "u1", exit_price=12.0, outcome="target")
+        assert st["log"]["closed"][0]["outcome"] == "target"
+
+    def test_the_bot_can_record_a_stop_exit(self, monkeypatch):
+        import trade_logger
+        st = self._wire(monkeypatch, {"open": [{"ticker": "A", "entry_price": 10.0}],
+                                      "closed": [], "watchlist": []})
+        trade_logger.close_trade("A", "u1", exit_price=9.0, outcome="stop")
+        assert st["log"]["closed"][0]["outcome"] == "stop"
+
+    def test_a_human_sell_still_defaults_to_manual(self, monkeypatch):
+        """The Mini App sell flow genuinely IS a human decision — it must keep
+        the default rather than be mislabelled as a target/stop hit."""
+        import trade_logger
+        st = self._wire(monkeypatch, {"open": [{"ticker": "A", "entry_price": 10.0}],
+                                      "closed": [], "watchlist": []})
+        trade_logger.close_trade("A", "u1", exit_price=11.0)
+        assert st["log"]["closed"][0]["outcome"] == "manual"
+
+    def test_junk_outcomes_fall_back_to_manual(self, monkeypatch):
+        """A free-text outcome would poison every aggregate that groups by it."""
+        import trade_logger
+        st = self._wire(monkeypatch, {"open": [{"ticker": "A", "entry_price": 10.0}],
+                                      "closed": [], "watchlist": []})
+        trade_logger.close_trade("A", "u1", exit_price=11.0, outcome="<script>")
+        assert st["log"]["closed"][0]["outcome"] == "manual"
+
+    def test_the_synthetic_bot_actually_passes_a_reason(self):
+        """Guard the wiring, not just the capability — the capability existing
+        while the caller ignores it is exactly the bug being fixed."""
+        import os
+        src = open(os.path.join(ROOT, "scripts", "synthetic_user.py")).read()
+        assert 'outcome="target"' in src and 'outcome="stop"' in src

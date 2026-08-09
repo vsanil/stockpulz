@@ -295,11 +295,13 @@ def _manage_account(admin: str, dry: bool) -> list[str]:
             tgt, stop = pos.get("target_price"), pos.get("stop_loss")
             if _pos(tgt) and px >= float(tgt):
                 if not dry:
-                    close_trade(t, admin, exit_price=float(px))
+                    # Record WHY. Without this every bot exit was tagged
+                    # "manual" and stop-vs-target was unmeasurable.
+                    close_trade(t, admin, exit_price=float(px), outcome="target")
                 acts.append(f"🎯 SOLD REAL {t} @ ${px:.2f} (target hit)")
             elif _pos(stop) and px <= float(stop):
                 if not dry:
-                    close_trade(t, admin, exit_price=float(px))
+                    close_trade(t, admin, exit_price=float(px), outcome="stop")
                 acts.append(f"🔴 SOLD REAL {t} @ ${px:.2f} (stop hit)")
             else:
                 still_real.append(t)

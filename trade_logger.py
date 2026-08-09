@@ -381,12 +381,26 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
     return trade, False
 
 
-def close_trade(ticker: str, chat_id: str, exit_price: float | None = None) -> dict | None:
+#: Exit reasons worth distinguishing. "manual" means a HUMAN chose to sell —
+#: it must not be used as a catch-all, or the reason becomes unmeasurable.
+VALID_OUTCOMES = ("manual", "target", "stop", "expired")
+
+
+def close_trade(ticker: str, chat_id: str, exit_price: float | None = None,
+                outcome: str = "manual") -> dict | None:
     """
-    Manually close an open trade, recording P&L in closed history.
+    Close an open trade, recording P&L in closed history.
     Returns the closed trade dict, or None if ticker not found in open trades.
-    Called by the Mini App sell flow.
+
+    `outcome` is WHY it closed. It used to be hardcoded to "manual" for every
+    caller, including the synthetic bot — which knows perfectly well whether it
+    sold at target or at stop and was throwing that away. The consequence was
+    that stop-vs-target could not be measured at all, and that is the one number
+    that distinguishes "the pick was wrong" from "the stop was too tight" —
+    problems with opposite fixes. Callers that genuinely represent a human
+    decision (the Mini App sell flow) keep the default.
     """
+    outcome = outcome if outcome in VALID_OUTCOMES else "manual"
     today  = et_today().isoformat()
     ticker = ticker.upper()
 
@@ -408,7 +422,7 @@ def close_trade(ticker: str, chat_id: str, exit_price: float | None = None) -> d
                     **trade,
                     "closed_date":  today,
                     "closed_price": round(float(exit_price), 4) if exit_price else None,
-                    "outcome":      "manual",
+                    "outcome":      outcome,
                     "return_pct":   round(return_pct, 2),
                     "gain_usd":     gain_usd,
                 }
