@@ -545,3 +545,47 @@ class TestDailyMessageUsesPlainEnglish:
         """The two lines that carry the actual decision must not regress."""
         msg = format_daily_message(self._p(plain_english="A simple summary."), _cfg())
         assert "NWSA" in msg and "$100" in msg and "$115" in msg and "$90" in msg
+
+
+class TestEntryWindowIsOneDefinition:
+    """🔴 The window the message PROMISES was written in three places —
+    formatters, a hardcoded 3.0 in agent's pre-market gap check, and again in
+    actionability. They drifted, and the drift was user-facing: a SHORT-TERM
+    pick promises 2%, but the gap check only warned above 3%, so a pick could
+    breach its own published rule in silence. Measured on live fills:
+    ANET +2.43% and NWSA +2.15% produced no warning."""
+
+    def test_short_term_promises_two_percent(self):
+        from formatters import entry_window_pct
+        assert entry_window_pct() == 2.0
+
+    def test_long_term_and_crypto_get_the_wider_window(self):
+        from formatters import entry_window_pct
+        assert entry_window_pct(is_long_term=True) == 3.0
+        assert entry_window_pct(is_crypto=True) == 3.0
+
+    def test_the_rendered_line_matches_the_constant(self):
+        """The number a user reads must be the number the code enforces."""
+        from formatters import _entry_window, entry_window_pct
+        line = _entry_window(100.0, 92.0)
+        assert f"{entry_window_pct():g}%" in line
+        assert "$102.00" in line, "the skip-above price must follow from the window"
+
+    def test_actionability_derives_the_same_numbers(self):
+        import importlib, actionability, formatters
+        importlib.reload(actionability)
+        assert actionability.ENTRY_WINDOW_PCT["short_term"] == formatters.entry_window_pct()
+        assert actionability.ENTRY_WINDOW_PCT["long_term"] == formatters.entry_window_pct(is_long_term=True)
+
+    def test_the_gap_check_warns_at_the_promised_window_not_a_flat_3pct(self):
+        """A 2.4% gap on a SHORT-TERM pick must warn — that is the exact case
+        that slipped through and reached users as an unreachable instruction."""
+        import agent
+        from formatters import entry_window_pct
+        st_window = entry_window_pct(is_long_term=False)
+        assert st_window == 2.0
+        gap = 2.43
+        assert gap > st_window, "the live ANET case must now exceed its window"
+        src = __import__("inspect").getsource(agent._build_premarket_gap_warnings)
+        assert "gap_pct >= 3.0" not in src, "flat 3% threshold is back"
+        assert "_window_pct" in src, "the gap check must use each pick's own window"

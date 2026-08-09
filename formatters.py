@@ -58,6 +58,24 @@ def _upside(entry, target) -> str:
         return ""
 
 
+# ── The entry-window promise — ONE definition ────────────────────────────────
+# The morning message tells users "Enter within 2% — skip if above $X". That
+# number was written in three places: here, a hardcoded 3.0 in agent's
+# pre-market gap check, and again in actionability. They drifted, and the
+# consequence was user-facing: a SHORT-TERM pick gapping +2.4% breached its own
+# published 2% rule while the gap check (3%) stayed silent, so the message told
+# users to skip a pick and then showed no warning that it had already gone.
+# Measured on live fills: ANET +2.43% and NWSA +2.15% both slipped through.
+ENTRY_WINDOW_ST_PCT = 2.0
+ENTRY_WINDOW_LT_PCT = 3.0        # long-term and crypto get the wider window
+
+
+def entry_window_pct(is_long_term: bool = False, is_crypto: bool = False) -> float:
+    """The window, in PERCENT, that the message promises for this kind of pick.
+    Import this — never re-hardcode 2 or 3."""
+    return ENTRY_WINDOW_LT_PCT if (is_long_term or is_crypto) else ENTRY_WINDOW_ST_PCT
+
+
 def _entry_window(entry, stop=None, budget=None,
                   is_long_term: bool = False, is_crypto: bool = False) -> str:
     """
@@ -75,9 +93,9 @@ def _entry_window(entry, stop=None, budget=None,
         return ""
     try:
         e   = float(entry)
-        pct = 0.03 if (is_long_term or is_crypto) else 0.02
+        pct       = entry_window_pct(is_long_term, is_crypto) / 100.0
         upper     = e * (1 + pct)
-        pct_label = "3%" if pct == 0.03 else "2%"
+        pct_label = f"{entry_window_pct(is_long_term, is_crypto):g}%"
 
         # ── Position sizing suffix ────────────────────────────────────────────
         # NEVER fabricate a whole share the budget can't afford (a $50 crypto
