@@ -407,3 +407,68 @@ class TestLedgerSaveIsVerified:
         monkeypatch.setattr(_t, "sleep", lambda s: None)
         assert ev._save_ledger({"picks": []}, "x.json") is False
         assert calls["n"] == 5
+
+
+class TestEtfAndCommodityProvenance:
+    """🔴 Found live on 2026-08-10: XLB was the ONLY pick that day without a
+    `screen` blob. `_attach_screen_provenance` joined against stock + crypto
+    candidates only, so every ETF and commodity pick carried no provenance and
+    would be silently absent from every setup_type and score-band slice in the
+    Sep 9 report — a whole asset class missing from the evidence base."""
+
+    def _mod(self):
+        import importlib, sys, os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        return importlib.import_module("ai_analyzer")
+
+    # real shapes, from etf_screener.py and _build_commodity_candidates
+    ETF = {"ticker": "XLB", "price": 92.1, "ret_1m": 4.9, "rsi": 51.6,
+           "vol_ratio": 1.08, "score": 72.5}
+    COMMODITY = {"ticker": "PDBC", "name": "Invesco", "commodity": "Diversified",
+                 "current_price": 15.2, "ret_1m": 2.1, "rsi": 47.0, "vol_ratio": 0.9}
+
+    def _picks(self):
+        return {"etfs": {"short_term": [{"ticker": "XLB", "entry_price": 92.1}], "long_term": []},
+                "commodities": {"short_term": [{"ticker": "PDBC", "entry_price": 15.2}],
+                                "long_term": []}}
+
+    def test_etf_picks_get_provenance(self):
+        a = self._mod()
+        p = self._picks()
+        a._attach_screen_provenance(p, [self.ETF])
+        s = p["etfs"]["short_term"][0].get("_screen")
+        assert s, "ETF picks still carry no provenance"
+        assert s["score"] == 72.5 and s["setup_type"] == "pullback"
+
+    def test_the_etf_volume_field_is_aliased(self):
+        """ETF/commodity screeners call it `vol_ratio`; everything downstream
+        reads `volume_ratio`. Without the alias the signal is silently dropped."""
+        a = self._mod()
+        p = self._picks()
+        a._attach_screen_provenance(p, [self.ETF])
+        assert p["etfs"]["short_term"][0]["_screen"]["volume_ratio"] == 1.08
+
+    def test_commodity_picks_get_provenance_even_without_a_score(self):
+        a = self._mod()
+        p = self._picks()
+        a._attach_screen_provenance(p, [self.COMMODITY])
+        s = p["commodities"]["short_term"][0].get("_screen")
+        assert s and "score" not in s, "commodities have no score — must not invent one"
+        assert s["volume_ratio"] == 0.9 and s["ret_1m"] == 2.1
+
+    def test_ret_1m_is_recorded(self):
+        """The momentum signal ETFs are actually ranked on — without it their
+        rows carry almost nothing to slice by."""
+        a = self._mod()
+        p = self._picks()
+        a._attach_screen_provenance(p, [self.ETF])
+        assert p["etfs"]["short_term"][0]["_screen"]["ret_1m"] == 4.9
+
+    def test_an_alias_never_overwrites_a_real_value(self):
+        a = self._mod()
+        cand = {**self.ETF, "volume_ratio": 3.3}   # both names present
+        p = self._picks()
+        a._attach_screen_provenance(p, [cand])
+        assert p["etfs"]["short_term"][0]["_screen"]["volume_ratio"] == 3.3
