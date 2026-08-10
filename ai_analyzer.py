@@ -1192,7 +1192,14 @@ def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
 # changes what gets picked — measuring the engine must not contaminate it.
 _SCREEN_FIELDS = ("score", "rsi", "macd_crossover", "volume_ratio",
                   "breakout_today", "obv_positive", "atr_pct", "sector",
-                  "market_cap", "patterns", "rs_vs_spy")
+                  "market_cap", "patterns", "rs_vs_spy",
+                  "ret_1m")          # ETF/commodity screeners' momentum signal
+
+# The ETF and commodity screeners name the same quantity differently. Without
+# this, an ETF pick recorded `score` and `rsi` but silently dropped its volume
+# signal — and ETFs got NO provenance at all until the join below included them,
+# so they were absent from every setup_type and score-band slice in the report.
+_SCREEN_ALIASES = {"vol_ratio": "volume_ratio"}
 
 
 def _attach_screen_provenance(picks: dict, candidates: list) -> None:
@@ -1210,6 +1217,9 @@ def _attach_screen_provenance(picks: dict, candidates: list) -> None:
                 if not cand:
                     continue
                 scr = {k: cand[k] for k in _SCREEN_FIELDS if cand.get(k) is not None}
+                for _src, _dst in _SCREEN_ALIASES.items():
+                    if scr.get(_dst) is None and cand.get(_src) is not None:
+                        scr[_dst] = cand[_src]
                 if not scr:
                     continue
                 # Compress: this row is kept forever in pick_ledger.json, and the
@@ -1338,7 +1348,13 @@ def analyze_with_claude(
     _backfill_allocations(picks, config)
     # Record WHY each pick was a candidate (measurement only — see _attach_screen_provenance)
     try:
-        _attach_screen_provenance(picks, stock_candidates + crypto_candidates)
+        # ETFs and commodities were omitted, so those picks carried no
+        # provenance and would be silently missing from every slice of the
+        # evaluator's report. Confirmed live: XLB was the only pick on
+        # 2026-08-10 without a `screen` blob.
+        _attach_screen_provenance(
+            picks, stock_candidates + crypto_candidates
+                   + (etf_candidates or []) + (commodity_candidates or []))
     except Exception as exc:      # never let instrumentation break the morning run
         print(f"[ai_analyzer] screen provenance attach failed (non-critical): {exc}")
     return picks
