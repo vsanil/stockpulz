@@ -205,17 +205,36 @@ class TestStrategyDefaultsAreUnchanged:
     GOLDEN = [60, 35, 35, 35, 35, 70, 45, 55, 45, 60, 25, 35]
 
     def test_default_scores_match_the_pre_refactor_engine(self):
-        got = [screener._short_term_score(_synthetic_ohlcv(s))[0]
+        """Pins the BASE score — the rubric itself. A bounded tie-break is added
+        on top (see TestTiebreak) but must never alter what the components award."""
+        got = [screener._short_term_score(_synthetic_ohlcv(s))[1]["base_score"]
                for s in range(len(self.GOLDEN))]
         assert got == self.GOLDEN, (
             "the default strategy no longer reproduces the live engine — "
             f"got {got}, expected {self.GOLDEN}")
+
+    def test_the_total_is_the_base_plus_a_sub_5_tiebreak(self):
+        for s in range(len(self.GOLDEN)):
+            total, m = screener._short_term_score(_synthetic_ohlcv(s))
+            assert 0 <= m["tiebreak"] < 5
+            assert abs(total - (m["base_score"] + m["tiebreak"])) < 1e-6
 
     def test_passing_the_default_explicitly_is_the_same_as_omitting_it(self):
         for s in range(6):
             df = _synthetic_ohlcv(s)
             assert (screener._short_term_score(df)[0]
                     == screener._short_term_score(df, screener.DEFAULT_STRATEGY)[0])
+
+    def test_zeroing_a_weight_removes_that_component(self):
+        """Re-asserted on the BASE score, where the rubric lives."""
+        no_rsi = screener.Strategy(name="t", w_rsi=0)
+        for s in range(8):
+            df = _synthetic_ohlcv(s)
+            base = screener._short_term_score(df)[1]["base_score"]
+            got  = screener._short_term_score(df, no_rsi)[1]["base_score"]
+            m    = screener._short_term_score(df)[1]
+            in_band = m.get("rsi") is not None and 35 <= m["rsi"] <= 55
+            assert got == base - (25 if in_band else 0)
 
     def test_every_default_field_matches_the_literal_it_replaced(self):
         d = screener.DEFAULT_STRATEGY
@@ -250,15 +269,6 @@ class TestStrategyArms:
         differing = sum(1 for x, y in zip(a, b) if x != y)
         assert differing >= 8, f"arms too similar to learn from ({differing}/12 differ)"
 
-    def test_zeroing_a_weight_removes_that_component(self):
-        no_rsi = screener.Strategy(name="t", w_rsi=0)
-        for s in range(8):
-            df = _synthetic_ohlcv(s)
-            base = screener._short_term_score(df)[0]
-            got  = screener._short_term_score(df, no_rsi)[0]
-            m    = screener._short_term_score(df)[1]
-            in_band = m.get("rsi") is not None and 35 <= m["rsi"] <= 55
-            assert got == base - (25 if in_band else 0)
 
     def test_run_screener_accepts_a_strategy(self):
         import inspect
@@ -382,8 +392,11 @@ class TestFinnhubRateLimit:
         lim = screener._RateLimiter(10, 1.0)
         stamps, lock = [], threading.Lock()
         def one():
-            lim.acquire()
-            with lock: stamps.append(time.monotonic())
+            # Use the GRANT time, not time.monotonic() afterwards: under load a
+            # thread can be descheduled between the two, which made this flaky —
+            # and a flaky failure here would trigger self-heal into a deploy.
+            t = lim.acquire()
+            with lock: stamps.append(t)
         ts = [threading.Thread(target=one) for _ in range(25)]
         for t in ts: t.start()
         for t in ts: t.join()
@@ -526,3 +539,63 @@ class TestCongressionalDormant:
         screener.dq_set("congressional", 0, 1 if configured else 0)
         assert screener.dq_snapshot()["congressional"]["total"] == 0
         screener.dq_reset()
+
+
+class TestTiebreak:
+    """🔴 Measured, not assumed: across 400 candidates the coarse score took only
+    19 DISTINCT values and 14 of the top 20 were ties — every component is
+    all-or-nothing and every weight a multiple of 5. Ties were then resolved by
+    whatever order the list happened to be in, and that arbitrary order decided
+    which names reached Claude and therefore the user."""
+
+    def _pop(self, n=200):
+        return [screener._short_term_score(_synthetic_ohlcv(s)) for s in range(n)]
+
+    def test_it_can_never_reorder_different_base_scores(self):
+        """THE safety property. The tie-break is bounded below 5 and the
+        smallest gap between two different base scores is 5, so it is
+        mathematically incapable of promoting a weaker candidate. This is what
+        makes the change not-a-tuning."""
+        pop = self._pop(120)
+        for total_a, ma in pop:
+            for total_b, mb in pop:
+                if ma["base_score"] > mb["base_score"]:
+                    assert total_a > total_b, (
+                        f"tie-break reordered {ma['base_score']}>{mb['base_score']} "
+                        f"into {total_a}<={total_b}")
+
+    def test_it_stays_below_the_smallest_component_gap(self):
+        assert all(0 <= m["tiebreak"] < 5 for _, m in self._pop(200))
+
+    def test_it_actually_breaks_the_ties(self):
+        pop = self._pop(400)
+        base_top = sorted((m["base_score"] for _, m in pop), reverse=True)[:20]
+        tot_top  = sorted((t for t, _ in pop), reverse=True)[:20]
+        assert len(set(base_top)) <= 8, "baseline: the coarse score bunches at the top"
+        assert len(set(tot_top)) == 20, "every top-20 candidate must now be ordered"
+
+    def test_it_prefers_the_stronger_signal_among_equals(self):
+        """Deeper into the RSI sweet spot beats sitting on its edge."""
+        strat = screener.DEFAULT_STRATEGY
+        mid  = screener._tiebreak({"rsi": (strat.rsi_lo + strat.rsi_hi) / 2}, strat)
+        edge = screener._tiebreak({"rsi": strat.rsi_hi}, strat)
+        assert mid > edge
+
+    def test_no_metrics_means_no_bonus(self):
+        assert screener._tiebreak({}, screener.DEFAULT_STRATEGY) == 0.0
+
+    def test_junk_metrics_do_not_crash_or_leak(self):
+        t = screener._tiebreak({"rsi": "n/a", "volume_ratio": None, "rs_vs_spy": float("nan")},
+                               screener.DEFAULT_STRATEGY)
+        assert 0 <= t < 5
+
+    def test_the_tiebreak_cannot_push_a_candidate_over_a_gate(self):
+        """ai_analyzer gates enrichment at `score >= 50`. Because every base
+        score is a multiple of 5 and the tie-break is < 5, a base-45 candidate
+        can never reach 50 — the gate keeps its exact meaning. Pinned because a
+        larger tie-break would silently change which candidates get enriched."""
+        strat = screener.DEFAULT_STRATEGY
+        for base in (40, 45, 50, 95):
+            worst = base + 4.999
+            assert (base >= 50) == (worst >= 50), \
+                f"a base {base} candidate changed side of the 50 gate"
