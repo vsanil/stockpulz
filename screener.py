@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import math
 import time
 import collections
 import threading
@@ -417,15 +418,24 @@ def _tiebreak(m: dict, strat: Strategy) -> float:
 
     vr = m.get("volume_ratio")
     if _fin(vr) and vr > 0:
-        parts.append(min(vr / 3.0, 1.0))
+        # ASYMPTOTIC, not clamped. `min(vr/3, 1)` saturated at any vr >= 3, and
+        # on the first live run TWLO (4.03), CART (5.08) and DOCS (9.94) all
+        # pinned to 1.0 → identical 4.9 tie-breaks → still tied. Volume ratio is
+        # frequently the ONLY input (rs_vs_spy is absent and RSI is usually
+        # outside the band), so a ceiling here reintroduces the exact problem
+        # the tie-break exists to remove. x/(x+3) rises monotonically toward 1
+        # without ever reaching it: stronger is always strictly better.
+        parts.append(vr / (vr + 3.0))
 
     rs = m.get("rs_vs_spy")
     if _fin(rs):
-        parts.append(min(max(rs / 20.0, 0.0), 1.0))
+        # Same reasoning, and this one is signed — tanh maps the whole real line
+        # into (0, 1) so relative weakness is ordered too, without a ceiling.
+        parts.append(0.5 * (1.0 + math.tanh(rs / 20.0)))
 
     if not parts:
         return 0.0
-    return round(sum(parts) / len(parts) * 4.9, 4)
+    return round(sum(parts) / len(parts) * 4.9, 6)
 
 
 def _short_term_score(hist: pd.DataFrame,
@@ -569,7 +579,8 @@ def _short_term_score(hist: pd.DataFrame,
         tb = _tiebreak(metrics, strat)
         metrics["tiebreak"] = tb
         metrics["base_score"] = score
-        score = round(score + tb, 4)
+        score = round(score + tb, 6)   # match _tiebreak's precision, so
+                                       # total == base + tiebreak exactly
     except Exception:
         pass
 
