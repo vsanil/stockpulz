@@ -599,3 +599,51 @@ class TestTiebreak:
             worst = base + 4.999
             assert (base >= 50) == (worst >= 50), \
                 f"a base {base} candidate changed side of the 50 gate"
+
+    def test_the_real_monday_saturation_case(self):
+        """🔴 REGRESSION from the first live run. `min(vr/3, 1)` clamped, so
+        TWLO (vol 4.03), CART (5.08) and DOCS (9.94) all pinned to 1.0 and got
+        an identical 4.9 tie-break — TWLO and CART stayed tied at 99.9, which is
+        the exact problem the tie-break exists to remove. Volume ratio is often
+        the ONLY input (rs_vs_spy is absent and RSI usually outside the band),
+        so a ceiling there reintroduces the whole defect."""
+        S = screener.DEFAULT_STRATEGY
+        tbs = [screener._tiebreak({"rsi": r, "volume_ratio": v, "rs_vs_spy": None}, S)
+               for r, v in ((73.66, 4.03), (67.08, 5.08), (75.11, 2.22),
+                            (52.97, 0.80), (74.20, 9.94))]
+        assert len(set(tbs)) == 5, f"live candidates still collide: {tbs}"
+
+    def test_no_input_can_ever_saturate(self):
+        """Asymptotic, not clamped — otherwise strength beyond the clamp point
+        stops carrying information."""
+        S = screener.DEFAULT_STRATEGY
+        # The GUARANTEE is < 5 (the smallest gap between two base scores).
+        for vr in (3, 10, 100, 10_000, 1e9):
+            assert screener._tiebreak({"volume_ratio": vr}, S) < 5
+        for rs in (20, 100, 1e6):
+            assert screener._tiebreak({"rs_vs_spy": rs}, S) < 5
+        # …and realistic magnitudes must still SEPARATE, not round together.
+        assert (screener._tiebreak({"volume_ratio": 100}, S)
+                < screener._tiebreak({"volume_ratio": 1000}, S))
+
+    def test_stronger_volume_always_scores_strictly_higher(self):
+        S = screener.DEFAULT_STRATEGY
+        vals = [screener._tiebreak({"volume_ratio": v}, S)
+                for v in (0.5, 1, 2, 3, 5, 10, 50)]
+        assert vals == sorted(vals) and len(set(vals)) == len(vals)
+
+    def test_relative_weakness_is_ordered_too(self):
+        """tanh spans the signed line, so underperformers rank below flat."""
+        S = screener.DEFAULT_STRATEGY
+        weak = screener._tiebreak({"rs_vs_spy": -15.0}, S)
+        flat = screener._tiebreak({"rs_vs_spy": 0.0}, S)
+        strong = screener._tiebreak({"rs_vs_spy": 15.0}, S)
+        assert weak < flat < strong
+
+    def test_math_is_importable_where_the_tiebreak_runs(self):
+        """🔴 `math` was missing at module level and NOTHING caught it —
+        py_compile passes, `import screener` passes, and every existing test
+        passed, because the tanh branch only executes when rs_vs_spy is present
+        and it is currently None on every live candidate. It would have raised
+        the first time that metric started populating."""
+        assert screener._tiebreak({"rs_vs_spy": 5.0}, screener.DEFAULT_STRATEGY) > 0
