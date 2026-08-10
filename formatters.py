@@ -522,7 +522,7 @@ def format_daily_message(picks: dict, config: dict,
                 score = nm.get("score", 0)
                 why   = nm.get("near_miss_reason", "close to threshold")
                 p_str = f"  ${price:,.2f}" if price else ""
-                lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}/100  · <i>{why}</i>"]
+                lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}  · <i>{why}</i>"]
         else:
             _quiet.append("📈 Stocks ST")
 
@@ -546,7 +546,7 @@ def format_daily_message(picks: dict, config: dict,
                 score = nm.get("score", 0)
                 why   = nm.get("near_miss_reason", "close to threshold")
                 p_str = f"  ${price:,.2f}" if price else ""
-                lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}/100  · <i>{why}</i>"]
+                lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}  · <i>{why}</i>"]
         else:
             _quiet.append("🏦 Stocks LT")
 

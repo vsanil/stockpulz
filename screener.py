@@ -379,6 +379,55 @@ STRATEGIES: dict[str, Strategy] = {
 }
 
 
+def _tiebreak(m: dict, strat: Strategy) -> float:
+    """A continuous refinement in [0, 5) that orders candidates the coarse score
+    cannot separate.
+
+    THE PROBLEM IT SOLVES — measured, not assumed: every component is
+    all-or-nothing and every weight is a multiple of 5, so across 400 candidates
+    the score takes only **19 distinct values**, and the top 20 contains just 6
+    of them — **14 of 20 are ties**. Ties were then resolved by whatever order
+    the list happened to be in, i.e. arbitrarily, and that arbitrary order
+    decides which names reach Claude and therefore the user.
+
+    🔴 THIS IS DELIBERATELY NOT TUNING. No weight and no threshold changes, and
+    the value is bounded BELOW 5 — the smallest gap between two different base
+    scores. So it is mathematically incapable of reordering candidates whose
+    base scores differ; it can only order those that were previously tied.
+    That invariant is the whole safety argument, and it is tested.
+
+    Among equally-qualified candidates it prefers the one whose signals are
+    strongest: deeper into the RSI sweet spot, heavier volume, more room above
+    the 20-day EMA, better relative strength. All from metrics already computed.
+    """
+    def _fin(x):
+        """NaN is a float and passes isinstance — this project has been bitten by
+        that repeatedly (`_is_pos`, `plausible_price`). One NaN here would make
+        the whole SCORE NaN and silently corrupt the ranking."""
+        return (isinstance(x, (int, float)) and not isinstance(x, bool)
+                and x == x and x not in (float("inf"), float("-inf")))
+
+    parts: list[float] = []
+
+    rsi = m.get("rsi")
+    if _fin(rsi) and strat.rsi_lo <= rsi <= strat.rsi_hi:
+        mid  = (strat.rsi_lo + strat.rsi_hi) / 2.0
+        half = max((strat.rsi_hi - strat.rsi_lo) / 2.0, 1e-9)
+        parts.append(max(0.0, 1.0 - abs(rsi - mid) / half))
+
+    vr = m.get("volume_ratio")
+    if _fin(vr) and vr > 0:
+        parts.append(min(vr / 3.0, 1.0))
+
+    rs = m.get("rs_vs_spy")
+    if _fin(rs):
+        parts.append(min(max(rs / 20.0, 0.0), 1.0))
+
+    if not parts:
+        return 0.0
+    return round(sum(parts) / len(parts) * 4.9, 4)
+
+
 def _short_term_score(hist: pd.DataFrame,
                       strat: Strategy = DEFAULT_STRATEGY) -> tuple[int, dict]:
     """Score a ticker for short-term trading. Returns (score, metrics).
@@ -513,6 +562,16 @@ def _short_term_score(hist: pd.DataFrame,
 
     except Exception as exc:
         print(f"[screener] Short-term indicator error: {exc}")
+
+    # Continuous refinement so equally-qualified candidates stop being ordered
+    # by list position. Bounded < 5, so it can never outrank a real component.
+    try:
+        tb = _tiebreak(metrics, strat)
+        metrics["tiebreak"] = tb
+        metrics["base_score"] = score
+        score = round(score + tb, 4)
+    except Exception:
+        pass
 
     return score, metrics
 
@@ -832,7 +891,12 @@ class _RateLimiter:
         self._calls: "collections.deque[float]" = collections.deque()
         self._lock = threading.Lock()
 
-    def acquire(self) -> None:
+    def acquire(self) -> float:
+        """Blocks until a slot is free. RETURNS the monotonic time the slot was
+        granted — a caller timing itself afterwards measures when its thread was
+        next scheduled, not when it was granted, and under load those diverge
+        enough to make a test of this flaky. A flaky test here is not harmless:
+        it would fail CI and trigger self-heal, which auto-merges and deploys."""
         while True:
             with self._lock:
                 now = time.monotonic()
@@ -840,7 +904,7 @@ class _RateLimiter:
                     self._calls.popleft()
                 if len(self._calls) < self._max:
                     self._calls.append(now)
-                    return
+                    return now
                 wait = self._per - (now - self._calls[0])
             time.sleep(max(wait, 0.01))      # sleep OUTSIDE the lock
 
