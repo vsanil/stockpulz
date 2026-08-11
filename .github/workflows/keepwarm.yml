@@ -9,10 +9,12 @@ name: Keep Render Warm
 # ~15 min. Warming 24/7 costs ~744 h/month = 99% of the cap, leaving no margin —
 # exceed it and Render suspends the service until the next billing cycle.
 #
-# The real window is set on the cron-job.org job (6 AM - 6 PM ET, ET-anchored so
-# it cannot drift against the 7 AM ET morning relay at a DST change). GitHub cron
-# only understands UTC, so this schedule is a SAFE SUBSET — 11:00-21:59 UTC sits
-# inside 6 AM - 6 PM ET under both EDT and EST.
+# The real window is set on the cron-job.org job (ET-anchored, so it cannot drift
+# against the 7 AM ET morning relay at a DST change). GitHub cron only understands
+# UTC, so this schedule is a deliberately CONSERVATIVE SUBSET: 11:00-17:59 UTC is
+# 7 AM-1 PM ET under EDT and 6 AM-12 PM ET under EST, which sits inside the
+# temporary Aug window (6 AM-2 PM ET) AND the normal one (6 AM-6 PM ET) — so it
+# does not need touching when the real window moves back on Sep 1.
 #
 # 🔴 This MUST stay inside that window. Every ping wakes the service for ~15 min,
 # so a GH ping outside the paid window is pure cost: the previous 10:00-03:59 UTC
@@ -28,7 +30,7 @@ name: Keep Render Warm
 # from waking the service during the cold hours.
 on:
   schedule:
-    - cron: "*/10 11-21 * * *"   # safe subset of 6 AM-6 PM ET — see the note above
+    - cron: "*/10 11-17 * * *"   # safe subset of BOTH windows — see the note above
 
   workflow_dispatch: {}   # Manual trigger for testing
 
