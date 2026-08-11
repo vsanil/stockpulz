@@ -171,15 +171,24 @@ def paper_sell(ticker: str, chat_id: str, shares: float | None = None,
         gain       = round(proceeds - cost, 2)
         gain_pct   = round(gain / cost * 100, 2) if cost > 0 else 0
 
-        # Record in history
+        # Record in history.
+        # `bought_date` and the levels are carried over deliberately: without the
+        # open date a closed paper trade cannot be joined back to the pick that
+        # produced it, so it silently drops out of the actionability denominator
+        # — which is how the worst entry-window breach on record (COHR, +5.45%)
+        # disappeared the moment its position closed, making the promise look
+        # better kept than it was.
         data["history"].append({
-            "ticker":      ticker,
-            "shares":      sell_shares,
-            "buy_price":   position["avg_price"],
-            "sell_price":  round(sell_price, 2),
-            "gain":        gain,
-            "gain_pct":    gain_pct,
-            "closed_date": et_today().isoformat(),
+            "ticker":       ticker,
+            "shares":       sell_shares,
+            "buy_price":    position["avg_price"],
+            "sell_price":   round(sell_price, 2),
+            "gain":         gain,
+            "gain_pct":     gain_pct,
+            "closed_date":  et_today().isoformat(),
+            "bought_date":  position.get("bought_date"),
+            "stop_loss":    position.get("stop_loss"),
+            "target_price": position.get("target_price"),
         })
 
         # Update position

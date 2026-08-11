@@ -1013,6 +1013,10 @@ function actionSection(a){
     +'<div class="fb-text"><b>'+e.outside_window+' of '+e.n+'</b> picks filled outside their window'
     +' · median slippage <b>'+e.median_slippage_pct+'%</b>'
     +' · worst <b>+'+e.worst_pct+'%</b></div>'
+    +'<div class="fb-meta">includes <b>'+(e.closed_n||0)+'</b> closed position(s) — a breach stays counted '
+    +'after the trade ends'
+    +((e.undated||0) ? ' · <b>'+e.undated+'</b> older fill(s) have no open date and cannot be matched to a pick' : '')
+    +'</div>'
     +rows
     +'<div class="fb-text" style="margin-top:8px">Stops: median <b>'+st.median_stop_pct+'%</b> below entry'
     +' · <b>'+st.tight+'</b> tighter than '+st.threshold_pct+'% (inside daily noise) · n='+st.n+'</div>'
@@ -1230,8 +1234,13 @@ def _build_actionability() -> dict:
             rows += (_load_gist_file(fn) or {}).get("picks", []) or []
         log   = load_user_trade_log(DEFAULT_TEST_CHAT_ID)
         paper = load_user_paper(DEFAULT_TEST_CHAT_ID)
+        # Closed PAPER trades must be in here too. Real closes always were —
+        # they keep opened_date + entry_price — but a sold paper position moves
+        # to `history`, and leaving that out meant a pick's reachability record
+        # was erased the moment the bot sold it. Reachability is a fact about
+        # the pick; it does not stop being true when the trade ends.
         positions = (log.get("open") or []) + (log.get("closed") or []) \
-                    + (paper.get("positions") or [])
+                    + (paper.get("positions") or []) + (paper.get("history") or [])
         return analyse(rows, positions, log.get("closed") or [])
     except Exception as exc:
         print(f"[admin] actionability build failed: {exc}")
