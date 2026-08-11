@@ -571,8 +571,23 @@ def webhook():
 @app.route("/health", methods=["GET"])
 def health():
     """Health check — unauthenticated, so it must NOT leak the config dict
-    (allowlist, admin chat_id, operational internals). Liveness only."""
-    return jsonify({"status": "ok"}), 200
+    (allowlist, admin chat_id, operational internals).
+
+    Reports the running COMMIT alongside liveness. Without it a service running
+    today's code and one running last week's are indistinguishable from outside,
+    so "did my fix deploy?" is unanswerable — which is how the Aug 11 keep-warm
+    gate was believed live for hours while the old self-ping was still serving,
+    and how PiQValet once served hours-old code behind a healthy 200 after a
+    duplicate service quietly took over its auto-deploys.
+
+    The SHA is safe here: the repo is public and it reveals nothing about users
+    or configuration. RENDER_GIT_COMMIT is set automatically by Render.
+    """
+    return jsonify({
+        "status": "ok",
+        "commit": (os.environ.get("RENDER_GIT_COMMIT") or "unknown")[:7],
+        "branch": os.environ.get("RENDER_GIT_BRANCH") or "unknown",
+    }), 200
 
 
 # ── One-time webhook registration ─────────────────────────────────────────────
