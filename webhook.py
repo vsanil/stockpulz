@@ -72,6 +72,67 @@ class _NanSafeJSONProvider(_DefaultJSONProvider):
 app.json = _NanSafeJSONProvider(app)
 
 
+# ── Traffic telemetry ─────────────────────────────────────────────────────────
+# Counts REAL user interactions per UTC hour so the "should I pay Render $7/mo"
+# question can be answered with data instead of a guess. See traffic_tracker.py
+# for why cold hits flush immediately.
+#
+# 🔴 /health is excluded and that exclusion is load-bearing: it is the keep-warm
+# ping itself, firing 4x an hour around the clock. Counting it would make every
+# hour look busy and destroy the entire measurement. /trigger/* is excluded for
+# the same reason — those are crons, not people.
+_TRAFFIC_SKIP_PREFIXES = ("/health", "/trigger/", "/static/", "/favicon",
+                          "/admin", "/register", "/metrics")
+
+
+def _traffic_chat_id():
+    """Best-effort user id for the counter.
+
+    Telegram-supplied ids (webhook updates) are trustworthy. The mini-app param
+    is not verified here — re-running the initData HMAC on every request just to
+    label a counter is not worth it, and a forged id can only skew the owner's
+    own usage histogram, never grant access. Anything unidentified counts as
+    'anon' rather than being dropped, because a hit at 3 AM matters even when we
+    cannot say whose it was.
+    """
+    try:
+        if request.path.rstrip("/").endswith("/webhook"):
+            upd = request.get_json(silent=True) or {}
+            for key in ("message", "edited_message", "callback_query"):
+                frm = (upd.get(key) or {}).get("from") or {}
+                if frm.get("id"):
+                    return str(frm["id"])
+            return None
+        return request.args.get("chat_id") or None
+    except Exception:
+        return None
+
+
+@app.before_request
+def _count_traffic():
+    try:
+        path = request.path or ""
+        if any(path.startswith(p) for p in _TRAFFIC_SKIP_PREFIXES):
+            return None
+        import traffic_tracker
+        traffic_tracker.record(_traffic_chat_id())
+    except Exception:
+        pass          # telemetry must never break a request
+    return None
+
+
+def _build_traffic() -> dict:
+    """Hourly usage for the admin card. Never raises — the dashboard must render
+    even when this file is missing or unreadable."""
+    try:
+        from config_manager import _load_gist_file
+        import traffic_tracker
+        return traffic_tracker.summarise(_load_gist_file(traffic_tracker.TRAFFIC_FILE) or {})
+    except Exception as exc:
+        print(f"[admin] traffic build failed: {exc}")
+        return {"error": str(exc)[:120]}
+
+
 @app.errorhandler(Exception)
 def _json_error_handler(e):
     """
@@ -1023,6 +1084,66 @@ function actionSection(a){
     +ocline+warn+'</div>';
 }
 
+// ── Traffic by hour ────────────────────────────────────────────────────────
+// Evidence for the Render upgrade decision. The bar chart is UTC hours; bars
+// outside the keep-warm window are the ones that argue for paying, and only
+// then if somebody actually hit them.
+function trafficSection(t){
+  if(!t || t.error) return '';
+  if(t.no_data){
+    return '<div class="card"><div class="card-title">Traffic by hour</div>'
+      +'<div class="fb-meta">No interactions counted yet this month. Counting started when '
+      +'this build deployed — an empty chart means <b>no data</b>, not "nobody uses it at night".</div></div>';
+  }
+  var max = 1;
+  (t.hours||[]).forEach(function(h){ if(h.hits>max) max=h.hits; });
+
+  var bars = (t.hours||[]).map(function(h){
+    var pct = Math.round(h.hits/max*100);
+    var col = h.warm ? '#3b82f6' : (h.hits ? '#f59e0b' : '#334155');
+    var lbl = h.hits ? h.hits + ' hit' + (h.hits==1?'':'s') : 'none';
+    if(h.cold) lbl += ' · ' + h.cold + ' cold start' + (h.cold==1?'':'s');
+    return '<div title="' + String(h.hour).padStart(2,'0') + ':00 UTC — ' + lbl
+      + (h.warm ? ' (server warm)' : ' (server asleep)') + '" style="flex:1;display:flex;'
+      + 'flex-direction:column;justify-content:flex-end;align-items:center;height:70px">'
+      + '<div style="width:80%;height:' + Math.max(pct,2) + '%;background:' + col
+      + ';border-radius:2px 2px 0 0"></div>'
+      + '<div style="font-size:8px;color:#64748b;margin-top:2px">' + h.hour + '</div></div>';
+  }).join('');
+
+  var urows = (t.users||[]).slice(0,8).map(function(u){
+    return '<div class="fb-row"><div class="fb-meta"><b>' + u.chat_id + '</b></div>'
+      + '<div class="fb-text">' + u.hits + ' interaction' + (u.hits==1?'':'s')
+      + (u.cold_window ? ' · <b>' + u.cold_window + '</b> while the server was scheduled asleep'
+                       : ' · none outside the warm window') + '</div></div>';
+  }).join('');
+
+  var verdict = t.outside_window
+    ? '<b>' + t.outside_window + '</b> interaction' + (t.outside_window==1?'':'s')
+      + ' landed in the cold window'
+      + (t.outside_window_cold ? ', <b>' + t.outside_window_cold + '</b> of which paid a cold start (30-60s wait)'
+                               : ', none of which hit a cold server — they were covered by traffic already keeping it up')
+    : 'Nothing landed in the cold window. On this month so far, the narrowed schedule costs users nothing.';
+
+  var pill = t.outside_window_cold
+    ? '<span class="pill p-pending">' + t.outside_window_cold + ' cold start(s)</span>'
+    : '<span class="pill p-active">no cold starts</span>';
+
+  return '<div class="card"><div class="card-title">Traffic by hour ' + pill + '</div>'
+    +'<div class="fb-meta" style="margin-bottom:8px">Interactions per UTC hour, ' + t.month + '. '
+    +'Blue = keep-warm window, amber = server scheduled asleep. Upgrading Render is only worth it '
+    +'if the amber bars carry real cold starts.</div>'
+    +'<div style="display:flex;gap:1px;align-items:flex-end;margin:10px 0">' + bars + '</div>'
+    +'<div class="fb-text">' + verdict + '</div>'
+    +'<div class="fb-text" style="margin-top:6px">' + t.total + ' total this month · '
+    +t.cold_starts + ' cold start(s) overall · busiest hour <b>'
+    +(t.peak_hour===null?'—':String(t.peak_hour).padStart(2,'0')+':00 UTC')+'</b></div>'
+    +urows
+    +'<div class="fb-meta" style="margin-top:8px">⚠️ This is a <b>floor, not a total</b>: if a cold '
+    +'/start is dropped before Flask handles it, there is no request to count. Treat it as '
+    +'"at least this many".</div></div>';
+}
+
 // ── Position audit ─────────────────────────────────────────────────────────
 // Arithmetic integrity of stored positions. This is where the synthetic bot
 // earns its keep: it has surfaced three defects (paper targets stored as null,
@@ -1095,7 +1216,8 @@ async function load(){
       +'<div class="card"><div class="card-title">Feedback</div>'+feedback(d.feedback)+'</div>'
     +'</div>'
     +auditSection(d.audit)
-    +actionSection(d.actionability);
+    +actionSection(d.actionability)
+    +trafficSection(d.traffic);
   document.getElementById('ts').textContent='Updated '+new Date().toLocaleTimeString();
 }
 
@@ -1384,6 +1506,7 @@ def admin_data():
         "feedback":         _enrich_feedback(load_feedback()[:20], users),
         "audit":            audit,
         "actionability":    action,
+        "traffic":          _build_traffic(),
         "cron":             cron,
         "last_morning_run": cfg.get("last_morning_run", ""),
     })
