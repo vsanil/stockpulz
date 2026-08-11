@@ -1,18 +1,28 @@
 name: Keep Render Warm
 
-# Pings /health every 10 minutes, 24/7, so Render never goes cold. A cold server →
-# the first /start or button tap waits ~30-60s for a boot (or the reply is dropped
-# mid-boot), which reads as "the bot isn't working". This bit NEW users worst:
-# they click a share link at ANY hour (other timezones, evenings, weekends), and
-# a cold server ate their first /start — so the invite looked broken.
+# Pings /health so Render isn't cold when someone actually uses the bot. A cold
+# server → the first /start or button tap waits ~30-60s for a boot (or the reply is
+# dropped mid-boot), which reads as "the bot isn't working".
 #
-# 24/7 because share-link clicks aren't confined to trading hours. This repo is
-# PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free.
-# Render free tier spins down after ~15 min idle; 10-min pings keep it hot. GH cron
-# can lag a few min under load — for hard reliability mirror as a cron-job.org ping.
+# 🔴 GitHub Actions minutes are free on a public repo, but Render instance-hours
+# are NOT: the free plan allows 750 h/month and every ping WAKES the service for
+# ~15 min. Warming 24/7 costs ~744 h/month = 99% of the cap, leaving no margin —
+# exceed it and Render suspends the service until the next billing cycle.
+#
+# So this runs on a WINDOW: 10:00-03:59 UTC (5 AM - 11 PM ET), ~558 h/month = 74%
+# of the cap. The window starts a full hour before the 11:00 UTC morning relay
+# (/trigger/morning must not hit a cold server) and covers evening use. Cold hours
+# are 04:00-10:00 UTC = midnight-5 AM ET, when a US user base is asleep.
+#
+# ⚠️ This workflow is NOT what actually keeps Render warm. Measured over 13
+# consecutive runs its real cadence is ~53 min (GitHub throttles */10 hard), and
+# Render sleeps after ~15 min idle — so it cannot hold the service up. The clean
+# 15-min ticks in the Render log come from the cron-job.org /health job. Narrowing
+# THAT job to the same window is what changes the bill; this file only stops GH
+# from waking the service during the cold hours.
 on:
   schedule:
-    - cron: "*/10 * * * *"     # Every 10 min, 24/7 — Render never goes cold
+    - cron: "*/10 10-23,0-3 * * *"   # 10:00-03:59 UTC only — see the note above
 
   workflow_dispatch: {}   # Manual trigger for testing
 
