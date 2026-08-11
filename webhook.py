@@ -170,21 +170,63 @@ def _save_admin_tokens(tokens: dict) -> None:
 
 # ── Keep-alive (prevents Render free tier cold starts) ────────────────────────
 
+# 🔴 The window, as ET hours. This is the THIRD place a keep-warm schedule lives
+# (cron-job.org job 7746621 is the first, keepwarm.yml the second) and it is the
+# only one running INSIDE the process — which makes it the one that actually
+# decides the bill, because it cannot be throttled or lagged. If the
+# cron-job.org window moves, move this too.
+_KEEPWARM_HOURS_ET = {int(h) for h in
+                      os.environ.get("KEEPWARM_HOURS_ET", "6,7,8,9,10,11,12,13").split(",")
+                      if h.strip().isdigit()}
+
+
+def _in_keepwarm_window(now=None) -> bool:
+    """True if self-pinging is allowed right now (US/Eastern hour).
+
+    ET, not UTC: the morning relay fires at 7 AM ET, so an ET-anchored window
+    cannot drift against it at a DST change. Fails OPEN — a clock error costing
+    a few instance-hours is recoverable; a bot that silently stops answering is
+    not.
+    """
+    try:
+        import pytz
+        now = now or _dt.now(pytz.timezone("America/New_York"))
+        return now.hour in _KEEPWARM_HOURS_ET
+    except Exception:
+        return True
+
+
 def _keep_alive_loop():
     """
-    Ping /health every 14 minutes so Render doesn't spin down the service.
-    Render free tier idles after 15 minutes of inactivity — first request after
-    idle takes 15-20s. This keeps the process warm at zero extra cost.
-    Requires RENDER_EXTERNAL_URL env var (set automatically by Render).
+    Ping /health every 14 minutes DURING THE KEEP-WARM WINDOW so Render doesn't
+    spin the service down while people are using it.
+
+    🔴 This ran unconditionally 24/7 until 2026-08-11 while its comment claimed
+    "zero extra cost". It was not: Render's free plan allows 750 instance hours
+    per ACCOUNT, and a service that never idles costs ~744 h/month — 99% of the
+    allowance for one app, on an account running three. Worse, because it pings
+    from inside the process at a cadence nothing can throttle, it silently
+    OVERRODE every external schedule: narrowing the cron-job.org job and
+    keepwarm.yml changed nothing while this thread was alive. It was caught only
+    because /health answered in 0.15s at 01:42 ET, hours outside the window the
+    service was supposed to be asleep in.
+
+    Requires RENDER_EXTERNAL_URL (set automatically by Render).
     """
     url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
     if not url:
         print("[webhook] RENDER_EXTERNAL_URL not set — keep-alive disabled.")
         return
     ping_url = f"{url}/health"
-    print(f"[webhook] Keep-alive started — pinging {ping_url} every 14 min.")
+    print(f"[webhook] Keep-alive started — pinging {ping_url} every 14 min "
+          f"during ET hours {sorted(_KEEPWARM_HOURS_ET)}.")
     while True:
         time.sleep(14 * 60)
+        if not _in_keepwarm_window():
+            # Outside the window we deliberately stop pinging and let Render spin
+            # the service down. The thread dying with the process is the intended
+            # outcome, not a failure.
+            continue
         try:
             resp = requests.get(ping_url, timeout=10)
             print(f"[webhook] Keep-alive ping → {resp.status_code}")
