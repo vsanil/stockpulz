@@ -175,8 +175,23 @@ def _save_admin_tokens(tokens: dict) -> None:
 # only one running INSIDE the process — which makes it the one that actually
 # decides the bill, because it cannot be throttled or lagged. If the
 # cron-job.org window moves, move this too.
+# 🔴 KEEP-ALIVE IS DISABLED. StockPulz runs on Render's STARTER plan: the
+# service never spins down, and paid instances draw nothing from the 750 h free
+# pool — so every ping woke something already awake. Proven Aug 11: StockPulz
+# stayed warm through 45 min of total silence while PiQValet and pricedrop
+# (both Free, same account) went cold in 20 min.
+#
+# DISABLED, NOT DELETED: a downgrade to Free brings the need straight back, and
+# a cold first /start is what makes the bot look broken to a new user.
+#   re-enable:  KEEPALIVE_ENABLED=1
+#   narrow it:  KEEPWARM_HOURS_ET=6,7,8,9,10,11,12,13   (must cover the 7 AM ET
+#               morning relay — delivery is not idempotent)
+_KEEPALIVE_ENABLED = (os.environ.get("KEEPALIVE_ENABLED", "").strip().lower()
+                      in ("1", "true", "yes", "on"))
+
 _KEEPWARM_HOURS_ET = {int(h) for h in
-                      os.environ.get("KEEPWARM_HOURS_ET", "6,7,8,9,10,11,12,13").split(",")
+                      os.environ.get("KEEPWARM_HOURS_ET",
+                                     ",".join(str(h) for h in range(24))).split(",")
                       if h.strip().isdigit()}
 
 
@@ -213,6 +228,11 @@ def _keep_alive_loop():
 
     Requires RENDER_EXTERNAL_URL (set automatically by Render).
     """
+    if not _KEEPALIVE_ENABLED:
+        print("[webhook] Keep-alive DISABLED — Starter plan never idles, so a "
+              "self-ping wakes an already-running service. Set KEEPALIVE_ENABLED=1 "
+              "if this service is ever moved to the Free plan.")
+        return
     url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
     if not url:
         print("[webhook] RENDER_EXTERNAL_URL not set — keep-alive disabled.")
