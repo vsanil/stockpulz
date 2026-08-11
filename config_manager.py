@@ -759,8 +759,12 @@ def increment_buy_count(ticker: str) -> int:
     Creates or resets the file if it's a new day.
     Returns the new count.
     """
-    from datetime import date
-    today = date.today().isoformat()
+    # et_today(), not date.today(): this is a per-day counter with a reset
+    # boundary, and a bare UTC date rolls over at 7-8 PM ET on Render — so the
+    # day's counts were being wiped mid-evening while users were still trading,
+    # and an evening buy started a "new day". Same class as the documented
+    # dedup-key bug; every date stamp with a rollover belongs on the ET clock.
+    today = et_today().isoformat()
 
     # Increment against a FRESH read — the old load→write pattern lost counts
     # whenever two users bought the same ticker at once.

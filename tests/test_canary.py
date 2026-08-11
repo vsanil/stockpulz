@@ -123,8 +123,14 @@ class TestCanaryHelpers:
 
     # ── data completeness ────────────────────────────────────────────────────
     def _dq(self, monkeypatch, sources, date=None):
-        import json, datetime
-        payload = {"date": date or datetime.date.today().isoformat(), "sources": sources}
+        # 🔴 et_today(), NOT date.today(). The check compares the stamp against an
+        # America/New_York clock, so a UTC runner between 00:00 and 04:00 UTC
+        # stamps tomorrow's date and the check correctly reads it as a FUTURE
+        # screener run — failing three tests every night for four hours while the
+        # code under test was fine. Same class as the documented UTC-vs-ET bug.
+        import json
+        from config_manager import et_today
+        payload = {"date": date or et_today().isoformat(), "sources": sources}
         monkeypatch.setattr(canary, "_gist_all",
                             lambda: {"data_quality.json": {"content": json.dumps(payload)}})
         canary.RESULTS.clear()
@@ -138,6 +144,27 @@ class TestCanaryHelpers:
             "finnhub_profile": {"ok": 79, "total": 79, "coverage_pct": 100.0},
             "finnhub_metrics": {"ok": 79, "total": 79, "coverage_pct": 100.0}})
         assert ok and "finnhub_profile=100.0%" in note
+
+    def test_the_stamp_is_read_on_the_same_clock_the_check_uses(self, monkeypatch):
+        """Regression for a suite that went red 00:00-04:00 UTC every night.
+
+        CI runs in UTC; the check compares the stamp against America/New_York.
+        In that four-hour window the two calendars differ by a day, so a payload
+        stamped with date.today() looked like a FUTURE screener run, `fresh` went
+        False, and three tests failed at 100% coverage — with the self-refuting
+        note "stale — last screener run recorded <today's date>".
+
+        Forcing the ET clock backwards reproduces the CI condition on any
+        machine at any hour, which the original failure could not be.
+        """
+        import sys, types, datetime as _dt
+        fake = types.ModuleType("pytz")
+        fake.timezone = lambda _n: _dt.timezone(_dt.timedelta(hours=-12))
+        monkeypatch.setitem(sys.modules, "pytz", fake)
+        ok, _ = self._dq(monkeypatch, {
+            "finnhub_profile": {"ok": 79, "total": 79, "coverage_pct": 100.0},
+            "finnhub_metrics": {"ok": 79, "total": 79, "coverage_pct": 100.0}})
+        assert ok, "the stamp must use the check's clock (et_today), not date.today()"
 
     def test_the_finnhub_bug_would_now_be_caught(self, monkeypatch):
         """The exact live failure: 51 of 79 candidates got no fundamentals, and

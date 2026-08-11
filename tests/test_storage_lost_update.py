@@ -622,8 +622,7 @@ class TestConfigManagerWholeFileWriters:
         assert _Server.data[F]["u2"] == [{"ticker": "BBB"}]
 
     def test_buy_count_increments_off_a_fresh_read(self):
-        from datetime import date
-        F, today = cm.BUY_COUNTS_FILE, date.today().isoformat()
+        F, today = cm.BUY_COUNTS_FILE, cm.et_today().isoformat()
         _Server.data[F] = {"date": today, "counts": {"AAA": 1}}
         # another user buys the same ticker between our read and our write
         cur = _Server().read_strict(F)
@@ -638,7 +637,7 @@ class TestConfigManagerWholeFileWriters:
         F = cm.BUY_COUNTS_FILE
         _Server.data[F] = {"date": "1999-01-01", "counts": {"AAA": 9}}
         assert cm.increment_buy_count("AAA") == 1
-        assert _Server.data[F]["date"] == date.today().isoformat()
+        assert _Server.data[F]["date"] == cm.et_today().isoformat()
 
     def test_mutate_gist_file_honours_no_write(self):
         """Regression: mutate_gist_file used to write the NO_WRITE sentinel object
