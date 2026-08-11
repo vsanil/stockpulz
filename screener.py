@@ -200,6 +200,33 @@ def _wiki_symbols(url: str) -> list[str]:
     return []
 
 
+def _nasdaq_100_symbols() -> set:
+    """Live Nasdaq-100 constituents.
+
+    Wikipedia dropped the constituents table from the Nasdaq-100 article, so
+    this reads stockanalysis.com instead. Selected by COLUMN CONTENT and row
+    count, never a table index — the rule that already saved the S&P 500 leg
+    when Wikipedia reshuffled its layout.
+    """
+    try:
+        resp = requests.get("https://stockanalysis.com/list/nasdaq-100-stocks/",
+                            headers=_BROWSER_UA, timeout=20)
+        resp.raise_for_status()
+        for df in pd.read_html(StringIO(resp.text)):
+            col = next((c for c in df.columns
+                        if str(c).strip().lower() in ("symbol", "ticker")), None)
+            if col is None or len(df) < 50:      # the constituents table, not a sidebar
+                continue
+            out = {str(v).strip().upper() for v in df[col] if str(v).strip()}
+            out = {t for t in out if _TICKER_RE.match(t)}
+            if out:
+                print(f"[screener] NASDAQ 100: {len(out)} tickers from stockanalysis.")
+                return out
+    except Exception as exc:
+        print(f"[screener] NASDAQ 100 fetch failed: {type(exc).__name__}: {exc}")
+    return set()
+
+
 def get_stock_universe() -> list[str]:
     """
     Build a broad US stock universe: S&P 500 + NASDAQ 100 + S&P MidCap 400.
@@ -246,10 +273,22 @@ def get_stock_universe() -> list[str]:
         _add(_wiki_symbols("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"))
         print(f"[screener] S&P 500 Wikipedia: added {len(tickers)-before} tickers.")
 
-    # ── Source 3: NASDAQ 100 via Wikipedia ────────────────────────────────────
+    # ── Source 3: NASDAQ 100 ──────────────────────────────────────────────────
+    # 🔴 NOT Wikipedia. That page no longer contains a constituents table at all
+    # (18 tables, the largest 41 rows of annual returns), so _wiki_symbols
+    # returned 0 and the log line "added 0 new tickers" read as benign for as
+    # long as it has been broken. The Nasdaq-100 names that are NOT in the S&P
+    # 500 were therefore never screened: ARM, ASML, MELI, MSTR, PDD, SHOP, ALAB,
+    # ALNY, CCEP, FER, TRI — 11 liquid, actively traded stocks.
     before = len(tickers)
-    _add(_wiki_symbols("https://en.wikipedia.org/wiki/Nasdaq-100"))
-    print(f"[screener] NASDAQ 100: added {len(tickers)-before} new tickers.")
+    _add(_nasdaq_100_symbols())
+    _added = len(tickers) - before
+    print(f"[screener] NASDAQ 100: added {_added} new tickers.")
+    if _added == 0:
+        # A dead source and a genuinely redundant one look identical in the log.
+        # Say so loudly — a silently frozen universe is how picks go stale.
+        print("[screener] ⚠️  NASDAQ 100 contributed NOTHING — source may be dead, "
+              "check _nasdaq_100_symbols()")
 
     # ── Source 3.5: high-interest / recent listings (volume-driven) ──────────
     # Added BEFORE MidCap 400 so hot new names (e.g. a recent IPO) survive the
@@ -716,6 +755,30 @@ def _get_alpaca_snapshots(tickers: list[str]) -> dict[str, float]:
     return prices
 
 
+# Alpaca spells class shares with a dot (BRK.B, BF.B); the S&P 500 CSV, yfinance
+# and everything else in this codebase use a hyphen (BRK-B, BF-B). Alpaca answers
+# 400 for the ENTIRE multi-symbol request when one symbol is unknown, so these two
+# tickers were discarding all 100 bars in their chunk on every run — silently,
+# because the yfinance fallback then covered it and the run stayed green.
+def _alpaca_sym(ticker: str) -> str:
+    """Our spelling -> Alpaca's."""
+    return str(ticker).upper().replace("-", ".")
+
+
+def _alpaca_syms(tickers: list) -> tuple[list, dict]:
+    """(symbols to send, {alpaca symbol: our symbol}).
+
+    The inverse map is not optional: responses come back keyed by Alpaca's
+    spelling, and every caller looks the ticker up by ours.
+    """
+    out, back = [], {}
+    for t in tickers:
+        a = _alpaca_sym(t)
+        out.append(a)
+        back[a] = str(t).upper()
+    return out, back
+
+
 def _alpaca_single_bars(ticker: str, days: int = 365) -> "pd.DataFrame | None":
     """Fetch daily bars for one stock ticker via Alpaca. Returns DataFrame or None."""
     import datetime as _dt
@@ -729,16 +792,26 @@ def _alpaca_single_bars(ticker: str, days: int = 365) -> "pd.DataFrame | None":
         "APCA-API-SECRET-KEY": secret,
         "Accept":              "application/json",
     }
+    # 🔴 Uses the MULTI-symbol endpoint with a single symbol, not the path-style
+    # /v2/stocks/bars/{symbol}. That path 404s for EVERY ticker — verified against
+    # AAPL — so this function returned None on every call it has ever made, and
+    # both callers swallow None. The visible consequences: `rs_vs_spy` was None on
+    # every candidate (the SPY baseline never loaded, so the relative-strength
+    # component of the score and the tanh branch of _tiebreak were dead code), and
+    # the 200MA leg of the long-term score silently contributed nothing.
+    sym = _alpaca_sym(ticker)
     try:
         resp = requests.get(
-            f"https://data.alpaca.markets/v2/stocks/bars/{ticker}",
+            "https://data.alpaca.markets/v2/stocks/bars",
             headers=headers,
-            params={"timeframe": "1Day", "start": start_date, "limit": 1000, "feed": "iex"},
+            params={"symbols": sym, "timeframe": "1Day",
+                    "start": start_date, "limit": 10000, "feed": "iex"},
             timeout=15,
         )
         if resp.status_code != 200:
+            print(f"[screener] Alpaca single bars {ticker}: HTTP {resp.status_code}")
             return None
-        bars = resp.json().get("bars") or []
+        bars = (resp.json().get("bars") or {}).get(sym) or []
         if not bars:
             return None
         df = pd.DataFrame(bars)
@@ -775,8 +848,15 @@ def _alpaca_bulk_bars(tickers: list, days: int = 92) -> dict:
 
     for i in range(0, len(tickers), chunk_size):
         chunk = tickers[i:i + chunk_size]
+        # Alpaca spells class shares with a DOT (BRK.B); the S&P CSV, yfinance and
+        # the rest of this codebase use a HYPHEN (BRK-B). Alpaca rejects the WHOLE
+        # request with 400 on one unknown symbol, so two tickers were killing all
+        # 100 in their chunk on every single run. `_alpaca_syms` also returns the
+        # inverse map, because the response comes back keyed by Alpaca's spelling
+        # and every caller downstream looks up the hyphenated one.
+        chunk_syms, back = _alpaca_syms(chunk)
         params: dict = {
-            "symbols":   ",".join(chunk),
+            "symbols":   ",".join(chunk_syms),
             "timeframe": "1Day",
             "start":     start_date,
             "limit":     10000,
@@ -793,7 +873,10 @@ def _alpaca_bulk_bars(tickers: list, days: int = 92) -> dict:
                     break
                 data = resp.json()
                 for sym, bars in (data.get("bars") or {}).items():
-                    raw_bars.setdefault(sym.upper(), []).extend(bars)
+                    # back to OUR spelling, or the caller's `ticker not in _raw`
+                    # check silently drops it.
+                    key = back.get(sym.upper(), sym.upper())
+                    raw_bars.setdefault(key, []).extend(bars)
                 page_token = data.get("next_page_token")
                 if not page_token:
                     break
