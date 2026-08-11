@@ -713,11 +713,38 @@ class TestReleaseHardening:
     """Pre-public-launch hardening: no config leak, JSON (never HTML) errors."""
 
     def test_health_does_not_leak_config(self, client):
+        """/health is unauthenticated. It may report liveness and the running
+        COMMIT (public repo, reveals nothing about users), and nothing else.
+
+        Asserted as an ALLOWLIST rather than exact equality: the old
+        `data == {"status": "ok"}` broke the moment a legitimate field was
+        added, which invites relaxing the whole check. This keeps the real
+        invariant — no config, no user data, no secrets — while letting the
+        endpoint carry deploy information.
+        """
         r = client.get("/health")
         assert r.status_code == 200
         data = r.get_json()
-        assert data == {"status": "ok"}          # no "config" dict leaked
-        assert "config" not in data
+        allowed = {"status", "commit", "branch"}
+        assert set(data) <= allowed, \
+            f"/health grew an unexpected field: {sorted(set(data) - allowed)}"
+        assert data["status"] == "ok"
+        blob = json.dumps(data).lower()
+        for banned in ("config", "allowed", "admin", "chat_id", "token",
+                       "secret", "gist", "key"):
+            assert banned not in blob, f"/health leaked {banned!r}"
+
+    def test_health_reports_the_running_commit(self, client, monkeypatch):
+        """Without this, a service running today's code and one running last
+        week's are indistinguishable from outside — which is how a keep-warm fix
+        was believed live for hours while the old code was still serving."""
+        monkeypatch.setenv("RENDER_GIT_COMMIT", "abcdef1234567890")
+        data = client.get("/health").get_json()
+        assert data["commit"] == "abcdef1"
+
+    def test_health_commit_is_unknown_when_not_on_render(self, client, monkeypatch):
+        monkeypatch.delenv("RENDER_GIT_COMMIT", raising=False)
+        assert client.get("/health").get_json()["commit"] == "unknown"
 
     def test_unknown_route_returns_json_not_html(self, client):
         # The global error handler must return JSON so the mini-app's
