@@ -101,3 +101,80 @@ class TestHonesty:
         pos = [{"ticker": f"T{i}", "opened_date": f"2026-07-{i:02d}", "entry_price": 101.0}
                for i in range(1, 32)]
         assert analyse(led, pos, [])["sample_warning"] is None
+
+
+class TestClosedPositionsStayInTheDenominator:
+    """🔴 The regression this class exists for.
+
+    COHR was the worst entry-window breach on record (+5.45% against a 3%
+    promise). The moment the synthetic bot SOLD it, the observation vanished and
+    the headline improved from 15% to 8.7% — not because anything got better,
+    but because the evidence left the denominator.
+
+    Two causes, both fixed: paper_sell discarded `bought_date` (so a closed
+    paper trade had no ledger join key at all), and _build_actionability never
+    passed paper history in. A metric about a PROMISE must not get quieter every
+    time a trade closes — that fails in the flattering direction.
+    """
+
+    def test_a_closed_paper_trade_still_counts_as_a_breach(self):
+        led = [_pick("COHR", d="2026-08-05", entry=328.25, tf="long_term")]
+        hist = [{"ticker": "COHR", "bought_date": "2026-08-05",
+                 "buy_price": 346.15, "sell_price": 351.0,
+                 "closed_date": "2026-08-10"}]
+        r = analyse(led, hist, [])
+        assert r["entry"]["n"] == 1, "closed paper trade dropped out of the denominator"
+        assert r["entry"]["outside_window"] == 1
+        assert r["entry"]["worst_pct"] == 5.45
+        assert r["entry"]["closed_n"] == 1
+
+    def test_buy_price_is_accepted_as_the_fill(self):
+        """Paper history spells the fill `buy_price`; positions spell it
+        `avg_price`/`entry_price`. Reading only the latter silently skipped
+        every closed paper trade even once it was passed in."""
+        led = [_pick("A", d="2026-08-05", entry=100.0)]
+        r = analyse(led, [{"ticker": "A", "bought_date": "2026-08-05", "buy_price": 103.0}], [])
+        assert r["entry"]["n"] == 1 and r["entry"]["outside_window"] == 1
+
+    def test_open_and_closed_records_of_one_pick_count_once(self):
+        """The bot holds a ticker as both a real and a paper position, and the
+        paper leg later closes. That is one PICK, so one observation."""
+        led = [_pick("A", d="2026-08-05", entry=100.0)]
+        pos = [{"ticker": "A", "opened_date": "2026-08-05", "entry_price": 103.0},
+               {"ticker": "A", "bought_date": "2026-08-05", "buy_price": 103.0,
+                "closed_date": "2026-08-10"}]
+        assert analyse(led, pos, [])["entry"]["n"] == 1
+
+    def test_a_fill_with_no_open_date_is_counted_as_missing_not_dropped(self):
+        """Legacy history rows predate the bought_date fix. They cannot be
+        joined — but they must be REPORTED, or unjoinable breaches quietly
+        flatter the rate."""
+        led = [_pick("A", d="2026-08-05", entry=100.0)]
+        r = analyse(led, [{"ticker": "A", "buy_price": 120.0, "closed_date": "2026-08-10"}], [])
+        assert r["entry"]["n"] == 0
+        assert r["entry"]["undated"] == 1
+
+    def test_closed_date_is_never_used_as_the_join_key(self):
+        """Joining a SALE date to a pick date would match the wrong pick
+        whenever a ticker is picked more than once."""
+        led = [_pick("A", d="2026-08-10", entry=100.0)]
+        r = analyse(led, [{"ticker": "A", "buy_price": 999.0, "closed_date": "2026-08-10"}], [])
+        assert r["entry"]["n"] == 0, "sale date was used as the open date"
+
+    def test_the_same_stop_is_not_counted_twice(self):
+        led = [_pick("A", d="2026-08-05", entry=100.0)]
+        pos = [{"ticker": "A", "bought_date": "2026-08-05", "entry_price": 100.0, "stop_loss": 95.0},
+               {"ticker": "A", "bought_date": "2026-08-05", "buy_price": 100.0, "stop_loss": 95.0,
+                "closed_date": "2026-08-10"}]
+        assert analyse(led, pos, [])["stops"]["n"] == 1
+
+
+class TestPaperSellPreservesTheJoinKey:
+    def test_history_record_carries_bought_date_and_levels(self):
+        """Root cause: paper_sell wrote ticker/shares/prices/gain only, so a sold
+        paper position lost the open date that joins it to its pick."""
+        import inspect, paper_trader
+        src = inspect.getsource(paper_trader.paper_sell)
+        body = src[src.index('data["history"].append'):]
+        for field in ("bought_date", "stop_loss", "target_price"):
+            assert field in body, f"paper_sell history record drops {field}"

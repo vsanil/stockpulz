@@ -46,30 +46,57 @@ def _num(x):
         return None
 
 
-def entry_slippage(ledger: dict, positions: list) -> list[dict]:
+def _open_day(pos: dict) -> str:
+    """The day the position was OPENED — the ledger join key.
+
+    Closed paper trades keep `bought_date` only because paper_sell now copies it
+    into the history record; before that it recorded `closed_date` alone, which
+    cannot be joined to a pick at all. `closed_date` is deliberately NOT a
+    fallback here: joining a sale date to a pick date would silently match the
+    wrong pick whenever a ticker is picked more than once.
+    """
+    return pos.get("opened_date") or pos.get("bought_date") or ""
+
+
+def _fill_price(pos: dict):
+    # `buy_price` is the paper-history spelling of the same number.
+    return _num(pos.get("entry_price") or pos.get("avg_price") or pos.get("buy_price"))
+
+
+def entry_slippage(ledger: dict, positions: list) -> tuple[list[dict], int]:
     """Fill price vs the entry price the user was shown.
 
     This is the check that matters most for trust: the message states a hard
     rule ("skip if above $X"). If our own bot routinely fills outside that
     window, a user who followed the instruction literally would have skipped
     the trade — so the pick was not actionable as published.
+
+    Returns (observations, undated) — `undated` counts fills that could not be
+    joined to a pick because they carry no open date. Those are silently missing
+    evidence, so the caller reports the number rather than hiding it: a breach
+    that drops out of the denominator makes the promise look better kept than
+    it was, which is the one direction this metric must never fail in.
     """
     # ONE observation per PICK. The bot commonly holds the same ticker as both a
     # real and a paper position, and both fills join to the same pick — counting
     # both would weight whichever picks it happened to buy twice, skewing the
     # "was this reachable" rate. Reachability is a property of the pick, not of
     # how many times we bought it.
-    out, seen = [], set()
+    out, seen, undated = [], set(), 0
     for pos in positions or []:
         tkr = (pos.get("ticker") or "").upper()
-        day = pos.get("opened_date") or pos.get("bought_date") or ""
+        day = _open_day(pos)
+        if not day:
+            # Only counts as missing evidence if we actually paid for something.
+            undated += 1 if tkr and _fill_price(pos) else 0
+            continue
         if (day, tkr) in seen:
             continue
         pick = (ledger or {}).get((day, tkr))
         if not pick:
             continue
         seen.add((day, tkr))
-        want, got = _num(pick.get("entry")), _num(pos.get("entry_price") or pos.get("avg_price"))
+        want, got = _num(pick.get("entry")), _fill_price(pos)
         if not want or not got or want <= 0:
             continue
         slip = (got - want) / want * 100.0
@@ -81,17 +108,25 @@ def entry_slippage(ledger: dict, positions: list) -> list[dict]:
             "window_pct": window,
             # Only ABOVE the window breaks the promise — filling cheaper is fine.
             "outside_window": slip > window,
+            "closed": bool(pos.get("closed_date") or pos.get("sell_price")),
         })
-    return out
+    return out, undated
 
 
 def stop_distances(positions: list) -> list[dict]:
-    out = []
+    out, seen = [], set()
     for pos in positions or []:
-        e = _num(pos.get("entry_price") or pos.get("avg_price"))
+        e = _fill_price(pos)
         s = _num(pos.get("stop_loss"))
         if not e or not s or e <= 0 or s >= e:
             continue
+        # A closed paper trade and its former open record describe the SAME
+        # position, so key on what identifies the position rather than counting
+        # the same stop twice once history starts feeding in.
+        key = ((pos.get("ticker") or "").upper(), _open_day(pos), round(e, 4), round(s, 4))
+        if key in seen:
+            continue
+        seen.add(key)
         d = (e - s) / e * 100.0
         out.append({"ticker": (pos.get("ticker") or "").upper(),
                     "stop_pct": round(d, 2), "tight": d < TIGHT_STOP_PCT})
@@ -125,7 +160,7 @@ def outcome_mix(closed: list) -> dict:
 def analyse(ledger_rows: list, positions: list, closed: list) -> dict:
     ledger = {(r["date"], (r.get("ticker") or "").upper()): r
               for r in (ledger_rows or []) if not r.get("control") and r.get("date")}
-    slip = entry_slippage(ledger, positions)
+    slip, undated = entry_slippage(ledger, positions)
     stops = stop_distances(positions)
     outs = outcome_mix(closed)
 
@@ -136,11 +171,16 @@ def analyse(ledger_rows: list, positions: list, closed: list) -> dict:
     return {
         "entry": {
             "n": len(slip),
+            "closed_n": sum(1 for s in slip if s.get("closed")),
             "median_slippage_pct": round(statistics.median(slips), 2) if slips else None,
             "worst_pct": round(max(slips), 2) if slips else None,
             "outside_window": len(outside),
             "outside_pct": round(len(outside) / len(slip) * 100, 1) if slip else None,
             "examples": sorted(outside, key=lambda s: -s["slippage_pct"])[:5],
+            # Fills with no open date cannot be joined to a pick. Surfacing the
+            # count keeps the rate honest — an unjoinable breach would otherwise
+            # just vanish and flatter the number.
+            "undated": undated,
         },
         "stops": {
             "n": len(stops),
