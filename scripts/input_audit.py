@@ -16,6 +16,11 @@ decide keep-vs-cut for each input, in one place:
 
 READ-ONLY. Probes are single small requests; nothing is written anywhere.
 
+⚠️ LOCAL TLS FALSE ALARM: this dev machine has a TLS-intercepting proxy, so
+Telegram (and anything via curl_cffi/yfinance) can report DEAD here while being
+perfectly healthy in production. CI is the authority — re-run there before
+believing a transport failure.
+
 ⚠️ A "DEAD" row may be a BAD PROBE, not a dead input — that happened twice while
 writing this (wrong function name, wrong response key). Before acting on a
 failure, confirm the probe calls the real function and reads a real field.
@@ -115,18 +120,6 @@ def p_universe_midcap():
     return len(s) > 200, f"{len(s)} tickers"
 
 
-def p_stocktwits():
-    import sentiment_analyzer as sa
-    d = sa._stocktwits_sentiment("AAPL")
-    return bool(d), f"{d.get('tagged_count')} tagged" if d else "None returned"
-
-
-def p_reddit():
-    import sentiment_analyzer as sa
-    n = sa._reddit_mentions("AAPL")
-    return n > 0, f"{n} mentions for AAPL"
-
-
 def p_congress():
     import screener
     cands = [n for n in dir(screener) if "congress" in n.lower() and callable(getattr(screener, n))]
@@ -189,8 +182,9 @@ INPUTS = [
     ("Universe: S&P 500",   p_universe_sp500,   "SCORE  600-ticker universe",                 ("get_stock_universe",)),
     ("Universe: Nasdaq-100",p_universe_nasdaq,  "SCORE  universe (11 names)",                 ("_nasdaq_100_symbols",)),
     ("Universe: MidCap 400",p_universe_midcap,  "SCORE  universe",                            ("_wiki_symbols",)),
-    ("StockTwits",          p_stocktwits,       "context  LLM only, 'weight LEAST'",          ("stocktwits", "sentiment")),
-    ("Reddit r/wsb",        p_reddit,           "context  LLM only, 'weight LEAST'",          ("reddit",)),
+    # StockTwits + Reddit removed 2026-08-12 — both dead, both "weight LEAST",
+    # and each cost a failing HTTP call per cache miss. Congressional stays:
+    # dormant (no QUIVER_API_KEY), not broken, and zero cost to keep.
     ("Congressional",       p_congress,         "SCORE  +8/+4 on LT (dormant)",               ("congress",)),
     ("Insider (openinsider)",p_insider,         "context  LLM",                               ("insider",)),
     ("Polygon",             p_polygon,          "context  options flow + bar fallback",       ("polygon", "options_flow")),
@@ -207,6 +201,10 @@ def main() -> int:
     for name, fn, feeds, needles in INPUTS:
         ok, detail, dt = probe(fn)
         if not ok:
+            # Flag the known local-proxy signature rather than reporting it as
+            # a real outage — it has cost investigation time before.
+            if "SSL" in detail or "certificate" in detail.lower():
+                detail += "  [likely LOCAL TLS proxy — verify on CI]"
             dead.append((name, feeds, detail))
         print(f"{name:<24}{'ok' if ok else 'DEAD':<6}{detail[:29]:<30}{feeds:<44}{_tested(*needles)}")
     print("-" * 118)

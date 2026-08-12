@@ -462,6 +462,12 @@ Rules:
 - Admin dashboard has a **Position audit** card with resolved/ignore/reopen buttons (`POST /admin/audit/<id>`). `_build_audit_findings()` is per-account try/except so one unreadable account can't hide the rest, and never raises so the dashboard always renders.
 - **⚠️ Admin-dashboard JS lives inside a Python `"""…"""` string: escape quotes as `\\'`, not `\'`.** A single backslash is consumed by Python and emits a bare quote, silently breaking the whole `<script>`. `scripts/check_js.py` catches it — run it after ANY admin-page edit.
 
+### Social sentiment (StockTwits + Reddit) REMOVED — Aug 12 2026
+- **Deleted `sentiment_analyzer.py` and its one consumer** (`ai_analyzer` enrichment + 2 prompt lines). Both feeds were dead — StockTwits' parser crashed on `"sentiment": null` (23/30 live messages carry it; `dict.get(k, {})` returns the default only when the key is ABSENT, not when the value is null) and Reddit has 403'd since it closed the unauthenticated JSON API. Nothing scored on them; the prompt explicitly ranked the signal **"weight LEAST"**, and the mini-app never displayed it. Cost of keeping: two failing HTTP calls per candidate per cache miss during the morning run, for zero signal.
+- **Professional analysts do not use retail social sentiment** — WSB mention counts are among the most heavily arbitraged retail signals there are. Repairing them would have restored an input the engine was already told to ignore.
+- **Insider signal shares the same 5-day `signal_cache` and is UNTOUCHED** — it is alive (openinsider HTTP 200). The cache still carries a `sentiment` key on older entries; it is simply never read.
+- **🔴 Congressional was deliberately NOT cut in the same sweep.** It is **dormant, not broken**: `congress_score` is always 0 so the `+8/+4` LT bonus never fires, but the fetcher works and sends `Authorization: Bearer $QUIVER_API_KEY` — one env var away from live, at zero runtime cost. **Deleting it would mean rebuilding an integration to restore a paid feature.** Dormant ≠ rot.
+
 ### Congressional signal is DORMANT — no free source exists (verified Aug 8 2026)
 - **Do not "fix" this by hunting for another endpoint — all of them were checked:**
   * **House Stock Watcher** — domain no longer resolves; its public S3 buckets (`house-stock-watcher-data`, `senate-stock-watcher-data`) return **403**. Project shut down. REMOVED from the code.
