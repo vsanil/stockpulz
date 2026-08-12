@@ -10,6 +10,7 @@ from telegram_api import send_message, _chat_id
 from config_manager import load_picks, load_user_trade_log, get_allowed_users
 from formatters import _esc
 from cmd_helpers import _get_client, _resolve_ticker_candidates, _fetch_live_price
+from llm_client import strip_fences
 
 
 def _explain_pick(query: str) -> str:
@@ -191,7 +192,7 @@ Rules:
             max_tokens=120,
             messages=[{"role": "user", "content": f"{SYSTEM}\n\nInput: {query}"}],
         )
-        parsed = json.loads(message.content[0].text.strip())
+        parsed = json.loads(strip_fences(message.content[0].text))
     except Exception as exc:
         print(f"[telegram] NL parse failed ({exc}) — treating as explain query")
         return _explain_pick(query)
@@ -415,7 +416,7 @@ Examples:
             max_tokens=150,
             messages=[{"role": "user", "content": f"{SYSTEM}\n\nInput: {raw}"}],
         )
-        result = json.loads(message.content[0].text.strip())
+        result = json.loads(strip_fences(message.content[0].text))
         if isinstance(result, list) and result:
             print(f"[telegram] NL ticker list extracted: {result}")
             return result

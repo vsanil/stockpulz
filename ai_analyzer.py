@@ -1040,13 +1040,9 @@ Return this exact JSON structure:
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _strip_fences(raw: str) -> str:
-    """Strip accidental markdown code-fence wrappers from a JSON string."""
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return raw
+# ONE definition, in llm_client. This alias keeps the three callers below (all
+# on the morning-pick critical path) untouched while removing the duplicate.
+from llm_client import strip_fences as _strip_fences
 
 
 

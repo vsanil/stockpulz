@@ -52,6 +52,7 @@ def parse_money(raw) -> float | None:
 # Canonical crypto set — single source of truth (was a 20-coin local list that
 # mispriced any crypto outside it in /size and /digest).
 from price_checker import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
+from llm_client import strip_fences
 
 def _is_admin(chat_id: str | None = None) -> bool:
     """Return True if the given chat_id (or env TELEGRAM_CHAT_ID) is the bot owner."""
@@ -176,12 +177,7 @@ def _resolve_ticker_candidates(name_or_ticker: str) -> list[dict]:
             max_tokens=150,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw_json = message.content[0].text.strip()
-        if raw_json.startswith("```"):
-            raw_json = raw_json.split("```")[1]
-            if raw_json.startswith("json"):
-                raw_json = raw_json[4:]
-        candidates = json.loads(raw_json)
+        candidates = json.loads(strip_fences(message.content[0].text))
         if isinstance(candidates, list) and candidates:
             return candidates
     except Exception as exc:
