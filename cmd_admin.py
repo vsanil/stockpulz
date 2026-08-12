@@ -18,6 +18,7 @@ from cmd_helpers import (
     _send_release_broadcast, _get_client, _fetch_live_price,
 )
 from cmd_settings import _send_settings_panel, _start_onboarding_wizard, _send_onboarding_complete, _prompt_for_param
+from llm_client import strip_fences
 
 
 def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
@@ -577,7 +578,7 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
                     max_tokens=80,
                     messages=[{"role": "user", "content": f"{_sys}\n\nInput: {raw}"}],
                 )
-                parsed = _json.loads(_msg.content[0].text.strip())
+                parsed = _json.loads(strip_fences(_msg.content[0].text))
                 if parsed.get("stop_loss_pct")   is not None:
                     updates["stop_loss_pct"]   = max(0.5, round(float(parsed["stop_loss_pct"]),   1))
                 if parsed.get("target_gain_pct") is not None:
@@ -865,7 +866,7 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
                     model="claude-haiku-4-5-20251001", max_tokens=60,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                updates = _json.loads(msg.content[0].text.strip())
+                updates = _json.loads(strip_fences(msg.content[0].text))
                 updates = {k: max(1, int(v)) for k, v in updates.items()
                            if k in ("max_stock_picks", "max_crypto_picks")}
             except Exception:

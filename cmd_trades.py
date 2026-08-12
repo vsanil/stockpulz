@@ -31,6 +31,7 @@ from cmd_helpers import (
 from cmd_trade_exec import _execute_bought, _execute_sold, _execute_update_level, _execute_add, _execute_trim, _send_chart, _offer_setstop_if_needed
 from cmd_settings import _prompt_for_param, _send_settings_panel
 from cmd_nlp import _nl_parse_trade, _nl_extract_tickers_list
+from llm_client import strip_fences
 
 
 def get_missed_picks_message(chat_id: str) -> str:
@@ -1321,7 +1322,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                     model="claude-haiku-4-5-20251001", max_tokens=250,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                guidance = json.loads(message.content[0].text.strip())
+                guidance = json.loads(strip_fences(message.content[0].text))
             except Exception as exc:
                 print(f"[portfolio] Guidance fetch failed (non-critical): {exc}")
 
