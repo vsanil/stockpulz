@@ -61,7 +61,12 @@ def plausible_price(price, reference=None, lo: float = 0.1, hi: float = 10.0) ->
         p = float(price)
     except (TypeError, ValueError):
         return False
-    if not (p == p and p > 0):          # reject None / NaN / <= 0  (p==p rejects NaN)
+    # `p == p` rejects NaN but NOT inf, and inf passes `> 0` — so without an
+    # explicit finiteness check the no-reference branch accepted infinity while
+    # the docstring promised "a positive, FINITE number". An inf quote poisons
+    # every aggregate it touches (portfolio totals, % P&L) rather than failing
+    # loudly. Same family as _is_pos and the NaN-in-rs_vs_spy score corruption.
+    if not (p == p and p > 0 and p != float("inf")):   # None / NaN / <=0 / inf
         return False
     try:
         r = float(reference)
