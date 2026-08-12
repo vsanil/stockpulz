@@ -13,6 +13,12 @@ from datetime import date, datetime
 import pytz
 from config_manager import shows_crypto as _shows_crypto
 
+# How many near-misses the MORNING MESSAGE shows. Deliberately smaller than
+# screener.NEAR_MISS_CAPTURE_N: we capture more for the evaluator's control
+# group, but the message is already ~80% of Telegram's 4096-char limit, so
+# capturing more evidence must never make the message longer.
+NEAR_MISS_SHOW_N = 3
+
 
 # ── Shared text helpers ───────────────────────────────────────────────────────
 
@@ -516,7 +522,7 @@ def format_daily_message(picks: dict, config: dict,
             _st_skip = _closed_short or "no qualifying setup today"
             lines += ["", f"📈 <b>STOCKS — SHORT TERM</b>  <i>· {_st_skip}</i>"]
             lines += ["<i>Near misses — didn't clear the bar:</i>"]
-            for nm in _nm_st[:3]:
+            for nm in _nm_st[:NEAR_MISS_SHOW_N]:
                 tk    = nm.get("ticker", "")
                 price = nm.get("current_price")
                 score = nm.get("score", 0)
@@ -540,7 +546,7 @@ def format_daily_message(picks: dict, config: dict,
             _lt_skip = _closed_short or "no stock cleared the quality bar today"
             lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
             lines += ["<i>Near misses — didn't clear the bar:</i>"]
-            for nm in _nm_lt[:3]:
+            for nm in _nm_lt[:NEAR_MISS_SHOW_N]:
                 tk    = nm.get("ticker", "")
                 price = nm.get("current_price")
                 score = nm.get("score", 0)

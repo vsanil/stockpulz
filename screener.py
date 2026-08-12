@@ -56,6 +56,23 @@ SECTOR_MEDIAN_PE = {
 MAX_TICKERS    = 600   # S&P 500 + NASDAQ 100 + MidCap 400, deduped, capped here
 ST_CANDIDATE_N = 30    # Top N by technical score  → short-term pool
 LT_CANDIDATE_N = 50    # Top N (by dollar volume, after liquidity gate) → long-term pool
+
+# Near-misses become the evaluator's CONTROL GROUP — the runners-up we passed
+# over, which is the only way to ask "did the final selection step beat the
+# alternatives?" Widened from 3 on 2026-08-12.
+#
+# Why 5 and not 20: the variance of the picked-vs-control DIFFERENCE is dominated
+# by the smaller sample, and picks run ~5/day — so past roughly 2x the pick rate
+# the extra rows buy almost nothing. They are not free either: each control row
+# is ~250 bytes in a year-sharded ledger with a ~1 MB truncation wall, so 20/day
+# would pull the canary's 700 KB tripwire forward by months for no statistical
+# gain.
+#
+# 🔴 This is the CAPTURE cap, deliberately NOT the DISPLAY cap. The morning
+# message renders only the first 3 (formatters.NEAR_MISS_SHOW_N) — the daily
+# message already sits at ~80% of Telegram's 4096-char limit, so capturing more
+# evidence must not make it longer.
+NEAR_MISS_CAPTURE_N = 5
                         # Larger pool gives fundamental scoring more quality options to pick from
 MIN_LT_DOLLAR_VOL = 50_000_000  # $50M/day avg — filters out small/micro-caps from LT pool
 SLEEP_INFO     = 0.1   # Delay between individual .info calls
@@ -1998,9 +2015,9 @@ def run_screener(
     _top_st_tickers = {s["ticker"] for s in short_top}
     _top_lt_tickers = {s["ticker"] for s in long_top}
     nm_st = [_add_near_miss_reason(c, is_st=True)
-             for c in short_candidates if c["ticker"] not in _top_st_tickers][:3]
+             for c in short_candidates if c["ticker"] not in _top_st_tickers][:NEAR_MISS_CAPTURE_N]
     nm_lt = [_add_near_miss_reason(c, is_st=False)
-             for c in long_candidates  if c["ticker"] not in _top_lt_tickers][:3]
+             for c in long_candidates  if c["ticker"] not in _top_lt_tickers][:NEAR_MISS_CAPTURE_N]
 
     # Publish what this run ACTUALLY got, so the canary can assert on completeness
     # rather than on liveness. Best-effort: a telemetry failure must never break
