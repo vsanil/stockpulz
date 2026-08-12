@@ -63,14 +63,24 @@ class TestForwardScoring:
         rows = [{"Close": 100, "High": 100, "Low": 100}] * 3
         assert bwf.score_forward(_bars(rows), 0, atr_pct=4.0) is None
 
-    def test_stop_width_is_clamped(self):
+    def test_stop_width_is_clamped(self, monkeypatch):
         """A 0.1% ATR must not produce a stop so tight everything loses, and a
         60% ATR must not produce one so wide nothing does."""
+        monkeypatch.setattr(bwf, "USE_ATR_STOP", True)   # ATR stops are opt-in
         rows = [{"Close": 100, "High": 100, "Low": 100}]
         rows += [{"Close": 100, "High": 100, "Low": 96}]      # -4%
         rows += [{"Close": 100, "High": 100, "Low": 100}] * 6
         assert bwf.score_forward(_bars(rows), 0, atr_pct=0.01)["outcome"] == "stop"   # floor 3%
         assert bwf.score_forward(_bars(rows), 0, atr_pct=99.0)["outcome"] == "expired"  # cap 20%
+
+    def test_default_levels_match_MEASURED_reality_not_config_defaults(self):
+        """🔴 The first run of this harness used the config defaults (15% target,
+        1.5xATR ~ 3.9% stop = 3.8:1) and concluded the levels were badly
+        asymmetric. Real ledger picks are 10.3% / 5.5% = 1.9:1 — the discrepancy
+        was the harness's, not the app's. Defaults must track what users get."""
+        assert bwf.TARGET_PCT == pytest.approx(10.3)
+        assert bwf.STOP_PCT == pytest.approx(5.5)
+        assert bwf.USE_ATR_STOP is False
 
 
 class TestWilson:

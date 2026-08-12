@@ -58,8 +58,18 @@ HOLDOUT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".holdout
 
 HORIZON_DAYS   = 30      # calendar days a pick has to work, matching the evaluator
 MIN_BARS       = 60      # bars required before a ticker can be scored at all
-TARGET_PCT     = 15.0    # app default target_gain_pct
-STOP_ATR_MULT  = 1.5     # app default: stop = 1.5 x ATR% below entry
+
+# 🔴 Levels must match what users are ACTUALLY given, not the config defaults.
+# Measured from 24 real short-term picks in the ledger: median target +10.3%,
+# median stop -5.5% (reward:risk 1.9:1). The first run of this harness used the
+# raw config defaults (15% target, 1.5xATR ~= 3.9% stop = 3.8:1), which is a far
+# more aggressive trade than the app publishes — it mechanically inflates the
+# stop-out rate and made the levels look broken when the discrepancy was mine.
+# Claude picks per-pick targets that cannot be replayed, so the empirical median
+# is the honest stand-in.
+TARGET_PCT     = 10.3    # measured median of real ST picks
+STOP_PCT       = 5.5     # measured median of real ST picks
+STOP_ATR_MULT  = 1.5     # used only with --atr-stop
 
 
 # ── data ─────────────────────────────────────────────────────────────────────
@@ -81,6 +91,9 @@ def load_bars(tickers: list[str], years: float, refresh: bool) -> dict:
 
 
 # ── forward scoring — identical rule to the live evaluator ───────────────────
+USE_ATR_STOP = False     # set by --atr-stop
+
+
 def score_forward(hist: pd.DataFrame, i: int, atr_pct: float) -> dict | None:
     """Outcome of buying at bar i's close, held HORIZON_DAYS.
 
@@ -94,7 +107,10 @@ def score_forward(hist: pd.DataFrame, i: int, atr_pct: float) -> dict | None:
     fwd = fwd[fwd.index <= hist.index[i] + pd.Timedelta(days=HORIZON_DAYS)]
     if len(fwd) < 5:
         return None
-    stop_pct = max(3.0, min(20.0, atr_pct * STOP_ATR_MULT)) if atr_pct else 7.0
+    if USE_ATR_STOP:
+        stop_pct = max(3.0, min(20.0, atr_pct * STOP_ATR_MULT)) if atr_pct else STOP_PCT
+    else:
+        stop_pct = STOP_PCT
     stop, target = entry * (1 - stop_pct / 100), entry * (1 + TARGET_PCT / 100)
     for _, row in fwd.iterrows():
         if float(row["Low"]) <= stop:
@@ -180,6 +196,7 @@ def summarise(rows: list[dict], label: str) -> None:
 
 
 def main() -> int:
+    global TARGET_PCT, STOP_PCT, USE_ATR_STOP
     ap = argparse.ArgumentParser()
     ap.add_argument("--years", type=float, default=2.0)
     ap.add_argument("--limit", type=int, default=150, help="universe size (compute bound)")
@@ -187,9 +204,17 @@ def main() -> int:
     ap.add_argument("--step", type=int, default=7, help="days between rebalances")
     ap.add_argument("--strategy", default="default", choices=sorted(STRATEGIES))
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--target-pct", type=float, default=TARGET_PCT)
+    ap.add_argument("--stop-pct", type=float, default=STOP_PCT)
+    ap.add_argument("--atr-stop", action="store_true",
+                    help="use 1.5xATR stops instead of the measured median")
     ap.add_argument("--holdout", action="store_true",
                     help="reveal the out-of-sample window. ONE SHOT — see the module docstring.")
     a = ap.parse_args()
+
+    TARGET_PCT, STOP_PCT, USE_ATR_STOP = a.target_pct, a.stop_pct, a.atr_stop
+    print(f"[backtest] levels: target +{TARGET_PCT}% / stop -{STOP_PCT}% "
+          f"({TARGET_PCT/STOP_PCT:.1f}:1)" + ("  [ATR stops]" if USE_ATR_STOP else "  [measured medians]"))
 
     uni = screener.get_stock_universe()[:a.limit]
     bars = load_bars(uni, a.years, a.refresh)
