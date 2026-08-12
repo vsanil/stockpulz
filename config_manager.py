@@ -745,8 +745,12 @@ def load_buy_counts() -> dict:
     Auto-resets when the date changes — counts are always today-only.
     Returns empty counts dict if missing or stale.
     """
-    from datetime import date
-    today = date.today().isoformat()
+    # 🔴 MUST match increment_buy_count's clock. These were split on 2026-08-11
+    # (writer moved to et_today, reader left on date.today) and on Render — where
+    # local time IS UTC — the two disagree from 00:00-04:00 UTC every night, so
+    # counts read as EMPTY for 4-5 hours daily. Same save/load-pair rule that
+    # already exists for the screener and macro caches.
+    today = et_today().isoformat()
     data  = _load_gist_file(BUY_COUNTS_FILE) or {}
     if data.get("date") != today:
         return {}   # new day — treat as empty (don't wipe Gist yet, lazy reset)
