@@ -11,7 +11,6 @@ import requests
 import yfinance as yf
 from llm_client import _get_client
 
-from sentiment_analyzer import get_sentiment
 from options_flow import get_options_signal
 from insider_tracker import get_insider_signal
 from price_context import get_price_context
@@ -244,44 +243,31 @@ def _build_stock_candidates(screener_results: dict) -> list[dict]:
                 except Exception as exc:
                     print(f"[ai_analyzer] Price context error for {ticker}: {exc}")
 
-            # ── Sentiment + insider: use cache (5-day TTL) ────────────────────
+            # ── Insider signal: use cache (5-day TTL) ─────────────────────────
+            # Social sentiment (StockTwits + Reddit) was REMOVED 2026-08-12. Both
+            # feeds were dead — StockTwits' parser died on a null sentiment field,
+            # Reddit has 403'd since its API closed — and the prompt ranked the
+            # signal "weight LEAST" even when alive, so it cost two failing HTTP
+            # calls per cache miss for nothing. The cache still carries a
+            # `sentiment` key on older entries; it is simply never read.
+            # Congressional is deliberately NOT removed: dormant, not broken, and
+            # one env var (QUIVER_API_KEY) away from working.
             cached = get_cached_signal(signal_cache, ticker)
 
             if cached:
                 # Cache hit — no network calls needed
                 print(f"[ai_analyzer] Cache hit for {ticker} signals.")
-                sent_data = cached.get("sentiment")
-                ins_data  = cached.get("insider")
+                ins_data = cached.get("insider")
             else:
-                # Cache miss — fetch live and store
-                sent_data = None
-                ins_data  = None
-
-                try:
-                    sent_data = get_sentiment(ticker)
-                except Exception as exc:
-                    print(f"[ai_analyzer] Sentiment fetch error for {ticker}: {exc}")
-
+                ins_data = None
                 try:
                     ins_data = get_insider_signal(ticker)
                 except Exception as exc:
                     print(f"[ai_analyzer] Insider fetch error for {ticker}: {exc}")
 
-                set_cached_signal(signal_cache, ticker, sent_data, ins_data)
+                set_cached_signal(signal_cache, ticker, None, ins_data)
                 cache_updated = True
                 time.sleep(0.3)   # brief delay only on live fetches
-
-            # Apply sentiment to entry
-            if sent_data:
-                try:
-                    entry["social_sentiment"] = {
-                        "label":           sent_data["label"],
-                        "score":           sent_data["score"],
-                        "reddit_mentions": sent_data["reddit_mentions"],
-                        "summary":         sent_data["summary"],
-                    }
-                except Exception:
-                    pass
 
             # Apply insider to entry
             if ins_data and ins_data.get("recent_buys", 0) > 0:
@@ -613,7 +599,7 @@ def _build_user_prompt(
                 f"  ST SIGNAL PRIORITY ({regime_name} regime — applies to short_term picks only): "
                 "Weight MOST → insider_activity (especially cluster), "
                 "analyst_consensus buy with high buy count, defensive sector membership, low atr_pct, "
-                "high inst_own_pct. Weight LEAST → social_sentiment, short_float squeeze thesis, "
+                "high inst_own_pct. Weight LEAST → short_float squeeze thesis, "
                 "pure momentum. Reject any pick whose primary thesis is price momentum alone.\n"
                 "  LT SIGNAL PRIORITY: Regime does NOT change LT evaluation — always use the "
                 "LT STOCK CONVICTION RUBRIC (fundamental signals only). Ignore technical signals for LT."
@@ -813,7 +799,6 @@ CRYPTO RULE: Each crypto symbol may appear AT MOST ONCE. No duplicates. long_ter
 {excluded_block}
 
 SIGNAL GUIDANCE (use in thesis and catalyst where relevant):
-  - social_sentiment: StockTwits + Reddit signal. Label "bullish"/"hot" supports picks; "bearish" is a red flag.
   - options_flow: aggregated across up to 4 near-term expiries — more accurate P/C ratio than single-expiry. Low P/C (<0.7) = calls dominating (bullish). High P/C (>1.5) = puts dominating (bearish).
   - sweep_detected (options): large block trade through single contract — institutional conviction, weight heavily.
   - nearest_otm_call + nearest_call_expiry: the REAL nearest out-of-the-money call strike with active volume, from live options data. When suggesting an options play (e.g. "consider the $185 call expiring 2025-05-23"), ALWAYS use nearest_otm_call as the strike and nearest_call_expiry as the expiry. NEVER invent or estimate strikes. If nearest_otm_call is absent, describe the trade directionally without specifying a strike.
