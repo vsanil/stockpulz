@@ -109,3 +109,56 @@ class TestOneDefinition:
         import ai_analyzer
         import llm_client
         assert ai_analyzer._strip_fences is llm_client.strip_fences
+
+
+class TestPortfolioGuidanceBudget:
+    """The token budget was flat at 250 while the response is one line PER
+    POSITION. Past ~8 positions it truncated mid-string, the JSON failed to
+    parse, and ALL guidance was dropped — so the feature silently vanished for
+    exactly the users with the most positions to guide. The owner's own account
+    (20 open) needs ~500 tokens and never got guidance.
+    """
+
+    def test_budget_scales_with_the_portfolio(self):
+        budget = lambda n: min(2000, 250 + 40 * n)
+        assert budget(1) >= 250
+        assert budget(20) >= 500, "the owner's real portfolio must fit"
+        assert budget(20) == 1050
+        assert budget(100) == 2000, "bounded — cannot run away on a huge account"
+        assert budget(5) < budget(25), "must grow with position count"
+
+    def test_the_call_site_actually_scales(self):
+        """The capability existing while the caller passes a constant WAS the
+        bug in close_trade's outcome field — assert the wiring, not the helper."""
+        import inspect, re
+        import cmd_trades
+        src = inspect.getsource(cmd_trades)
+        # Scope to the guidance call only. A blanket "no max_tokens=250 anywhere"
+        # is WRONG: the /review coach insight legitimately uses a flat 250 because
+        # its output is fixed-size prose ("2-3 sentences max") regardless of how
+        # many trades go in — truncation there clips a sentence, it does not
+        # discard a parsed object.
+        block = src[src.index("Ask Haiku for one-line guidance"):]
+        block = block[:block.index("Exposure summary")]
+        assert "max_tokens=min(2000, 250 + 40 * len(position_data))" in block
+        assert not re.search(r"max_tokens=\d+\s*,", block), \
+            "the guidance call must scale with position count, not use a constant"
+
+    def test_truncated_guidance_salvages_complete_pairs(self):
+        from cmd_trades import _salvage_guidance
+        truncated = ('{\n "AAPL": "Hold — 3% from target",\n'
+                     ' "NVDA": "Take profit — at target",\n "MSFT": "Watch — near st')
+        got = _salvage_guidance(truncated)
+        assert got == {"AAPL": "Hold — 3% from target",
+                       "NVDA": "Take profit — at target"}, got
+        assert "MSFT" not in got, "an incomplete pair must not be half-reported"
+
+    def test_salvage_is_safe_on_garbage(self):
+        from cmd_trades import _salvage_guidance
+        for junk in ("", "not json at all", "{", None):
+            assert _salvage_guidance(junk) == {}
+
+    def test_salvage_handles_escaped_quotes(self):
+        from cmd_trades import _salvage_guidance
+        assert _salvage_guidance(r'{"AAPL": "Hold \"tight\" here", "X": "tr') \
+            == {"AAPL": r'Hold \"tight\" here'}

@@ -126,6 +126,21 @@ def get_missed_picks_message(chat_id: str) -> str:
     return text, keyboard
 
 
+def _salvage_guidance(raw: str) -> dict:
+    """Recover complete "TICKER": "line" pairs from a truncated JSON object.
+
+    A cut-off response is unparseable as a whole, but every pair BEFORE the cut
+    is intact. Returning those beats returning nothing: guidance is advisory
+    per-position, so a partial answer is genuinely useful while an empty one
+    just makes the feature look absent.
+    """
+    import re as _re
+    out = {}
+    for k, v in _re.findall(r'"([A-Z0-9.\-]{1,10})"\s*:\s*"((?:[^"\\]|\\.)*)"', raw or ""):
+        out[k] = v
+    return out
+
+
 def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
     """Real-money trade commands."""
     # ── /bought [TICKER|name [price] [shares]] ───────────────────────────────
@@ -1318,11 +1333,27 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                     'Return ONLY a JSON object keyed by ticker, e.g. {"AAPL": "Hold — 3% from target"}'
                 )
                 client  = _get_client()
+                # 🔴 Scale the budget with the portfolio. A flat 250 truncated the
+                # response mid-string for anyone holding more than ~8 positions —
+                # the JSON then failed to parse and ALL guidance was discarded, so
+                # the feature silently vanished for exactly the users with the most
+                # to guide (the owner's 20 open positions need ~500 tokens).
                 message = client.messages.create(
-                    model="claude-haiku-4-5-20251001", max_tokens=250,
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=min(2000, 250 + 40 * len(position_data)),
                     messages=[{"role": "user", "content": prompt}],
                 )
-                guidance = json.loads(strip_fences(message.content[0].text))
+                raw = strip_fences(message.content[0].text)
+                try:
+                    guidance = json.loads(raw)
+                except json.JSONDecodeError:
+                    # Still truncated (a very large portfolio): salvage the
+                    # complete pairs rather than dropping every line. Same rule as
+                    # batch price fetches — degrade per-item, never all-or-nothing.
+                    guidance = _salvage_guidance(raw)
+                    if guidance:
+                        print(f"[portfolio] Guidance truncated — salvaged "
+                              f"{len(guidance)}/{len(position_data)} lines")
             except Exception as exc:
                 print(f"[portfolio] Guidance fetch failed (non-critical): {exc}")
 
