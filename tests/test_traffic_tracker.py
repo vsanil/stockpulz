@@ -28,17 +28,26 @@ def _clean():
 
 
 class _Store:
-    """Stands in for the gist: mutate_gist_file(file, mutator)."""
+    """Stands in for the gist, honouring the REAL contract.
+
+    🔴 The first version of this stub did `self.data = mutator(self.data)`,
+    i.e. it accepted a bare return value. The real `mutate_gist_file` does
+    `new_contents, result = mutator(current)`. That mismatch let a broken
+    tracker ship green: every live flush raised "not enough values to unpack"
+    and was swallowed, so nothing was ever written. A stub must enforce the
+    contract, not a convenient version of it.
+    """
 
     def __init__(self, fail=False):
         self.data, self.writes, self.fail = {}, 0, fail
 
-    def mutate(self, _file, mutator):
+    def mutate(self, _file, mutator, default=None):
         if self.fail:
             raise RuntimeError("gist unavailable")
         self.writes += 1
-        self.data = mutator(self.data)
-        return self.data
+        new_contents, result = mutator(self.data if self.data else (default or {}))
+        self.data = new_contents
+        return result
 
 
 @pytest.fixture
@@ -113,8 +122,8 @@ class TestCountsAreNotLostOnFailure:
         s = _Store()
         real = s.mutate
 
-        def racing(_file, mutator):
-            out = real(_file, mutator)
+        def racing(_file, mutator, default=None):
+            out = real(_file, mutator, default)
             tt._pending["2026-08"]["14"]["hits"] += 1        # a request lands mid-write
             tt._pending["2026-08"]["14"]["users"]["999"] = 1
             return out

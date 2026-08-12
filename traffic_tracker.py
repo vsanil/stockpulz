@@ -145,10 +145,13 @@ def flush() -> bool:
     try:
         from config_manager import mutate_gist_file
 
+        # 🔴 mutate_gist_file's contract is `mutator(current) -> (new_contents, result)`.
+        # Returning a bare dict raises "not enough values to unpack", which this
+        # function then SWALLOWS — so the tracker silently never wrote at all.
         def _mut(data):
-            return _merge(dict(data or {}), batch)
+            return _merge(dict(data or {}), batch), None
 
-        mutate_gist_file(TRAFFIC_FILE, _mut)
+        mutate_gist_file(TRAFFIC_FILE, _mut, default={})
     except Exception as exc:
         print(f"[traffic] flush failed (counts kept for the next attempt): {exc}")
         return False
