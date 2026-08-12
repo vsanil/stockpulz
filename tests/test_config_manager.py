@@ -479,6 +479,24 @@ class TestBuyCounts:
         counts = config_manager.load_buy_counts()
         assert counts["NVDA"] == 2
 
+    def test_writer_and_reader_use_the_SAME_clock(self, _gist_store, monkeypatch):
+        """🔴 Regression for a pair split on 2026-08-11.
+
+        increment_buy_count was moved to et_today() and load_buy_counts was left
+        on date.today(). On Render local time IS UTC, so the two disagree from
+        00:00-04:00 UTC every night and counts read as EMPTY for 4-5 hours daily.
+
+        The real failure only appears in that window — these tests passed all
+        evening and started failing the moment ET rolled over mid-session.
+        Forcing ET a day ahead reproduces it at any hour, on any machine.
+        """
+        import datetime as _dt
+        monkeypatch.setattr(config_manager, "et_today",
+                            lambda: _dt.date.today() + _dt.timedelta(days=1))
+        config_manager.increment_buy_count("NVDA")
+        assert config_manager.load_buy_counts().get("NVDA") == 1, \
+            "writer and reader are on different clocks — counts vanish nightly"
+
     def test_stale_date_returns_empty(self, _gist_store):
         yesterday = (date.today() - timedelta(days=1)).isoformat()
         _gist_store.write("buy_counts.json", {"date": yesterday, "counts": {"NVDA": 5}})
