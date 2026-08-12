@@ -51,6 +51,26 @@ def get_performance_stats(lookback_days: int = 30) -> dict:
     }
 
 
+# ── Honesty gates ─────────────────────────────────────────────────────────────
+# 🔴 This text is injected into the STOCK-PICKING PROMPT, so anything here steers
+# what real users are shown. It must be at least as conservative as the numbers
+# we show users, not less.
+#
+# The directive gate was `>= 2` until 2026-08-12 — meaning that once five trades
+# closed, the model started receiving instructions ("raise minimum threshold",
+# "prioritise high-conviction setups") derived from TWO samples per conviction
+# bucket. A 2-trade win rate is noise; issuing it as an instruction is how a
+# closed loop chases its own tail. This is the exact feedback loop that was cut
+# in July after the synthetic bot's 22 mechanical trades started steering real
+# picks — reintroduced accidentally at a smaller sample size.
+#
+# _MIN_DIRECTIVE_N matches evaluate_picks._MIN_N (30): if 30 is the bar for
+# calling something conclusive in a report the OWNER reads, it is the bar for
+# telling the MODEL to change its behaviour.
+_MIN_CONTEXT_TRADES = 10   # matches performance_tracker._MIN_COMMUNITY_TRADES
+_MIN_DIRECTIVE_N    = 30   # matches evaluate_picks._MIN_N — same bar as "conclusive"
+
+
 def get_performance_context(lookback_days: int = 30) -> str:
     """
     Aggregate closed trades from all users over the last N days.
@@ -73,8 +93,9 @@ def get_performance_context(lookback_days: int = 30) -> str:
         print(f"[performance_context] Error loading trades: {exc}")
         return ""
 
-    if len(all_trades) < 5:
-        print(f"[performance_context] Only {len(all_trades)} trades — skipping (need 5+).")
+    if len(all_trades) < _MIN_CONTEXT_TRADES:
+        print(f"[performance_context] Only {len(all_trades)} trades — skipping "
+              f"(need {_MIN_CONTEXT_TRADES}+).")
         return ""
 
     returns = [float(t["return_pct"]) for t in all_trades if "return_pct" in t]
@@ -127,8 +148,10 @@ def get_performance_context(lookback_days: int = 30) -> str:
     if conv_lines:
         lines.append(f"  By conviction: {' | '.join(conv_lines)}")
         # Warn if low-conviction picks are dragging performance
-        low_conv = [c for c in sorted(conv_stats) if c <= 2 and len(conv_stats[c]) >= 2]
-        hi_conv  = [c for c in sorted(conv_stats) if c >= 4 and len(conv_stats[c]) >= 2]
+        low_conv = [c for c in sorted(conv_stats)
+                    if c <= 2 and len(conv_stats[c]) >= _MIN_DIRECTIVE_N]
+        hi_conv  = [c for c in sorted(conv_stats)
+                    if c >= 4 and len(conv_stats[c]) >= _MIN_DIRECTIVE_N]
         if low_conv:
             low_wr = round(sum(1 for r in conv_stats[low_conv[0]] if r > 0) / len(conv_stats[low_conv[0]]) * 100)
             if low_wr < 45:
