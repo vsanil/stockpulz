@@ -472,3 +472,45 @@ class TestEtfAndCommodityProvenance:
         p = self._picks()
         a._attach_screen_provenance(p, [cand])
         assert p["etfs"]["short_term"][0]["_screen"]["volume_ratio"] == 3.3
+
+
+class TestNearMissCaptureWidened:
+    """Near-misses ARE the evaluator's control group — the runners-up we passed
+    over. Widened 3 -> 5 per timeframe on 2026-08-12 so the picked-vs-not-picked
+    comparison has a bigger control side by September.
+    """
+
+    def test_capture_is_wider_than_display(self):
+        """🔴 The load-bearing asymmetry. We capture more evidence for the
+        ledger, but the morning message must NOT get longer — it already sits at
+        ~80% of Telegram's 4096-char limit."""
+        import formatters
+        import screener
+        assert screener.NEAR_MISS_CAPTURE_N == 5
+        assert formatters.NEAR_MISS_SHOW_N == 3
+        assert screener.NEAR_MISS_CAPTURE_N > formatters.NEAR_MISS_SHOW_N, \
+            "capturing more must never mean displaying more"
+
+    def test_screener_uses_the_constant_not_a_literal(self):
+        import inspect, re
+        import screener
+        src = inspect.getsource(screener)
+        block = src[src.index("Near-misses: top candidates"):]
+        block = block[:block.index("_publish_data_quality")]
+        assert "NEAR_MISS_CAPTURE_N" in block
+        assert not re.search(r"\]\[:3\]", block), "hardcoded [:3] cap is back"
+
+    def test_message_length_is_unaffected_by_wider_capture(self):
+        """Render with 5 near-misses and confirm only 3 reach the message."""
+        import formatters
+        nm = [{"ticker": f"NM{i}", "current_price": 100.0 + i, "score": 80 - i,
+               "near_miss_reason": "close to threshold"} for i in range(5)]
+        picks = {"_saved_date": "2026-08-12",
+                 "stocks": {"short_term": [], "long_term": [],
+                            "near_misses": {"short_term": nm, "long_term": []}},
+                 "crypto": {}, "etfs": {}, "commodities": {}}
+        msg = formatters.format_daily_message(picks, {})
+        shown = sum(1 for i in range(5) if f"NM{i}" in msg)
+        assert shown == formatters.NEAR_MISS_SHOW_N, \
+            f"message showed {shown} near-misses, expected {formatters.NEAR_MISS_SHOW_N}"
+        assert len(msg) < 4096, "daily message must stay under Telegram's limit"
