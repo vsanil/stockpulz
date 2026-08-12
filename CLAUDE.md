@@ -74,6 +74,17 @@ Rules:
 - **Rule: converting a date/clock in a writer means converting its reader in the SAME commit, and adding a round-trip test that FORCES the divergence** — never one that waits for the calendar to expose it.
 - Audited the rest: `get_cached_signal`/`set_cached_signal` and `save_weekly_pick` are internally consistent on `date.today()`. **Deliberately NOT converted** — they are not broken, and half-converting is what caused this. Convert both halves together or leave them.
 
+### Walk-forward backtest — `scripts/backtest_walkforward.py` (Aug 12)
+- **Why**: the live evaluator needs ~1,500 picks (~1 year) to separate a 55% engine from a 60% one. Replaying history is the only honest way to get thousands of samples quickly — **and the most common way retail systems fool themselves**, so the discipline is the feature, not the code.
+- **TRAIN window: tune freely. HOLDOUT: `--holdout`, ONE SHOT.** Every view is appended to `.holdout_views.json` and printed back ("HOLDOUT VIEWED N times"). After the first look it is no longer out-of-sample, and any number it produces afterwards is a lie you told yourself.
+- **🔴 What it CANNOT test, and why — restate these with any number it prints:**
+  - **Long-term score is EXCLUDED.** Finnhub serves CURRENT fundamentals only, so scoring a 2024 pick with 2026 P/E is look-ahead. Excluded rather than faked.
+  - **Claude's selection is NOT replayed** — expensive, and the model's training contains the outcome. This measures the SCREENER RANKING, which is the part with tunable weights anyway.
+  - **Survivorship**: uses TODAY's universe, so dead/delisted names are missing and any edge is an **optimistic upper bound**.
+- **The baseline is the point.** A win rate alone is unreadable. Each date also scores the MID-RANKED candidates from the same eligible pool, so the question is "do top-ranked beat mid-ranked", not "did picks make money". `EDGE < 3 points` prints as *within noise*.
+- Forward scoring matches the live evaluator exactly: **stop checked BEFORE target on the same bar** (conservative — a both-touched bar is a loss, and those are the volatile days), else mark-to-market at 30 days. Entry is the decision bar's close; forward window starts at the NEXT bar. Guard: `tests/test_backtest_walkforward.py` pins the stop-before-target rule, the no-look-ahead slice, the stop clamp, and that Wilson stays honestly wide at small n.
+- Bars cached to `scripts/.backtest_bars.pkl` (`--refresh` to refetch). Compute scales as tickers × rebalances; use `--limit` / `--step`.
+
 ### Input inventory — `scripts/input_audit.py` (Aug 11)
 - **The generalised answer to the "wired but dead" bug class.** Ten bugs in one day shared one shape: an input returns nothing, the exception is swallowed, every monitor stays green. Run `python3 scripts/input_audit.py` — READ-ONLY, one small probe per source — to get, for all 17 external inputs: **LIVE?** (returns data now), **FEEDS?** (`SCORE` / `context` / `CORE`), **TESTED?** (test files touching it).
 - **First run: 3 dead.** `StockTwits` (parser dies on `"sentiment": null` — 23/30 live messages carry it; `dict.get(k, {})` returns the default only when the key is ABSENT, not when the value is null), `Reddit r/wsb` (HTTP 403 since Reddit closed the unauthenticated JSON API — needs OAuth), `Congressional` (dormant by design, no free source). **All score-affecting inputs are alive.**

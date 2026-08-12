@@ -8,3 +8,7 @@ venv/
 
 # Graphify cache (auto-generated build artifacts)
 graphify-out/cache/
+
+# walk-forward backtest artifacts (bar cache + holdout-view ledger)
+scripts/.backtest_bars.pkl
+scripts/.holdout_views.json
