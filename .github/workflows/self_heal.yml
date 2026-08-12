@@ -160,13 +160,33 @@ jobs:
         id: health
         if: ${{ steps.ship.outputs.outcome == 'merged' }}
         run: |
-          sleep 150                        # let Render auto-deploy the merge
-          H="bad"
-          for i in 1 2 3 4; do
-            c=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "${RENDER_URL}/health" || echo 000)
-            [ "$c" = "200" ] && { H="ok"; break; }
-            sleep 25
+          # 🔴 This compares the COMMIT /health reports against the SHA we merged.
+          # It used to assert only "HTTP 200", which STALE CODE RETURNS JUST AS
+          # HAPPILY — so on 2026-08-11, with Render autoDeploy silently switched
+          # off, self-heal merged fixes to main and DM'd "merged & deployed" for
+          # an unknown period while none of them ever shipped. A liveness check
+          # cannot detect a non-deploy; only a version check can.
+          # --short=7 pinned: git auto-extends the abbreviation as a repo grows,
+          # while /health hardcodes [:7]. Unpinned, that drift would make every
+          # SUCCESSFUL deploy report "stale" — a false alarm teaches you to ignore it.
+          WANT=$(git rev-parse --short=7 HEAD)
+          echo "want=$WANT" >> "$GITHUB_OUTPUT"
+          H="bad"; GOT=""
+          # Render builds this repo (pandas/numpy/matplotlib) in a few minutes;
+          # poll rather than guessing one sleep long enough to cover it.
+          for i in $(seq 1 12); do
+            sleep 30
+            BODY=$(curl -s --max-time 20 "${RENDER_URL}/health" || echo "")
+            [ -z "$BODY" ] && { H="bad"; continue; }
+            GOT=$(printf '%s' "$BODY" | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+            if [ "$GOT" = "$WANT" ]; then H="ok"; break; fi
+            # Responding, but not yet (or never) running our commit.
+            H="stale"
           done
+          # No commit field at all, or the app's own "unknown" placeholder, means
+          # we CANNOT tell — report that honestly rather than as a stale deploy.
+          case "$GOT" in ""|unknown) [ "$H" = "stale" ] && H="unverified" ;; esac
+          echo "got=$GOT" >> "$GITHUB_OUTPUT"
           echo "status=$H" >> "$GITHUB_OUTPUT"
 
       - name: Notify admin — result
@@ -177,8 +197,13 @@ jobs:
           M="${{ steps.ctx.outputs.monitor }}"; URL="${{ steps.ctx.outputs.url }}"
           case "$O" in
             merged)
-              if [ "$H" = "ok" ]; then MSG="✅ Auto-fixed *$M* — tests green, merged to main & deployed, /health OK. Files: ${FILES}";
-              else MSG="🚨 Auto-fixed & deployed *$M* but /health is NOT responding after deploy — check now / roll back in Render. Files: ${FILES}"; fi ;;
+              WANT="${{ steps.health.outputs.want }}"; GOT="${{ steps.health.outputs.got }}"
+              case "$H" in
+                ok)   MSG="✅ Auto-fixed *$M* — tests green, merged to main, and /health confirms commit \`$WANT\` is LIVE. Files: ${FILES}" ;;
+                stale) MSG="🚨 Auto-fixed *$M* and merged \`$WANT\`, but /health still reports \`$GOT\` after 6 min — THE FIX IS NOT DEPLOYED. Check Render autoDeploy / build logs. Files: ${FILES}" ;;
+                unverified) MSG="⚠️ Auto-fixed *$M* and merged \`$WANT\`. /health responds but reports NO commit — cannot confirm the deploy shipped. Verify in Render. Files: ${FILES}" ;;
+                *)    MSG="🚨 Auto-fixed & merged *$M* but /health is NOT responding — check now / roll back in Render. Files: ${FILES}" ;;
+              esac ;;
             branch)  MSG="⚠️ Auto-fix for *$M* did NOT deploy (tests red) — pushed to branch \`$BR\` for you to review." ;;
             testfix) MSG="🧪 Self-heal TEST: produced a fix for *$M* (files: ${FILES}), tests green — NOT merged (manual run)." ;;
             nofix)   MSG="⚠️ Couldn't confidently auto-fix *$M* — needs you. Failed run: ${URL}" ;;
