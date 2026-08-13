@@ -392,3 +392,65 @@ def get_ohlcv(ticker: str, days: int = 92) -> list | None:
     if bars:
         _OHLCV_CACHE[_ck] = (bars, time.time())
     return bars
+
+
+def _yf_sym(ticker: str) -> str:
+    """Ticker as yfinance knows it. Crypto needs the -USD suffix: a bare
+    `yf.download("BTC")` resolves to an unrelated ~$28 instrument, NOT
+    BTC-USD (~$63k). Verified live 2026-08-12."""
+    t = ticker.upper()
+    return f"{t}-USD" if t in _CRYPTO_SYMBOLS else t
+
+
+def get_quotes_with_change(tickers: list) -> dict:
+    """{TICKER: {"price": float, "change_pct": float|None}} for a watchlist row.
+
+    🔴 Exists because two watchlist DISPLAY paths passed raw user tickers to
+    `yf.download(...)` with no crypto mapping, so BTC rendered at **$28.02**
+    against a real $63,623, and HYPE (which yfinance has under NO symbol —
+    neither HYPE nor HYPE-USD) produced 404 noise on every run.
+
+    Current price comes from `get_live_prices` — batched, crypto-aware, and
+    partial-tolerant, so one bad ticker cannot empty the whole block. Previous
+    close comes from yfinance under the mapped symbol, and is simply absent for
+    anything yfinance does not carry; the row then renders without a % change
+    rather than with a wrong one.
+
+    Both legs gate on `plausible_price`, so a garbage quote cannot become a
+    headline percentage.
+    """
+    tickers = [str(t).upper() for t in (tickers or []) if t]
+    if not tickers:
+        return {}
+
+    prices = get_live_prices(tickers) or {}
+
+    prev: dict = {}
+    try:
+        import yfinance as yf
+        symmap = {_yf_sym(t): t for t in tickers}
+        raw = yf.download(list(symmap), period="5d", interval="1d",
+                          auto_adjust=True, progress=False, threads=True)
+        closes = raw["Close"] if "Close" in getattr(raw, "columns", []) else raw
+        for ysym, t in symmap.items():
+            try:
+                col = closes[ysym] if hasattr(closes, "columns") and ysym in closes.columns else closes
+                vals = col.dropna()
+                if len(vals) >= 2:
+                    prev[t] = float(vals.iloc[-2])
+            except Exception:
+                continue
+    except Exception:
+        pass                      # no prev close → rows render without a change
+
+    out: dict = {}
+    for t in tickers:
+        p = prices.get(t)
+        if not plausible_price(p):
+            continue
+        pv = prev.get(t)
+        chg = None
+        if plausible_price(pv, reference=p):
+            chg = (p - pv) / pv * 100
+        out[t] = {"price": float(p), "change_pct": chg}
+    return out

@@ -199,3 +199,77 @@ class TestCoinGeckoBatching:
                             lambda *a, **k: called.append(1) or _Resp({}))
         assert price_checker.cg_prices([]) == {}
         assert not called
+
+
+class TestWatchlistQuotes:
+    """🔴 Two watchlist DISPLAY paths passed raw user tickers to yf.download with
+    no crypto mapping. Measured live 2026-08-12: a bare `yf.download("BTC")`
+    returns **$28.02** against a real **$63,623** — so the watchlist rendered BTC
+    at twenty-eight dollars. HYPE has no yfinance symbol at all (neither HYPE nor
+    HYPE-USD), producing 404 noise on every run.
+    """
+
+    def test_crypto_gets_the_usd_suffix(self):
+        assert market_data._yf_sym("BTC") == "BTC-USD"
+        assert market_data._yf_sym("eth") == "ETH-USD"
+
+    def test_equities_are_unchanged(self):
+        assert market_data._yf_sym("AAPL") == "AAPL"
+        assert market_data._yf_sym("NVDA") == "NVDA"
+
+    def test_yfinance_is_queried_with_MAPPED_symbols(self, monkeypatch):
+        """The actual bug: the bare symbol resolves to a different instrument."""
+        seen = {}
+
+        def _dl(syms, **kw):
+            seen["syms"] = list(syms)
+            raise RuntimeError("stop here — we only care what was requested")
+
+        monkeypatch.setattr(market_data, "get_live_prices", lambda t: {"BTC": 63000.0})
+        import sys, types
+        fake = types.ModuleType("yfinance"); fake.download = _dl
+        monkeypatch.setitem(sys.modules, "yfinance", fake)
+        market_data.get_quotes_with_change(["BTC"])
+        assert seen["syms"] == ["BTC-USD"], f"queried {seen['syms']} — bare BTC is a $28 instrument"
+
+    def test_a_ticker_yfinance_lacks_still_gets_a_price(self, monkeypatch):
+        """HYPE: priced via the crypto path, no previous close available, so the
+        row renders WITHOUT a change rather than not at all."""
+        monkeypatch.setattr(market_data, "get_live_prices", lambda t: {"HYPE": 56.43})
+        import sys, types
+        fake = types.ModuleType("yfinance")
+        fake.download = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no data"))
+        monkeypatch.setitem(sys.modules, "yfinance", fake)
+        out = market_data.get_quotes_with_change(["HYPE"])
+        assert out["HYPE"]["price"] == 56.43
+        assert out["HYPE"]["change_pct"] is None
+
+    def test_an_implausible_price_is_dropped_not_rendered(self, monkeypatch):
+        """$0.01 for a real ticker is a failed fetch, not a quote."""
+        monkeypatch.setattr(market_data, "get_live_prices",
+                            lambda t: {"AAPL": 0.0, "NVDA": 224.0})
+        import sys, types
+        fake = types.ModuleType("yfinance")
+        fake.download = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+        monkeypatch.setitem(sys.modules, "yfinance", fake)
+        out = market_data.get_quotes_with_change(["AAPL", "NVDA"])
+        assert "AAPL" not in out and out["NVDA"]["price"] == 224.0
+
+    def test_one_bad_ticker_does_not_empty_the_block(self, monkeypatch):
+        """Documented rule: any batch fetch feeding a user-facing block must
+        degrade per-ticker, never all-or-nothing."""
+        monkeypatch.setattr(market_data, "get_live_prices",
+                            lambda t: {"AAPL": 300.0})          # NVDA missing
+        import sys, types
+        fake = types.ModuleType("yfinance")
+        fake.download = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+        monkeypatch.setitem(sys.modules, "yfinance", fake)
+        out = market_data.get_quotes_with_change(["AAPL", "NVDA"])
+        assert list(out) == ["AAPL"]
+
+    def test_empty_input_makes_no_calls(self, monkeypatch):
+        called = []
+        monkeypatch.setattr(market_data, "get_live_prices",
+                            lambda t: called.append(1) or {})
+        assert market_data.get_quotes_with_change([]) == {}
+        assert not called

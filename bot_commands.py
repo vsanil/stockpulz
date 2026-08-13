@@ -1877,28 +1877,23 @@ def _handle_pending_reply(state: dict, text: str, chat_id: str) -> str:
                 "<i>Watchlist tickers show live prices in the dashboard.</i>"
             )
         lines = [f"👁 <b>Watchlist</b> ({len(tickers)} tickers)\n"]
+        # Crypto MUST route through get_quotes_with_change: a bare
+        # yf.download("BTC") resolves to an unrelated ~$28 instrument, and this
+        # block rendered exactly that until 2026-08-12. HYPE has no yfinance
+        # symbol at all, so it also produced 404 noise on every run.
         try:
-            import yfinance as _yf
-            _data = _yf.download(tickers, period="2d", interval="1d",
-                                 auto_adjust=True, progress=False)
-            _closes = _data["Close"] if "Close" in _data.columns else _data
+            from market_data import get_quotes_with_change
+            _q = get_quotes_with_change(tickers)
             for sym in tickers:
-                try:
-                    col = _closes[sym] if sym in _closes else _closes
-                    vals = col.dropna()
-                    if len(vals) >= 2:
-                        price = float(vals.iloc[-1])
-                        prev  = float(vals.iloc[-2])
-                        chg   = (price - prev) / prev * 100
-                        arrow = "🟢" if chg >= 0 else "🔴"
-                        lines.append(f"{arrow} <b>{sym}</b>  ${price:,.2f}  <code>{chg:+.1f}%</code>")
-                    elif len(vals) == 1:
-                        price = float(vals.iloc[-1])
-                        lines.append(f"⬜ <b>{sym}</b>  ${price:,.2f}")
-                    else:
-                        lines.append(f"⬜ <b>{sym}</b>  —")
-                except Exception:
+                row = _q.get(sym.upper())
+                if not row:
                     lines.append(f"⬜ <b>{sym}</b>  —")
+                elif row["change_pct"] is None:
+                    lines.append(f"⬜ <b>{sym}</b>  ${row['price']:,.2f}")
+                else:
+                    chg   = row["change_pct"]
+                    arrow = "🟢" if chg >= 0 else "🔴"
+                    lines.append(f"{arrow} <b>{sym}</b>  ${row['price']:,.2f}  <code>{chg:+.1f}%</code>")
         except Exception:
             for sym in tickers:
                 lines.append(f"• <b>{sym}</b>")
