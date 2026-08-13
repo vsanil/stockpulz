@@ -22,6 +22,7 @@ def _clean():
     tt._pending.clear()
     tt._pending_hits = 0
     tt._last_flush = tt.time.time()
+    tt._last_cold_flush = 0.0
     yield
     tt._pending.clear()
     tt._pending_hits = 0
@@ -226,3 +227,45 @@ class TestKeepWarmPingIsNeverCounted:
     def test_real_user_paths_are_counted(self, path):
         import webhook
         assert not any(path.startswith(p) for p in webhook._TRAFFIC_SKIP_PREFIXES)
+
+
+class TestColdFlushIsDebounced:
+    """🔴 Found by reading a GREEN full sweep's log body (2026-08-12): six
+    `409 Conflict` writes to traffic_hours.json in one run, plus collateral 409s
+    on user_configs and a trade log.
+
+    Cause: `_PROC_START` makes EVERY request in the first COLD_START_SECS look
+    cold, so a burst fired one gist PATCH per request. Rapid successive PATCHes
+    to one gist are what tripped GitHub's secondary rate limit on 2026-07-03 and
+    left the admin's alerts wiped when the RESTORE was the blocked call.
+    """
+
+    def test_the_first_cold_hit_still_flushes_immediately(self, store):
+        """The whole point of the design — a lone 3 AM tap must survive the
+        spin-down that follows it."""
+        tt.record("123", cold=True, now=_at(4))
+        assert store.writes == 1
+
+    def test_a_burst_of_cold_hits_does_NOT_write_per_request(self, store):
+        for _ in range(20):
+            tt.record("123", cold=True, now=_at(4))
+        assert store.writes == 1, f"burst caused {store.writes} gist writes"
+
+    def test_nothing_is_lost_when_the_burst_is_throttled(self, store):
+        for _ in range(20):
+            tt.record("123", cold=True, now=_at(4))
+        tt.flush()
+        assert store.data["2026-08"]["04"]["hits"] == 20
+        assert store.data["2026-08"]["04"]["cold"] == 20
+
+    def test_a_later_cold_hit_flushes_again_once_the_gap_has_passed(self, store):
+        tt.record("123", cold=True, now=_at(4))
+        assert store.writes == 1
+        tt._last_cold_flush -= tt._MIN_COLD_FLUSH_GAP + 1     # simulate the gap
+        tt.record("123", cold=True, now=_at(5))
+        assert store.writes == 2
+
+    def test_the_gap_is_short_enough_to_beat_a_spin_down(self):
+        """Render idles at ~15 min. The debounce must be far below that or a
+        throttled cold hit could die with the process."""
+        assert tt._MIN_COLD_FLUSH_GAP < 60, "must be well under the ~15 min idle timeout"

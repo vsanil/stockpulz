@@ -54,9 +54,26 @@ COLD_START_SECS = 90.0
 _FLUSH_AFTER_SECS = 600.0
 _FLUSH_AFTER_HITS = 25
 
+# 🔴 Debounce for the immediate cold flush. `_PROC_START` makes EVERY request in
+# the first COLD_START_SECS look cold, so a burst (full_sweep drives 60 paths
+# in-process, the morning relay, a user tapping through tabs after a boot) fired
+# one gist PATCH per request. Observed live 2026-08-12: 6 x "409 Conflict" on
+# traffic_hours.json in a single sweep, plus collateral 409s on user_configs and
+# a trade log.
+#
+# That matters beyond noise — rapid successive PATCHes to one gist are what
+# tripped GitHub's secondary rate limit on 2026-07-03 and left the admin's
+# alerts wiped when the RESTORE was the blocked call.
+#
+# The intent still holds: the FIRST cold hit flushes immediately, so a lone 3 AM
+# tap survives the spin-down that follows. Only bursts are throttled — and a
+# burst means the process is busy, so it is not about to idle out anyway.
+_MIN_COLD_FLUSH_GAP = 20.0
+
 TRAFFIC_FILE = "traffic_hours.json"
 
 _lock = threading.Lock()
+_last_cold_flush = 0.0
 _pending: dict = {}            # {"YYYY-MM": {"HH": {"hits":n,"cold":n,"users":{uid:n}}}}
 _pending_hits = 0
 _last_flush = time.time()
@@ -119,9 +136,18 @@ def record(chat_id: str | None = None, cold: bool | None = None,
             rec["cold"] += 1 if cold else 0
             rec["users"][uid] = rec["users"].get(uid, 0) + 1
             _pending_hits += 1
-            due = (cold                                        # never risk losing this one
+            # A cold hit still flushes immediately — but at most once per
+            # _MIN_COLD_FLUSH_GAP, so a burst of "cold" requests cannot become a
+            # burst of gist writes. Anything held back is picked up by the
+            # count/time thresholds below, or by the next cold flush.
+            global _last_cold_flush
+            now_t = time.time()
+            cold_due = cold and (now_t - _last_cold_flush) >= _MIN_COLD_FLUSH_GAP
+            if cold_due:
+                _last_cold_flush = now_t
+            due = (cold_due
                    or _pending_hits >= _FLUSH_AFTER_HITS
-                   or (time.time() - _last_flush) >= _FLUSH_AFTER_SECS)
+                   or (now_t - _last_flush) >= _FLUSH_AFTER_SECS)
         if due:
             return flush()
     except Exception:
