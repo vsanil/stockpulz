@@ -84,20 +84,28 @@ class TestLivePriceUnit:
 
         assert price is None
 
-    def test_yfinance_usd_suffix_for_known_crypto(self):
-        """Known crypto like BNB tries BNB-USD via yfinance."""
+    def test_known_crypto_resolves_through_the_canonical_resolver(self):
+        """🔴 This test used to assert `"BNB" in call_args or "BNB-USD" in
+        call_args` — an `or` that passes whether the code queries the CORRECT
+        symbol or the wrong one, so it could never have caught the bug it looked
+        like it was guarding. Bare `BNB` resolves on yfinance to an unrelated
+        instrument; measured 2026-08-12, bare BTC returned $28 against $63,623.
+
+        _live_price now delegates to market_data.get_live_price, which routes
+        crypto to the crypto endpoint rather than guessing at suffixes.
+        """
+        import market_data as md
         from paper_trader import _live_price
 
-        call_args = []
-        mock_fi = MagicMock()
-        mock_fi.fast_info.last_price = 738.0
-
-        def _ticker(sym):
-            call_args.append(sym)
-            return mock_fi
-
-        with patch("yfinance.Ticker", side_effect=_ticker):
+        with patch.object(md, "get_live_price", return_value=738.0) as m:
             price = _live_price("BNB")
 
         assert price == 738.0
-        assert "BNB" in call_args or "BNB-USD" in call_args
+        m.assert_called_once_with("BNB")
+
+    def test_the_canonical_resolver_maps_crypto_for_yfinance(self):
+        """And the resolver itself must never hand yfinance a bare crypto
+        symbol — that is where the $28 came from."""
+        import market_data as md
+        assert md._yf_sym("BNB") == "BNB-USD"
+        assert md._yf_sym("AAPL") == "AAPL"
