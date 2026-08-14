@@ -45,14 +45,30 @@ def _mutate_paper(chat_id: str, mutator):
 
 
 def _live_price(ticker: str) -> float | None:
-    # Try yfinance first (stocks + major crypto with -USD suffix)
-    for sym in (ticker, f"{ticker}-USD"):
-        try:
-            p = yf.Ticker(sym).fast_info.last_price
-            if p:
-                return float(p)
-        except Exception:
-            pass
+    """Live price for a paper position — stocks, crypto, and exotic coins.
+
+    🔴 This used to try the BARE symbol first and only then `{ticker}-USD`:
+
+        for sym in (ticker, f"{ticker}-USD"): ...
+
+    That works for equities (a bad symbol returns nothing, so the retry runs)
+    but is silently wrong for crypto, because bare `BTC` DOES resolve on
+    yfinance — to an unrelated instrument. Measured 2026-08-12:
+    **BTC $28.00 and ETH $18.00** against a real $63,623 and $1,891. Every
+    paper crypto position was priced at pennies, through paper_buy, paper_sell,
+    the portfolio display and total portfolio value.
+
+    `market_data.get_live_price` is the canonical resolver: crypto routes to the
+    crypto endpoint, equities to the stocks endpoint, with a mapped-symbol
+    yfinance fallback and a 15s cache.
+    """
+    try:
+        from market_data import get_live_price
+        p = get_live_price(ticker)
+        if p and p > 0:
+            return float(p)
+    except Exception:
+        pass
     # CoinGecko fallback for exotic crypto (HYPE, ASTER, LAB etc.)
     try:
         import requests as _req

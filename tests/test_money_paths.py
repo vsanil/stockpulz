@@ -273,3 +273,71 @@ class TestWatchlistQuotes:
                             lambda t: called.append(1) or {})
         assert market_data.get_quotes_with_change([]) == {}
         assert not called
+
+
+class TestPaperTraderPriceResolution:
+    """🔴 `_live_price` tried the BARE symbol first, then `{ticker}-USD`:
+
+        for sym in (ticker, f"{ticker}-USD"): ...
+
+    Correct for equities — a bad symbol returns nothing so the retry runs — but
+    silently wrong for crypto, because bare `BTC` DOES resolve on yfinance, to
+    an unrelated instrument. Measured 2026-08-12: BTC $28.00, ETH $18.00
+    against a real $63,623 and $1,891.
+
+    Stored entries were unaffected (the bot passes explicit pick prices), but
+    the portfolio DISPLAY and total portfolio value both call this per position,
+    so a paper BTC holding rendered at roughly -99.96% unrealized.
+    """
+
+    def test_it_delegates_to_the_canonical_resolver(self, monkeypatch):
+        import paper_trader
+        import market_data as md
+        monkeypatch.setattr(md, "get_live_price", lambda t: 63_000.0)
+        assert paper_trader._live_price("BTC") == 63_000.0
+
+    def test_the_bare_then_usd_fallback_cannot_return(self):
+        """The ordering itself was the bug — assert the pattern is gone."""
+        import ast, inspect, textwrap
+        import paper_trader
+        # Strip the docstring before scanning — it deliberately QUOTES the old
+        # pattern as documentation, which a naive substring check trips on.
+        tree = ast.parse(textwrap.dedent(inspect.getsource(paper_trader._live_price)))
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)):
+            fn.body = fn.body[1:]
+        body = ast.unparse(fn)
+        assert 'f"{ticker}-USD"' not in body, "bare-then-USD fallback is back in the code"
+        assert "get_live_price" in body
+
+    def test_exotic_coins_still_reach_the_coingecko_search(self, monkeypatch):
+        """Coins outside the canonical map (ASTER, LAB…) must keep their
+        last-resort lookup — the fix must not remove that path."""
+        import paper_trader
+        import market_data as md
+        monkeypatch.setattr(md, "get_live_price", lambda t: None)
+
+        class _R:
+            ok = True
+            def __init__(self, p): self._p = p
+            def json(self): return self._p
+
+        def _get(url, params=None, timeout=None):
+            if "search" in url:
+                return _R({"coins": [{"symbol": "ASTER", "id": "aster-x"}]})
+            return _R({"aster-x": {"usd": 1.23}})
+
+        monkeypatch.setattr(paper_trader, "_req", None, raising=False)
+        import requests
+        monkeypatch.setattr(requests, "get", _get)
+        assert paper_trader._live_price("ASTER") == 1.23
+
+    def test_returns_none_when_nothing_resolves(self, monkeypatch):
+        import paper_trader
+        import market_data as md
+        import requests
+        monkeypatch.setattr(md, "get_live_price", lambda t: None)
+        monkeypatch.setattr(requests, "get",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+        assert paper_trader._live_price("NOPE") is None
