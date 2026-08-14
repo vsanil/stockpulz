@@ -218,3 +218,44 @@ class TestCanaryHelpers:
         assert ok
         assert "congressional=n/a (not configured)" in note
         assert "congressional=0.0%" not in note
+
+
+class TestPaperViewCryptoPriceCheck:
+    """The check added after paper_trader._live_price priced ETH at $18.
+
+    The existing paper.crypto_fractional check passed an EXPLICIT price to
+    paper_buy, so it never touched the resolver the portfolio VIEW uses — the
+    bug lived entirely in the display path and every monitor stayed green.
+    """
+
+    def test_it_cross_checks_an_INDEPENDENT_source(self):
+        """Two reads from the same resolver agree even when both are wrong —
+        the false-pass trap prices.cg_cache already fell into. This must compare
+        the paper resolver against CoinGecko, not against itself."""
+        import inspect
+        src = inspect.getsource(canary)
+        # Anchor on the SECTION header — the cg_prices import sits above the
+        # first _check(), so slicing from the check name skips it.
+        block = src[src.index("Paper VIEW prices crypto correctly"):]
+        block = block[:block.index("Alert round-trip")]
+        assert "cg_prices" in block, "must cross-check CoinGecko, not the same path"
+        assert "_paper_price" in block
+
+    def test_an_unavailable_reference_reads_as_NOT_VERIFIED_not_pass(self):
+        """A green line must never mean 'the check could not run'."""
+        import inspect
+        src = inspect.getsource(canary)
+        block = src[src.index("Paper VIEW prices crypto correctly"):]
+        assert "NOT VERIFIED" in block[:block.index("Alert round-trip")]
+
+    def test_the_drift_threshold_would_have_caught_the_real_bug(self):
+        """Measured live: the paper view returned $18.00 while ETH was $1,891."""
+        ref, buggy = 1891.0, 18.0
+        drift = abs(buggy - ref) / ref * 100
+        assert drift >= 20, "the 20% threshold must reject a 99% error"
+
+    def test_ordinary_intraday_movement_does_not_trip_it(self):
+        """CoinGecko and the trade feed differ by seconds, not percent — the
+        threshold must not fire on normal drift."""
+        ref, real = 1891.0, 1885.0
+        assert abs(real - ref) / ref * 100 < 20

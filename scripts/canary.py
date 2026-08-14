@@ -618,6 +618,39 @@ def check_mutations(admin: str) -> None:
         except Exception as e:
             _check("paper.crypto_fractional", False, f"exc: {e}")
 
+        # ── Paper VIEW prices crypto correctly ───────────────────────────────
+        # 🔴 The gap that let a real bug through. paper.crypto_fractional passes
+        # an EXPLICIT price to paper_buy, so it never exercised the resolver the
+        # portfolio VIEW uses. paper_trader._live_price tried the bare symbol
+        # first, and bare BTC/ETH resolve on yfinance to unrelated instruments —
+        # measured 2026-08-12 at $28.00 and $18.00 against $63,623 and $1,891.
+        # Every paper crypto holding rendered at roughly -99.96% unrealized and
+        # every monitor stayed green.
+        #
+        # Cross-checked against CoinGecko — an INDEPENDENT source. Comparing two
+        # reads from the same resolver would agree even when both are wrong,
+        # which is the false-pass trap prices.cg_cache already fell into.
+        try:
+            from paper_trader import _live_price as _paper_price
+            from price_checker import cg_prices, _SYMBOL_TO_CG_ID
+            ref = (cg_prices([_SYMBOL_TO_CG_ID["ETH"]]) or {}).get(_SYMBOL_TO_CG_ID["ETH"])
+            got = _paper_price("ETH")
+            if not _pos(ref):
+                _check("paper.view_crypto_price", True,
+                       "NOT VERIFIED — CoinGecko unavailable this run")
+            elif not _pos(got):
+                _check("paper.view_crypto_price", False, "",
+                       fail_detail="paper view could not price ETH at all")
+            else:
+                drift = abs(got - ref) / ref * 100
+                _check("paper.view_crypto_price", drift < 20,
+                       f"paper view ETH ${got:,.2f} vs CoinGecko ${ref:,.2f} ({drift:.1f}% apart)",
+                       fail_detail=(f"paper view prices ETH at ${got:,.2f} but CoinGecko says "
+                                    f"${ref:,.2f} ({drift:.0f}% off) — every paper crypto "
+                                    f"position's P&L is wrong on screen"))
+        except Exception as e:
+            _check("paper.view_crypto_price", False, "", fail_detail=f"exc: {e}")
+
         # ── Alert round-trip (add → replace → remove) ─────────────────────────
         try:
             from price_alert_manager import add_alert, remove_alert, _load_alerts
