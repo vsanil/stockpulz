@@ -125,8 +125,19 @@ def get_price_context(ticker: str, hist: pd.DataFrame | None = None) -> dict:
 
         # ── Volume balance (up-day vs down-day) ───────────────────────────────
         recent_20  = hist.tail(20)
-        up_vol     = float(recent_20.loc[recent_20["Close"] >= recent_20["Open"], "Volume"].mean()) if len(recent_20) > 0 else 0
-        down_vol   = float(recent_20.loc[recent_20["Close"] <  recent_20["Open"], "Volume"].mean()) if len(recent_20) > 0 else 0
+        # 🔴 pandas .mean() of an EMPTY selection is NaN, and every comparison
+        # against NaN is False — so a window with NO down-days (or no up-days)
+        # fell through to "neutral volume", losing the signal exactly when it is
+        # strongest. Same family as _is_pos / plausible_price: NaN does not
+        # announce itself, it just makes conditions quietly false.
+        def _mean_vol(mask) -> float:
+            if len(recent_20) == 0:
+                return 0.0
+            v = float(recent_20.loc[mask, "Volume"].mean())
+            return v if v == v else 0.0          # v != v  ⇒  NaN
+
+        up_vol   = _mean_vol(recent_20["Close"] >= recent_20["Open"])
+        down_vol = _mean_vol(recent_20["Close"] <  recent_20["Open"])
         if up_vol > down_vol * 1.25:
             vol_trend = "accumulation (up-day vol dominates)"
         elif down_vol > up_vol * 1.25:
