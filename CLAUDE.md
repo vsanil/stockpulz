@@ -574,6 +574,9 @@ Rules:
 - **⚠️ `conftest._mock_prices` is `autouse=True`** — every test gets FAKE_PRICES. To exercise the REAL `get_live_price`, capture it at module import (collection runs before fixtures) and `monkeypatch.setattr` it back, or you will silently test the stub.
 - **Found writing these: `plausible_price` accepted `inf`.** The docstring promised "a positive, FINITE number" but the check was `p == p and p > 0` — `p == p` rejects NaN, and `inf` passes `> 0`. An `inf` quote poisons every aggregate it touches instead of failing loudly. Same family as `_is_pos` and the NaN-in-`rs_vs_spy` score corruption. **Rule: a finiteness claim in a docstring must be enforced by `math.isfinite`-equivalent code, not by `== self` alone.**
 
+- **Aug 13: `price_context` 4→90%, `options_flow` 7→21%** (41 tests). Both were verified ALIVE first — testing dead code is worse than useless. Both have a pure core (`get_price_context(hist=…)`, `_compute_signal(raw)`), so the tests drive logic without network or market-hours flakiness. `options_flow` stops at 21% because ~200 of its 282 statements are Polygon/yfinance chain-fetching; the signal maths is now fully covered.
+- **🔴 Found writing them — `price_context` volume balance was NaN-broken.** `recent_20.loc[mask, "Volume"].mean()` on an EMPTY selection returns **NaN**, and every comparison against NaN is False — so a 20-day window with NO down-days (or no up-days) fell through to `"neutral volume"`, **losing the accumulation/distribution signal exactly when it is strongest**. Same family as `_is_pos`, `plausible_price` and the NaN-in-`rs_vs_spy` score corruption: NaN does not announce itself, it just makes conditions quietly false. Guard: `TestVolumeBalance`, verified it fails against the pre-fix code.
+
 ### Test suite — mandatory before every commit
 - Run `python -m pytest tests/ -q` before every commit, no exceptions
 - A commit is NOT done until all tests pass
