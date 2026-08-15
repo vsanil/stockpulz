@@ -1,0 +1,41 @@
+# Read-only inventory of every external input, run where TLS is clean.
+#
+# Why this exists as its own workflow: verifying a data-source fix used to mean
+# triggering the morning run, which SENDS PICKS TO REAL USERS and is not
+# idempotent — so confirming a screener change cost every user a duplicate
+# message. This exercises the same inputs and delivers nothing.
+#
+# It is also the answer to "is a local failure real?": this Mac sits behind a
+# TLS-intercepting proxy that breaks yfinance (curl_cffi bundles its own CA),
+# so a DEAD row locally proves nothing. CI is the authority.
+#
+# Manual only — no schedule. It is a diagnostic, not a monitor; the canary and
+# full sweep are the monitors.
+name: Input Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe every external input (READ-ONLY — no sends, no writes)
+        env:
+          GITHUB_TOKEN:       ${{ secrets.GIST_TOKEN }}
+          GIST_ID:            ${{ secrets.GIST_ID }}
+          ALPACA_KEY_ID:      ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          FINNHUB_API_KEY:    ${{ secrets.FINNHUB_API_KEY }}
+          POLYGON_API_KEY:    ${{ secrets.POLYGON_API_KEY }}
+          QUIVER_API_KEY:     ${{ secrets.QUIVER_API_KEY }}
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python3 scripts/input_audit.py
