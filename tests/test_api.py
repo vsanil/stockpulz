@@ -1339,3 +1339,110 @@ class TestAdminAudit:
                             lambda: (_ for _ in ()).throw(RuntimeError("boom")))
         out = webhook._build_audit_findings()
         assert out["findings"] == [] and "error" in out
+
+
+class TestTriggerWeeklyRelays:
+    """🔴 /trigger/weekly must RELAY, not spawn agent.py on Render (Aug 15 2026).
+
+    run_weekly_recap opens with `run_morning(config, now_et)` — "Saturday: run
+    crypto morning picks, then send a compact weekly recap" — so the Saturday
+    trigger was running the FULL morning pipeline (screener + Claude +
+    personalised send) locally on Render through the generic /trigger/<mode>
+    subprocess path. The weekday morning trigger was converted to a relay in
+    Jul 2026 for exactly this reason; the Saturday path was never converted.
+
+    Measured on Sat 2026-08-15: it generated and delivered GLD + SLV but set
+    ZERO auto alerts for either real user, while the identical code yields
+    `GLD stop@381.41` and `SLV invalidation@49.71` when run anywhere else. The
+    per-ticker except logged and continued, so the run still "succeeded".
+    """
+
+    SECRET = "test-cron-secret"
+
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("CRON_SECRET", self.SECRET)
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+
+    def test_wrong_secret_returns_403(self, client):
+        assert client.post("/trigger/weekly?secret=wrong").status_code == 403
+
+    def test_it_dispatches_weekly_to_github(self, client, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_post = MagicMock(return_value=MagicMock(status_code=204))
+        monkeypatch.setattr("requests.post", mock_post)
+        r = client.post(f"/trigger/weekly?secret={self.SECRET}&force=true")
+        assert r.status_code == 200 and r.get_json()["dispatched"] is True
+        assert "actions/workflows/daily_run.yml/dispatches" in mock_post.call_args[0][0]
+        assert mock_post.call_args[1]["json"]["inputs"]["run_mode"] == "weekly"
+
+    def test_it_NEVER_spawns_a_local_process(self, client, monkeypatch):
+        """The whole point. A subprocess here means the morning pipeline runs on
+        Render's instance again."""
+        from unittest.mock import MagicMock
+        monkeypatch.setattr("requests.post", MagicMock(return_value=MagicMock(status_code=204)))
+        popen = MagicMock()
+        monkeypatch.setattr("subprocess.Popen", popen)
+        client.post(f"/trigger/weekly?secret={self.SECRET}&force=true")
+        assert not popen.called, "weekly spawned agent.py on Render instead of relaying"
+
+    def test_the_dedicated_route_beats_the_generic_one(self):
+        """/trigger/<mode> still lists weekly; the static rule must win, exactly
+        as it already does for morning and prescreener."""
+        import webhook
+        rules = [r.rule for r in webhook.app.url_map.iter_rules()]
+        assert "/trigger/weekly" in rules and "/trigger/<mode>" in rules
+        match = webhook.app.url_map.bind("localhost").match("/trigger/weekly",
+                                                            method="POST")
+        assert match[0] == "trigger_weekly", f"generic route captured it: {match[0]}"
+
+    def test_a_second_call_the_same_day_is_skipped(self, client, monkeypatch):
+        from unittest.mock import MagicMock
+        import datetime as _dt
+        import pytz
+        today = _dt.datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+        monkeypatch.setattr("config_manager.get_config",
+                            lambda: {"cron_last_weekly": today + "T12:00:00"})
+        mock_post = MagicMock(return_value=MagicMock(status_code=204))
+        monkeypatch.setattr("requests.post", mock_post)
+        r = client.post(f"/trigger/weekly?secret={self.SECRET}")
+        assert r.get_json()["skipped"] is True
+        assert not mock_post.called, "duplicate weekly run was dispatched"
+
+    def test_force_bypasses_the_duplicate_guard(self, client, monkeypatch):
+        from unittest.mock import MagicMock
+        import datetime as _dt
+        import pytz
+        today = _dt.datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+        monkeypatch.setattr("config_manager.get_config",
+                            lambda: {"cron_last_weekly": today + "T12:00:00"})
+        mock_post = MagicMock(return_value=MagicMock(status_code=204))
+        monkeypatch.setattr("requests.post", mock_post)
+        r = client.post(f"/trigger/weekly?secret={self.SECRET}&force=true")
+        assert r.get_json().get("dispatched") is True
+
+    def test_missing_token_returns_500(self, client, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN")
+        r = client.post(f"/trigger/weekly?secret={self.SECRET}&force=true")
+        assert r.status_code == 500 and r.get_json()["ok"] is False
+
+
+class TestOnlyWeeklyAndMorningReachRunMorning:
+    """run_morning is the heavy path (screener + Claude + send). Every caller of
+    it must execute on GH Actions, never on Render."""
+
+    def test_run_morning_has_exactly_two_callers(self):
+        import inspect
+        import agent
+        src = inspect.getsource(agent)
+        calls = [ln.strip() for ln in src.splitlines()
+                 if "run_morning(" in ln and not ln.strip().startswith("def ")]
+        assert len(calls) == 2, (
+            f"a new run_morning caller appeared: {calls}. Every entry point that "
+            "reaches it must relay to GH Actions, not spawn on Render.")
+
+    def test_week_ahead_generates_no_picks(self):
+        """Sunday is a pure briefing — if that ever changes it needs relaying too."""
+        import inspect
+        import agent
+        assert "No new picks are generated" in (inspect.getdoc(agent.run_week_ahead) or "")
