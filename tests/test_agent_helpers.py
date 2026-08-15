@@ -723,8 +723,13 @@ class TestAutoSetPickAlertsEntryGuard:
 
     def _capture(self, monkeypatch, live):
         calls = []
-        monkeypatch.setattr(ag, "add_alert",
-                            lambda uid, t, price, direction=None, auto=False: calls.append((t, round(price, 2), direction)))
+        # Mirrors the real add_alert signature, INCLUDING `kind` — a stub that is
+        # narrower than production turns a signature change into three silent
+        # "alert set failed" lines swallowed by the caller's try/except.
+        monkeypatch.setattr(
+            ag, "add_alert",
+            lambda uid, t, price, direction=None, auto=False, kind=None, **kw:
+                calls.append((t, round(price, 2), direction)))
         monkeypatch.setattr(ag, "load_user_trade_log", lambda uid: {"open": []})
         monkeypatch.setattr(ag, "_download_prices", lambda tickers, **kw: live)
         return calls
