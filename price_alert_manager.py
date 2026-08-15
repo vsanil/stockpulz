@@ -83,19 +83,40 @@ def _current_price(ticker: str) -> float | None:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
+DEFAULT_AUTO_KIND = "stop"      # what an auto alert without a `kind` has always been
+
+
 def add_alert(chat_id: str, ticker: str, target_price: float,
               direction: str = "auto", recurring: bool = False,
-              auto: bool = False, replace: bool = False) -> str:
+              auto: bool = False, replace: bool = False,
+              kind: str | None = None) -> str:
     """
     Set a price alert.
 
     direction: "above" | "below" | "auto"
       - "auto": alert fires above target if target > current price, below otherwise
     auto: True means this was system-generated (stop-loss from pick/position).
-      When auto=True, any existing auto alert for the same ticker+direction is
+      When auto=True, an existing auto alert for the same ticker+direction+KIND is
       replaced rather than duplicated. Manual alerts are never touched.
+    kind: what an auto alert is FOR — "stop" | "entry" | "invalidation".
+
+    🔴 Why `kind` exists (Aug 15). The auto-replace used to match on
+    ticker+direction alone, so only ONE auto "below" alert could exist per
+    ticker — and a pick legitimately wants several at different levels. Measured:
+    for a short-term pick trading >=1% above entry, agent sets the stop first and
+    then the entry-zone alert, and the entry alert SILENTLY DESTROYED THE STOP
+    (below@95 replaced by below@100). It bit exactly the picks that were running,
+    which are the ones a stop matters most for. Matching on kind lets a stop, an
+    entry-zone alert and a long-term invalidation level coexist while still
+    collapsing genuine duplicates of the same purpose.
+
+    Legacy alerts carry no `kind` and are treated as DEFAULT_AUTO_KIND ("stop"),
+    which is what every auto alert was before this change — so a new entry alert
+    cannot clobber a stop that predates the field.
+
     Returns a formatted confirmation string for Telegram.
     """
+    kind = kind or DEFAULT_AUTO_KIND
     ticker  = ticker.upper()
     current = _current_price(ticker)
     if current is None:
@@ -115,18 +136,25 @@ def add_alert(chat_id: str, ticker: str, target_price: float,
         entry["recurring"] = True
     if auto:
         entry["auto"] = True
+        entry["kind"] = kind
 
     def _mut(alerts):
         chat_alerts = alerts.setdefault(str(chat_id), [])
         if auto:
-            # System stop: replace any existing auto alert for same ticker+direction,
-            # AND drop a true duplicate at the same target regardless of auto flag —
-            # else an auto pick-alert stacks a 2nd identical alert on top of a manual/
-            # synthetic one already at that level, and BOTH fire (the dup-ADM bug).
+            # System alert: replace an existing auto alert of the SAME PURPOSE for
+            # this ticker+direction, AND drop a true duplicate at the same target
+            # regardless of auto flag — else an auto pick-alert stacks a 2nd
+            # identical alert on top of a manual/synthetic one already at that
+            # level, and BOTH fire (the dup-ADM bug).
+            #
+            # Matching on kind is load-bearing: without it the entry-zone alert
+            # replaced the STOP, because both are "below" on the same ticker.
             chat_alerts[:] = [
                 a for a in chat_alerts
                 if not (a["ticker"] == ticker and a["direction"] == direction
-                        and (a.get("auto") or abs(a["target"] - target_price) < 0.005))
+                        and ((a.get("auto")
+                              and a.get("kind", DEFAULT_AUTO_KIND) == kind)
+                             or abs(a["target"] - target_price) < 0.005))
             ]
         elif replace:
             # One alert per ticker (mini-app pick/watchlist edit): atomically drop

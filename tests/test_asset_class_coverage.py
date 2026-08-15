@@ -259,12 +259,23 @@ class TestExclusionsAreDocumented:
         src = inspect.getsource(agent._auto_set_pick_alerts)
         # Anchor on the statement that FOLLOWS the block, not on a bare ")" —
         # the first ")" belongs to picks.get("stocks", {}).
-        start = src.index("all_sections = (")
+        start = src.index("_lt_picks = (")
         body = src[start:src.index("ENTRY_ALERT_MIN_ABOVE", start)]
         for sec in ("stocks", "crypto", "etfs", "commodities"):
             assert f'"{sec}"' in body, f"{sec} picks reach users with no alert"
         for tf in ("short_term", "long_term"):
             assert tf in body
+
+    def test_short_term_picks_are_processed_before_long_term(self):
+        """Order is load-bearing: a ticker that is both (KMI on 2026-08-14) must
+        take its real short-term stop, after which the wide long-term
+        invalidation level is skipped for it as redundant."""
+        import inspect
+        import agent
+        src = inspect.getsource(agent._auto_set_pick_alerts)
+        block = src[src.index("all_sections = ("):src.index("ENTRY_ALERT_MIN_ABOVE")]
+        assert block.index('"short_term"') < block.index("_lt_picks\n"), \
+            "long-term picks must be appended AFTER the short-term ones"
 
     def test_the_ledger_states_why_options_are_unmeasured(self):
         import importlib.util

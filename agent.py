@@ -4296,6 +4296,71 @@ def _send_or_print(message: str, label: str = ""):
         broadcast_all([{"chat_id": uid, "text": message} for uid in recipients])
 
 
+# How far below entry a long-term pick's thesis is treated as questionable.
+# Deliberately WIDE — this must never read as a stop-loss. A long-term thesis
+# should survive ordinary drawdowns; 15% says "something may have changed",
+# which is the signal an LT holder actually wants and currently gets none of.
+LT_INVALIDATION_PCT = 15.0
+
+# How many days back to keep retrying a long-term entry-zone alert that could
+# not arm on its publication day. One trading week — past that the entry level
+# is stale enough that "it pulled back to entry" is no longer the same trade.
+LT_REARM_DAYS = 5
+
+
+def _lt_rearm_picks(today_picks: dict) -> list[dict]:
+    """Long-term picks from earlier this week whose entry alert never armed.
+
+    🔴 Why this exists. The entry-zone alert requires price >= 1% above entry so
+    it cannot insta-fire — but it is evaluated ONCE, during the morning run that
+    publishes the pick, at the exact moment price is by definition within 2-3% of
+    entry. So for a long-term pick it almost never arms, and it is never
+    re-checked. Combined with LT picks having no stop, that left MRK and TLT with
+    zero alerts for real users on 2026-08-14.
+
+    Re-offering them each morning costs nothing: add_alert collapses duplicates
+    of the same ticker+direction+kind, so an already-armed alert is a no-op, and
+    a pick that has since risen above entry finally gets its alert.
+
+    Silent on failure — this is an enhancement to alerting, and it must never be
+    able to break the morning run.
+    """
+    try:
+        from config_manager import load_weekly_picks
+        today = et_today().isoformat()
+        seen: set = set()
+        for sec in ("stocks", "etfs", "commodities"):
+            for p in (today_picks.get(sec, {}) or {}).get("long_term", []) or []:
+                seen.add((p.get("ticker") or p.get("symbol") or "").upper())
+
+        out: list[dict] = []
+        for day, past in sorted((load_weekly_picks() or {}).items(), reverse=True):
+            if day == today:
+                continue
+            try:
+                age = (date.fromisoformat(today) - date.fromisoformat(day)).days
+            except ValueError:
+                continue
+            if not (0 < age <= LT_REARM_DAYS):
+                continue
+            for sec in ("stocks", "etfs", "commodities"):
+                for p in (past.get(sec, {}) or {}).get("long_term", []) or []:
+                    t = (p.get("ticker") or p.get("symbol") or "").upper()
+                    # Today's pick of the same ticker wins — its entry is fresher.
+                    if not t or t in seen or not _is_pos(p.get("entry_price")):
+                        continue
+                    seen.add(t)
+                    out.append(p)
+        if out:
+            print(f"[agent] _lt_rearm_picks: re-offering entry alerts for "
+                  f"{len(out)} long-term pick(s) from earlier this week: "
+                  f"{[ (p.get('ticker') or p.get('symbol')) for p in out ]}")
+        return out
+    except Exception as exc:
+        print(f"[agent] _lt_rearm_picks failed (non-critical): {exc}")
+        return []
+
+
 def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
     """Auto-set stop-loss + entry alerts for morning picks. Silent — never raises.
 
@@ -4309,15 +4374,25 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
     Everything else that reaches a user MUST be covered by this function.
     """
     try:
-        all_sections = (
-            picks.get("stocks", {}).get("short_term", []) +
+        _lt_picks = (
             picks.get("stocks", {}).get("long_term",  []) +
-            picks.get("crypto", {}).get("short_term", []) +
-            picks.get("etfs",   {}).get("short_term", []) +
             picks.get("etfs",   {}).get("long_term",  []) +
-            picks.get("commodities", {}).get("short_term", []) +
             picks.get("commodities", {}).get("long_term",  [])
         )
+        all_sections = (
+            picks.get("stocks", {}).get("short_term", []) +
+            picks.get("crypto", {}).get("short_term", []) +
+            picks.get("etfs",   {}).get("short_term", []) +
+            picks.get("commodities", {}).get("short_term", []) +
+            _lt_picks
+        )
+        # Short-term picks are processed FIRST so a ticker that is both an ST and
+        # an LT pick (KMI on 2026-08-14) gets its real stop, and the wide LT
+        # invalidation level is then skipped for it as redundant noise.
+        # Re-arm: long-term entry alerts from earlier this week that could not arm
+        # on their publication day. See _lt_rearm_picks().
+        all_sections = all_sections + _lt_rearm_picks(picks)
+        _lt_ids = {id(p) for p in _lt_picks}   # identity, not dict equality
         # Fetch live prices once so entry alerts are only armed when the pick is
         # trading ABOVE its entry. Picks are issued at ~entry (within 2%), so a
         # "below entry" alert set at issue time would insta-fire the same morning
@@ -4336,6 +4411,7 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
             try:
                 log = load_user_trade_log(uid)
                 open_tickers = {t.get("ticker", "").upper() for t in log.get("open", [])}
+                stopped: set = set()     # tickers that got a real stop this run
                 for pick in all_sections:
                     ticker = (pick.get("ticker") or pick.get("symbol") or "").upper()
                     if not ticker or ticker in open_tickers:
@@ -4345,14 +4421,36 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
                         # well below current, so no insta-fire risk; always armed.
                         stop = pick.get("stop_loss")
                         if stop:
-                            add_alert(uid, ticker, float(stop), direction="below", auto=True)
+                            add_alert(uid, ticker, float(stop), direction="below",
+                                      auto=True, kind="stop")
+                            stopped.add(ticker)
                             total_set += 1
                         # Entry zone alert — only when price is ≥1% above entry, so
                         # "below entry" firing means a genuine pullback into the zone.
                         entry = pick.get("entry_price")
                         cur   = live_prices.get(ticker)
                         if entry and cur and cur >= float(entry) * ENTRY_ALERT_MIN_ABOVE:
-                            add_alert(uid, ticker, float(entry), direction="below", auto=True)
+                            add_alert(uid, ticker, float(entry), direction="below",
+                                      auto=True, kind="entry")
+                            total_set += 1
+                        # 🔴 Long-term invalidation level (Aug 15). LT picks carry NO
+                        # stop by design — a multi-year thesis should not be stopped
+                        # out on a 5% wobble — and the entry alert above is checked
+                        # ONCE, at publication, when price is by definition within
+                        # 2-3% of entry, so it almost never arms. Net effect measured
+                        # on 2026-08-14: MRK and TLT reached real users with ZERO
+                        # alerts of any kind. The only LT pick that had one (KMI) was
+                        # covered by coincidence, because it was also a short-term
+                        # pick. "No stop" was never meant to mean "no alert".
+                        #
+                        # This is NOT a stop: it sits far below any sensible one, and
+                        # it says "the thesis may be broken", not "sell now".
+                        if (id(pick) in _lt_ids and ticker not in stopped
+                                and _is_pos(pick.get("entry_price"))):
+                            lvl = round(float(pick["entry_price"])
+                                        * (1 - LT_INVALIDATION_PCT / 100), 2)
+                            add_alert(uid, ticker, lvl, direction="below",
+                                      auto=True, kind="invalidation")
                             total_set += 1
                     except Exception as exc:
                         print(f"[agent] _auto_set_pick_alerts: alert set failed for {ticker}/{uid}: {exc}")
