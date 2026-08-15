@@ -171,6 +171,46 @@ def p_polygon():
     return r.status_code == 200, f"HTTP {r.status_code}"
 
 
+def p_polygon_options():
+    """Separate from p_polygon on purpose — the reference endpoint is free while
+    the OPTIONS SNAPSHOT is not. Probing the free one and calling Polygon 'ok'
+    is what let the options chain look healthy while it 403'd on every call."""
+    import os, requests
+    from datetime import date, timedelta
+    k = os.environ.get("POLYGON_API_KEY", "")
+    if not k:
+        return False, "no POLYGON_API_KEY set"
+    t = date.today()
+    r = requests.get("https://api.polygon.io/v3/snapshot/options/NVDA",
+                     params={"expiration_date.gte": t.isoformat(),
+                             "expiration_date.lte": (t + timedelta(days=45)).isoformat(),
+                             "limit": 5, "apiKey": k}, timeout=15)
+    if r.status_code == 403:
+        return False, "HTTP 403 — not entitled (paid tier); falls back to yfinance"
+    return r.status_code == 200 and bool((r.json() or {}).get("results")), f"HTTP {r.status_code}"
+
+
+def p_commodity_candidates():
+    """🔴 The Aug 14 bug: this returned 0 on every run for ≥10 days and printed
+    nothing, so the commodities section was silently empty."""
+    import ai_analyzer
+    c = ai_analyzer._build_commodity_candidates()
+    n_signals = sum(1 for x in c
+                    if x.get("ret_1m") is not None and x.get("rsi") is not None)
+    return bool(c), f"{len(c)} candidates, {n_signals} with full signals"
+
+
+def p_options_strike():
+    """The field that decides whether an options play ships with a real strike.
+    When it is None the prompt's documented fallback fires and the play goes out
+    as 'CALL, strike: null' — actionable by nobody."""
+    from options_flow import get_options_signal
+    s = get_options_signal("NVDA")
+    strike = s.get("nearest_otm_call")
+    return strike is not None, (f"NVDA strike={strike} exp={s.get('nearest_call_expiry')} "
+                                f"src={s.get('source')}")
+
+
 # name, probe, what it feeds, test-grep needles
 INPUTS = [
     ("Alpaca bulk bars",    p_alpaca_bulk,      "SCORE  short-term technicals (600 tickers)", ("_alpaca_bulk_bars",)),
@@ -188,6 +228,9 @@ INPUTS = [
     ("Congressional",       p_congress,         "SCORE  +8/+4 on LT (dormant)",               ("congress",)),
     ("Insider (openinsider)",p_insider,         "context  LLM",                               ("insider",)),
     ("Polygon",             p_polygon,          "context  options flow + bar fallback",       ("polygon", "options_flow")),
+    ("Polygon options snap", p_polygon_options, "context  options chain (PAID tier)",         ("_get_polygon_options",)),
+    ("Commodity candidates", p_commodity_candidates, "CORE  the entire commodities section",   ("_build_commodity_candidates", "commodity")),
+    ("Options strike",      p_options_strike,   "CORE  strike/expiry on every options play",  ("nearest_otm_call",)),
     ("Anthropic",           p_anthropic,        "CORE   pick selection + all NL",             ("anthropic", "llm_client")),
     ("GitHub Gist",         p_gist,             "CORE   all storage",                         ("gist", "storage")),
     ("Telegram",            p_telegram,         "CORE   all delivery",                        ("telegram",)),
