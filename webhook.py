@@ -36,6 +36,7 @@ if _sentry_dsn:
     )
 
 from config_manager import get_config, get_allowed_users, et_today
+import formatters
 from telegram_notifier import handle_incoming_command, handle_callback_query, set_webhook, send_typing_action, typing_until_done, send_message
 
 app = Flask(__name__)
@@ -1545,7 +1546,10 @@ def admin_data():
     elt     = etfs.get("long_term",    [])
     comm_st = comms.get("short_term",  [])
     comm_lt = comms.get("long_term",   [])
-    opts    = picks_raw.get("options_plays", [])
+    # Same strike gate as the bot message — bot and mini-app must never disagree
+    # about what is shippable. formatters.is_citable_option is the one definition.
+    opts    = [o for o in (picks_raw.get("options_plays") or [])
+               if formatters.is_citable_option(o)]
     total_picks = len(st) + len(lt) + len(cst) + len(clt) + len(est) + len(elt) + len(comm_st) + len(comm_lt)
 
     cron_keys = [

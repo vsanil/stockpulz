@@ -178,6 +178,71 @@ class TestPolygonProducesACitableStrike:
         assert raw["nearest_otm_call"] is None and raw["current_price"] is None
 
 
+# ── options are withheld while their signal is empty ─────────────────────────
+class TestOptionsStrikeGate:
+    """🔴 Owner's call, Aug 15: stop shipping options while the signal is dead.
+
+    Implemented as a SIGNAL gate, not a deletion. Verified on CI that
+    options_flow returns source="none" in production — Polygon 403s on the free
+    tier and yfinance is blocked from GitHub Actions IPs — so put_call_ratio,
+    sweep_detected, unusual AND the strike are all empty, and the model was
+    writing option theses from nothing. Gating on the strike is self-healing:
+    when the feed returns, strikes populate and the section comes back with no
+    code change.
+    """
+
+    def _clean(self, plays):
+        return ai_analyzer._validate_and_clean_picks(
+            {"stocks": {}, "options_plays": plays}, {"KMI", "NVDA"})
+
+    def test_a_play_with_no_strike_is_withheld(self):
+        out = self._clean([{"ticker": "KMI", "action": "CALL",
+                            "strike": None, "expiry": None, "note": "x"}])
+        assert not out.get("options_plays"), \
+            "an unactionable play ('CALL, strike: null') must not reach a user"
+
+    def test_a_fully_specified_play_still_ships(self):
+        """The gate must not become a deletion — this is what auto-restores."""
+        out = self._clean([{"ticker": "NVDA", "action": "CALL", "strike": 185.0,
+                            "expiry": "2026-09-18", "note": "x"}])
+        assert len(out.get("options_plays") or []) == 1
+
+    def test_a_strike_without_an_expiry_is_not_citable(self):
+        out = self._clean([{"ticker": "NVDA", "action": "CALL",
+                            "strike": 185.0, "expiry": None, "note": "x"}])
+        assert not out.get("options_plays")
+
+    @pytest.mark.parametrize("bad", [0, -5.0, float("nan"), float("inf"), True, "185"])
+    def test_garbage_strikes_are_rejected(self, bad):
+        """A NaN strike is truthy and every comparison against it is False, so a
+        bare `if strike:` would ship it. Same family as _is_pos."""
+        out = self._clean([{"ticker": "NVDA", "action": "CALL",
+                            "strike": bad, "expiry": "2026-09-18", "note": "x"}])
+        assert not out.get("options_plays"), f"strike={bad!r} reached a user"
+
+    def test_suppression_is_announced(self, capsys):
+        self._clean([{"ticker": "KMI", "action": "CALL", "strike": None,
+                      "expiry": None, "note": "x"}])
+        out = capsys.readouterr().out
+        assert "Suppressed 1 options play" in out and "WITHHELD" in out
+
+    def test_a_withheld_section_is_not_reported_as_a_quiet_MARKET(self):
+        """'no setups today' claims we looked and found nothing. We cannot look,
+        so saying it would be a false statement to the user."""
+        import formatters
+        msg = formatters.format_daily_message(
+            {"stocks": {"short_term": [{"ticker": "AAPL", "entry_price": 100.0,
+                                        "target_price": 110.0, "stop_loss": 95.0,
+                                        "conviction": 4, "thesis": "t"}],
+                        "long_term": []},
+             "crypto": {"short_term": [], "long_term": []},
+             "etfs": {"short_term": [], "long_term": []},
+             "commodities": {"short_term": [], "long_term": []},
+             "options_plays": []}, {})
+        assert "🎯 Options" not in msg, \
+            "a withheld section must be silent, not listed as a quiet market"
+
+
 # ── the exclusions are decisions, not oversights ─────────────────────────────
 class TestExclusionsAreDocumented:
     def test_alert_scope_explains_what_it_skips(self):

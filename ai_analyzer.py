@@ -1072,6 +1072,12 @@ from llm_client import strip_fences as _strip_fences
 from price_checker import CRYPTO_SYMBOLS as _KNOWN_CRYPTO
 
 
+# ONE definition, in formatters — beside entry_window_pct, for the same reason:
+# a rule the user sees must not be able to drift between the code that generates
+# and the code that renders. Alias so the generation gate below reads plainly.
+from formatters import is_citable_option as _is_citable_option
+
+
 def _is_valid_ticker(ticker: str) -> bool:
     """Return True if yfinance can find a price for this ticker (i.e. it's real)."""
     try:
@@ -1143,16 +1149,39 @@ def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
             "long_term":  _clean_section(commodities.get("long_term",  []), is_crypto=False),
         }
 
-    # Options plays: validate that referenced ticker is known
+    # Options plays: known ticker AND a citable contract.
+    #
+    # 🔴 The strike gate is a SIGNAL GATE, not a feature deletion (Aug 15).
+    # Verified on CI: options_flow returns source="none" in production — BOTH
+    # Polygon (403, free tier) and yfinance (blocked from GitHub Actions IPs)
+    # give nothing — so put_call_ratio, sweep_detected, unusual and the strike
+    # are ALL empty. The model was therefore writing option theses from no data,
+    # and the prompt's honest fallback ("never invent a strike") meant every
+    # play shipped as "CALL, strike: null" — a recommendation nobody can act on.
+    #
+    # A play we cannot specify is a play we should not send. Gating on the
+    # strike is self-healing: the moment the signal returns (paid Polygon tier,
+    # or the fetch moved off GH Actions IPs) strikes populate and the section
+    # comes back with NO code change. Do not "simplify" this into a feature flag
+    # or a deletion — the feed is blocked, not dead, and it works today from a
+    # residential IP.
     options_plays = picks.get("options_plays", [])
     if options_plays:
-        clean_opts = []
+        clean_opts, no_strike = [], 0
         for o in options_plays:
             sym = (o.get("ticker") or "").upper().strip()
-            if sym and (sym in valid_stock_tickers or _is_valid_ticker(sym)):
-                clean_opts.append(o)
-            else:
+            if not sym or not (sym in valid_stock_tickers or _is_valid_ticker(sym)):
                 print(f"[ai_analyzer] Dropped options play for unknown ticker: {sym}")
+                continue
+            if not _is_citable_option(o):
+                no_strike += 1
+                continue
+            clean_opts.append(o)
+        if no_strike:
+            print(f"⚠️  [ai_analyzer] Suppressed {no_strike} options play(s) with no "
+                  f"citable strike/expiry — the options signal is empty, so the "
+                  f"section is being WITHHELD rather than shipped unactionable. "
+                  f"See the ⚠️ [options_flow] line above for which branch failed.")
         if clean_opts:
             result["options_plays"] = clean_opts
 

@@ -76,6 +76,35 @@ ENTRY_WINDOW_ST_PCT = 2.0
 ENTRY_WINDOW_LT_PCT = 3.0        # long-term and crypto get the wider window
 
 
+def is_citable_option(o: dict) -> bool:
+    """🔴 THE one definition of "an options play we may show a user" (Aug 15).
+
+    A play is citable only with a real positive strike AND an expiry. Without
+    both, "KMI CALL" is a recommendation nobody can act on — the user still has
+    to choose the contract, which is the entire decision.
+
+    This gates on the SIGNAL, it is not a feature deletion. Verified on CI that
+    options_flow returns source="none" in production (Polygon 403s on the free
+    tier; yfinance is blocked from GitHub Actions IPs), so put_call_ratio,
+    sweep_detected, unusual and the strike are ALL empty and the model was
+    writing option theses from nothing. When the feed returns, strikes populate
+    and options come back with NO code change.
+
+    Lives here beside entry_window_pct() for the same reason: a rule the user
+    sees must have exactly one definition, or the copy and the code drift.
+    Applied at all three sites — generation (ai_analyzer), the bot message
+    (below) and the mini-app (webhook).
+    """
+    strike = o.get("strike")
+    if isinstance(strike, bool) or not isinstance(strike, (int, float)):
+        return False
+    # NaN is truthy and every comparison against it is False, so a bare
+    # `if strike:` would ship it. Same family as _is_pos / plausible_price.
+    if not (strike == strike and strike not in (float("inf"), float("-inf")) and strike > 0):
+        return False
+    return bool(str(o.get("expiry") or "").strip())
+
+
 def entry_window_pct(is_long_term: bool = False, is_crypto: bool = False) -> float:
     """The window, in PERCENT, that the message promises for this kind of pick.
     Import this — never re-hardcode 2 or 3."""
@@ -303,7 +332,11 @@ def format_daily_message(picks: dict, config: dict,
         (commodities.get("short_term", []) if show_st else []) +
         ([{**c, "_lt": True} for c in commodities.get("long_term", [])] if show_lt else [])
     )
-    options_plays = picks.get("options_plays", [])
+    # Render-side half of the strike gate. Generation already drops these, but a
+    # picks.json saved BEFORE the gate shipped still holds uncitable plays, and
+    # the morning message is built from that file — so the guard has to exist
+    # here too or the section keeps rendering from stored data.
+    options_plays = [o for o in (picks.get("options_plays") or []) if is_citable_option(o)]
 
     # ── Header ────────────────────────────────────────────────────────────────
     mood = _esc(picks.get("daily_summary", ""))
@@ -581,8 +614,12 @@ def format_daily_message(picks: dict, config: dict,
         lines += ["", "🎯 <b>OPTIONS</b>  <i>· illustrative only</i>"]
         for o in options_plays:
             lines += [f"<blockquote expandable>{_row_options(o)}</blockquote>"]
-    elif st_picks or (show_st and not _closed_short):
-        _quiet.append("🎯 Options")
+    # 🔴 Options are NOT listed as quiet (Aug 15). "no setups today" is a claim
+    # about the MARKET — that we looked and found nothing. Since the options
+    # signal is empty in production (see the strike gate in ai_analyzer), we
+    # cannot look, and saying otherwise is a false statement to the user. A
+    # section we are WITHHOLDING is silent, exactly like one hidden by a user's
+    # own preference. Restore this line only when the signal is live again.
 
     # One line for everything that had nothing to report (was one header each).
     if _quiet:
