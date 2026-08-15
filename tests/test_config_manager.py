@@ -497,14 +497,39 @@ class TestBuyCounts:
         assert config_manager.load_buy_counts().get("NVDA") == 1, \
             "writer and reader are on different clocks — counts vanish nightly"
 
+    def test_the_stale_check_survives_the_UTC_ET_window(self, _gist_store, monkeypatch):
+        """🔴 Third occurrence of this class, so it gets a forced guard.
+
+        The two staleness tests below stamped "yesterday" with date.today() while
+        load_buy_counts compares against et_today(). Between 00:00 and 04:00 UTC
+        those calendars differ by a day, so the stamp WAS ET's today and the
+        store read as current — five CI runs failed between 02:54 and 03:10 UTC
+        on 2026-08-15 and passed from 04:27, with no code change in between.
+
+        Forcing ET a day BEHIND reproduces the CI window at any hour on any
+        machine, which the real failure could not be.
+        """
+        import datetime as _dt
+        monkeypatch.setattr(config_manager, "et_today",
+                            lambda: _dt.date.today() - _dt.timedelta(days=1))
+        yesterday = (config_manager.et_today() - timedelta(days=1)).isoformat()
+        _gist_store.write("buy_counts.json", {"date": yesterday, "counts": {"NVDA": 5}})
+        assert config_manager.load_buy_counts() == {}, \
+            "a stale store read as current — the test stamped on the wrong clock"
+
     def test_stale_date_returns_empty(self, _gist_store):
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        # 🔴 et_today(), NOT date.today(). load_buy_counts compares against an
+        # America/New_York clock, so on a UTC runner between 00:00 and 04:00 UTC
+        # a stamp built from date.today() is ET's TODAY, not yesterday — the
+        # store reads as current and the assert flips. Failed 5 CI runs between
+        # 02:54 and 03:10 UTC on 2026-08-15 and passed from 04:27 onward.
+        yesterday = (config_manager.et_today() - timedelta(days=1)).isoformat()
         _gist_store.write("buy_counts.json", {"date": yesterday, "counts": {"NVDA": 5}})
         counts = config_manager.load_buy_counts()
         assert counts == {}
 
     def test_increment_resets_on_new_day(self, _gist_store):
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = (config_manager.et_today() - timedelta(days=1)).isoformat()
         _gist_store.write("buy_counts.json", {"date": yesterday, "counts": {"NVDA": 5}})
         n = config_manager.increment_buy_count("NVDA")
         assert n == 1   # reset to 1, not 6
