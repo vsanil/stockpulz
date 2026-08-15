@@ -4297,7 +4297,17 @@ def _send_or_print(message: str, label: str = ""):
 
 
 def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
-    """Auto-set stop-loss + entry alerts for morning picks. Silent — never raises."""
+    """Auto-set stop-loss + entry alerts for morning picks. Silent — never raises.
+
+    SCOPE — deliberately excluded, do not "helpfully" add:
+      * crypto long_term — hard-coded [] upstream (ai_analyzer); crypto LT picks
+        are not used, so there is never anything to alert on.
+      * options_plays — an alert here would fire on the UNDERLYING's price, not
+        the contract the user actually holds, whose value is driven by IV and
+        time decay as much as by spot. A "stop" on the underlying would be
+        actively misleading about an option position.
+    Everything else that reaches a user MUST be covered by this function.
+    """
     try:
         all_sections = (
             picks.get("stocks", {}).get("short_term", []) +
