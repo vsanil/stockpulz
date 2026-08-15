@@ -324,6 +324,80 @@ def trigger_morning():
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "vsanil/stockpulz")
 
 
+def _relay_to_github(mode: str, force: bool = False, tag: str = "") -> tuple:
+    """Dispatch daily_run.yml on GitHub Actions instead of spawning agent.py here.
+
+    🔴 The rule this enforces: any run that does screening, Claude analysis or
+    ETF work must execute on GH Actions (7GB) — never on Render. Render's
+    instance OOM-kills those runs mid-flight, which sets the cron_last_* stamp
+    while never delivering, and the per-day guard then blocks the retry.
+
+    Returns (flask_response, status).
+    """
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if not gh_token:
+        print(f"[{tag or mode}] GITHUB_TOKEN not set — cannot dispatch workflow.")
+        return jsonify({"ok": False, "error": "GITHUB_TOKEN not configured"}), 500
+    try:
+        import requests as _rq
+        resp = _rq.post(
+            f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/daily_run.yml/dispatches",
+            headers={"Authorization": f"Bearer {gh_token}",
+                     "Accept": "application/vnd.github+json"},
+            json={"ref": "main",
+                  "inputs": {"run_mode": mode, "force": "true" if force else "false"}},
+            timeout=10,
+        )
+        if resp.status_code == 204:
+            print(f"[{tag or mode}] GitHub Actions {mode} run dispatched.")
+            return jsonify({"ok": True, "dispatched": True}), 200
+        print(f"[{tag or mode}] Dispatch failed: {resp.status_code} {resp.text[:200]}")
+        return jsonify({"ok": False, "error": f"dispatch returned {resp.status_code}"}), 502
+    except Exception as exc:
+        print(f"[{tag or mode}] Dispatch error: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.route("/trigger/weekly", methods=["POST", "GET"])
+def trigger_weekly():
+    """Saturday recap — RELAYS to GitHub Actions. Takes priority over /trigger/<mode>.
+
+    🔴 Why this exists (Aug 15 2026). `run_weekly_recap` opens with
+    `run_morning(config, now_et)` — "Saturday: run crypto morning picks, then
+    send a compact weekly recap" — so the weekly trigger was running the FULL
+    morning pipeline (screener + Claude + personalised send) locally on Render
+    via the generic /trigger/<mode> subprocess path. The weekday morning trigger
+    was converted to a relay in Jul 2026 for exactly this reason; the Saturday
+    path was never converted and kept spawning on Render.
+
+    Measured on Sat 2026-08-15: the run generated and delivered GLD + SLV, but
+    set ZERO auto alerts for either real user — while the identical code produces
+    `GLD stop@381.41` and `SLV invalidation@49.71` when run anywhere else. The
+    per-ticker `except` in _auto_set_pick_alerts logged and continued, so the run
+    "succeeded". Weekday mornings, which run on GH Actions, alert correctly.
+    """
+    secret   = os.environ.get("CRON_SECRET", "")
+    provided = request.args.get("secret", "") or (request.get_json(silent=True) or {}).get("secret", "")
+    if not secret or not hmac.compare_digest(str(provided), str(secret)):
+        return jsonify({"error": "unauthorized"}), 403
+
+    force = request.args.get("force", "").lower() in ("1", "true")
+    if not force:
+        try:
+            import pytz as _tz
+            from datetime import datetime as _dt
+            from config_manager import get_config as _gcfg
+            _last  = _gcfg().get("cron_last_weekly", "")
+            _today = _dt.now(_tz.timezone("America/New_York")).date().isoformat()
+            if _last and _last[:10] >= _today:
+                print(f"[trigger_weekly] Already ran today ({_last[:16]}) — skipping.")
+                return jsonify({"ok": True, "skipped": True, "reason": "already ran today"}), 200
+        except Exception as _e:
+            print(f"[trigger_weekly] Duplicate check failed (non-critical): {_e}")
+
+    return _relay_to_github("weekly", force=force, tag="trigger_weekly")
+
+
 @app.route("/trigger/prescreener", methods=["POST", "GET"])
 def trigger_prescreener():
     """
