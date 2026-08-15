@@ -24,6 +24,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from formatters import _p, _upside, _entry_window, _stars, format_daily_message
+import formatters   # module handle for tests that assert on ordering/source
 
 
 # ── Minimal picks fixture ─────────────────────────────────────────────────────
@@ -208,7 +209,9 @@ class TestFormatDailyMessage:
         duplicate LT card."""
         result = format_daily_message(_picks(st_tickers=("VERX",), lt_tickers=("VERX",)), _cfg())
         assert result.count("also a long-term hold") == 1   # noted once in the ST card
-        assert "shown above" in result                       # LT section cross-refs, no dup card
+        # LT renders FIRST as of Aug 15 2026, so the full card sits BELOW this
+        # cross-reference. The pointer flipped with the order.
+        assert "shown below" in result and "shown above" not in result
         assert "VERX" in result
 
     def test_distinct_st_lt_not_collapsed(self):
@@ -589,3 +592,65 @@ class TestEntryWindowIsOneDefinition:
         src = __import__("inspect").getsource(agent._build_premarket_gap_warnings)
         assert "gap_pct >= 3.0" not in src, "flat 3% threshold is back"
         assert "_window_pct" in src, "the gap check must use each pick's own window"
+
+
+class TestLongTermLeadsShortTerm:
+    """Owner's call, Aug 15 2026: long-term stocks render BEFORE short-term.
+
+    Order is what a reader sees first, so it is a product decision, not
+    cosmetics — and it has to hold on every pick surface or the app tells the
+    same user two different stories about what matters most.
+    """
+
+    _E = {"short_term": [], "long_term": []}
+
+    def _msg(self, picks):
+        m = formatters.format_daily_message(picks, {"chat_id": "1"})
+        return m[0] if isinstance(m, (list, tuple)) else m
+
+    def _order(self, msg):
+        import re
+        return [re.sub(r"<[^>]+>", "", l).strip()
+                for l in msg.splitlines() if re.search(r"<b>(STOCKS|CRYPTO|ETFs|COMMODITIES)", l)]
+
+    def test_long_term_section_comes_first(self):
+        msg = self._msg({
+            "stocks": {"short_term": [{"ticker": "STK", "entry_price": 100,
+                                       "target_price": 110, "stop_loss": 95, "conviction": 4}],
+                       "long_term": [{"ticker": "LTK", "entry_price": 50,
+                                      "target_price": 80, "conviction": 5}],
+                       "near_misses": {}},
+            "crypto": dict(self._E), "etfs": dict(self._E),
+            "commodities": dict(self._E), "options_plays": []})
+        order = self._order(msg)
+        assert "LONG TERM" in order[0] and "SHORT TERM" in order[1], order
+
+    def test_the_collapsed_quiet_line_follows_the_same_order(self):
+        msg = self._msg({
+            "stocks": {**self._E, "near_misses": {}}, "crypto": dict(self._E),
+            "etfs": dict(self._E), "commodities": dict(self._E), "options_plays": []})
+        quiet = [l for l in msg.splitlines() if "no setups" in l][0]
+        assert quiet.index("Stocks LT") < quiet.index("Stocks ST"), quiet
+
+    def test_the_duplicate_pointer_flipped_with_the_order(self):
+        """🔴 The pointer HAD to flip. A ticker that is both renders its full
+        card in SHORT TERM, which now sits BELOW — "shown above" would send the
+        reader the wrong way."""
+        dup = {"ticker": "KMI", "entry_price": 32, "target_price": 38,
+               "stop_loss": 31, "conviction": 4}
+        msg = self._msg({
+            "stocks": {"short_term": [dup], "long_term": [{**dup, "target_price": 45}],
+                       "near_misses": {}},
+            "crypto": dict(self._E), "etfs": dict(self._E),
+            "commodities": dict(self._E), "options_plays": []})
+        assert "shown below" in msg and "shown above" not in msg
+
+    def test_every_pick_surface_agrees(self):
+        """format_confirmation_message and format_eod_full_summary must not
+        drift back to short-term-first."""
+        import inspect
+        for fn in (formatters.format_confirmation_message,
+                   formatters.format_eod_full_summary):
+            src = inspect.getsource(fn)
+            assert src.index("🏦 Long Term") < src.index("📈 Short Term"), \
+                f"{fn.__name__} still renders short-term first"

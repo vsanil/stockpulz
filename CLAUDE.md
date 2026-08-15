@@ -290,6 +290,16 @@ Rules:
 - **Only true silence collapses.** A section with picks renders in full; a section with NEAR-MISSES still gets its own header + list (that's real content). A section hidden by user preference (`show_crypto=False`) is not listed as quiet — it isn't theirs. Market-closed says "market closed" once instead of per section.
 - **Rule: don't re-add a per-section "no setup today" header.** The `_quiet` list in `format_daily_message` is the one place absence is reported. Guard: `TestEmptySectionsCollapse`.
 
+### Section order: LONG TERM leads SHORT TERM (owner's call, Aug 15 2026)
+- Order is what a reader sees first, so it is a product decision, not cosmetics. Applied to **all four pick surfaces** — `format_daily_message`, `format_confirmation_message`, `format_eod_full_summary`, and both mini-app flatten sites. **Rule: change one and change all four**, or the app tells the same user two different stories about what matters most.
+- **🔴 The ST/LT duplicate pointer had to flip with it.** A ticker that is both renders its full card ONCE in SHORT TERM with an "also a long-term hold" note; the LT section carries a stub. That stub said *"shown above"* — with LT now first the card is BELOW, so it now reads **"shown below"**. A reordering that leaves a cross-reference pointing the wrong way is worse than no reordering.
+- Guard: `TestLongTermLeadsShortTerm` — section order, the collapsed quiet line's order, the flipped pointer, and an AST-free source check that confirmation + EOD have not drifted back. 4 of 4 verified failing against the reverted code.
+
+### Which sections appear EVERY day (asked Aug 15 — the answer is "no")
+- A section renders in full **only when it has picks**. Stocks ST/LT additionally render when they have NEAR-MISSES worth reading (own header + list). Everything else collapses into ONE line: `📭 no setups today: 🏦 Stocks LT · 📈 Stocks ST · 🪙 Crypto · 📦 ETFs · 🛢 Commodities`.
+- **Three things are never listed as quiet**, and the distinction is deliberate: a section hidden by the user's own preference (it isn't theirs), a market-closed day (says "market closed" once), and **OPTIONS while withheld** — "no setups today" is a claim that we LOOKED and found nothing, and with an empty signal we cannot look.
+- So on a thin day the message is one pick plus one absence line, not five headers announcing nothing.
+
 ### Daily message shows `plain_english`, NOT `thesis` (Aug 8)
 - The stock prompt asks for **`plain_english`: "one sentence (max 20 words) for a complete beginner — what this company does and why you're buying now. No jargon."** It was generated on every pick, stored, and **never rendered** — `grep plain_english formatters.py` returned 0. The raw `thesis` went out instead, leaking internal metric names into the daily message every morning: `three_white_soldiers`, `volume_ratio 2.02`, `P/C=0.06`, `OBV positive`.
 - `formatters._summary(pick)` = `plain_english or thesis` — the ONE resolver, used by all five row builders (ST, LT, crypto, ETF, commodity). The fallback matters: crypto/ETF picks and anything cached from before the field don't carry it.

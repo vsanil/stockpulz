@@ -3965,8 +3965,9 @@ let _buyposCloseToken = 0;
 function _lookupPickLevels(sym) {
   if (!picksCache) return {};
   const sections = [
-    ...(picksCache.stocks?.short_term || []),
+    // LONG TERM leads — same order as the morning message (Aug 15 2026).
     ...(picksCache.stocks?.long_term  || []),
+    ...(picksCache.stocks?.short_term || []),
     ...(picksCache.crypto?.short_term || []),
     ...(picksCache.crypto?.long_term  || []),
     ...(picksCache.etfs?.short_term   || []),
@@ -4668,8 +4669,9 @@ async function renderHistoryPicks() {
   dates.forEach(date => {
     const dayPicks = historyPicksCache[date] || {};
     const allP = [
-      ...(dayPicks.stocks?.short_term || []).map(p => ({...p, _type:'stock',  _tf:'ST', _sym: p.ticker || ''})),
+      // LONG TERM leads — same order as the morning message (Aug 15 2026).
       ...(dayPicks.stocks?.long_term  || []).map(p => ({...p, _type:'stock',  _tf:'LT', _sym: p.ticker || ''})),
+      ...(dayPicks.stocks?.short_term || []).map(p => ({...p, _type:'stock',  _tf:'ST', _sym: p.ticker || ''})),
       ...(dayPicks.crypto?.short_term || []).map(p => ({...p, _type:'crypto', _tf:'ST', _sym: p.symbol || p.ticker || ''})),
       ...(dayPicks.crypto?.long_term  || []).map(p => ({...p, _type:'crypto', _tf:'LT', _sym: p.symbol || p.ticker || ''})),
       ...(dayPicks.etfs?.short_term   || []).map(p => ({...p, _type:'etf',   _tf:'ST', _sym: p.ticker || ''})),
