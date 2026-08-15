@@ -207,8 +207,15 @@ def p_options_strike():
     from options_flow import get_options_signal
     s = get_options_signal("NVDA")
     strike = s.get("nearest_otm_call")
-    return strike is not None, (f"NVDA strike={strike} exp={s.get('nearest_call_expiry')} "
-                                f"src={s.get('source')}")
+    # 🔴 Report the WHOLE signal, not just the strike. The Aug 15 CI run showed
+    # source="none" — meaning BOTH Polygon and yfinance returned nothing, so the
+    # entire options signal was the empty default, not merely a missing strike.
+    # A probe that only checked the strike would have called that "no strike"
+    # and hidden that put_call_ratio/sweep/unusual were dead too.
+    return strike is not None, (f"strike={strike} src={s.get('source')} "
+                                f"p/c={s.get('put_call_ratio')} "
+                                f"sweep={s.get('sweep_detected')} "
+                                f"unusual={s.get('unusual')}")
 
 
 # name, probe, what it feeds, test-grep needles

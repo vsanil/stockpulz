@@ -29,7 +29,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Probe every external input (READ-ONLY — no sends, no writes)
         env:
-          GITHUB_TOKEN:       ${{ secrets.GIST_TOKEN }}
+          GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
           GIST_ID:            ${{ secrets.GIST_ID }}
           ALPACA_KEY_ID:      ${{ secrets.ALPACA_KEY_ID }}
           ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
