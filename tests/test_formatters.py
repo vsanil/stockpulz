@@ -654,3 +654,72 @@ class TestLongTermLeadsShortTerm:
             src = inspect.getsource(fn)
             assert src.index("🏦 Long Term") < src.index("📈 Short Term"), \
                 f"{fn.__name__} still renders short-term first"
+
+
+class TestMoneyIsNotFormattedLikeAPrice:
+    """🔴 Live Aug 15 2026: the morning message read `risk $0.9600/share` on a
+    stock where `$0.96` was meant.
+
+    `_p()` is magnitude-keyed for PRICES — it drops to 4+ decimals below $1 so
+    sub-penny crypto renders honestly. A risk-per-share is MONEY, and money is
+    two decimals.
+    """
+
+    def test_dollar_amounts_use_two_decimals(self):
+        assert formatters._money(0.96) == "0.96"
+        assert formatters._money(0.77) == "0.77"
+        assert formatters._money(12.5) == "12.50"
+
+    def test_large_amounts_are_grouped(self):
+        assert formatters._money(1234.5) == "1,234.50"
+
+    def test_a_real_sub_cent_amount_never_renders_as_zero(self):
+        """A sub-penny coin's per-unit risk genuinely is a fraction of a cent.
+        Showing it as $0.00 is the same class of lie _is_pos guards against."""
+        assert formatters._money(0.0000012) not in ("0.00", "0")
+        assert float(formatters._money(0.0000012)) > 0
+
+    def test_none_and_nan_do_not_render_as_a_number(self):
+        for bad in (None, float("nan"), float("inf"), "abc"):
+            assert formatters._money(bad) == "—"
+
+    def test_the_rendered_risk_line_matches(self):
+        import re
+        out = re.sub(r"<[^>]+>", "", formatters._entry_window(entry=32.09, stop=31.13))
+        assert "risk $0.96/share" in out, out
+        assert "0.9600" not in out
+
+    def test_price_formatting_is_untouched(self):
+        """_p() must keep its sub-dollar precision — it is still the PRICE
+        formatter, and the skip-above level in the same line depends on it."""
+        assert formatters._p(0.3337) == "0.3337"
+        assert formatters._p(0.00002400) == "0.00002400"
+
+
+class TestSubPennyRiskLineNoLongerVanishes:
+    """The risk was pre-rounded to cents, so on a sub-penny coin it became 0.00,
+    failed the `> 0` guard, and the ENTIRE risk + position-sizing string was
+    dropped — silently, for exactly the picks where sizing matters most."""
+
+    def _txt(self, **kw):
+        import re, html
+        return html.unescape(re.sub(r"<[^>]+>", "", formatters._entry_window(**kw)))
+
+    def test_a_sub_penny_coin_still_shows_its_risk(self):
+        out = self._txt(entry=0.00002400, stop=0.00002100, is_crypto=True)
+        assert "risk $" in out and "$0.00/share" not in out
+
+    def test_position_sizing_survives_too(self):
+        out = self._txt(entry=0.00002400, stop=0.00002100, is_crypto=True, budget=50)
+        assert "risk at stop" in out
+
+    def test_large_unit_counts_are_readable_not_scientific(self):
+        """Only visible once the line stopped vanishing — it would have shipped
+        as a new display bug: "2.083e+06 units"."""
+        out = self._txt(entry=0.00002400, stop=0.00002100, is_crypto=True, budget=50)
+        assert "e+" not in out, out
+        assert "2,083,333 units" in out, out
+
+    def test_ordinary_stock_sizing_is_unchanged(self):
+        out = self._txt(entry=32.09, stop=31.13, budget=200)
+        assert "6 shares" in out and "$5.76 risk at stop" in out
