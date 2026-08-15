@@ -63,6 +63,17 @@ def _get_polygon_options(ticker: str) -> dict | None:
     max_single_vol = 0
     expiry_dates: set[str] = set()   # track distinct expiry dates for expiries_loaded
 
+    # 🔴 These four used to be produced ONLY by the yfinance fallback, so with
+    # POLYGON_API_KEY set (i.e. in production) they were ALWAYS None. The prompt
+    # tells the model "NEVER invent a strike — if nearest_otm_call is absent,
+    # describe the trade directionally", so it obeyed and EVERY options play
+    # shipped with strike: null, expiry: null. The model was correct; it was
+    # being starved. Polygon already returns everything needed here — the loop
+    # below simply never collected it.
+    underlying_price: float | None = None
+    otm_calls: dict[str, list[float]] = {}   # {expiry: [strike, ...]} calls WITH volume
+    strike_oi: dict[float, int] = {}         # aggregate OI per strike, for the gamma pin
+
     url    = f"{_POLYGON_BASE}/v3/snapshot/options/{ticker.upper()}"
     params = {
         "expiration_date.gte": exp_min,
@@ -95,9 +106,24 @@ def _get_polygon_options(ticker: str) -> dict | None:
             if exp_date:
                 expiry_dates.add(exp_date)
 
+            if underlying_price is None:
+                _up = (contract.get("underlying_asset") or {}).get("price")
+                if isinstance(_up, (int, float)) and not isinstance(_up, bool) and _up > 0:
+                    underlying_price = float(_up)
+
+            _strike = details.get("strike_price")
+            _strike = (float(_strike)
+                       if isinstance(_strike, (int, float)) and not isinstance(_strike, bool)
+                       else None)
+            if _strike is not None and _strike > 0:
+                strike_oi[_strike] = strike_oi.get(_strike, 0) + oi
+
             if ctype == "call":
                 total_call_vol += vol
                 total_call_oi  += oi
+                # Only contracts that actually TRADED are citable as a strike.
+                if _strike is not None and _strike > 0 and vol > 0 and exp_date:
+                    otm_calls.setdefault(exp_date, []).append(_strike)
             elif ctype == "put":
                 total_put_vol += vol
                 total_put_oi  += oi
@@ -117,14 +143,36 @@ def _get_polygon_options(ticker: str) -> dict | None:
     if total_call_vol + total_put_vol == 0:
         return None
 
+    # Nearest OTM call: earliest expiry that has a traded strike above spot, then
+    # the lowest such strike. Same semantics as the yfinance path, which walks
+    # expiries in order and takes the first one with OTM calls.
+    nearest_otm_call = nearest_call_expiry = None
+    if underlying_price and underlying_price > 0:
+        for exp in sorted(otm_calls):
+            above = [s for s in otm_calls[exp] if s > underlying_price]
+            if above:
+                nearest_otm_call, nearest_call_expiry = min(above), exp
+                break
+
+    gamma_pin_strike = gamma_pin_dist_pct = None
+    if strike_oi and underlying_price and underlying_price > 0:
+        gamma_pin_strike = max(strike_oi, key=strike_oi.__getitem__)
+        gamma_pin_dist_pct = round(
+            abs(gamma_pin_strike - underlying_price) / underlying_price * 100, 2)
+
     return {
-        "call_volume":     total_call_vol,
-        "put_volume":      total_put_vol,
-        "call_oi":         total_call_oi,
-        "put_oi":          total_put_oi,
-        "max_single_vol":  max_single_vol,
-        "expiries_loaded": len(expiry_dates),   # accurate count, not default 1
-        "source":          "polygon",
+        "call_volume":         total_call_vol,
+        "put_volume":          total_put_vol,
+        "call_oi":             total_call_oi,
+        "put_oi":              total_put_oi,
+        "max_single_vol":      max_single_vol,
+        "gamma_pin_strike":    gamma_pin_strike,
+        "gamma_pin_dist_pct":  gamma_pin_dist_pct,
+        "nearest_otm_call":    nearest_otm_call,
+        "nearest_call_expiry": nearest_call_expiry,
+        "current_price":       underlying_price,
+        "expiries_loaded":     len(expiry_dates),   # accurate count, not default 1
+        "source":              "polygon",
     }
 
 
@@ -228,6 +276,19 @@ def _get_yfinance_options(ticker: str) -> dict | None:
                 nearest_otm_call    = float(otm_calls.iloc[0]["strike"])
                 nearest_call_expiry = exp   # ISO date string e.g. "2025-05-16"
                 break
+
+        # 🔴 Diagnostic, not cosmetic. When this is None the prompt's documented
+        # fallback fires ("never invent a strike — describe directionally"), so
+        # EVERY options play ships with strike: null / expiry: null and the model
+        # looks like it is being vague when it is actually being starved. That is
+        # exactly what production has been doing, and the cause is not visible
+        # from the outside. Name which branch failed.
+        if nearest_otm_call is None:
+            why = ("no underlying price" if not (current_price and current_price > 0)
+                   else f"no traded OTM call above {current_price} in "
+                        f"{len(fetched_chains)} expiry chain(s)")
+            print(f"⚠️  [options_flow] {ticker}: nearest_otm_call unavailable ({why}) "
+                  f"— any options play for this ticker will ship WITHOUT a strike.")
 
         return {
             "call_volume":         total_call_vol,

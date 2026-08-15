@@ -409,12 +409,30 @@ def _build_commodity_candidates() -> list[dict]:
     # yf.download with multiple tickers returns a MultiIndex df; single ticker
     # returns a flat df.  Handle both.
     def _ticker_df(raw, ticker: str):
+        """Pull one ticker's Close/Volume, whichever way yfinance nested the columns.
+
+        🔴 This hardcoded `level=1`, which is the layout you get WITHOUT
+        group_by. `yf.download(..., group_by="ticker")` returns (ticker, field)
+        — ticker at level 0 — so every lookup raised KeyError and was swallowed
+        into `return None`, then `continue`. Result: 0 candidates, on every run,
+        with NO log line of any kind, and the commodities section silently empty.
+        The other three group_by="ticker" call sites in this repo (etf_screener,
+        market_regime, screener) all correctly read level 0.
+
+        Detect which level holds the ticker rather than assuming, so a future
+        yfinance layout change degrades to a loud zero rather than a silent one.
+        """
         if hasattr(raw.columns, "levels"):
-            # MultiIndex: (field, ticker)
-            try:
-                return raw.xs(ticker, axis=1, level=1)[["Close", "Volume"]]
-            except KeyError:
-                return None
+            for level in (0, 1):
+                try:
+                    if ticker not in set(raw.columns.get_level_values(level)):
+                        continue
+                    df = raw.xs(ticker, axis=1, level=level)
+                except (KeyError, IndexError):
+                    continue
+                if {"Close", "Volume"}.issubset(df.columns):
+                    return df[["Close", "Volume"]]
+            return None
         # Single-ticker fallback (shouldn't happen with 7 tickers but be safe)
         return raw[["Close", "Volume"]] if ticker == tickers[0] else None
 
@@ -464,7 +482,22 @@ def _build_commodity_candidates() -> list[dict]:
         except Exception as exc:
             print(f"[ai_analyzer] Commodity candidate error for {ticker}: {exc}")
 
-    print(f"[ai_analyzer] Built {len(candidates)} commodity candidates.")
+    # 🔴 A zero build must be LOUD. The docstring above is explicit that without
+    # these signals the model "correctly returns []", so a starved commodity
+    # section is indistinguishable from a genuinely quiet day — the plain
+    # "Built 0 commodity candidates" line read as benign for at least ten days
+    # while the section was structurally dead. Same lesson as the Nasdaq-100
+    # scrape, which now warns when it contributes nothing.
+    if not candidates:
+        shape = "empty" if getattr(raw, "empty", True) else f"{raw.shape}"
+        lvl0 = (list(raw.columns.get_level_values(0)[:4])
+                if hasattr(raw.columns, "levels") else "flat")
+        print(f"⚠️  [ai_analyzer] Built 0 commodity candidates from {len(tickers)} tickers "
+              f"— the COMMODITIES SECTION WILL BE EMPTY. Download shape={shape}, "
+              f"column level-0 sample={lvl0}. If the download returned data, the "
+              f"per-ticker extraction is failing (see _ticker_df).")
+    else:
+        print(f"[ai_analyzer] Built {len(candidates)} commodity candidates.")
     return candidates
 
 

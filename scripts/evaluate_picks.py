@@ -161,7 +161,16 @@ def record_picks(led: dict, picks: dict, day: str, arm: str | None = None,
                  known: set | None = None) -> int:
     """Append one run's picks. `arm=None` is production; an arm name marks an
     A/B variant, which the report segments separately and NEVER mixes into the
-    headline (same rule as controls)."""
+    headline (same rule as controls).
+
+    SCOPE — `options_plays` is deliberately NOT recorded. Every number in this
+    ledger is produced by replaying daily bars of the instrument, and an option's
+    payoff depends on IV, time decay and the strike — none of which the
+    underlying's bars capture. Scoring an option off its underlying would put a
+    wrong number into the same report as the honest ones, which is worse than
+    the gap. Options are therefore delivered but UNMEASURED; if that is ever to
+    change it needs option price history, not another loop here.
+    """
     rows = led.setdefault("picks", [])
     seen = {_key(r) for r in rows} | (known or set())
     added = 0
