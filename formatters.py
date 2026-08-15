@@ -545,6 +545,37 @@ def format_daily_message(picks: dict, config: dict,
     # near-misses worth reading — still render in full; only silence collapses.
     _quiet: list[str] = []
 
+    # 🔴 LONG TERM leads, SHORT TERM follows (owner's call, Aug 15 2026). The
+    # order is deliberate, not cosmetic — it is what a reader sees first. Keep
+    # every other pick surface in the same order (format_confirmation_message,
+    # format_eod_full_summary, and the mini-app picks tab) or the app tells the
+    # same user two different stories about what matters most.
+    if lt_picks:
+        lines += ["", "🏦 <b>STOCKS — LONG TERM</b>"]
+        for s in lt_picks:
+            lines += [f"<blockquote expandable>{_row_lt(s)}</blockquote>"]
+    elif _lt_hold:
+        # Every long-term pick was also a short-term pick. The full card lives in
+        # SHORT TERM, which now renders BELOW this line — so the pointer had to
+        # flip with the order, or it sends the reader the wrong way.
+        _held = ", ".join(f"<b>{_esc(sym)}</b>" for sym in _lt_hold)
+        lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_held} shown below (also long-term holds)</i>"]
+    elif show_lt:
+        _nm_lt = _near_misses.get("long_term") or []
+        if _nm_lt and not _closed_short:
+            _lt_skip = _closed_short or "no stock cleared the quality bar today"
+            lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
+            lines += ["<i>Near misses — didn't clear the bar:</i>"]
+            for nm in _nm_lt[:NEAR_MISS_SHOW_N]:
+                tk    = nm.get("ticker", "")
+                price = nm.get("current_price")
+                score = nm.get("score", 0)
+                why   = nm.get("near_miss_reason", "close to threshold")
+                p_str = f"  ${price:,.2f}" if price else ""
+                lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}  · <i>{why}</i>"]
+        else:
+            _quiet.append("🏦 Stocks LT")
+
     if st_picks:
         lines += ["", "📈 <b>STOCKS — SHORT TERM</b>"]
         for s in st_picks:
@@ -564,30 +595,6 @@ def format_daily_message(picks: dict, config: dict,
                 lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}  · <i>{why}</i>"]
         else:
             _quiet.append("📈 Stocks ST")
-
-    if lt_picks:
-        lines += ["", "🏦 <b>STOCKS — LONG TERM</b>"]
-        for s in lt_picks:
-            lines += [f"<blockquote expandable>{_row_lt(s)}</blockquote>"]
-    elif _lt_hold:
-        # Every long-term pick was also a short-term pick — shown above with a note.
-        _held = ", ".join(f"<b>{_esc(sym)}</b>" for sym in _lt_hold)
-        lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_held} shown above (also long-term holds)</i>"]
-    elif show_lt:
-        _nm_lt = _near_misses.get("long_term") or []
-        if _nm_lt and not _closed_short:
-            _lt_skip = _closed_short or "no stock cleared the quality bar today"
-            lines += ["", f"🏦 <b>STOCKS — LONG TERM</b>  <i>· {_lt_skip}</i>"]
-            lines += ["<i>Near misses — didn't clear the bar:</i>"]
-            for nm in _nm_lt[:NEAR_MISS_SHOW_N]:
-                tk    = nm.get("ticker", "")
-                price = nm.get("current_price")
-                score = nm.get("score", 0)
-                why   = nm.get("near_miss_reason", "close to threshold")
-                p_str = f"  ${price:,.2f}" if price else ""
-                lines += [f"  <code>{tk}</code>{p_str}  score {score:.0f}  · <i>{why}</i>"]
-        else:
-            _quiet.append("🏦 Stocks LT")
 
     if cst_picks:
         lines += ["", "🪙 <b>CRYPTO</b>  <i>· high risk</i>"]
@@ -799,14 +806,15 @@ def format_confirmation_message(picks: dict, current_prices: dict,
 
     lines = [f"<u><b>📊 Live Prices — {now}</b></u>"]
 
-    if st:
-        lines += ["", "<b>📈 Short Term</b>"]
-        for s in st:
-            lines.append(price_line(s.get("ticker", ""), s.get("entry_price"), s.get("target_price"), s.get("stop_loss")))
+    # LONG TERM leads here too — same order as the morning message.
     if lt:
         lines += ["", "<b>🏦 Long Term</b>"]
         for s in lt:
             lines.append(price_line(s.get("ticker", ""), s.get("entry_price"), s.get("target_price"), None))
+    if st:
+        lines += ["", "<b>📈 Short Term</b>"]
+        for s in st:
+            lines.append(price_line(s.get("ticker", ""), s.get("entry_price"), s.get("target_price"), s.get("stop_loss")))
     if cst:
         lines += ["", "<b>🪙 Crypto</b>"]
         for c in cst:
@@ -984,6 +992,18 @@ def format_eod_full_summary(
         txt = f"  {emoji} {star}<b>{symbol}</b>  <code>${_p(price)}</code>  {chg}{badge_str}{lbl}"
         return pct, txt
 
+    # ── Long-term stocks ──────────────────────────────────────────────────────
+    # LONG TERM leads here too — same order as the morning message.
+    lt_pcts = []
+    if lt:
+        lines.append("<b>🏦 Long Term</b>")
+        for s in lt:
+            pct, row = _row(s.get("ticker", ""), s.get("entry_price"),
+                            s.get("target_price"), None, "hold")
+            lines.append(row)
+            if pct is not None:
+                lt_pcts.append(pct)
+
     # ── Short-term stocks ─────────────────────────────────────────────────────
     st_pcts = []
     if st:
@@ -994,17 +1014,6 @@ def format_eod_full_summary(
             lines.append(row)
             if pct is not None:
                 st_pcts.append(pct)
-
-    # ── Long-term stocks ──────────────────────────────────────────────────────
-    lt_pcts = []
-    if lt:
-        lines.append("<b>🏦 Long Term</b>")
-        for s in lt:
-            pct, row = _row(s.get("ticker", ""), s.get("entry_price"),
-                            s.get("target_price"), None, "hold")
-            lines.append(row)
-            if pct is not None:
-                lt_pcts.append(pct)
 
     # ── Crypto ────────────────────────────────────────────────────────────────
     if cst or clt:
