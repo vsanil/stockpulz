@@ -54,6 +54,34 @@ def _p(price) -> str:
     return f"{f:.8f}"
 
 
+def _money(amount) -> str:
+    """Format a DOLLAR AMOUNT — risk, P&L, a total. NOT a price.
+
+    🔴 `_p()` is magnitude-keyed for PRICES: it drops to 4+ decimals below $1 so
+    sub-penny crypto renders honestly. Applied to MONEY that produced
+    `risk $0.9600/share` on a stock where `$0.96` was meant (live Aug 15 2026).
+
+    Two decimals is the money default. Below a cent we keep going rather than
+    rounding to `$0.00`, because a sub-penny coin's per-unit risk genuinely IS a
+    fraction of a cent — and showing a real, non-zero risk as zero is the same
+    class of lie as `_is_pos`/`plausible_price` were built to prevent.
+    """
+    if amount is None:
+        return "—"
+    try:
+        f = float(amount)
+    except (TypeError, ValueError):
+        return "—"
+    if f != f or f in (float("inf"), float("-inf")):      # NaN / inf
+        return "—"
+    a = abs(f)
+    if a >= 0.01 or a == 0:
+        return f"{f:,.2f}"
+    if a >= 0.0001:
+        return f"{f:.4f}"
+    return f"{f:.8f}"
+
+
 def _upside(entry, target) -> str:
     """Return (+X.X%) or (-X.X%) string."""
     try:
@@ -140,7 +168,12 @@ def _entry_window(entry, stop=None, budget=None,
             budget can't afford a single share."""
             if is_crypto:
                 qty = budget_f / e
-                return qty, f"{qty:.4g} unit{'s' if qty != 1 else ''}"
+                # `%g` alone renders a sub-penny coin's quantity in scientific
+                # notation — "2.083e+06 units" — which is unreadable in a chat
+                # message. Only visible since the risk line stopped vanishing for
+                # those coins, so it would have shipped as a new display bug.
+                qty_s = f"{qty:,.0f}" if qty >= 1000 else f"{qty:.4g}"
+                return qty, f"{qty_s} unit{'s' if qty != 1 else ''}"
             whole = int(budget_f / e)
             if whole < 1:
                 return None
@@ -161,17 +194,20 @@ def _entry_window(entry, stop=None, budget=None,
             # Short-term: always show risk/share; add position size if budget set
             risk_str = ""
             if stop:
-                risk_per_share = round(e - float(stop), 2)
+                # NOT pre-rounded to cents: on a sub-penny coin that rounds to
+                # 0.00, fails the `> 0` guard below, and silently drops the whole
+                # risk + position-sizing line. _money() decides the precision.
+                risk_per_share = e - float(stop)
                 if risk_per_share > 0:
-                    risk_str = f"  ·  risk <b>${_p(risk_per_share)}/share</b>"
+                    risk_str = f"  ·  risk <b>${_money(risk_per_share)}/share</b>"
                     if budget:
                         q = _qty_label(float(budget))
                         if q:
                             qty, qty_str = q
-                            total_risk = round(qty * risk_per_share, 2)
+                            total_risk = qty * risk_per_share
                             risk_str = (
                                 f"  ·  <code>${int(budget)}</code> → {qty_str}, "
-                                f"${_p(total_risk)} risk at stop"
+                                f"${_money(total_risk)} risk at stop"
                             )
                         else:
                             risk_str += (f"  ·  <code>${int(budget)}</code> &lt; 1 share "
