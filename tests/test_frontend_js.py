@@ -264,3 +264,58 @@ class TestPickCardActionRows:
         """It displays STATE (amber when an alert exists), so hiding it behind a
         disclosure would conceal whether the pick is already alerted."""
         assert "_pickAlertBtnHtml(sym" in self._src
+
+
+class TestApiIsCalledPositionally:
+    """🔴 The usage counter never sent a single request (2026-08-08 → 08-15).
+
+    `api()` is POSITIONAL — api(path, method, body). One call site was written
+    fetch-style, `api(path, {method:'POST', body:'…'})`, so `method` became an
+    object that stringifies to "[object Object]" — an invalid HTTP method — and
+    fetch threw directly into the site's own `.catch(() => {})`.
+
+    Nothing surfaced: telemetry is designed to fail silently, so the endpoint,
+    the auth, the mutator and the deployed page were all correct and the file it
+    writes simply never appeared. The feature it existed to inform (which
+    tabs/sheets are worth keeping) then had to be decided without evidence.
+    """
+
+    _RE = r"""api\(\s*(?:'[^']*'|"[^"]*"|`[^`]*`)\s*,\s*\{"""
+
+    @property
+    def _src(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "miniapp", "index.html")) as f:
+            return f.read()
+
+    def test_no_call_site_passes_an_options_object_as_the_method(self):
+        import re
+        src = self._src
+        bad = []
+        for m in re.finditer(self._RE, src, re.S):
+            line = src.count("\n", 0, m.start()) + 1
+            bad.append(f"index.html:{line}: {m.group(0).strip()}")
+        assert not bad, (
+            "api() takes (path, method, body) positionally. These pass an object "
+            "as `method`, which fetch rejects and the caller's .catch() hides:\n  "
+            + "\n  ".join(bad))
+
+    def test_the_scan_can_actually_detect_an_offender(self):
+        """A guard that cannot fail is not a guard — this reintroduces the exact
+        broken shape and asserts the regex catches it."""
+        import re
+        offender = """api('/api/miniapp/usage', {method: 'POST', body: '{}'})"""
+        assert re.search(self._RE, offender, re.S), "the scan would miss the real bug"
+
+    def test_the_usage_flush_now_posts_positionally(self):
+        assert "api('/api/miniapp/usage', 'POST', {counts: u})" in self._src
+
+    def test_every_post_call_site_uses_a_string_method(self):
+        import re
+        src = self._src
+        calls = re.findall(r"api\(\s*(?:'[^']*'|\"[^\"]*\")\s*,\s*([^,)\s][^,)]*)", src)
+        for arg in calls:
+            arg = arg.strip()
+            assert arg.startswith(("'", '"', "`")), \
+                f"api() second argument is not a method string: {arg[:60]}"

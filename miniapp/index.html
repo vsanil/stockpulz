@@ -3083,7 +3083,14 @@ function _flushUsage() {
     localStorage.removeItem(_USAGE_LS_KEY);   // clear FIRST: a failed send loses
   } catch (e) { return; }                     // a few counts, a retry loop spams
   try {
-    api('/api/miniapp/usage', {method: 'POST', body: JSON.stringify({counts: u})})
+    // 🔴 api() is POSITIONAL — api(path, method, body). This was written
+    // fetch-style, `api(path, {method:'POST', body:'...'})`, so `method` became
+    // an OBJECT that stringifies to "[object Object]" — an invalid HTTP method —
+    // and fetch threw straight into the .catch() below. The counter therefore
+    // never sent a single request from the day it shipped (2026-08-08) to
+    // 2026-08-15, while usage_counts.json stayed absent and the feature it was
+    // built to inform (which tabs/sheets to keep) had to be decided on taste.
+    api('/api/miniapp/usage', 'POST', {counts: u})
       .catch(() => {});                       // fire and forget, never surfaced
   } catch (e) { /* ignore */ }
 }
