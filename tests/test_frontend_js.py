@@ -192,3 +192,75 @@ class TestIntegration:
                 f"JS check failures in miniapp/index.html "
                 f"({len(errors)} error(s)):\n{detail}"
             )
+
+
+class TestPickCardActionRows:
+    """🔴 The pick card's real-estate layout (Aug 15 2026).
+
+    Measured against the deployed CSS at a 375px viewport: the card was 430px
+    with THREE action rows, because `.btn-buy`'s `min-width:150px` could not fit
+    beside Chart + Backtest + Alert and wrapped to a full-width row of its own.
+
+    Moving Chart and Backtest into the Analysis disclosure frees that wrap so
+    Alert and Buy share ONE line: 430px -> 383px, three rows -> two. 47px per
+    card, ~235px across a 5-pick day.
+
+    The saving comes from ELIMINATING A ROW, not from hiding buttons — pulling
+    items out of a horizontal row without collapsing the row saves nothing.
+    """
+
+    @property
+    def _src(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "miniapp", "index.html")) as f:
+            return f.read()
+
+    def _card_fn(self):
+        """The pick-card template literal only."""
+        s = self._src
+        i = s.index('<div class="pick-actions">', s.index("pick-thesis-toggle"))
+        # from the Analysis toggle through the Paper Trade row
+        start = s.rindex("pick-thesis-toggle", 0, i)
+        end = s.index("btn-paper", i)
+        return s[start - 400:end + 200]
+
+    def test_chart_and_backtest_are_inside_the_analysis_disclosure(self):
+        """Discriminating form: both must appear BEFORE the action row that holds
+        btn-buy. In the old markup they sat INSIDE it, so their index was higher.
+        (Comparing against `pick-thesis-body` alone passed either way — the
+        disclosure precedes the action row in both layouts.)"""
+        s = self._src
+        # `id="buy-` appears only in the card template; "btn-buy" also matches
+        # the CSS rule defined far earlier in the file.
+        buy = s.index('id="buy-')
+        row = s.rindex('<div class="pick-actions"', 0, buy)
+        # `onclick="openChart(` is markup-only; a bare `openChart(` also matches
+        # the function DECLARATION far earlier in the file, which made this pass
+        # against both layouts.
+        assert s.index('onclick="openChart(') < row, "Chart is in the action row — Buy will wrap"
+        assert s.index('onclick="openBacktestSheet(') < row, "Backtest is in the action row"
+
+    def test_the_action_row_holds_only_alert_and_buy(self):
+        """A third button here re-creates the forced wrap and gives the row back."""
+        block = self._card_fn()
+        row = block[block.index('<div class="pick-actions">', block.index("/div>")):]
+        row = row[:row.index("</div>")]
+        assert "btn-buy" in row
+        assert "openChart(" not in row and "openBacktestSheet(" not in row, \
+            "a research button is back in the action row — Buy will wrap again"
+
+    def test_the_min_width_that_makes_them_share_a_row_is_unchanged(self):
+        """150px + Alert (~110px) + 8px gap fits 375px. Raising it re-wraps."""
+        assert "min-width: 150px;" in self._src
+
+    def test_the_disclosure_renders_unconditionally(self):
+        """It now always holds Chart + Backtest, so gating it on a thesis would
+        make them vanish on a pick that has none."""
+        assert "(p.thesis || p.reason || p.theme || p.edge) ? `" not in self._src, \
+            "the toggle is gated on a thesis again — Chart/Backtest vanish without one"
+
+    def test_the_alert_button_is_still_on_the_card(self):
+        """It displays STATE (amber when an alert exists), so hiding it behind a
+        disclosure would conceal whether the pick is already alerted."""
+        assert "_pickAlertBtnHtml(sym" in self._src
