@@ -521,7 +521,12 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.08); border-color: rgba(0,0
 .pick-actions { display: flex; flex-wrap: wrap; gap: 8px; position: relative; z-index: 1; }
 .btn-buy {
   flex: 1; padding: 12px;
-  min-width: 150px;   /* can't fit beside Chart/Backtest/Alert → wraps to its own full-width row */
+  /* 150px + the Alert button (~110px) + an 8px gap ≈ 268px, which fits the
+     ~343px of card width on a 375px viewport — so Alert and Buy share ONE row.
+     Before Chart/Backtest moved into the Analysis disclosure this could not fit
+     and Buy wrapped to a full-width row of its own. Raising this value, or
+     putting another button back in this row, re-creates that wrap. */
+  min-width: 150px;
   border-radius: 12px; border: none;
   background: linear-gradient(135deg, var(--accent) 0%, #5a9bff 50%, var(--green) 140%);
   color: #fff;
@@ -4778,18 +4783,27 @@ function renderPickCard(p, idx = 0) {
       </div>
       <div class="upside-bar"><div class="upside-fill" style="width:${upsidePct}%"></div></div>
       ${conv ? `<div style="margin:6px 0 4px;position:relative;z-index:1"><span class="conv-tag ${convCls}" style="cursor:pointer" onclick="(function(el){const t=el.closest('.pick-card').querySelector('.pick-thesis-toggle');if(t)togglePickThesis(t);})(this)" title="Tap to expand analysis">${convIcon} Conviction ${p.conviction}/5</span></div>` : ''}
-      ${(p.thesis || p.reason || p.theme || p.edge) ? `
-        <button class="pick-thesis-toggle" onclick="togglePickThesis(this)" aria-label="Toggle analysis">
-          <span>Analysis</span>
-          <span class="pick-thesis-chevron">▾</span>
-        </button>
-        <div class="pick-thesis-body">
-          ${p.thesis || p.reason ? `<div class="pick-thesis">${esc(p.thesis || p.reason)}</div>` : ''}
-          ${(p.theme || p.edge) ? `<div class="pick-theme-row">${p.theme ? `<span class="theme-chip">#${p.theme.replace(/[\s\-]+/g,'').replace(/(?:^|\s)\S/g,c=>c.toUpperCase())}</span>` : ''}${p.edge ? `<span class="pick-edge">${p.edge}</span>` : ''}</div>` : ''}
-        </div>` : ''}
+      <!-- Chart + Backtest live INSIDE the Analysis disclosure. They are research,
+           not actions: nothing about them is time-sensitive, and removing them
+           from the action row frees .btn-buy from its forced wrap so Alert and
+           Buy share ONE line. That is the actual saving — three action rows drop
+           to two (~52px per card, ~260px across a 5-pick day). Moving buttons
+           out of a row without collapsing the row would have saved nothing.
+           The toggle now renders UNCONDITIONALLY: it always holds these two, so
+           gating it on a thesis would make them vanish on a pick without one. -->
+      <button class="pick-thesis-toggle" onclick="togglePickThesis(this)" aria-label="Toggle analysis">
+        <span>Analysis</span>
+        <span class="pick-thesis-chevron">▾</span>
+      </button>
+      <div class="pick-thesis-body">
+        ${p.thesis || p.reason ? `<div class="pick-thesis">${esc(p.thesis || p.reason)}</div>` : ''}
+        ${(p.theme || p.edge) ? `<div class="pick-theme-row">${p.theme ? `<span class="theme-chip">#${p.theme.replace(/[\s\-]+/g,'').replace(/(?:^|\s)\S/g,c=>c.toUpperCase())}</span>` : ''}${p.edge ? `<span class="pick-edge">${p.edge}</span>` : ''}</div>` : ''}
+        <div class="pick-actions" style="margin-top:8px">
+          <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
+          <button class="btn-chart-sm" style="color:var(--accent)" onclick="openBacktestSheet('${sym}',${parseFloat(p.entry_price)||0},${parseFloat(p.stop_loss)||0},${parseFloat(p.target_price)||0})">🔁 Backtest</button>
+        </div>
+      </div>
       <div class="pick-actions">
-        <button class="btn-chart-sm" onclick="openChart('${sym}','${p._type}',${parseFloat(p.entry_price)||0},${parseFloat(p.target_price)||0},${parseFloat(p.stop_loss)||0})">📊 Chart</button>
-        <button class="btn-chart-sm" style="color:var(--accent)" onclick="openBacktestSheet('${sym}',${parseFloat(p.entry_price)||0},${parseFloat(p.stop_loss)||0},${parseFloat(p.target_price)||0})">🔁 Backtest</button>
         ${p.entry_price ? _pickAlertBtnHtml(sym, parseFloat(p.entry_price)||0) : ''}
         <button class="btn-buy${isBought ? ' done' : ''}" id="buy-${sym}"
                 onclick="markBought('${sym}','${p._type}','${p._tf}')">
