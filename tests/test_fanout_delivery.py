@@ -226,3 +226,113 @@ class TestCalledButNeverImported:
         agent._check_trade_reminders()
         assert cleared == [("u1", "reminders", [])], \
             "the due reminder was not cleared — it will re-fire tomorrow"
+
+
+class TestOrderSensitiveConversions:
+    """Three paths send MORE THAN ONE message per user, and the order is part of
+    the message: the pre-market gap alerts explain the summary card that follows,
+    and the Friday wrap must arrive before the review nudge before the lesson.
+
+    broadcast_all does NOT guarantee ordering within one user's batch, so these
+    use sequential fan-out PASSES — each pass completes before the next begins.
+    The expensive per-user build runs ONCE, before any pass.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _stubs(self, monkeypatch):
+        self.sent = []
+        monkeypatch.setattr(agent, "broadcast_all",
+                            lambda p: (self.sent.extend(p),
+                                       {x["chat_id"]: True for x in p})[1])
+        monkeypatch.setattr(agent, "_all_recipients", lambda: ["u1", "u2"])
+        for fn in ("send_message", "send_inline_keyboard", "send_photo"):
+            monkeypatch.setattr(agent, fn, lambda *a, **k: True)
+        monkeypatch.setattr(agent, "get_user_config",
+                            lambda uid: {"watchlist": [], "portfolio": {}})
+        monkeypatch.setattr(agent, "_miniapp_btn",
+                            lambda *a, **k: {"text": "x", "callback_data": "y"})
+        monkeypatch.setattr(agent, "_is_quiet_hours", lambda uid: False)
+        monkeypatch.setattr(agent, "_is_alerted", lambda *a, **k: False)
+        monkeypatch.setattr(agent, "_mark_alerted", lambda *a, **k: None)
+        monkeypatch.setattr(agent, "_log_cron_run", lambda *a, **k: None)
+
+    def test_friday_wrap_delivers_wrap_then_nudge_then_lesson(self, monkeypatch):
+        from datetime import date
+        monkeypatch.setattr(agent, "load_user_trade_log", lambda uid: {
+            "open": [], "closed": [
+                {"ticker": "AAPL", "closed_date": date.today().isoformat(),
+                 "return_pct": 5.0, "gain_usd": 50.0}] * 6})
+        monkeypatch.setattr(agent, "_download_prices", lambda t, **k: {})
+        monkeypatch.setattr(agent, "_get_client",
+                            lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+        agent.run_friday_wrap()
+
+        def kind(t):
+            if "Trade Review available" in t:
+                return "nudge"
+            return "lesson" if "week's lesson" in t else "main"
+        order = [kind(p["text"]) for p in self.sent]
+        assert order and set(order) <= {"main", "nudge", "lesson"}
+        # Every main must precede every nudge — that is what a PASS buys.
+        assert order.index("nudge") > max(i for i, k in enumerate(order) if k == "main"), \
+            f"a nudge overtook a wrap: {order}"
+
+    def test_tax_harvest_marks_the_dedup_only_after_the_send(self, monkeypatch):
+        from datetime import date
+        monkeypatch.setattr(agent, "et_today", lambda: date(2026, 11, 15))
+        monkeypatch.setattr(agent, "load_user_trade_log", lambda uid: {
+            "open": [{"ticker": "AAPL", "entry_price": 100.0, "shares": 10}]})
+        monkeypatch.setattr(agent, "_download_prices", lambda t, **k: {"AAPL": 60.0})
+        order = []
+        monkeypatch.setattr(agent, "broadcast_all", lambda p: (
+            order.append("send"), self.sent.extend(p),
+            {x["chat_id"]: True for x in p})[2])
+        monkeypatch.setattr(agent, "_mark_alerted",
+                            lambda *a, **k: order.append("mark"))
+        agent.run_tax_loss_harvest_check()
+        assert len(self.sent) == 2, "both users hold a >$50 loss and must be nudged"
+        assert order.index("send") < order.index("mark"), \
+            "marking before the send suppresses next month's nudge if the send fails"
+
+    def test_close_check_trailing_stops_fan_out(self, monkeypatch):
+        monkeypatch.setattr(agent, "load_picks", lambda: {"stocks": []})
+        monkeypatch.setattr(agent, "get_current_prices", lambda *a, **k: {},
+                            raising=False)
+        monkeypatch.setattr(agent, "_check_trailing_stops",
+                            lambda cp, uid, msg_buffer=None: msg_buffer.append("TRAIL"))
+        agent.run_close_check()
+        assert [p["chat_id"] for p in self.sent] == ["u1", "u2"]
+        assert "TRAIL" in self.sent[0]["text"]
+
+    def test_premarket_sends_movers_before_the_summary(self):
+        """The gap alerts contextualise the summary card, so they go first.
+        Pinned on the source because the two passes are what enforce it —
+        a single combined fan-out would lose the order silently."""
+        import inspect
+        src = inspect.getsource(agent.run_premarket)
+        m, s = src.index('tag="premarket_movers"'), src.index('tag="premarket_summary"')
+        assert m < s, "the summary would arrive before the alerts it explains"
+        # The costly per-ticker yfinance build must run ONCE, before either pass.
+        assert src.index("for uid in _all_recipients()") < m, \
+            "the build must not be re-run per pass"
+
+    def test_the_weekly_alpha_card_stays_serial_and_follows_the_text(self):
+        """broadcast_all speaks sendMessage only, so the card loop stays serial.
+
+        Structural rather than functional: run_weekly_recap opens with
+        run_morning(), so a functional test never reaches the send stage and
+        would skip itself into uselessness. These assertions are chosen so that
+        adding a second, earlier photo loop breaks them.
+        """
+        import inspect
+        src = inspect.getsource(agent.run_weekly_recap)
+        assert src.count("send_photo(") == 1, \
+            "exactly one photo send — a second loop would reorder delivery"
+        loop = "for uid in _carded:"
+        assert loop in src, "the card loop must target only users who got the text"
+        assert src.index('tag="weekly_recap"') < src.index(loop) < src.index("send_photo("), \
+            "the card must not arrive before the recap it illustrates"
+        # _carded is filled inside the builder, i.e. after the paused check,
+        # so a paused user can never be sent a card.
+        assert "_carded.append(uid)" in src
+        assert src.index("if user_cfg.get(\"paused\")") < src.index("_carded.append(uid)")
