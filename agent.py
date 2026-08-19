@@ -846,13 +846,10 @@ def run_morning(config: dict, now_et: datetime):
             regime = get_market_regime()
             week_msg = format_week_ahead(earnings_week, regime)
             if week_msg:
-                for uid in _all_recipients():
-                    try:
-                        user_cfg = {**config, **get_user_config(uid)}
-                        if not user_cfg.get("paused"):
-                            send_message(week_msg, chat_id=uid)
-                    except Exception:
-                        pass
+                def _week_msg(uid):
+                    user_cfg = {**config, **get_user_config(uid)}
+                    return None if user_cfg.get("paused") else week_msg
+                _fanout(_week_msg, tag="week_ahead_block")
         except Exception as exc:
             print(f"[agent] Week-ahead block failed (non-critical): {exc}")
 
@@ -886,6 +883,43 @@ def run_morning(config: dict, now_et: datetime):
 
 
 # ── Trade-close broadcast helper (shared by confirmation + close-check runs) ──
+
+def _fanout(msg_for, recipients=None, tag: str = "broadcast") -> int:
+    """Build every user's message first, then send them ALL concurrently.
+
+    🔴 Why this exists. Delivery was 34 serial `for uid … send_message()` loops.
+    At 2 users that is invisible; at 100 it is ~35s per loop against Telegram's
+    ~30 msg/s cap, and a single 429 mid-loop stalls everyone behind it.
+    broadcast_all() fans out with a 30-way semaphore, so the same 100 users take
+    a few seconds.
+
+    `msg_for(uid)` returns:
+        None / ""  → skip this user (paused, quiet hours, nothing to say)
+        str        → message text
+        dict       → {"text": …, "keyboard": …} for an inline keyboard
+
+    The per-user try/except is preserved deliberately: one user's build failure
+    must never abort delivery for the rest — that rule predates this helper and
+    is why every converted loop keeps its own error line.
+    """
+    outbox: list[dict] = []
+    for uid in (_all_recipients() if recipients is None else recipients):
+        try:
+            m = msg_for(uid)
+            if not m:
+                continue
+            outbox.append({"chat_id": uid, "text": m} if isinstance(m, str)
+                          else {"chat_id": uid, **m})
+        except Exception as exc:
+            print(f"[agent] {tag}: build failed for {uid} (non-critical): {exc}")
+    if not outbox:
+        return 0
+    results = broadcast_all(outbox)
+    failed = [c for c, ok in results.items() if not ok]
+    if failed:
+        print(f"[agent] {tag}: {len(failed)}/{len(outbox)} send(s) failed: {failed[:5]}")
+    return sum(1 for ok in results.values() if ok)
+
 
 def _broadcast_trade_closes(current_prices: dict) -> None:
     """Auto-close disabled — positions must be closed manually by the user."""
@@ -2032,16 +2066,11 @@ def run_vix_check():
         return
     _mark_alerted(dedup_key)
 
-    for uid in _all_recipients():
-        try:
-            cfg = get_user_config(uid)
-            if cfg.get("paused"):
-                continue
-            send_message(msg, chat_id=uid, parse_mode="HTML")
-        except Exception as exc:
-            print(f"[agent] vix_check: send failed for {uid} (non-critical): {exc}")
+    def _vix_msg(uid):
+        return None if get_user_config(uid).get("paused") else msg
+    n = _fanout(_vix_msg, tag="vix_check")
 
-    print(f"[agent] vix_check: sent VIX={vix:.1f} alert to {len(_all_recipients())} users.")
+    print(f"[agent] vix_check: sent VIX={vix:.1f} alert to {n} user(s).")
 
 
 # ── Position News Alerts ──────────────────────────────────────────────────────
@@ -2384,16 +2413,11 @@ def run_monthly_commentary():
         f"<b>Your portfolio:</b> Check /summary for your current positions and exposure."
     )
 
-    for uid in _all_recipients():
-        try:
-            cfg = get_user_config(uid)
-            if cfg.get("paused"):
-                continue
-            send_message(msg, chat_id=uid, parse_mode="HTML")
-        except Exception as exc:
-            print(f"[agent] monthly_commentary: send failed for {uid} (non-critical): {exc}")
+    def _commentary_msg(uid):
+        return None if get_user_config(uid).get("paused") else msg
+    n = _fanout(_commentary_msg, tag="monthly_commentary")
 
-    print(f"[agent] monthly_commentary: sent for {month} {year}.")
+    print(f"[agent] monthly_commentary: sent for {month} {year} to {n} user(s).")
 
 
 # ── Monthly Personal P&L Digest ───────────────────────────────────────────────
