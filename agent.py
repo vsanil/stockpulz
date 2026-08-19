@@ -54,10 +54,16 @@ def _miniapp_url_btn(label: str, path: str, fallback_cb: str) -> dict:
 
 from config_manager import (
     get_config, update_config, save_picks, load_picks, save_weekly_pick,
-    get_dynamic_pick_counts, get_user_config,
+    get_dynamic_pick_counts, get_user_config, update_user_config,
     load_user_trade_log,
     save_screener_cache, load_screener_cache, et_today,
 )
+# 🔴 Both of these were CALLED but never imported — a NameError swallowed by the
+# surrounding catch-all, so the feature silently did nothing. update_user_config
+# meant trade reminders were never cleared (so one re-fired every day, forever)
+# and alerts_sent_count never incremented; _get_client meant run_friday_wrap's
+# AI weekly lesson was never generated. Found by converting the delivery loops.
+from llm_client import _get_client
 from etf_screener import run_etf_screener
 from trade_logger import check_and_close_trades
 from price_alert_manager import check_all_alerts, add_alert
@@ -897,6 +903,15 @@ def _fanout(msg_for, recipients=None, tag: str = "broadcast") -> int:
         None / ""  → skip this user (paused, quiet hours, nothing to say)
         str        → message text
         dict       → {"text": …, "keyboard": …} for an inline keyboard
+        list       → several of the above, for a user who gets N messages
+
+    🔴 Returns the number of USERS reached, never the number of messages sent.
+    broadcast_all() returns {chat_id: ok}, so a user receiving N messages
+    collapses to ONE key — counting messages off that dict would silently
+    under-report. The sends themselves all happen; only the result mapping
+    collapses. Ordering within one user's batch is NOT guaranteed, so only pass
+    a list where the messages are independent (different tickers, say) rather
+    than a sequence the user is meant to read in order.
 
     The per-user try/except is preserved deliberately: one user's build failure
     must never abort delivery for the rest — that rule predates this helper and
@@ -908,8 +923,11 @@ def _fanout(msg_for, recipients=None, tag: str = "broadcast") -> int:
             m = msg_for(uid)
             if not m:
                 continue
-            outbox.append({"chat_id": uid, "text": m} if isinstance(m, str)
-                          else {"chat_id": uid, **m})
+            for one in (m if isinstance(m, list) else [m]):
+                if not one:
+                    continue
+                outbox.append({"chat_id": uid, "text": one} if isinstance(one, str)
+                              else {"chat_id": uid, **one})
         except Exception as exc:
             print(f"[agent] {tag}: build failed for {uid} (non-critical): {exc}")
     if not outbox:
@@ -917,7 +935,7 @@ def _fanout(msg_for, recipients=None, tag: str = "broadcast") -> int:
     results = broadcast_all(outbox)
     failed = [c for c, ok in results.items() if not ok]
     if failed:
-        print(f"[agent] {tag}: {len(failed)}/{len(outbox)} send(s) failed: {failed[:5]}")
+        print(f"[agent] {tag}: {len(failed)} user(s) had a failed send: {failed[:5]}")
     return sum(1 for ok in results.values() if ok)
 
 
@@ -926,8 +944,8 @@ def _broadcast_trade_closes(current_prices: dict) -> None:
     return  # noqa: auto-close removed per user preference
     """Check and close trades for all recipients, sending close alerts + debriefs."""
     _app_url = (os.environ.get("APP_URL") or "").rstrip("/")
-    for uid in _all_recipients():
-        try:
+    def _close_msgs(uid):
+            out = []
             closed = check_and_close_trades(current_prices, uid)
             for trade in closed:
                 ticker  = trade["ticker"]
@@ -971,9 +989,10 @@ def _broadcast_trade_closes(current_prices: dict) -> None:
                 kb_row = [{"text": "✅ Log as Sold", "callback_data": f"sold_pick|{ticker}"}]
                 if _app_url:
                     kb_row.append({"text": "📊 Dashboard", "web_app": {"url": f"{_app_url}/miniapp"}})
-                send_inline_keyboard(close_msg, [kb_row], chat_id=uid)
-        except Exception as exc:
-            print(f"[agent] Trade close check failed for {uid} (non-critical): {exc}")
+                out.append({"text": close_msg, "keyboard": [kb_row]})
+            return out
+
+    _fanout(_close_msgs, tag="trade_closes")
 
 
 # ── Confirmation run ──────────────────────────────────────────────────────────
@@ -1031,27 +1050,27 @@ def run_confirmation():
         print(f"[agent] Price alert check failed (non-critical): {exc}")
 
     # ── Per-user earnings warnings ────────────────────────────────────────────
-    for uid in _all_recipients():
-        try:
-            if get_user_config(uid).get("skip_earnings"):
-                continue
-            from earnings_checker import get_upcoming_earnings
-            log = load_user_trade_log(uid)
-            open_stock_tickers = [
-                t["ticker"] for t in log.get("open", [])
-                if t.get("asset_type") == "stock"
-            ]
-            if open_stock_tickers:
-                upcoming = get_upcoming_earnings(open_stock_tickers, days_ahead=3)
-                for ticker, earnings_date in upcoming.items():
-                    send_message(
-                        f"🗓️ <b>Earnings Warning</b> — <b>{ticker}</b> reports <b>{earnings_date}</b>\n"
-                        f"You have an open position. Earnings can cause sharp moves — "
-                        f"consider closing before the announcement.",
-                        chat_id=uid,
-                    )
-        except Exception as exc:
-            print(f"[agent] Earnings warning check failed for {uid} (non-critical): {exc}")
+    def _earnings_warn_msgs(uid):
+        if get_user_config(uid).get("skip_earnings"):
+            return None
+        from earnings_checker import get_upcoming_earnings
+        log = load_user_trade_log(uid)
+        open_stock_tickers = [
+            t["ticker"] for t in log.get("open", [])
+            if t.get("asset_type") == "stock"
+        ]
+        if not open_stock_tickers:
+            return None
+        upcoming = get_upcoming_earnings(open_stock_tickers, days_ahead=3)
+        # One message per ticker — independent, so fan-out order does not matter.
+        return [
+            f"🗓️ <b>Earnings Warning</b> — <b>{ticker}</b> reports <b>{earnings_date}</b>\n"
+            f"You have an open position. Earnings can cause sharp moves — "
+            f"consider closing before the announcement."
+            for ticker, earnings_date in upcoming.items()
+        ]
+
+    _fanout(_earnings_warn_msgs, tag="earnings_warning")
 
     # ── Watchlist signal alerts ───────────────────────────────────────────────
     # Fire a proactive alert when a watchlisted ticker hits a technical signal
@@ -1065,16 +1084,16 @@ def run_confirmation():
         for s in picks.get("stocks", picks).get("long_term", []):
             pick_symbols.add(s.get("ticker", ""))
 
-        for uid in _all_recipients():
-            try:
+        def _watch_signal_msgs(uid):
+                out = []
                 u_cfg     = get_user_config(uid)
                 if u_cfg.get("paused") or u_cfg.get("skip_watchlist_alerts"):
-                    continue
+                    return None
                 watchlist = u_cfg.get("watchlist", [])
                 # Only scan tickers NOT already in today's picks
                 scan = [t for t in watchlist if t and t not in pick_symbols]
                 if not scan:
-                    continue
+                    return None
                 from price_checker import _SYMBOL_TO_CG_ID as _CG_IDS_WL
                 yf_scan_map = {(f"{t}-USD" if t.upper() in _CG_IDS_WL else t): t for t in scan}
                 hist = yf.download(" ".join(yf_scan_map.keys()), period="60d", interval="1d",
@@ -1109,20 +1128,22 @@ def run_confirmation():
                         if crossed_up:
                             alerts.append("MACD bullish crossover")
                         if alerts:
-                            send_inline_keyboard(
-                                f"👀 <b>Watchlist Signal — {ticker}</b>  <code>${current_price:,.2f}</code>\n"
-                                f"<i>{' · '.join(alerts)}</i>\n"
-                                f"Not in today's picks — but worth a look.",
-                                [[
+                            out.append({
+                                "text": (
+                                    f"👀 <b>Watchlist Signal — {ticker}</b>  <code>${current_price:,.2f}</code>\n"
+                                    f"<i>{' · '.join(alerts)}</i>\n"
+                                    f"Not in today's picks — but worth a look."
+                                ),
+                                "keyboard": [[
                                     _miniapp_url_btn(f"📊 {ticker} Chart", f"?chart={ticker}", f"cmd|CHART {ticker}"),
                                     _miniapp_btn("👁 Watchlist", "watchlist", f"watch|{ticker}"),
                                 ]],
-                                chat_id=uid,
-                            )
+                            })
                     except Exception:
                         continue
-            except Exception as exc:
-                print(f"[agent] Watchlist scan failed for {uid} (non-critical): {exc}")
+                return out
+
+        _fanout(_watch_signal_msgs, tag="watchlist_signal")
     except Exception as exc:
         print(f"[agent] Watchlist signal check failed (non-critical): {exc}")
 
@@ -1131,24 +1152,21 @@ def run_confirmation():
     if DRY_RUN:
         print(f"\n{'=' * 60}\nDRY RUN — 10:30 AM Confirmation (not sent):\n{'=' * 60}\n{message}")
     else:
-        for uid in _all_recipients():
-            try:
-                ucfg = get_user_config(uid)
-                if ucfg.get("paused") or ucfg.get("skip_confirmation"):
-                    print(f"[agent] Skipping confirmation for {uid} (paused or opted out).")
-                    continue
-                _conf_kb = [
-                    [_miniapp_btn("📊 Open Dashboard  ↗", "picks", "TODAY")],
-                    [
-                        _miniapp_btn("📋 Help",     "picks",       "HELP"),
-                        _miniapp_btn("📲 Share",    "picks",       "SHARE"),
-                        _miniapp_btn("💬 Feedback", "picks",       "FEEDBACK"),
-                        _miniapp_btn("📊 Positions","portfolio",   "POSITIONS"),
-                    ],
-                ]
-                send_inline_keyboard(message, _conf_kb, chat_id=uid)
-            except Exception as exc:
-                print(f"[agent] WARNING: Confirmation send failed for {uid}: {exc}")
+        def _conf_msg(uid):
+            ucfg = get_user_config(uid)
+            if ucfg.get("paused") or ucfg.get("skip_confirmation"):
+                print(f"[agent] Skipping confirmation for {uid} (paused or opted out).")
+                return None
+            return {"text": message, "keyboard": [
+                [_miniapp_btn("📊 Open Dashboard  ↗", "picks", "TODAY")],
+                [
+                    _miniapp_btn("📋 Help",     "picks",       "HELP"),
+                    _miniapp_btn("📲 Share",    "picks",       "SHARE"),
+                    _miniapp_btn("💬 Feedback", "picks",       "FEEDBACK"),
+                    _miniapp_btn("📊 Positions","portfolio",   "POSITIONS"),
+                ],
+            ]}
+        _fanout(_conf_msg, tag="confirmation")
 
     # Mark as sent so retries don't fire again today
     if not DRY_RUN:
@@ -1800,39 +1818,36 @@ def run_macro_alert_check():
     _mark_alerted(dedup_key)
     event_names = ", ".join(e["name"] for e in events[:5])
 
-    for uid in _all_recipients():
-        try:
-            cfg = get_user_config(uid)
-            if cfg.get("paused"):
-                continue
+    def _macro_msg(uid):
+        cfg = get_user_config(uid)
+        if cfg.get("paused"):
+            return None
 
-            log           = load_user_trade_log(uid)
-            open_tickers  = [t["ticker"] for t in log.get("open", []) if t.get("ticker")]
-            watch_tickers = cfg.get("watchlist", [])
+        log           = load_user_trade_log(uid)
+        open_tickers  = [t["ticker"] for t in log.get("open", []) if t.get("ticker")]
+        watch_tickers = cfg.get("watchlist", [])
 
-            personal_section = ""
-            if open_tickers or watch_tickers:
-                lines = []
-                if open_tickers:
-                    lines.append(f"💼 {', '.join(open_tickers[:6])} (open positions)")
-                if watch_tickers:
-                    lines.append(f"👁 {', '.join(watch_tickers[:6])} (watchlist)")
-                personal_section = (
-                    "\n\nYour positions that may be affected:\n"
-                    + "\n".join(lines)
-                    + "\n\nNo action needed — your stops are in place. Just be aware."
-                )
-
-            msg = (
-                f"⚠️ <b>Market Alert — Big Event Tomorrow</b>\n\n"
-                f"<b>Tomorrow:</b> {event_names}\n\n"
-                f"These events can cause sharp moves in equities, crypto, and rate-sensitive assets."
-                f"{personal_section}"
+        personal_section = ""
+        if open_tickers or watch_tickers:
+            lines = []
+            if open_tickers:
+                lines.append(f"💼 {', '.join(open_tickers[:6])} (open positions)")
+            if watch_tickers:
+                lines.append(f"👁 {', '.join(watch_tickers[:6])} (watchlist)")
+            personal_section = (
+                "\n\nYour positions that may be affected:\n"
+                + "\n".join(lines)
+                + "\n\nNo action needed — your stops are in place. Just be aware."
             )
-            send_message(msg, chat_id=uid, parse_mode="HTML")
 
-        except Exception as exc:
-            print(f"[agent] macro_alert send failed for {uid} (non-critical): {exc}")
+        return (
+            f"⚠️ <b>Market Alert — Big Event Tomorrow</b>\n\n"
+            f"<b>Tomorrow:</b> {event_names}\n\n"
+            f"These events can cause sharp moves in equities, crypto, and rate-sensitive assets."
+            f"{personal_section}"
+        )
+
+    _fanout(_macro_msg, tag="macro_alert")
 
     print(f"[agent] macro_alert: sent to {len(_all_recipients())} users for events: {event_names}")
 
@@ -2225,11 +2240,11 @@ def run_pre_earnings_guidance():
     window_start = now_ts + 86400   # 24 hours from now
     window_end   = now_ts + 172800  # 48 hours from now
 
-    for uid in _all_recipients():
-        try:
+    def _pre_earnings_msgs(uid):
+            out = []
             cfg = get_user_config(uid)
             if cfg.get("paused"):
-                continue
+                return None
 
             log = load_user_trade_log(uid)
             open_tickers  = [t["ticker"] for t in log.get("open", []) if t.get("ticker")]
@@ -2291,11 +2306,13 @@ def run_pre_earnings_guidance():
                         f"• <b>Trim before</b> — sell half now to lock in some gains, let the rest ride\n\n"
                         f"There's no universally right answer.{stop_str}"
                     )
-                    send_inline_keyboard(msg, [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]], chat_id=uid)
+                    out.append({"text": msg, "keyboard": [
+                        [_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]]})
                 except Exception as exc:
                     print(f"[agent] pre_earnings: data fetch failed for {sym}: {exc}")
-        except Exception as exc:
-            print(f"[agent] pre_earnings: failed for {uid} (non-critical): {exc}")
+            return out
+
+    _fanout(_pre_earnings_msgs, tag="pre_earnings")
 
     print("[agent] pre_earnings guidance complete.")
 
@@ -2368,7 +2385,6 @@ def run_monthly_commentary():
     # Try Claude for commentary; fall back to template
     commentary = None
     try:
-        from llm_client import _get_client
         sector_lines = "\n".join(
             f"  {sector_names.get(sym, sym)}: {ret:+.1f}%"
             for sym, ret in sorted_sectors
@@ -2444,10 +2460,7 @@ def run_monthly_pnl_digest():
         return
 
     print(f"[agent] Running monthly P&L digest for {month_name}...")
-    sent = 0
-
-    for uid in _all_recipients():
-        try:
+    def _digest_msg(uid):
             log    = load_user_trade_log(uid)
             closed = log.get("closed", [])
 
@@ -2467,7 +2480,7 @@ def run_monthly_pnl_digest():
                     pass
 
             if not month_trades:
-                continue  # nothing closed last month — skip this user
+                return None  # nothing closed last month — skip this user
 
             # Compute stats
             wins    = [t for t in month_trades if float(t.get("return_pct", 0)) > 0]
@@ -2516,11 +2529,9 @@ def run_monthly_pnl_digest():
                 pass
 
             lines += ["", "<i>Run /stats for full history · /review for AI coaching</i>"]
-            send_message("\n".join(lines), chat_id=uid)
-            sent += 1
+            return "\n".join(lines)
 
-        except Exception as exc:
-            print(f"[agent] monthly_pnl_digest: failed for {uid}: {exc}")
+    sent = _fanout(_digest_msg, tag="monthly_pnl_digest")
 
     _mark_alerted(dedup_key)
     print(f"[agent] monthly_pnl_digest: sent to {sent} user(s) for {month_name}.")
@@ -2815,20 +2826,19 @@ def run_weekly_recap(config: dict, now_et: datetime):
     print("[agent] Building auto missed-picks digest...")
     try:
         from cmd_trades import get_missed_picks_message
-        recipients = _all_recipients()
-        for uid in recipients:
-            try:
-                user_cfg = {**config, **get_user_config(uid)}
-                if user_cfg.get("paused"):
-                    continue
-                msg, kb = get_missed_picks_message(uid)
-                if msg:
-                    if DRY_RUN:
-                        print(f"\n[DRY RUN] Missed picks for {uid}:\n{msg}")
-                    else:
-                        send_inline_keyboard(msg, kb, chat_id=uid)
-            except Exception as exc:
-                print(f"[agent] Missed picks digest failed for {uid} (non-critical): {exc}")
+        def _missed_msg(uid):
+            user_cfg = {**config, **get_user_config(uid)}
+            if user_cfg.get("paused"):
+                return None
+            msg, kb = get_missed_picks_message(uid)
+            if not msg:
+                return None
+            if DRY_RUN:
+                print(f"\n[DRY RUN] Missed picks for {uid}:\n{msg}")
+                return None
+            return {"text": msg, "keyboard": kb}
+
+        _fanout(_missed_msg, tag="missed_picks")
     except Exception as exc:
         print(f"[agent] Missed picks auto-push failed (non-critical): {exc}")
 
@@ -3048,36 +3058,41 @@ def _check_trade_reminders() -> None:
     from datetime import date as _date
     today_str = et_today().isoformat()
 
-    for uid in _all_recipients():
+    # The reminder list is cleared only AFTER the sends land — clearing it during
+    # the build would drop a reminder whose send then failed.
+    _fired: dict = {}
+
+    def _reminder_msgs(uid):
+        cfg = get_user_config(uid)
+        reminders = list(cfg.get("reminders") or [])
+        if not reminders:
+            return None
+
+        due    = [r for r in reminders if r.get("date", "9999") <= today_str]
+        future = [r for r in reminders if r.get("date", "9999") > today_str]
+        if not due:
+            return None
+
+        _fired[uid] = future
+        out = []
+        for r in due:
+            ticker = r.get("ticker", "?")
+            note   = r.get("note", "")
+            note_part = f"\n📝 <i>{note}</i>" if note else ""
+            out.append({
+                "text": (f"⏰ <b>Trade Reminder: {ticker}</b>{note_part}\n\n"
+                         f"You asked to be reminded about this position today."),
+                "keyboard": [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
+            })
+        return out
+
+    _fanout(_reminder_msgs, tag="reminders")
+
+    for uid, future in _fired.items():
         try:
-            cfg = get_user_config(uid)
-            reminders = list(cfg.get("reminders") or [])
-            if not reminders:
-                continue
-
-            due   = [r for r in reminders if r.get("date", "9999") <= today_str]
-            future = [r for r in reminders if r.get("date", "9999") > today_str]
-
-            if not due:
-                continue
-
-            # Fire each due reminder
-            for r in due:
-                ticker = r.get("ticker", "?")
-                note   = r.get("note", "")
-                note_part = f"\n📝 <i>{note}</i>" if note else ""
-                send_inline_keyboard(
-                    f"⏰ <b>Trade Reminder: {ticker}</b>{note_part}\n\n"
-                    f"You asked to be reminded about this position today.",
-                    [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]],
-                    chat_id=uid,
-                )
-
-            # Keep only future reminders
             update_user_config(uid, "reminders", future)
-
         except Exception as exc:
-            print(f"[agent] reminders check failed for {uid} (non-critical): {exc}")
+            print(f"[agent] reminders: could not clear for {uid} (non-critical): {exc}")
 
 
 # ── Trailing stop nudge helper ───────────────────────────────────────────────
@@ -3614,12 +3629,11 @@ def run_week_ahead(config: dict):
 
     recipients = _all_recipients()
     print(f"[agent] Sending Sunday Week Ahead to {len(recipients)} user(s)...")
-    for uid in recipients:
-        try:
+    def _week_ahead_msg(uid):
             user_cfg = {**config, **get_user_config(uid)}
             if user_cfg.get("paused"):
                 print(f"[agent] Skipping week-ahead for {uid} — picks paused.")
-                continue
+                return None
 
             # Build personalised earnings prefix for this user's open positions + watchlist
             user_log = load_user_trade_log(uid)
@@ -3647,10 +3661,10 @@ def run_week_ahead(config: dict):
 
             if DRY_RUN:
                 print(f"\n{'=' * 60}\nDRY RUN — Week Ahead for {uid}:\n{'=' * 60}\n{final_msg}\n")
-            else:
-                send_message(final_msg, chat_id=uid)
-        except Exception as exc:
-            print(f"[agent] Week-ahead send failed for {uid}: {exc}")
+                return None
+            return final_msg
+
+    _fanout(_week_ahead_msg, recipients=recipients, tag="week_ahead")
 
     print("[agent] Sunday Week Ahead complete.")
 
@@ -3984,12 +3998,12 @@ def run_price_alerts():
     try:
         from cache_layer import cache_get, cache_set
         from datetime import date as _date
-        for uid in _all_recipients():
-            try:
+        def _watch_move_msgs(uid):
+                out = []
                 log = load_user_trade_log(uid)
                 watch_tickers = log.get("watchlist", [])
                 if not watch_tickers:
-                    continue
+                    return None
                 # Live price vs true previous close (same method as the positions
                 # card) — not lagging daily bars, which showed stale pre-market
                 # closes and could report yesterday's move as today's.
@@ -4013,19 +4027,21 @@ def run_price_alerts():
                         cache_set(key, "1", ttl_seconds=86400)
                         emoji = "🚀" if pct_chg > 0 else "🔻"
                         sign  = "+" if pct_chg > 0 else ""
-                        send_inline_keyboard(
-                            f"{emoji} <b>{t}</b> is moving <b>{sign}{pct_chg:.1f}%</b> today\n"
-                            f"Price: <code>${_p(curr)}</code>  (was <code>${_p(prev)}</code>)",
-                            [[
+                        out.append({
+                            "text": (
+                                f"{emoji} <b>{t}</b> is moving <b>{sign}{pct_chg:.1f}%</b> today\n"
+                                f"Price: <code>${_p(curr)}</code>  (was <code>${_p(prev)}</code>)"
+                            ),
+                            "keyboard": [[
                                 _miniapp_url_btn(f"📊 {t} Chart", f"?chart={t}", f"cmd|CHART {t}"),
                                 _miniapp_btn("🔔 Set Alert", "watchlist", f"alert|{t}"),
                             ]],
-                            chat_id=uid,
-                        )
+                        })
                     except Exception:
                         pass
-            except Exception as exc:
-                print(f"[agent] Watchlist move check failed for {uid}: {exc}")
+                return out
+
+        _fanout(_watch_move_msgs, tag="watch_move")
     except Exception as exc:
         print(f"[agent] Watchlist move alerts failed (non-critical): {exc}")
 
