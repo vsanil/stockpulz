@@ -178,6 +178,61 @@ class SupabaseBackend(StorageBackend):
             self._client = create_client(url, key)
         except ImportError:
             raise ImportError("supabase package not installed. Run: pip install supabase")
+        self._verify_schema()
+
+    # Both are required: `documents` holds whole-blob files, `user_records` the
+    # per-user rows that every settings/positions/alerts read goes through.
+    REQUIRED_TABLES = ("documents", "user_records")
+
+    def _verify_schema(self, timeout: float = 4.0) -> None:
+        """Refuse to become the storage backend unless the schema is really there.
+
+        🔴 The outage this prevents (2026-08-19). SUPABASE_URL and SUPABASE_KEY
+        were set on Render while `supabase_schema.sql` had never been applied.
+        Construction SUCCEEDED — the client is lazy — so this backend took over
+        all storage, and then EVERY per-user read failed, one log line at a
+        time: `Could not find the table 'public.user_records' in the schema
+        cache`. Measured on production: 40 failures on user_trades.json, 18 on
+        user_configs.json, 4 each on price_alerts and backtest_trades in a
+        45-minute window, while the mini-app and bot silently showed nothing.
+        The Saturday weekly run set ZERO alerts for the same reason.
+
+        get_storage_backend() already falls back to Gist when construction
+        raises — it just never got the chance. Failing here converts a silent,
+        ongoing, user-facing outage into one startup line and no impact.
+
+        A timeout or network error also raises: a backend we cannot verify must
+        not be trusted with storage when a working Gist is sitting right there.
+        """
+        import threading
+        missing: list[str] = []
+        errors: list[str] = []
+
+        def _probe(table: str) -> None:
+            try:
+                self._client.table(table).select("*").limit(1).execute()
+            except Exception as exc:
+                msg = str(exc)
+                # PostgREST says this when the relation is absent from the schema cache.
+                if "does not exist" in msg or "schema cache" in msg or "PGRST205" in msg:
+                    missing.append(table)
+                else:
+                    errors.append(f"{table}: {msg[:120]}")
+
+        for tbl in self.REQUIRED_TABLES:
+            t = threading.Thread(target=_probe, args=(tbl,), daemon=True)
+            t.start()
+            t.join(timeout=timeout)
+            if t.is_alive():
+                errors.append(f"{tbl}: probe timed out after {timeout}s")
+
+        if missing:
+            raise RuntimeError(
+                f"Supabase schema incomplete — missing table(s): {', '.join(missing)}. "
+                f"Run supabase_schema.sql (see scripts/migrate_to_supabase.py --dry-run) "
+                f"or unset SUPABASE_URL/SUPABASE_KEY to stay on the Gist.")
+        if errors:
+            raise RuntimeError(f"Supabase unreachable or unverifiable: {'; '.join(errors)}")
 
     def read(self, filename: str) -> dict | list | None:
         import threading
