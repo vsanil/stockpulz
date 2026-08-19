@@ -679,11 +679,25 @@ body.tg-light .picker-tf  { background: rgba(0,0,0,.07); }
 .btn-chart-sm:active { transform: scale(.96); background: var(--card-hover); }
 
 /* ── Portfolio summary boxes ─────────────────────────────────────────────── */
+/* 🔴 Five tiles at flex:1 split 347px into 61px each, leaving a 43px label area
+   — but "Positions" needs 67px and "Portfolio $" 69px, and both are single
+   words that cannot wrap. The row did not scroll either (overflow-x: visible),
+   so the labels were simply cut off with no way to read them. Wrapping to
+   3 + 2 gives ~109px per tile, comfortably over the 69px worst case. */
+/* The watchlist sparkline is decorative and it is the only expendable item on
+   the row: at 375px the row leaves ~151px for [ticker][price][sparkline], and
+   ticker + a worst-case price ("$64,285.00") already need ~145px. Keeping it
+   squeezed the TICKER to a single character. Content wins over decoration. */
+@media (max-width: 430px) { .watch-spark { display: none; } }
+
 .summary-row {
-  display: flex; gap: 10px; margin-bottom: 4px; padding: 14px 0 10px;
+  display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; padding: 14px 0 10px;
 }
 .summary-box {
-  flex: 1;
+  /* min-width is what forces the wrap: below it the tile cannot be squeezed
+     narrower than its longest label. 96px holds "Portfolio $" (69px) plus the
+     16px horizontal padding and border with room to spare. */
+  flex: 1 1 calc(33.333% - 7px); min-width: 96px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01)),
     var(--card);
@@ -7888,21 +7902,29 @@ async function renderWatchlist(tickers, alertTickers = new Set(), assetTypesMap 
       const _wtg = _wTriggered ? Number(_wTriggered.target) : 0;
       const _wShowFired = _wtp > 0 && !(_wtg > 0 && _wtp < _wtg * 0.1);
       const _wFiredLine = (_wTriggered && _wShowFired)
-        ? `<div style="font-size:11px;color:var(--amber);opacity:.75;margin-top:2px">🔔 fired $${_wtp.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} · ${_relTime(_wTriggered.triggered_at)}</div>`
+        ? `<div style="font-size:11px;color:var(--amber);opacity:.75;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🔔 fired $${_wtp.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} · ${_relTime(_wTriggered.triggered_at)}</div>`
         : '';
-      html += `<div id="wrow-${t}" style="display:flex;justify-content:space-between;align-items:center;
+      // 🔴 min-width:0 / flex:0 0 auto — the flexbox min-content trap (Aug 18).
+      // A flex item defaults to min-width:auto and will NOT shrink below its
+      // content's min-content width. The left block (ticker + name + the
+      // "🔔 fired $X · Nd ago" line) measured 204px and the button group 161px
+      // = 365px inside a 347px row, so the ✕ was pushed to 379px on a 375px
+      // viewport — OFF SCREEN and unreachable. It only bit rows carrying the
+      // fired annotation, which is why it survived: the common row fits.
+      html += `<div id="wrow-${t}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;
                padding:12px 0;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:12px">
-          <div>
+        <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 auto;overflow:hidden">
+          <div style="min-width:64px;flex:1 1 auto;overflow:hidden">
             <div onclick="openChart('${t}','${_watchAssetType(t, d.asset_types)}')"
                  style="font-size:16px;font-weight:700;cursor:pointer;color:var(--accent)">${t}</div>
-            <div data-name-ticker="${t}" style="font-size:11px;color:var(--hint);margin-top:1px;line-height:1.2"></div>
+            <div data-name-ticker="${t}" style="font-size:11px;color:var(--hint);margin-top:1px;line-height:1.2;
+                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
             ${_wFiredLine}
           </div>
-          <div id="wprice-${t}" style="font-size:13px;opacity:.6">…</div>
-          <canvas id="wspark-${t}" width="60" height="24" style="opacity:.7;margin-left:4px"></canvas>
+          <div id="wprice-${t}" style="font-size:13px;opacity:.6;flex:0 0 auto">…</div>
+          <canvas id="wspark-${t}" class="watch-spark" width="60" height="24" style="opacity:.7;margin-left:4px;flex:0 0 auto"></canvas>
         </div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;flex:0 0 auto">
           <button onclick="openChart('${t}','${_watchAssetType(t, d.asset_types)}')"
                   style="padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);
                          background:transparent;color:var(--text);font-size:12px;cursor:pointer">📊</button>
