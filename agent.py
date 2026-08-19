@@ -1222,8 +1222,13 @@ def _check_picks_stop_loss(current_prices: dict, picks: dict, uid: str) -> None:
         if not stop_price or stop_price <= 0:
             continue
 
+        # 🔴 `current <= 0` rejects zero but NOT holiday garbage: a $0.01 tick
+        # is positive and trivially satisfies `current < stop_price`, which fired
+        # "Current price $0.01 has breached today's suggested stop (↓100.0%)".
+        # Validate against the pick's own entry (fallback: the stop itself).
+        from market_data import plausible_price
         current = current_prices.get(ticker)
-        if not current or current <= 0:
+        if not plausible_price(current, pick.get("entry_price") or stop_price):
             continue
 
         alert_key = f"{uid}:{ticker}:{today_str}"
@@ -3001,9 +3006,16 @@ def _check_portfolio_drawdown(uid: str, current_prices: dict) -> None:
             elif len(col) == 1:
                 curr_closes[orig_t] = float(col.iloc[-1])
 
-        # Use intraday current_prices if more recent than daily close
+        # Use intraday current_prices if more recent than daily close — but only
+        # when the tick is plausible against the price we already know for real.
+        # This overwrite had NO validation, so one bad tick fired a
+        # "🚨 Portfolio Drawdown Alert ... down 99.9% today".
+        from market_data import plausible_price
         for t in tickers:
-            if t in current_prices:
+            if t not in current_prices:
+                continue
+            reference = prev_closes.get(t) or curr_closes.get(t)
+            if plausible_price(current_prices[t], reference):
                 curr_closes[t] = current_prices[t]
 
         # Calculate today's portfolio P&L
