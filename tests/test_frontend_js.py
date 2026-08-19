@@ -368,11 +368,16 @@ class TestAnalysisToggleLooksTappable:
             "hardcoded white overlay disappears in light mode"
 
     def test_it_meets_the_44px_touch_target(self):
-        """The project's own mobile rule. Measured live at 48px."""
+        """The project's own mobile rule, DECLARED rather than emergent.
+
+        Asserting on padding was the wrong guard: it passes or fails for the
+        wrong reason the moment the font size or line-height changes. min-height
+        states the constraint directly.
+        """
         import re
-        m = re.search(r"padding:\s*(\d+)px", self._css)
-        assert m and int(m.group(1)) >= 12, \
-            f"vertical padding {m and m.group(1)}px gives a sub-44px target"
+        m = re.search(r"min-height:\s*(\d+)px", self._css)
+        assert m and int(m.group(1)) >= 44, \
+            f"min-height is {m and m.group(1)} — the touch target is not guaranteed"
 
     def test_the_label_names_what_is_hidden(self):
         """"Analysis" alone gave no clue Chart and Backtest were behind it."""
