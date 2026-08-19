@@ -3147,7 +3147,10 @@ def _check_trailing_stops(current_prices: dict, uid: str,
         target  = trade.get("target_price")
         current = current_prices.get(ticker) if ticker else None
 
-        if not (ticker and _is_pos(entry) and _is_pos(current)):
+        # _is_pos rejects NaN but accepts $0.01 and a 10x spike, which fired
+        # "crossed below your entry" and "up +900.0%" off a bad quote.
+        from market_data import plausible_price
+        if not (ticker and _is_pos(entry) and plausible_price(current, entry)):
             continue
 
         entry_f   = float(entry)
@@ -3514,7 +3517,14 @@ def _check_take_profit_nudge(uid: str, current_prices: dict) -> None:
         if not (ticker and entry and target):
             continue
         current = current_prices.get(ticker)
-        if not current:
+        # 🔴 `if not current` lets NaN through (nan is truthy) and lets holiday
+        # garbage / a 10x spike through. Both reached users: NaN RAISED at
+        # int(progress * 100), killing the nudge for every LATER position of
+        # this user with the dedup key already marked, and a spike fired
+        # "Up 900.0% ... unrealised gain ~$9,000" — a take-profit
+        # recommendation off a phantom gain. Validate against the entry.
+        from market_data import plausible_price
+        if not plausible_price(current, entry):
             continue
         entry_f, target_f, curr_f = float(entry), float(target), float(current)
         if target_f <= entry_f:
