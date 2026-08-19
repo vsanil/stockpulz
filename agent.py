@@ -1560,7 +1560,10 @@ def run_friday_wrap():
                         ticker = trade.get("ticker")
                         entry  = trade.get("entry_price")
                         curr   = prices.get(ticker) if ticker else None
-                        if not (ticker and entry and curr):
+                        # Leads a money figure ("Unrealised P&L: +$X"), so it
+                        # takes the same guard as an alert path.
+                        from market_data import plausible_price
+                        if not (ticker and entry and plausible_price(curr, entry)):
                             continue
                         alloc  = trade.get("allocation") or trade.get("budget") or 0
                         shares = trade.get("shares") or trade.get("quantity")
@@ -1727,7 +1730,10 @@ def run_tax_loss_harvest_check():
                 ticker = trade.get("ticker")
                 entry  = trade.get("entry_price")
                 curr   = prices.get(ticker) if ticker else None
-                if not (ticker and entry and curr):
+                # A $0.01 tick manufactures a huge unrealised loss and this
+                # nudge tells the user to SELL it for the deduction.
+                from market_data import plausible_price
+                if not (ticker and entry and plausible_price(curr, entry)):
                     continue
                 shares = trade.get("shares") or trade.get("quantity")
                 alloc  = trade.get("allocation") or trade.get("budget")
@@ -4523,7 +4529,12 @@ def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:
                         # "below entry" firing means a genuine pullback into the zone.
                         entry = pick.get("entry_price")
                         cur   = live_prices.get(ticker)
-                        if entry and cur and cur >= float(entry) * ENTRY_ALERT_MIN_ABOVE:
+                        # A spiked quote falsely clears the ≥1% test and arms an
+                        # entry alert that then insta-fires — defeating the very
+                        # guard this line implements.
+                        from market_data import plausible_price
+                        if (entry and plausible_price(cur, entry)
+                                and cur >= float(entry) * ENTRY_ALERT_MIN_ABOVE):
                             add_alert(uid, ticker, float(entry), direction="below",
                                       auto=True, kind="entry")
                             total_set += 1
