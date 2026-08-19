@@ -473,7 +473,12 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.08); border-color: rgba(0,0
   background: var(--card-hover);
   border: 1px solid var(--border); border-radius: 12px;
   color: var(--text); font-size: 13px; font-weight: 600;
-  padding: 12px 14px;              /* ≥44px tall — the project's touch-target rule */
+  /* min-height DECLARES the touch-target rule instead of leaving it to emerge
+     from padding + line-box, so a later font or padding tweak cannot quietly
+     shrink it below 44px. Padding trimmed 12→10 to land ON 44 rather than 48:
+     the row-elimination saving was 47px and a usable control gave 25px back, so
+     every 4px here is a quarter of what is left. */
+  padding: 10px 14px; min-height: 44px;
   cursor: pointer; font-family: inherit;
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
   position: relative; z-index: 1; text-align: left;
