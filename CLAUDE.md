@@ -417,6 +417,18 @@ Rules:
 - Server-side allowlist `_USAGE_KEY_RE = ^(tab|sheet):[a-z0-9_-]{1,30}$` plus caps (≤60 keys/request, 0<n≤500) so a client can't invent keys and grow the file without bound. Rate-limited 12/min. Guard: `TestUsageCounters`, incl. a storage failure still returning 200.
 - One hook covers everything: `gotoTab()` bumps `tab:*`, `openOverlay()` bumps `sheet:*` (18 sheets). **A new sheet opened WITHOUT `openOverlay` won't be counted** — route it through `openOverlay`.
 
+### Serial delivery loops — `agent._fanout()` (Aug 19)
+- **At 2 users a `for uid in _all_recipients(): send_message(...)` loop is invisible; at 100 it is the delivery model.** Telegram allows ~30 msg/s, so a serial loop is ~35s of wall clock per broadcast — and it is worse than slow: `send_message` RETRIES on a 429, so one throttled user **blocks every user behind them**, and the failure lands on whoever is late in the list. `broadcast_all` (asyncio + aiohttp, 30-way semaphore) already existed and was used by exactly one caller.
+- **`agent._fanout(msg_for, recipients=None, tag=...)`** — builds every message first, then sends them in ONE `broadcast_all`. `msg_for(uid)` returns a string, a dict (`{"text":…, "keyboard":…}`), or **`None` to skip that user** (paused, nothing to say). Returns the number that landed.
+- **The per-user try/except is INSIDE the helper, not optional** — the pre-existing rule "one user's failure can never abort delivery for the rest" is preserved by construction, and a build failure now skips that user instead of the whole loop. Failed SENDS are logged with the tag rather than swallowed; `broadcast_all` returns `{chat_id: ok}` and nobody was reading it.
+- **Converted so far: `run_vix_check`, `run_monthly_commentary`, the `run_morning` week-ahead block.** Guard: `tests/test_fanout_delivery.py` (11 tests, incl. that an empty outbox makes NO API call and that the guard itself fails when a site is reverted).
+- **🔴 20 send-loops REMAIN serial, and the "34 loops" figure quoted earlier was wrong** — most were never simple send loops. What is left, by why:
+  - **11 build a keyboard per user** (`run_confirmation`, `run_macro_alert_check`, `run_pre_earnings_guidance`, `_send_morning_personalised`, …). These ARE convertible — `_fanout` takes the dict form — but each needs its build hoisted and read individually. **This is live delivery; convert in reviewed batches, never one sweep.**
+  - **5 do per-user NETWORK work in the loop** (`run_eod_summary`, `run_close_check`, `run_price_alerts`, …). The network work must move OUT of the fan-out — same hoist rule as the `mutate_user_record` conversions: read-only prep runs once, outside.
+  - **`run_weekly_recap` sends a PHOTO** — `broadcast_all` is text/keyboard only. Leave it or teach the broadcaster `sendPhoto`; do not fake it.
+  - **`run_friday_wrap` (4 sends/user) and `run_premarket` (2)** — multiple messages per user; a fan-out per message changes the ORDER a user reads them in. Needs thought, not a mechanical edit.
+- **Rule: a new per-user delivery loop uses `_fanout`, not a bare `for uid … send_message`.**
+
 ### Background jobs must fail silently to users
 - run_digest suppresses "Something went wrong" replies from the command layer — scheduled jobs never surface errors to users (only admin logs). Never send a "Building…" teaser before the content is built.
 
