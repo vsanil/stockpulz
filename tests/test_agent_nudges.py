@@ -329,3 +329,70 @@ class TestSellNudgesRejectGarbageQuotes:
         agent._check_take_profit_nudge("u1", {"BAD": float("nan"), "GOOD": 109.0})
         assert any("GOOD" in m for m in self.sent), \
             "a bad quote on one ticker suppressed a valid nudge on another"
+
+
+class TestPickAndPortfolioAlertsRejectGarbage:
+    """The same Jul 3 class again, on the two remaining alert paths.
+
+    Measured before the fix:
+      • _check_picks_stop_loss fired "Current price $0.01 has breached today's
+        suggested stop of $95.00 (↓100.0%)" — `if not current or current <= 0`
+        rejects zero but a holiday $0.01 sails through and trivially satisfies
+        `current < stop_price`. This is the literal Jun 23 symptom, still live
+        on the PICKS path.
+      • _check_portfolio_drawdown overwrote the yfinance close with the
+        intraday quote (`curr_closes[t] = current_prices[t]`) with NO validation
+        at all, so one bad tick fired "🚨 Portfolio Drawdown Alert ... down
+        99.9% today".
+    """
+
+    @pytest.fixture(autouse=True)
+    def _wire(self, monkeypatch):
+        self.sent = []
+        for fn in ("send_message", "send_inline_keyboard"):
+            monkeypatch.setattr(agent, fn,
+                                lambda *a, **k: self.sent.append(a[0] if a else ""))
+        monkeypatch.setattr(agent, "_is_alerted", lambda *a, **k: False)
+        monkeypatch.setattr(agent, "_mark_alerted", lambda *a, **k: None)
+        monkeypatch.setattr(agent, "_miniapp_btn", lambda *a, **k: {})
+        monkeypatch.setattr(agent, "get_user_config", lambda uid: {})
+
+    PICKS = {"stocks": {"short_term": [
+        {"ticker": "AAPL", "entry_price": 100.0, "stop_loss": 95.0}]}}
+
+    @pytest.mark.parametrize("px", [0.01, 1500.0, float("nan"), float("inf")])
+    def test_a_pick_stop_alert_never_fires_off_a_bad_quote(self, px):
+        agent._check_picks_stop_loss({"AAPL": px}, self.PICKS, "u1")
+        assert self.sent == [], f"false stop alert off {px}: {self.sent}"
+
+    def test_a_REAL_stop_breach_still_alerts(self):
+        agent._check_picks_stop_loss({"AAPL": 94.0}, self.PICKS, "u1")
+        assert any("Stop Alert" in m for m in self.sent), \
+            "the guard silenced a genuine breach"
+
+    def test_a_healthy_price_is_silent(self):
+        agent._check_picks_stop_loss({"AAPL": 99.0}, self.PICKS, "u1")
+        assert self.sent == []
+
+    def _drawdown(self, monkeypatch, intraday, prev=100.0, last=100.0):
+        import pandas as pd
+        import yfinance
+        monkeypatch.setattr(agent, "load_user_trade_log", lambda uid: {
+            "open": [{"ticker": "AAPL", "entry_price": 100.0, "shares": 10}]})
+        monkeypatch.setattr(yfinance, "download",
+                            lambda *a, **k: pd.DataFrame({("Close", "AAPL"): [prev, last]}))
+        agent._check_portfolio_drawdown("u1", {"AAPL": intraday})
+        return self.sent
+
+    @pytest.mark.parametrize("px", [0.01, 1500.0])
+    def test_drawdown_never_fires_off_a_bad_intraday_tick(self, monkeypatch, px):
+        assert self._drawdown(monkeypatch, px) == [], \
+            f"false drawdown alert off an intraday {px}"
+
+    def test_a_REAL_drawdown_still_alerts(self, monkeypatch):
+        # −8% on the day, well past the 3% default threshold.
+        assert any("Drawdown" in m for m in self._drawdown(monkeypatch, 92.0)), \
+            "the guard silenced a genuine drawdown"
+
+    def test_a_quiet_day_is_silent(self, monkeypatch):
+        assert self._drawdown(monkeypatch, 99.5) == []
