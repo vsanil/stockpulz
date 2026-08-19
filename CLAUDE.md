@@ -304,6 +304,15 @@ Rules:
 - Captures the gotchas that have cost time: `GH_GIST_TOKEN` is not `GIST_TOKEN`; `CRON_SECRET` needs `#` encoded as `%23`; Polygon's free tier 403s on the options snapshot; `QUIVER_API_KEY` unset means **dormant, not broken**; `MINIAPP_AUTH_DISABLED` is the account-takeover valve. `SUPABASE_URL`/`KEY` are **commented out** with the reason — a test fails if they are ever presented as fillable keys.
 - All three guard failure modes verified to fire, plus a test that the scan still finds 30+ vars so the sync check cannot pass vacuously.
 
+### Watchlist row density — four icon buttons took 47% of the row (Aug 18)
+- Four unlabelled icons (📊 ➕ 🔕 ✕) = **164px of a 347px row**. That density is the ROOT of both defects above: it pushed ✕ off-screen and left no room for the sparkline. Fixing overflow without fixing density just moves the pain.
+- **Two controls stay inline, and the choice of which is the point:**
+  - **🔔/🔕 stays — it is a STATE indicator** (amber when an alert is live). Behind a menu, "does this ticker have an alert?" becomes invisible. Same reasoning that kept Set Alert on the pick card.
+  - **📊 removed as REDUNDANT** — tapping the ticker already calls `openChart`.
+  - **➕ and 🗑 moved into a `⋯` sheet.** Remove is destructive, so a menu is the safer home for it.
+- Result: button group **164px → 78px**, pane buttons **262 → 132**, and the sparkline fits again (`[ticker][price][sparkline]` ≈ 205px of ~237px available). **The sparkline hide added an hour earlier was reverted — it was only ever a symptom of the density.**
+- Guard: `TestWatchlistRowDensity` (5 of 6 fail against the reverted markup). **An obsolete guard asserting the sparkline stays hidden was DELETED, not relaxed** — a test that contradicts current intent is worse than no test.
+
 ### 🔴 Two controls broke at 375px — the flexbox `min-width: auto` trap (Aug 18)
 - Found by touring every tab and MEASURING, not by reading the code. Same root cause both times: **a flex item defaults to `min-width: auto` and will not shrink below its content's min-content width**, so the overflow lands on whatever sits last in the row.
 - **Watchlist ✕ was OFF SCREEN and untappable.** Left block (ticker + name + `🔔 fired $X · Nd ago`) = 204px, button group = 161px → 365px inside a 347px row, pushing ✕ to 379–391px on a 375px viewport. **It only bit rows carrying the fired annotation**, which is why it survived — the common row fits. Fixed with `min-width` on the text side and `flex:0 0 auto` on the buttons.
