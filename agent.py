@@ -1026,20 +1026,20 @@ def run_confirmation():
     _broadcast_trade_closes(current_prices)
 
     # ── Trailing stop nudges — batched per user to reduce notification noise ───
-    for uid in _all_recipients():
-        try:
-            if get_user_config(uid).get("skip_trail_nudge"):
-                continue
-            if _is_quiet_hours(uid):
-                continue
-            buf: list = []
-            _check_trailing_stops(current_prices, uid, msg_buffer=buf)
-            if buf:
-                combined = "\n\n──────────────\n\n".join(buf)
-                header = f"📋 <b>Position alerts ({len(buf)})</b>\n\n" if len(buf) > 1 else ""
-                send_message(f"{header}{combined}", chat_id=uid)
-        except Exception as exc:
-            print(f"[agent] Trailing stop check failed for {uid} (non-critical): {exc}")
+    def _trail_msg(uid):
+        if get_user_config(uid).get("skip_trail_nudge"):
+            return None
+        if _is_quiet_hours(uid):
+            return None
+        buf: list = []
+        _check_trailing_stops(current_prices, uid, msg_buffer=buf)
+        if not buf:
+            return None
+        combined = "\n\n──────────────\n\n".join(buf)
+        header = f"📋 <b>Position alerts ({len(buf)})</b>\n\n" if len(buf) > 1 else ""
+        return f"{header}{combined}"
+
+    _fanout(_trail_msg, tag="trailing_stops")
 
     # ── Price alerts ──────────────────────────────────────────────────────────
     try:
@@ -1306,20 +1306,20 @@ def run_close_check():
             print(f"[agent] Auto-stop check failed for {uid} (non-critical): {exc}")
 
     # ── Trailing stop nudges — batched per user to reduce notification noise ───
-    for uid in _all_recipients():
-        try:
-            if get_user_config(uid).get("skip_trail_nudge"):
-                continue
-            if _is_quiet_hours(uid):
-                continue
-            buf: list = []
-            _check_trailing_stops(current_prices, uid, msg_buffer=buf)
-            if buf:
-                combined = "\n\n──────────────\n\n".join(buf)
-                header = f"📋 <b>Position alerts ({len(buf)})</b>\n\n" if len(buf) > 1 else ""
-                send_message(f"{header}{combined}", chat_id=uid)
-        except Exception as exc:
-            print(f"[agent] Trailing stop check failed for {uid} (non-critical): {exc}")
+    def _trail_msg(uid):
+        if get_user_config(uid).get("skip_trail_nudge"):
+            return None
+        if _is_quiet_hours(uid):
+            return None
+        buf: list = []
+        _check_trailing_stops(current_prices, uid, msg_buffer=buf)
+        if not buf:
+            return None
+        combined = "\n\n──────────────\n\n".join(buf)
+        header = f"📋 <b>Position alerts ({len(buf)})</b>\n\n" if len(buf) > 1 else ""
+        return f"{header}{combined}"
+
+    _fanout(_trail_msg, tag="trailing_stops")
 
     # ── Price alerts ──────────────────────────────────────────────────────────
     try:
@@ -1350,11 +1350,10 @@ def run_eod_summary():
         print(f"[agent] Price fetch failed for EOD summary: {exc}")
         return
 
-    for uid in _all_recipients():
-        try:
+    def _eod_msg(uid):
             cfg = get_user_config(uid)
             if cfg.get("paused") or cfg.get("skip_eod"):
-                continue
+                return None
             log            = load_user_trade_log(uid)
             watchlist      = cfg.get("watchlist", [])
             open_positions = log.get("open", [])
@@ -1463,26 +1462,26 @@ def run_eod_summary():
                     else:
                         msg = insights_header.lstrip() + insights_body
 
-            if msg:
-                if DRY_RUN:
-                    print(f"\nDRY RUN — EOD Summary + Insights for {uid}:\n{msg}")
-                else:
-                    _eod_kb = [
-                        [
-                            _miniapp_btn("📊 Portfolio",     "portfolio",   "POSITIONS"),
-                            _miniapp_btn("📈 Today's Picks", "picks",       "TODAY"),
-                            _miniapp_btn("📉 Performance",   "performance", "STATS"),
-                        ],
-                        [
-                            _miniapp_btn("📋 Help",     "picks",     "HELP"),
-                            _miniapp_btn("📲 Share",    "picks",     "SHARE"),
-                            _miniapp_btn("💬 Feedback", "picks",     "FEEDBACK"),
-                            _miniapp_btn("📜 History",  "portfolio", "HISTORY"),
-                        ],
-                    ]
-                    send_inline_keyboard(msg, _eod_kb, chat_id=uid)
-        except Exception as exc:
-            print(f"[agent] EOD summary failed for {uid} (non-critical): {exc}")
+            if not msg:
+                return None
+            if DRY_RUN:
+                print(f"\nDRY RUN — EOD Summary + Insights for {uid}:\n{msg}")
+                return None
+            return {"text": msg, "keyboard": [
+                [
+                    _miniapp_btn("📊 Portfolio",     "portfolio",   "POSITIONS"),
+                    _miniapp_btn("📈 Today's Picks", "picks",       "TODAY"),
+                    _miniapp_btn("📉 Performance",   "performance", "STATS"),
+                ],
+                [
+                    _miniapp_btn("📋 Help",     "picks",     "HELP"),
+                    _miniapp_btn("📲 Share",    "picks",     "SHARE"),
+                    _miniapp_btn("💬 Feedback", "picks",     "FEEDBACK"),
+                    _miniapp_btn("📜 History",  "portfolio", "HISTORY"),
+                ],
+            ]}
+
+    _fanout(_eod_msg, tag="eod_summary")
 
 
 
@@ -1503,6 +1502,9 @@ def run_friday_wrap():
     week_start = today - timedelta(days=today.weekday())  # Monday
 
     import yfinance as yf
+
+    # uid -> {"main": str, "nudge": str|None, "lesson": str|None}
+    _wrap: dict = {}
 
     for uid in _all_recipients():
         try:
@@ -1528,11 +1530,9 @@ def run_friday_wrap():
                     continue
 
             if not week_closed:
-                send_message(
+                _wrap[uid] = {"main": (
                     "📭 No closed trades this week — your positions are still working. "
-                    "Check /positions for live P&amp;L.",
-                    chat_id=uid,
-                )
+                    "Check /positions for live P&amp;L.")}
                 continue
 
             # Stats on closed trades
@@ -1605,19 +1605,18 @@ def run_friday_wrap():
                 f"{closer}"
                 f"{spy_week_str}"
             )
-            send_message(msg, chat_id=uid, parse_mode="HTML")
+            _entry: dict = {"main": msg}
+            _wrap[uid] = _entry
 
             # ── Auto trade review nudge (≥5 total closed trades) ────────────
             # Send a /review prompt so users know the feature exists.
             # Only if they have meaningful history to analyse.
             try:
                 if len(closed_trades) >= 5:
-                    send_message(
+                    _entry["nudge"] = (
                         "🧠 <b>Weekly Trade Review available</b>\n\n"
                         "You have enough trade history for an AI pattern analysis.\n"
-                        "Send <code>/review</code> for a candid coach's take on your trading habits.",
-                        chat_id=uid,
-                    )
+                        "Send <code>/review</code> for a candid coach's take on your trading habits.")
             except Exception:
                 pass
 
@@ -1652,15 +1651,23 @@ def run_friday_wrap():
                             messages=[{"role": "user", "content": prompt}],
                         )
                         lesson = resp.content[0].text.strip().strip('"')
-                        send_message(
-                            f"💡 <b>This week's lesson:</b>\n{lesson}",
-                            chat_id=uid,
-                        )
+                        _entry["lesson"] = f"💡 <b>This week's lesson:</b>\n{lesson}"
             except Exception as exc:
                 print(f"[agent] Friday wrap — lesson generation failed for {uid}: {exc}")
 
         except Exception as exc:
             print(f"[agent] Friday wrap failed for {uid} (non-critical): {exc}")
+
+    # 🔴 THREE ORDERED PASSES, not one fan-out of all three. A user must read the
+    # wrap, then the review nudge, then the lesson — and ordering WITHIN one
+    # user's batch is not guaranteed by broadcast_all. Each pass completes before
+    # the next begins, so the sequence holds while each pass still fans out.
+    _uids = list(_wrap)
+    for _key, _tag in (("main", "friday_wrap"),
+                       ("nudge", "friday_review_nudge"),
+                       ("lesson", "friday_lesson")):
+        _fanout(lambda uid, _k=_key: _wrap.get(uid, {}).get(_k),
+                recipients=_uids, tag=_tag)
 
     print("[agent] Friday evening wrap-up complete.")
 
@@ -1683,29 +1690,32 @@ def run_tax_loss_harvest_check():
 
     dedup_month = today.strftime("%Y-%m")
 
-    for uid in _all_recipients():
-        try:
+    # Marked only AFTER the sends land — marking during the build would suppress
+    # next month's nudge for a user whose send then failed.
+    _harvest_keys: dict = {}
+
+    def _harvest_msg(uid):
             cfg = get_user_config(uid)
             if cfg.get("paused"):
-                continue
+                return None
 
             dedup_key = f"taxharvest_{uid}_{dedup_month}"
             if _is_alerted(dedup_key):
-                continue
+                return None
 
             log = load_user_trade_log(uid)
             open_trades = log.get("open", [])
             if not open_trades:
-                continue
+                return None
 
             open_tickers = list({t["ticker"] for t in open_trades if t.get("ticker")})
             try:
                 prices = _download_prices(open_tickers, period="1d", interval="1d", auto_adjust=True)
                 if not prices:
-                    continue
+                    return None
             except Exception as exc:
                 print(f"[agent] Tax harvest — price fetch failed for {uid}: {exc}")
-                continue
+                return None
 
             loss_positions = []
             for trade in open_trades:
@@ -1732,7 +1742,7 @@ def run_tax_loss_harvest_check():
                     })
 
             if not loss_positions:
-                continue
+                return None
 
             positions_lines = "\n".join(
                 f"• {p['ticker']} — down ${p['abs_loss']:.0f} "
@@ -1751,11 +1761,14 @@ def run_tax_loss_harvest_check():
                 f"<i>This is general information, not tax advice. Consult your tax advisor for "
                 f"your specific situation.</i>"
             )
-            send_inline_keyboard(msg, [[_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]], chat_id=uid)
-            _mark_alerted(dedup_key)
+            _harvest_keys[uid] = dedup_key
+            return {"text": msg, "keyboard": [
+                [_miniapp_btn("📊 View Portfolio", "portfolio", "POSITIONS")]]}
 
-        except Exception as exc:
-            print(f"[agent] Tax harvest check failed for {uid} (non-critical): {exc}")
+    _fanout(_harvest_msg, tag="tax_harvest")
+
+    for uid, key in _harvest_keys.items():
+        _mark_alerted(key)
 
     print("[agent] Tax-loss harvest check complete.")
 
@@ -2786,37 +2799,40 @@ def run_weekly_recap(config: dict, now_et: datetime):
         if recap:
             recipients = _all_recipients()
             print(f"[agent] Sending personalised weekly recap to {len(recipients)} user(s)...")
-            for uid in recipients:
+            _carded: list = []
+
+            def _recap_msg(uid):
+                user_cfg = {**config, **get_user_config(uid)}
+                if user_cfg.get("paused"):
+                    print(f"[agent] Skipping weekly recap for {uid} — picks paused.")
+                    return None
+                message = format_weekly_recap_message(recap, config=user_cfg)
+                if DRY_RUN:
+                    print(f"\n{'='*60}\nDRY RUN — Weekly Recap for {uid}:\n{'='*60}\n{message}")
+                    return None
+                _carded.append(uid)
+                return {"text": message, "keyboard": [[
+                    _miniapp_btn("📈 My Stats",     "performance", "STATS"),
+                    _miniapp_btn("📊 My Positions", "portfolio",   "POSITIONS"),
+                ], [
+                    _miniapp_btn("🏆 Community",    "performance", "COMMUNITY"),
+                    _miniapp_btn("📋 Full History", "portfolio",   "HISTORY"),
+                ]]}
+
+            _fanout(_recap_msg, recipients=recipients, tag="weekly_recap")
+
+            # 🔴 The alpha card stays SERIAL: broadcast_all speaks sendMessage
+            # only, and faking a photo through it would send a broken message.
+            # It runs after the recap so the card never arrives before the text
+            # it illustrates. Card generation dominates the cost here anyway.
+            for uid in _carded:
                 try:
-                    user_cfg = {**config, **get_user_config(uid)}
-                    if user_cfg.get("paused"):
-                        print(f"[agent] Skipping weekly recap for {uid} — picks paused.")
-                        continue
-                    message = format_weekly_recap_message(recap, config=user_cfg)
-                    if DRY_RUN:
-                        print(f"\n{'='*60}\nDRY RUN — Weekly Recap for {uid}:\n{'='*60}\n{message}")
-                    else:
-                        send_inline_keyboard(
-                            message,
-                            [[
-                                _miniapp_btn("📈 My Stats",     "performance", "STATS"),
-                                _miniapp_btn("📊 My Positions", "portfolio",   "POSITIONS"),
-                            ], [
-                                _miniapp_btn("🏆 Community",    "performance", "COMMUNITY"),
-                                _miniapp_btn("📋 Full History", "portfolio",   "HISTORY"),
-                            ]],
-                            chat_id=uid,
-                        )
-                        # Weekly alpha card — visual summary of performance
-                        try:
-                            from card_generator import generate_performance_card
-                            card = generate_performance_card(uid)
-                            if card:
-                                send_photo(card, caption="📊 Your weekly alpha card", chat_id=uid)
-                        except Exception as _card_exc:
-                            print(f"[agent] Weekly card failed for {uid} (non-critical): {_card_exc}")
-                except Exception as exc:
-                    print(f"[agent] Weekly recap failed for {uid}: {exc}")
+                    from card_generator import generate_performance_card
+                    card = generate_performance_card(uid)
+                    if card:
+                        send_photo(card, caption="📊 Your weekly alpha card", chat_id=uid)
+                except Exception as _card_exc:
+                    print(f"[agent] Weekly card failed for {uid} (non-critical): {_card_exc}")
         else:
             print("[agent] No weekly picks data — skipping recap.")
     except Exception as exc:
@@ -3688,6 +3704,9 @@ def run_premarket(config: dict):
     from market_data import get_live_price, _CRYPTO_SYMBOLS, plausible_price
     print("[agent] Running pre-market pulse...")
 
+    # uid -> {"movers": [str, …], "summary": str}
+    _pre: dict = {}
+
     for uid in _all_recipients():
         try:
             user_cfg = {**config, **get_user_config(uid)}
@@ -3846,7 +3865,8 @@ def run_premarket(config: dict):
                 ]
                 earnings_section = "\n\n⚠️ <b>Earnings this week (open positions)</b>\n" + "\n".join(e_lines)
 
-            # ── Big mover alerts (sent first, individually) ───────────────────
+            # ── Big mover alerts (delivered first, individually) ──────────────
+            _mover_msgs: list = []
             for ticker, price, pct, stop in big_movers:
                 direction = "gapping UP" if pct > 0 else "gapping DOWN"
                 action    = ""
@@ -3860,25 +3880,35 @@ def run_premarket(config: dict):
                     action = "\n⚠️ <b>Approaching stop-loss</b> — consider your risk before open."
                 elif pct >= 5:
                     action = "\n💡 Strong open expected — consider taking partial profits near target."
-                send_message(
+                _mover_msgs.append(
                     f"{'🟢' if pct > 0 else '🔴'} <b>{ticker}</b> {direction} <b>{'+' if pct > 0 else ''}{pct:.1f}%</b> "
-                    f"pre-market → <code>${_p(price)}</code>{action}",
-                    chat_id=uid,
+                    f"pre-market → <code>${_p(price)}</code>{action}"
                 )
 
             body = "\n".join(position_lines)
             n    = len(unique)
-            send_message(
-                f"🌅 <b>Pre-market — your {n} position{'s' if n != 1 else ''}</b>\n\n"
-                f"{body}"
-                f"{concentration_line}"
-                f"{earnings_section}\n\n"
-                f"<i>Market opens in ~45 min. 🟢 = +3%+  🔴 = -3%+  ⚪ = quiet</i>",
-                chat_id=uid,
-            )
+            _pre[uid] = {
+                "movers": _mover_msgs,
+                "summary": (
+                    f"🌅 <b>Pre-market — your {n} position{'s' if n != 1 else ''}</b>\n\n"
+                    f"{body}"
+                    f"{concentration_line}"
+                    f"{earnings_section}\n\n"
+                    f"<i>Market opens in ~45 min. 🟢 = +3%+  🔴 = -3%+  ⚪ = quiet</i>"
+                ),
+            }
 
         except Exception as exc:
             print(f"[agent] Pre-market pulse failed for {uid} (non-critical): {exc}")
+
+    # 🔴 TWO ORDERED PASSES: the per-ticker gap alerts must land before the
+    # summary card that contextualises them. The expensive per-ticker yfinance
+    # work above runs ONCE — both passes read the prepared dict, never rebuild.
+    _uids = list(_pre)
+    _fanout(lambda uid: _pre.get(uid, {}).get("movers") or None,
+            recipients=_uids, tag="premarket_movers")
+    _fanout(lambda uid: _pre.get(uid, {}).get("summary"),
+            recipients=_uids, tag="premarket_summary")
 
     print("[agent] Pre-market pulse complete.")
 
@@ -3955,12 +3985,12 @@ def run_price_alerts():
 
     # Also check trade targets/stops on open positions using live prices — per user
     import yfinance as yf
-    for uid in _all_recipients():
-        try:
+    def _target_approach_msgs(uid):
+            out = []
             log = load_user_trade_log(uid)
             open_trades = log.get("open", [])
             if not open_trades:
-                continue
+                return None
 
             tickers = list({t["ticker"] for t in open_trades})
             current_prices = _download_prices(tickers, period="1d", interval="1m", auto_adjust=True)
@@ -3982,17 +4012,19 @@ def run_price_alerts():
                     from cache_layer import cache_get, cache_set
                     if not cache_get(alert_key):
                         cache_set(alert_key, "1", ttl_seconds=86400)
-                        send_inline_keyboard(
-                            f"⚡ <b>{ticker}</b> is <b>{gap_pct:.1f}%</b> from your target <code>${float(target):.2f}</code>\n"
-                            f"Current: <code>${float(current):.2f}</code>  ·  Consider taking partial profit.",
-                            [[
+                        out.append({
+                            "text": (
+                                f"⚡ <b>{ticker}</b> is <b>{gap_pct:.1f}%</b> from your target <code>${float(target):.2f}</code>\n"
+                                f"Current: <code>${float(current):.2f}</code>  ·  Consider taking partial profit."
+                            ),
+                            "keyboard": [[
                                 _miniapp_btn(f"✅ Close {ticker}", "portfolio", f"sold_pick|{ticker}"),
                                 {"text": "Hold 💎", "callback_data": "noop"},
                             ]],
-                            chat_id=uid,
-                        )
-        except Exception as exc:
-            print(f"[agent] Intraday trade check failed for {uid} (non-critical): {exc}")
+                        })
+            return out
+
+    _fanout(_target_approach_msgs, tag="target_approach")
 
     # ── Watchlist big-move alerts (>3% intraday) ─────────────────────────────
     try:
