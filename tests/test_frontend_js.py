@@ -319,3 +319,74 @@ class TestApiIsCalledPositionally:
             arg = arg.strip()
             assert arg.startswith(("'", '"', "`")), \
                 f"api() second argument is not a method string: {arg[:60]}"
+
+
+class TestAnalysisToggleLooksTappable:
+    """🔴 Owner feedback, Aug 18: "it doesn't even look clickable."
+
+    The disclosure was styled as a section LABEL — `background:none; border:none`,
+    `--hint` grey at 11px, ~22px tall, and its only feedback was `opacity` on
+    `:active`, i.e. after you had already guessed it was a control. That was
+    survivable while it hid optional prose. It became a real defect when Chart
+    and Backtest were moved inside it, because the affordance became
+    load-bearing — the pixels were optimised without checking discoverability.
+    """
+
+    @property
+    def _css(self):
+        import os, re
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "miniapp", "index.html")) as f:
+            src = f.read()
+        m = re.search(r"\.pick-thesis-toggle \{(.*?)\}", src, re.S)
+        assert m, ".pick-thesis-toggle rule not found"
+        # Strip CSS comments: the rule's own comment MENTIONS the banned
+        # rgba(255,255,255,.04) while explaining why it was removed, and a naive
+        # scan flags that as an offence. Same docstring-scan trap as before.
+        return re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)
+
+    @property
+    def _src(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "miniapp", "index.html")) as f:
+            return f.read()
+
+    def test_it_has_a_surface_and_an_edge(self):
+        css = self._css
+        assert "background: none" not in css, "no surface — reads as a text label"
+        assert "border: none" not in css, "no edge — reads as a text label"
+        assert "border-radius" in css
+
+    def test_the_surface_is_a_THEME_TOKEN_not_a_white_overlay(self):
+        """`rgba(255,255,255,.04)` is invisible on a white card, and light mode
+        is the theme actually in use. Caught by reading the COMPUTED colour
+        against the card, not by looking at the CSS."""
+        css = self._css
+        assert "var(--card-hover)" in css, "surface must come from a theme token"
+        assert "rgba(255,255,255" not in css, \
+            "hardcoded white overlay disappears in light mode"
+
+    def test_it_meets_the_44px_touch_target(self):
+        """The project's own mobile rule. Measured live at 48px."""
+        import re
+        m = re.search(r"padding:\s*(\d+)px", self._css)
+        assert m and int(m.group(1)) >= 12, \
+            f"vertical padding {m and m.group(1)}px gives a sub-44px target"
+
+    def test_the_label_names_what_is_hidden(self):
+        """"Analysis" alone gave no clue Chart and Backtest were behind it."""
+        src = self._src
+        assert "pick-thesis-sub" in src
+        assert "chart, backtest" in src, "the label must name the payload"
+
+    def test_open_state_is_exposed_and_styled(self):
+        src, css_all = self._src, self._src
+        assert 'aria-expanded="false"' in src, "initial state must be declared"
+        assert "setAttribute('aria-expanded'" in src, "state must track the toggle"
+        assert '.pick-thesis-toggle[aria-expanded="true"]' in css_all, \
+            "open state needs a visual difference, not just an attribute"
+
+    def test_pressed_feedback_is_more_than_opacity(self):
+        assert "transform: scale(.98)" in self._src, \
+            "a pressed state should match the app's other buttons"

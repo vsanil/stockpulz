@@ -458,16 +458,44 @@ body.tg-light .upside-bar { background: rgba(0,0,0,0.08); border-color: rgba(0,0
 }
 
 /* Collapsible thesis toggle button */
+/* 🔴 This must READ as a control (Aug 18). It was styled as a section label —
+   no surface, no border, --hint grey at 11px, ~22px tall, and its only feedback
+   was opacity on :active, i.e. after you had already guessed. That was tolerable
+   while it hid optional prose; it became a real defect once Chart and Backtest
+   moved inside it, because the affordance is now load-bearing.
+   Matches .btn-chart-sm deliberately — same surface, radius, weight and pressed
+   state — so it belongs to the same visual language as the buttons it reveals. */
 .pick-thesis-toggle {
-  width: 100%; background: none; border: none; border-top: 1px solid var(--border);
-  color: var(--hint); font-size: 11px; font-weight: 500; letter-spacing: .02em;
-  padding: 7px 2px 4px; margin-top: 6px; cursor: pointer;
-  display: flex; justify-content: space-between; align-items: center;
+  width: 100%; margin-top: 8px;
+  /* TOKEN, not a hardcoded white overlay: rgba(255,255,255,.04) is invisible on
+     a white card, and light mode is the theme actually in use. --card-hover is
+     #f0f2f8 in light and a lifted white in dark, so it reads in both. */
+  background: var(--card-hover);
+  border: 1px solid var(--border); border-radius: 12px;
+  color: var(--text); font-size: 13px; font-weight: 600;
+  padding: 12px 14px;              /* ≥44px tall — the project's touch-target rule */
+  cursor: pointer; font-family: inherit;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
   position: relative; z-index: 1; text-align: left;
+  transition: transform .12s, background .15s, border-color .15s;
 }
-.pick-thesis-toggle:active { opacity: .6; }
-.pick-thesis-chevron { font-size: 10px; transition: transform .2s; }
-.pick-thesis-chevron.open { transform: rotate(180deg); }
+.pick-thesis-toggle:hover { background: rgba(79,142,247,0.10); border-color: rgba(79,142,247,0.30); }
+.pick-thesis-toggle:active { transform: scale(.98); background: rgba(79,142,247,0.16); }
+.pick-thesis-toggle[aria-expanded="true"] {
+  border-color: rgba(79,142,247,0.35); color: var(--accent);
+}
+/* Name what is behind it — "Analysis" alone gave no clue Chart/Backtest were in there. */
+.pick-thesis-sub { color: var(--hint); font-weight: 500; font-size: 11.5px; }
+.pick-thesis-toggle[aria-expanded="true"] .pick-thesis-sub { color: var(--accent); opacity: .75; }
+/* A filled chevron reads as an affordance; a bare 10px glyph reads as decoration. */
+.pick-thesis-chevron {
+  font-size: 11px; line-height: 1; flex: 0 0 auto;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(128,128,128,0.18);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .2s, background .15s;
+}
+.pick-thesis-chevron.open { transform: rotate(180deg); background: rgba(79,142,247,0.18); }
 /* Collapsible body — hidden by default */
 .pick-thesis-body {
   overflow: hidden; max-height: 0;
@@ -4798,8 +4826,9 @@ function renderPickCard(p, idx = 0) {
            out of a row without collapsing the row would have saved nothing.
            The toggle now renders UNCONDITIONALLY: it always holds these two, so
            gating it on a thesis would make them vanish on a pick without one. -->
-      <button class="pick-thesis-toggle" onclick="togglePickThesis(this)" aria-label="Toggle analysis">
-        <span>Analysis</span>
+      <button class="pick-thesis-toggle" onclick="togglePickThesis(this)"
+              aria-expanded="false" aria-label="Show analysis, chart and backtest">
+        <span>Analysis <span class="pick-thesis-sub">· chart, backtest</span></span>
         <span class="pick-thesis-chevron">▾</span>
       </button>
       <div class="pick-thesis-body">
@@ -4831,6 +4860,8 @@ function togglePickThesis(btn) {
   const body    = btn.nextElementSibling;
   const chevron = btn.querySelector('.pick-thesis-chevron');
   const isOpen  = body.classList.contains('open');
+  // Drives both the accessible state and the [aria-expanded="true"] styling.
+  btn.setAttribute('aria-expanded', String(!isOpen));
   body.classList.toggle('open', !isOpen);
   chevron.classList.toggle('open', !isOpen);
   tg.HapticFeedback?.selectionChanged();
