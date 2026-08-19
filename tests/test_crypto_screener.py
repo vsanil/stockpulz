@@ -146,28 +146,19 @@ class TestPriceHistory:
         assert len(calls) == 2
 
 
-class TestRsiDivergence:
-    """🔴 OPEN DECISION, not a pinned behaviour.
+class TestRsiMatchesTheStandard:
+    """The divisor was corrected on 2026-08-19 (owner's call), replacing
+    TestRsiDivergence which had documented it as an open question.
 
-    crypto_screener._simple_rsi divides the gain sum by the COUNT OF GAINS:
+    It previously divided the gain sum by the COUNT OF GAINS; every other RSI in
+    this repo divides by the PERIOD (Wilder's standard) — agent.py:3508,
+    agent.py:1114, ai_analyzer.py:463. On a downtrend containing one spike the
+    two forms gave 90.91 and 43.48, and the value feeds the 42-62 band in
+    _short_term_score, so it changed which coins were picked.
 
-        avg_gain = statistics.mean(gains)          # len(gains)
-
-    Every other RSI in this repo divides by the PERIOD, which is Wilder's
-    standard definition:
-
-        agent.py:3508        sum(gains[-period:]) / period
-        agent.py:1114        delta.clip(lower=0).rolling(14).mean()
-        ai_analyzer.py:463   delta.clip(lower=0).rolling(14).mean()
-
-    On a downtrend containing one spike the two forms give 90.91 and 43.48. The
-    value feeds `if rsi and 42 <= rsi <= 62` in _short_term_score, so the
-    divergence changes which coins are picked.
-
-    This test asserts the divergence EXISTS rather than that either value is
-    right. Fixing it changes crypto pick output for real users, so it is the
-    owner's call — and it must not be silently "cleaned up" by a future
-    refactor without that decision being made.
+    🔴 This is an ENGINE CHANGE: crypto numbers before and after are not
+    directly comparable. It is dated in evaluate_picks.ENGINE_CHANGES so the
+    report says so rather than averaging across it.
     """
 
     @staticmethod
@@ -177,16 +168,32 @@ class TestRsiDivergence:
         ag, al = sum(g) / period, sum(l) / period
         return 100.0 if al == 0 else round(100 - 100 / (1 + ag / al), 2)
 
-    def test_the_divergence_is_real_and_large(self):
-        spiky = [100, 110] + [109 - i for i in range(13)]
-        ours, standard = cs._simple_rsi(spiky), self._wilder(spiky)
-        assert abs(ours - standard) > 15, (
-            "the two RSI forms have converged — if _simple_rsi was corrected to "
-            "the standard divisor, delete this test and record the decision; "
-            "crypto pick output changes with it"
-        )
+    @pytest.mark.parametrize("prices", [
+        pytest.param([100, 110] + [109 - i for i in range(13)], id="spiky-downtrend"),
+        pytest.param([100 + (3 if i % 2 else -3) for i in range(20)], id="choppy"),
+        pytest.param([100 + i * (1 if i % 3 else -2) for i in range(25)], id="mixed"),
+        pytest.param([100 + i for i in range(20)], id="uptrend"),
+        pytest.param([100 - i for i in range(20)], id="downtrend"),
+    ])
+    def test_it_now_agrees_with_the_standard_definition(self, prices):
+        assert cs._simple_rsi(prices) == pytest.approx(self._wilder(prices), abs=0.01)
 
-    def test_they_agree_on_monotonic_series(self):
-        """Scope the claim honestly: the forms only diverge on mixed series."""
-        up = [100 + i for i in range(20)]
-        assert cs._simple_rsi(up) == self._wilder(up) == 100.0
+    def test_the_specific_case_that_prompted_the_change(self):
+        spiky = [100, 110] + [109 - i for i in range(13)]
+        assert cs._simple_rsi(spiky) == pytest.approx(43.48, abs=0.01), \
+            "the old count-of-gains divisor scored this 90.91 — strongly overbought"
+
+    def test_a_period_with_no_gains_does_not_divide_by_zero(self):
+        assert cs._simple_rsi([100 - i for i in range(20)]) == 0.0
+
+    def test_the_change_is_dated_in_the_evaluator(self):
+        """A change to pick logic resets what the numbers mean; the report has
+        to say so rather than averaging two engines together."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "ev", os.path.join(ROOT, "scripts", "evaluate_picks.py"))
+        ev = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ev)
+        assert any(d == "2026-08-19" and scope == "crypto"
+                   for d, scope, _ in ev.ENGINE_CHANGES), \
+            "the RSI correction is not logged as an engine change"

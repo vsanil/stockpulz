@@ -514,3 +514,39 @@ class TestNearMissCaptureWidened:
         assert shown == formatters.NEAR_MISS_SHOW_N, \
             f"message showed {shown} near-misses, expected {formatters.NEAR_MISS_SHOW_N}"
         assert len(msg) < 4096, "daily message must stay under Telegram's limit"
+
+
+class TestEngineChangeLog:
+    """A change to the pick logic RESETS what the numbers mean.
+
+    Without this, a report spanning the 2026-08-19 crypto RSI correction would
+    silently average two different engines and present it as one track record.
+    """
+
+    def _rows(self, dates, atype="crypto"):
+        return [{"date": d, "asset_type": atype, "ticker": "BTC"} for d in dates]
+
+    def test_the_note_fires_when_a_slice_straddles_a_change(self):
+        note = " ".join(ev._engine_change_note(
+            self._rows(["2026-08-10"] * 3 + ["2026-08-20"] * 2)))
+        assert "3 of 5" in note and "2026-08-19" in note
+        assert "not directly comparable" in note
+
+    def test_it_is_silent_when_every_pick_is_on_one_side(self):
+        """Crying wolf on a consistent slice trains the reader to ignore it —
+        the same reasoning as the canary's weekly-relay check."""
+        assert ev._engine_change_note(self._rows(["2026-08-10"] * 5)) == []
+        assert ev._engine_change_note(self._rows(["2026-08-20"] * 5)) == []
+
+    def test_a_crypto_change_does_not_warn_about_stocks(self):
+        assert ev._engine_change_note(
+            self._rows(["2026-08-10"] * 3 + ["2026-08-20"] * 2, "stock")) == []
+
+    def test_an_empty_ledger_says_nothing(self):
+        assert ev._engine_change_note([]) == []
+
+    def test_every_logged_change_carries_a_date_scope_and_reason(self):
+        for date, scope, what in ev.ENGINE_CHANGES:
+            assert len(date) == 10 and date[4] == "-", f"bad date: {date}"
+            assert scope in ("all", "stock", "crypto", "etf", "commodity"), scope
+            assert len(what) > 40, f"{date} logged without a real explanation"
