@@ -684,11 +684,9 @@ body.tg-light .picker-tf  { background: rgba(0,0,0,.07); }
    words that cannot wrap. The row did not scroll either (overflow-x: visible),
    so the labels were simply cut off with no way to read them. Wrapping to
    3 + 2 gives ~109px per tile, comfortably over the 69px worst case. */
-/* The watchlist sparkline is decorative and it is the only expendable item on
-   the row: at 375px the row leaves ~151px for [ticker][price][sparkline], and
-   ticker + a worst-case price ("$64,285.00") already need ~145px. Keeping it
-   squeezed the TICKER to a single character. Content wins over decoration. */
-@media (max-width: 430px) { .watch-spark { display: none; } }
+/* The sparkline is back: dropping from four inline buttons to two frees ~86px,
+   so [ticker][price][sparkline] now needs ~205px of the ~237px available. It
+   was only hidden because four icon buttons took 47% of the row. */
 
 .summary-row {
   display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; padding: 14px 0 10px;
@@ -2522,6 +2520,28 @@ body.tg-light { --hint: #4b5563; }
   </div>
 </div>
 
+<!-- ── Watchlist row actions ───────────────────────────────────────────────
+     Four unlabelled icon buttons per row consumed 164px — 47% of a 347px row —
+     which is what forced the ✕ off-screen and squeezed out the sparkline. Only
+     the alert bell stays inline, because it is a STATE indicator (amber when an
+     alert is live); the rest move here. Chart is reachable by tapping the
+     ticker, and Remove is destructive, so a menu is the safer home for it. -->
+<div id="watchmore-overlay" class="overlay" onclick="handleOverlayTap(event,'watchmore-overlay')">
+  <div class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-hdr">
+      <div class="sheet-title" id="watchmore-title">Ticker</div>
+      <button class="sheet-close" onclick="closeOverlay('watchmore-overlay')">✕</button>
+    </div>
+    <div class="sheet-body">
+      <button class="btn-cancel" style="text-align:left" onclick="_watchMoreDo('chart')">📊&nbsp;&nbsp;View chart</button>
+      <button class="btn-cancel" style="text-align:left" onclick="_watchMoreDo('add')">➕&nbsp;&nbsp;Add to portfolio</button>
+      <button class="btn-cancel" style="text-align:left" onclick="_watchMoreDo('alert')">🔔&nbsp;&nbsp;<span id="watchmore-alert-lbl">Set price alert</span></button>
+      <button class="btn-cancel" style="text-align:left;color:var(--red)" onclick="_watchMoreDo('remove')">🗑&nbsp;&nbsp;Remove from watchlist</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Paper Buy overlay ──────────────────────────────────────────────────── -->
 <div id="paper-buy-overlay" class="overlay" onclick="if(event.target===this)closePaperBuySheet()">
   <div class="bottom-sheet">
@@ -3349,6 +3369,24 @@ function copyTicker(sym) {
 
 // ── Overlay helpers ───────────────────────────────────────────────────────────
 function openOverlay(id)  { _bumpUsage('sheet:' + String(id).replace(/-overlay$|-sheet$/, '')); document.getElementById(id).classList.add('open');    document.body.style.overflow = 'hidden'; }
+let _watchMoreTicker = '';
+let _watchMoreType   = 'stock';
+function openWatchMore(ticker, assetType, hasAlert) {
+  _watchMoreTicker = ticker;
+  _watchMoreType   = assetType || 'stock';
+  document.getElementById('watchmore-title').textContent = ticker;
+  document.getElementById('watchmore-alert-lbl').textContent =
+    hasAlert ? 'Edit price alert' : 'Set price alert';
+  openOverlay('watchmore-overlay');
+}
+function _watchMoreDo(action) {
+  const t = _watchMoreTicker;
+  closeOverlay('watchmore-overlay');
+  if (action === 'chart')  return openChart(t, _watchMoreType);
+  if (action === 'add')    return openAddPosition(t);
+  if (action === 'alert')  return openWatchAlert(t);
+  if (action === 'remove') return removeFromWatchlist(t);
+}
 function closeOverlay(id) { document.getElementById(id).classList.remove('open'); document.body.style.overflow = ''; }
 function handleOverlayTap(e, id) {
   // Close if user taps the dark backdrop (not the sheet itself)
@@ -7925,20 +7963,14 @@ async function renderWatchlist(tickers, alertTickers = new Set(), assetTypesMap 
           <canvas id="wspark-${t}" class="watch-spark" width="60" height="24" style="opacity:.7;margin-left:4px;flex:0 0 auto"></canvas>
         </div>
         <div style="display:flex;gap:8px;flex:0 0 auto">
-          <button onclick="openChart('${t}','${_watchAssetType(t, d.asset_types)}')"
-                  style="padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);
-                         background:transparent;color:var(--text);font-size:12px;cursor:pointer">📊</button>
-          <button onclick="openAddPosition('${t}')"
-                  style="padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);
-                         background:transparent;color:var(--accent);font-size:12px;cursor:pointer"
-                  title="Add ${t} to portfolio">➕</button>
           <button onclick="openWatchAlert('${t}')"
                   style="padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);
                          background:transparent;${alertTickers.has(t)?'color:var(--amber);border-color:rgba(255,184,0,0.4)':'color:var(--hint)'};font-size:12px;cursor:pointer"
                   title="${alertTickers.has(t)?'Alert active — tap to update':'Set price alert'}">${alertTickers.has(t)?'🔔':'🔕'}</button>
-          <button onclick="removeFromWatchlist('${t}')"
+          <button onclick="openWatchMore('${t}','${_watchAssetType(t, d.asset_types)}',${alertTickers.has(t)})"
                   style="padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);
-                         background:transparent;color:var(--red);font-size:12px;cursor:pointer">✕</button>
+                         background:transparent;color:var(--hint);font-size:12px;cursor:pointer"
+                  aria-label="More actions for ${t}" title="More actions">⋯</button>
         </div>
       </div>`;
     }

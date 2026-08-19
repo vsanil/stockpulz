@@ -463,8 +463,67 @@ class TestNarrowViewportOverflow:
         assert m and int(m.group(1)) >= 96, \
             f"min-width {m and m.group(1)} is under the 69px label + 16px padding + border"
 
-    def test_the_sparkline_yields_before_the_content_does(self):
-        """At 375px the row leaves ~151px for [ticker][price][sparkline] and the
-        first two already need ~145px. Decoration loses to content."""
+    # NOTE: a guard here once asserted the sparkline was HIDDEN. That was true
+    # only while four icon buttons took 47% of the row. Cutting to two inline
+    # controls freed ~86px and the sparkline fits again, so the constraint no
+    # longer holds — TestWatchlistRowDensity now asserts the opposite. Removed
+    # rather than relaxed: a test that contradicts current intent is worse than
+    # no test.
+
+
+class TestWatchlistRowDensity:
+    """Four unlabelled icon buttons per row took 164px — 47% of a 347px row.
+
+    That density is what forced the ✕ off-screen and squeezed out the sparkline.
+    Two stay inline; the rest move into a ⋯ sheet.
+
+      * 🔔/🔕 stays because it is a STATE indicator (amber when an alert is
+        live) — hiding it would conceal whether a ticker is already alerted,
+        the same reasoning that kept Set Alert on the pick card.
+      * 📊 was redundant: tapping the ticker already opens the chart.
+      * 🗑 Remove is destructive, so a sheet is the safer home for it.
+    """
+
+    @property
+    def _src(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "miniapp", "index.html")) as f:
+            return f.read()
+
+    def _group(self):
         s = self._src
-        assert ".watch-spark" in s and "display: none" in s[s.index(".watch-spark"):s.index(".watch-spark") + 200]
+        i = s.index('<div style="display:flex;gap:8px;flex:0 0 auto">')
+        return s[i:s.index("</div>\n      </div>`;", i)]
+
+    def test_only_two_controls_stay_inline(self):
+        """Measured live: 78px instead of 164px."""
+        grp = self._group()
+        assert grp.count("<button") == 2, \
+            f"{grp.count('<button')} inline buttons — the row cannot carry more at 375px"
+
+    def test_the_alert_bell_is_one_of_them(self):
+        grp = self._group()
+        assert "openWatchAlert(" in grp, \
+            "the bell shows alert STATE; behind a sheet that state is invisible"
+        assert "var(--amber)" in grp, "the active-alert colour must stay on the row"
+
+    def test_the_overflow_menu_is_the_other(self):
+        assert "openWatchMore(" in self._group()
+
+    def test_the_sheet_offers_every_action_that_left_the_row(self):
+        s = self._src
+        i = s.index('id="watchmore-overlay"')
+        sheet = s[i:s.index("</div>\n</div>", i)]
+        for needed in ("View chart", "Add to portfolio", "price alert", "Remove from watchlist"):
+            assert needed in sheet, f"{needed!r} is unreachable — it left the row with no home"
+
+    def test_the_alert_label_reflects_existing_state(self):
+        assert "'Edit price alert' : 'Set price alert'" in self._src
+
+    def test_the_sparkline_is_no_longer_suppressed(self):
+        """It was hidden only because four buttons took 47% of the row. Two give
+        ~86px back, so [ticker][price][sparkline] fits in ~205px of ~237px."""
+        s = self._src
+        assert ".watch-spark { display: none; }" not in s, \
+            "the sparkline should fit again now the row is not button-bound"
