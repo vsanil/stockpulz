@@ -57,6 +57,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
+          # Storage backend. Must match Render, or GH Actions writes to the Gist
+          # while the web service writes to Supabase — the split-brain of 2026-08-19.
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
           GITHUB_TOKEN:       ${{ secrets.GH_GIST_TOKEN }}
           GIST_ID:            ${{ secrets.GIST_ID }}
           FINNHUB_API_KEY:    ${{ secrets.FINNHUB_API_KEY }}
