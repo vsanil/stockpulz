@@ -113,3 +113,97 @@ class TestBackendSelectionStaysDormant:
         """`supports_rows()` False is what keeps every path byte-identical to
         pre-migration behaviour."""
         assert storage.GistBackend().supports_rows() is False
+
+
+class TestSupabaseSchemaGuard:
+    """🔴 The 2026-08-19 production outage.
+
+    SUPABASE_URL and SUPABASE_KEY were set on Render while supabase_schema.sql
+    had never been applied. Construction SUCCEEDED (the client is lazy), so
+    SupabaseBackend took over ALL storage and every per-user read then failed —
+    40 on user_trades.json, 18 on user_configs.json, 4 each on price_alerts and
+    backtest_trades in one 45-minute window — while the mini-app and bot showed
+    nothing and the Saturday weekly run set zero alerts.
+
+    get_storage_backend() already falls back to Gist when construction raises.
+    It simply never got the chance.
+    """
+
+    def _client(self, missing=(), hang=(), other_error=()):
+        class _Q:
+            def __init__(self, table): self.t = table
+            def select(self, *a, **k): return self
+            def limit(self, *a, **k): return self
+            def execute(self):
+                import time
+                if self.t in hang:
+                    time.sleep(30)
+                if self.t in missing:
+                    raise Exception(
+                        "{'message': \"Could not find the table 'public."
+                        f"{self.t}' in the schema cache\", 'code': 'PGRST205'}}")
+                if self.t in other_error:
+                    raise Exception("connection refused")
+                return type("R", (), {"data": []})()
+        class _C:
+            def table(self_inner, name): return _Q(name)
+        return _C()
+
+    def _backend(self, monkeypatch, client):
+        import storage
+        monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+        monkeypatch.setenv("SUPABASE_KEY", "test-key")
+        b = storage.SupabaseBackend.__new__(storage.SupabaseBackend)
+        b._client = client
+        return b
+
+    def test_a_missing_user_records_table_raises(self, monkeypatch):
+        b = self._backend(monkeypatch, self._client(missing=("user_records",)))
+        with pytest.raises(RuntimeError) as e:
+            b._verify_schema(timeout=1.0)
+        assert "user_records" in str(e.value)
+        assert "unset SUPABASE_URL" in str(e.value), "the message must name the rollback"
+
+    def test_a_missing_documents_table_raises(self, monkeypatch):
+        b = self._backend(monkeypatch, self._client(missing=("documents",)))
+        with pytest.raises(RuntimeError):
+            b._verify_schema(timeout=1.0)
+
+    def test_a_complete_schema_passes(self, monkeypatch):
+        b = self._backend(monkeypatch, self._client())
+        b._verify_schema(timeout=1.0)          # must not raise
+
+    def test_an_unreachable_supabase_raises_rather_than_taking_over(self, monkeypatch):
+        """A backend we cannot verify must not be trusted with storage while a
+        working Gist is sitting right there."""
+        b = self._backend(monkeypatch, self._client(other_error=("documents",)))
+        with pytest.raises(RuntimeError) as e:
+            b._verify_schema(timeout=1.0)
+        assert "unreachable or unverifiable" in str(e.value)
+
+    def test_a_hanging_probe_times_out_instead_of_blocking_boot(self, monkeypatch):
+        import time
+        b = self._backend(monkeypatch, self._client(hang=("documents",)))
+        t0 = time.time()
+        with pytest.raises(RuntimeError) as e:
+            b._verify_schema(timeout=0.5)
+        assert time.time() - t0 < 5, "a hung probe must not stall startup"
+        assert "timed out" in str(e.value)
+
+    def test_get_storage_backend_FALLS_BACK_to_gist_when_the_schema_is_missing(self, monkeypatch):
+        """The whole point: the outage becomes one startup line and no impact."""
+        import storage
+        monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+        monkeypatch.setenv("SUPABASE_KEY", "test-key")
+        monkeypatch.setenv("GH_GIST_TOKEN", "t")
+        monkeypatch.setenv("GIST_ID", "g")
+        monkeypatch.setattr(storage, "_backend_instance", None)
+
+        def _boom(*a, **k):
+            raise RuntimeError("Supabase schema incomplete — missing table(s): user_records.")
+        monkeypatch.setattr(storage, "SupabaseBackend", _boom)
+
+        b = storage.get_storage_backend()
+        assert isinstance(b, storage.GistBackend), \
+            "a half-configured Supabase must never take over storage"
+        monkeypatch.setattr(storage, "_backend_instance", None)
