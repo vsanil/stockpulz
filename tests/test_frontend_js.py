@@ -395,3 +395,76 @@ class TestAnalysisToggleLooksTappable:
     def test_pressed_feedback_is_more_than_opacity(self):
         assert "transform: scale(.98)" in self._src, \
             "a pressed state should match the app's other buttons"
+
+
+class TestNarrowViewportOverflow:
+    """🔴 Two controls were unreachable or unreadable at 375px (Aug 18).
+
+    Both are the same root cause — a flex item defaults to `min-width: auto` and
+    will not shrink below its content's min-content width, so the overflow lands
+    on whatever sits last in the row.
+
+      * Watchlist: the left block (ticker + name + "🔔 fired $X · Nd ago")
+        measured 204px and the button group 161px = 365px inside a 347px row,
+        pushing the ✕ to 379-391px on a 375px viewport. OFF SCREEN — the remove
+        control could not be tapped. It only bit rows carrying the fired
+        annotation, which is why it survived.
+      * Portfolio: five tiles at `flex: 1` split 347px into 61px each, leaving a
+        43px label area for "Positions" (67px) and "Portfolio $" (69px). Single
+        words, so they could not wrap, and the row did not scroll.
+    """
+
+    @property
+    def _src(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "miniapp", "index.html")) as f:
+            return f.read()
+
+    # ── watchlist row ────────────────────────────────────────────────────────
+    def _row(self):
+        s = self._src
+        i = s.index('html += `<div id="wrow-${t}"')
+        return s[i:s.index("</div>`", i)]
+
+    def test_the_button_group_never_shrinks_or_is_pushed_out(self):
+        row = self._row()
+        i = row.index('<div style="display:flex;gap:8px')
+        assert "flex:0 0 auto" in row[i:i + 120], \
+            "the ✕/alert/add/chart group must not shrink — it gets pushed off-screen"
+
+    def test_the_ticker_has_a_width_floor(self):
+        """Over-correcting with min-width:0 alone let the text block collapse to
+        ~9px and truncated every ticker to ONE character."""
+        row = self._row()
+        assert "min-width:64px" in row, "without a floor the ticker itself is clipped"
+
+    def test_the_fired_annotation_ellipsizes_rather_than_widening_the_row(self):
+        s = self._src
+        i = s.index("🔔 fired $")
+        assert "text-overflow:ellipsis" in s[max(0, i - 260):i], \
+            "the fired line is the widest element; it must truncate, not push"
+
+    # ── portfolio summary tiles ──────────────────────────────────────────────
+    def _rule(self, name):
+        import re
+        m = re.search(rf"\.{name} \{{(.*?)\}}", self._src, re.S)
+        assert m, f".{name} rule not found"
+        return re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)   # strip comments
+
+    def test_the_summary_row_can_wrap(self):
+        assert "flex-wrap: wrap" in self._rule("summary-row"), \
+            "five tiles cannot fit one 375px row without clipping their labels"
+
+    def test_each_tile_is_wide_enough_for_its_longest_label(self):
+        import re
+        css = self._rule("summary-box")
+        m = re.search(r"min-width:\s*(\d+)px", css)
+        assert m and int(m.group(1)) >= 96, \
+            f"min-width {m and m.group(1)} is under the 69px label + 16px padding + border"
+
+    def test_the_sparkline_yields_before_the_content_does(self):
+        """At 375px the row leaves ~151px for [ticker][price][sparkline] and the
+        first two already need ~145px. Decoration loses to content."""
+        s = self._src
+        assert ".watch-spark" in s and "display: none" in s[s.index(".watch-spark"):s.index(".watch-spark") + 200]
