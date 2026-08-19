@@ -684,6 +684,42 @@ body.tg-light .picker-tf  { background: rgba(0,0,0,.07); }
    words that cannot wrap. The row did not scroll either (overflow-x: visible),
    so the labels were simply cut off with no way to read them. Wrapping to
    3 + 2 gives ~109px per tile, comfortably over the 69px worst case. */
+/* ── Tab help strip ───────────────────────────────────────────────────────
+   One tappable line per tab explaining what it shows, expanding to the detail.
+   Styled from theme TOKENS (a hardcoded white overlay is invisible in light
+   mode) and given a declared min-height so the touch target cannot erode.
+   The WHOLE strip is the control, not a small "?" — a full-width target is
+   both easier to hit and less chrome than a separate button. */
+.tabhelp {
+  width: 100%; margin: 0 0 12px; text-align: left;
+  background: var(--card-hover); border: 1px solid var(--border);
+  border-radius: 12px; padding: 9px 12px; min-height: 40px;
+  display: flex; align-items: center; gap: 8px;
+  color: var(--text); font-size: 12.5px; font-weight: 500;
+  font-family: inherit; cursor: pointer;
+  transition: transform .12s, background .15s, border-color .15s;
+}
+.tabhelp:hover  { background: rgba(79,142,247,0.10); border-color: rgba(79,142,247,0.30); }
+.tabhelp:active { transform: scale(.99); background: rgba(79,142,247,0.16); }
+.tabhelp[aria-expanded="true"] { border-color: rgba(79,142,247,0.35); color: var(--accent); }
+.tabhelp-line { flex: 1 1 auto; min-width: 0; }
+.tabhelp-chev {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(128,128,128,0.18);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; transition: transform .2s, background .15s;
+}
+.tabhelp-chev.open { transform: rotate(180deg); background: rgba(79,142,247,0.18); }
+.tabhelp-body {
+  overflow: hidden; max-height: 0; opacity: 0;
+  transition: max-height .25s ease, opacity .2s ease;
+  font-size: 12px; line-height: 1.55; color: var(--hint);
+}
+.tabhelp-body.open { max-height: 460px; opacity: 1; margin: -6px 0 14px; }
+.tabhelp-body b { color: var(--text); font-weight: 600; }
+.tabhelp-body ul { margin: 6px 0 0; padding-left: 18px; }
+.tabhelp-body li { margin-bottom: 5px; }
+
 /* The sparkline is back: dropping from four inline buttons to two frees ~86px,
    so [ticker][price][sparkline] now needs ~205px of the ~237px available. It
    was only hidden because four icon buttons took 47% of the row. */
@@ -3171,6 +3207,7 @@ function gotoTab(name) {
   document.getElementById('pane-' + name).classList.add('active');
   document.getElementById('nav-'  + name).classList.add('active');
   curTab = name;
+  _ensureTabHelp(name);
   _bumpUsage('tab:' + name);
   tg.HapticFeedback?.selectionChanged();
 
@@ -3369,6 +3406,71 @@ function copyTicker(sym) {
 
 // ── Overlay helpers ───────────────────────────────────────────────────────────
 function openOverlay(id)  { _bumpUsage('sheet:' + String(id).replace(/-overlay$|-sheet$/, '')); document.getElementById(id).classList.add('open');    document.body.style.overflow = 'hidden'; }
+// ── Tab help ────────────────────────────────────────────────────────────────
+// Every figure below was read from the code that computes it, not written from
+// memory. An explanation that misstates a number is worse than none.
+const _TAB_HELP = {
+  picks: { line: "Today's trade ideas, refreshed each weekday at 7 AM ET.",
+    detail: `<ul>
+      <li><b>Entry / Target / Stop</b> — the price to buy near, where to take profit, where to cut the loss.</li>
+      <li><b>Conviction 1–5</b> — how strongly the setup scored. It is not a probability.</li>
+      <li><b>Long-term picks carry no stop by design</b> — a multi-year thesis should survive an ordinary drawdown. They get an <b>invalidation alert 15% below entry</b> instead, meaning "the thesis may be broken", not "sell now".</li>
+      <li><b>Analysis</b> opens the full thesis plus a chart and a historical backtest of the setup.</li>
+      <li>The bell turns <b>amber</b> once an alert exists for that ticker.</li>
+    </ul>` },
+  portfolio: { line: "Positions you have logged, with live P&L. Real and Paper are separate.",
+    detail: `<ul>
+      <li><b>Health score /100</b> starts at 100 and subtracts: <b>12</b> per position with no stop (max 40), <b>8</b> per position sitting within 3% of its stop (max 24), <b>15</b> if 60%+ of positions are one asset type, <b>5</b> per position held over 60 days with no target (max 15). Under 50 reads "At Risk" — most often it just means missing stops.</li>
+      <li><b>Streak</b> — consecutive closed trades in one direction. <b>↑3W</b> is three wins running, <b>↓2L</b> two losses.</li>
+      <li><b>Best Pick</b> — the largest unrealised gain among open positions.</li>
+      <li><b>Avg P&L</b> is across open positions; <b>Cumulative P&L</b> is realised, from closed trades.</li>
+    </ul>` },
+  performance: { line: "Your closed-trade track record over time.",
+    detail: `<ul>
+      <li>The calendar marks each day <b>profit</b>, <b>loss</b> or <b>mixed</b> by the trades closed that day.</li>
+      <li>It stays empty until trades are closed — open positions do not count, since their outcome is not yet known.</li>
+    </ul>` },
+  watchlist: { line: "Tickers you follow. Tap the bell to set a price alert.",
+    detail: `<ul>
+      <li>The <b>bell is amber</b> when an alert is live for that ticker, grey when not.</li>
+      <li><b>🔔 fired</b> means the alert already triggered, with the price and how long ago.</li>
+      <li>Tap the <b>ticker</b> for a chart; <b>⋯</b> holds add-to-portfolio and remove.</li>
+    </ul>` },
+  settings: { line: "Budgets, which asset classes you see, and how alerts behave.",
+    detail: `<ul>
+      <li><b>Budgets</b> drive the position-size suggestion on each pick ("$200 → 6 shares").</li>
+      <li>Hiding an asset class removes it from both the morning message and this app.</li>
+    </ul>` },
+};
+function toggleTabHelp(btn) {
+  const body = btn.nextElementSibling;
+  const chev = btn.querySelector('.tabhelp-chev');
+  const open = body.classList.contains('open');
+  body.classList.toggle('open', !open);
+  chev.classList.toggle('open', !open);
+  btn.setAttribute('aria-expanded', String(!open));
+  tg.HapticFeedback?.selectionChanged();
+}
+function _ensureTabHelp(name) {
+  const help = _TAB_HELP[name];
+  const pane = document.getElementById('pane-' + name);
+  if (!help || !pane || pane.querySelector('.tabhelp')) return;
+  const wrap = document.createElement('div');
+  wrap.innerHTML =
+    `<button class="tabhelp" aria-expanded="false" onclick="toggleTabHelp(this)">
+       <span class="tabhelp-line">ℹ️ ${help.line}</span>
+       <span class="tabhelp-chev">▾</span>
+     </button>
+     <div class="tabhelp-body">${help.detail}</div>`;
+  // Insert ABOVE the tab's own content so it reads as an intro, not a footnote.
+  pane.insertBefore(wrap, pane.firstChild);
+  // 🔴 DELIBERATELY does not auto-expand. The first build opened it on first
+  // visit and the result was a wall of text above the fold — adding to exactly
+  // the overwhelm this was meant to relieve. The collapsed line already answers
+  // "what is this tab", and the chevron invites the detail for anyone who wants
+  // it. Cost when closed: ~40px, once per tab.
+}
+
 let _watchMoreTicker = '';
 let _watchMoreType   = 'stock';
 function openWatchMore(ticker, assetType, hasAlert) {
@@ -10339,6 +10441,7 @@ renderMarketsView = async function() {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 loadedTabs['picks'] = true;
+_ensureTabHelp('picks');   // gotoTab never fires for the tab we land on
 // Position nav indicator on the initial tab after layout settles
 requestAnimationFrame(() => _moveNavIndicator('picks'));
 loadPicks();
