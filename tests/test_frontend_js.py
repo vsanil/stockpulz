@@ -527,3 +527,89 @@ class TestWatchlistRowDensity:
         s = self._src
         assert ".watch-spark { display: none; }" not in s, \
             "the sparkline should fit again now the row is not button-bound"
+
+
+class TestTabHelp:
+    """Per-tab explanation strips (Aug 18).
+
+    Owner asked for a tooltip per tab, having found figures like "At Risk ·
+    6/100" and "STREAK ↑3W" unexplained anywhere in the app.
+    """
+
+    @property
+    def _src(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "miniapp", "index.html")) as f:
+            return f.read()
+
+    def test_every_tab_has_an_entry(self):
+        s = self._src
+        block = s[s.index("const _TAB_HELP = {"):s.index("const _TABHELP", s.index("const _TAB_HELP = {")) if "const _TABHELP" in s else s.index("function toggleTabHelp")]
+        for tab in ("picks", "portfolio", "performance", "watchlist", "settings"):
+            assert f"{tab}: {{" in block, f"{tab} has no help entry"
+
+    def test_it_does_NOT_auto_expand(self):
+        """The first build opened it on first visit and produced a wall of text
+        above the fold — adding to the overwhelm it was meant to relieve."""
+        s = self._src
+        assert "DELIBERATELY does not auto-expand" in s
+        assert "sp_tabhelp_seen" not in s, "dead first-run state should be gone"
+
+    def test_the_strip_reads_as_a_control(self):
+        import re
+        m = re.search(r"\.tabhelp \{(.*?)\}", self._src, re.S)
+        css = re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)
+        assert "var(--card-hover)" in css, "a hardcoded white overlay is invisible in light mode"
+        assert "min-height" in css, "the tap target must be declared, not emergent"
+        assert "cursor: pointer" in css
+
+    def test_state_is_exposed(self):
+        s = self._src
+        assert 'aria-expanded="false"' in s
+        assert "btn.setAttribute('aria-expanded'" in s
+
+    # ── the guard that actually matters ──────────────────────────────────────
+    def test_the_health_score_explanation_matches_the_CODE(self):
+        """🔴 An explanation that misstates a number is worse than none.
+
+        The penalties are computed in one place and described in another; if the
+        computation changes, the help text silently becomes a lie. Pin them
+        together.
+        """
+        s = self._src
+        # Slice through the LABEL logic too — it sits after _hColor, and ending
+        # the window early made this assertion fail for the wrong reason.
+        calc = s[s.index("let _health = 100;"):s.index("${_hLabel} ·")]
+        help_txt = s[s.index("portfolio: { line:"):s.index("performance: { line:")]
+
+        # (penalty per position, cap) as written in the calculation
+        for per, cap in (("12", "40"), ("8", "24"), ("5", "15")):
+            assert f"_noStop * 12" in calc or per in calc
+            assert f"<b>{per}</b>" in help_txt, f"penalty {per} is not explained"
+            assert f"max {cap}" in help_txt, f"cap {cap} is not explained"
+        assert "Math.min(40, _noStop * 12)" in calc
+        assert "Math.min(24, _nearStop * 8)" in calc
+        assert "Math.min(15, _stale * 5)" in calc
+        assert "_health -= 15" in calc and "60%+" in help_txt, \
+            "the concentration penalty must stay described"
+        assert "_health >= 50 ? 'Fair'" in calc and 'Under 50 reads "At Risk"' in help_txt
+
+    def test_the_streak_explanation_matches_the_CODE(self):
+        s = self._src
+        calc = s[s.index("const s = d.current_streak || 0;"):s.index("streakEl.style.color")]
+        assert "'↑' + s + 'W'" in calc and "'↓' + Math.abs(s) + 'L'" in calc
+        help_txt = s[s.index("portfolio: { line:"):s.index("performance: { line:")]
+        assert "↑3W" in help_txt and "↓2L" in help_txt
+
+    def test_the_long_term_stop_explanation_matches_agent(self):
+        """LT_INVALIDATION_PCT is 15 in agent.py; the help text says 15%."""
+        import os, re
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "agent.py")) as f:
+            agent = f.read()
+        m = re.search(r"LT_INVALIDATION_PCT\s*=\s*([\d.]+)", agent)
+        assert m, "LT_INVALIDATION_PCT not found"
+        pct = str(int(float(m.group(1))))
+        assert f"invalidation alert {pct}% below entry" in self._src, \
+            f"help says a different number than agent's {pct}%"
