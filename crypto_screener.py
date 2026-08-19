@@ -126,11 +126,21 @@ def _get_price_history(coin_id: str, days: int = 7) -> list[float]:
 def _simple_rsi(prices: list[float], period: int = 14) -> float | None:
     if not prices or len(prices) < period + 1:
         return None
+    # 🔴 Divide by the PERIOD, not by the count of gains — Wilder's standard,
+    # and what agent._get_rsi and ai_analyzer already do. The old
+    # statistics.mean(gains) form divided by len(gains), which inflates RSI
+    # whenever gains are fewer but larger than losses: a downtrend containing
+    # one spike scored 90.91 where the standard form gives 43.48. That value
+    # feeds the 42-62 "neutral momentum" band below, so it changed which coins
+    # were picked. Corrected 2026-08-19 — see ENGINE_CHANGES in
+    # scripts/evaluate_picks.py; crypto numbers before and after are not
+    # directly comparable.
     deltas   = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
-    gains    = [d for d in deltas[-period:] if d > 0]
-    losses   = [-d for d in deltas[-period:] if d < 0]
-    avg_gain = statistics.mean(gains)  if gains  else 0
-    avg_loss = statistics.mean(losses) if losses else 1e-9
+    window   = deltas[-period:]
+    gains    = [d for d in window if d > 0]
+    losses   = [-d for d in window if d < 0]
+    avg_gain = sum(gains) / period
+    avg_loss = (sum(losses) / period) or 1e-9
     rs = avg_gain / avg_loss
     return round(100 - (100 / (1 + rs)), 2)
 

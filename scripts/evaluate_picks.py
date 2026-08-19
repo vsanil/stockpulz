@@ -405,6 +405,35 @@ def _agg(rows: list[dict]) -> dict:
     }
 
 
+# 🔴 Dated engine changes. A change to the pick logic RESETS what the numbers
+# mean, so a report spanning one silently averages two different engines. Add a
+# row whenever selection/scoring behaviour changes — date, scope, and what moved.
+ENGINE_CHANGES = [
+    ("2026-08-19", "crypto",
+     "crypto_screener._simple_rsi divisor corrected to the period (Wilder's "
+     "standard); it previously divided by the count of gains, inflating RSI on "
+     "spiky downtrends and changing which coins cleared the 42-62 band"),
+]
+
+
+def _engine_change_note(scored: list[dict]) -> list[str]:
+    """Say when a slice straddles an engine change, rather than averaging across it."""
+    out: list[str] = []
+    for date, scope, what in ENGINE_CHANGES:
+        rows = [r for r in scored
+                if scope == "all" or (r.get("asset_type") or "") == scope]
+        if not rows:
+            continue
+        before = sum(1 for r in rows if (r.get("date") or "") < date)
+        after = len(rows) - before
+        if before and after:
+            out.append(
+                f"<i>⚠️ {scope}: {before} of {len(rows)} matured picks predate the "
+                f"{date} engine change ({what}). Before/after are not directly "
+                f"comparable — read them separately.</i>")
+    return out + [""] if out else []
+
+
 def build_report(scored: list[dict]) -> str:
     # 🔴 Controls are the runners-up we did NOT pick. They exist only as a
     # baseline and must NEVER enter the headline, the slices, or any number a
@@ -477,6 +506,8 @@ def build_report(scored: list[dict]) -> str:
         L += [f"<i>Note: {instrumented}/{len(scored)} matured picks carry screener "
               f"features; earlier picks predate the instrumentation and are "
               f"excluded from the setup/score slices.</i>", ""]
+
+    L += _engine_change_note(scored)
 
     # ── Picked vs not-picked ─────────────────────────────────────────────────
     # Compared on mark-to-market only: controls have no target/stop, so this is
