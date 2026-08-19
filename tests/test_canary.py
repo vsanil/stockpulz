@@ -259,3 +259,105 @@ class TestPaperViewCryptoPriceCheck:
         threshold must not fire on normal drift."""
         ref, real = 1891.0, 1885.0
         assert abs(real - ref) / ref * 100 < 20
+
+
+class TestWeeklyRelayCheck:
+    """🔴 The Saturday weekly path runs `run_morning` and, until 2026-08-15,
+    did it ON RENDER — delivering picks while setting ZERO auto alerts, and
+    still reporting success. It runs once a week, so nothing noticed for weeks.
+
+    Note the patch target: `check_weekly_relay` does
+    `from config_manager import ...` INSIDE the function, so these must be
+    patched on config_manager, not on canary. Patching the wrong module is what
+    let a real writer hit the live gist on Aug 15.
+    """
+
+    import datetime as _dt
+
+    def _wire(self, monkeypatch, *, weekly_today=True, alerts=None,
+              gh_dispatch=True, api_ok=True):
+        import config_manager as cm
+        import datetime as dt, json
+        today = dt.date(2026, 8, 22)
+        monkeypatch.setattr(cm, "et_today", lambda: today)
+        monkeypatch.setattr(cm, "get_config", lambda: {
+            "cron_last_weekly": (today.isoformat() if weekly_today else "2026-08-15") + "T12:00:43Z"})
+        monkeypatch.setattr(cm, "get_allowed_users", lambda: ["111", "222"])
+        monkeypatch.setattr(canary, "_gist_all", lambda: {
+            "price_alerts.json": {"content": json.dumps(alerts if alerts is not None else {})}})
+
+        class _R:
+            status_code = 200 if api_ok else 503
+            def json(self_inner):
+                return {"workflow_runs": ([{"event": "workflow_dispatch"}] if gh_dispatch
+                                          else [{"event": "schedule"}])}
+        monkeypatch.setattr(canary.requests, "get", lambda *a, **k: _R())
+        canary.RESULTS.clear()
+
+    def _res(self):
+        out = {n: (ok, note) for n, ok, note in canary.RESULTS}
+        canary.RESULTS.clear()
+        return out
+
+    def _alert(self, uid_alerts):
+        return uid_alerts
+
+    def test_silent_on_days_no_weekly_run_fired(self, monkeypatch):
+        """Six days out of seven. A check that cries wolf trains you to ignore it."""
+        self._wire(monkeypatch, weekly_today=False)
+        canary.check_weekly_relay()
+        r = self._res()
+        assert r["weekly.relay"][0] is True
+        assert "nothing to verify" in r["weekly.relay"][1]
+        assert "weekly.alerts_set" not in r, "must not assert on a day it did not run"
+
+    def test_the_2026_08_15_failure_would_now_be_CAUGHT(self, monkeypatch):
+        """Picks delivered, zero auto alerts for any real user."""
+        self._wire(monkeypatch, alerts={"111": [], "222": []})
+        canary.check_weekly_relay()
+        r = self._res()
+        assert r["weekly.alerts_set"][0] is False
+        assert "ZERO auto alerts" in r["weekly.alerts_set"][1]
+
+    def test_a_healthy_weekly_run_passes(self, monkeypatch):
+        self._wire(monkeypatch, alerts={
+            "111": [{"auto": True, "kind": "stop", "set_at": "2026-08-22T12:05:00Z"}],
+            "222": [{"auto": True, "kind": "invalidation", "set_at": "2026-08-22T12:05:00Z"}]})
+        canary.check_weekly_relay()
+        r = self._res()
+        assert r["weekly.alerts_set"][0] is True
+        assert "2 auto alert(s)" in r["weekly.alerts_set"][1]
+
+    def test_SYNTHETIC_account_alerts_do_not_satisfy_it(self, monkeypatch):
+        """🔴 The exact masking failure: on 2026-08-15 production 'looked'
+        covered because the synthetic bot logs positions and gets alerts. Only
+        allowed_users count."""
+        self._wire(monkeypatch, alerts={
+            "900000001": [{"auto": True, "set_at": "2026-08-22T12:05:00Z"}],
+            "111": [], "222": []})
+        canary.check_weekly_relay()
+        assert self._res()["weekly.alerts_set"][0] is False, \
+            "a synthetic-account alert satisfied a real-user check"
+
+    def test_yesterdays_alerts_do_not_count(self, monkeypatch):
+        self._wire(monkeypatch, alerts={
+            "111": [{"auto": True, "set_at": "2026-08-21T12:05:00Z"}], "222": []})
+        canary.check_weekly_relay()
+        assert self._res()["weekly.alerts_set"][0] is False
+
+    def test_it_flags_a_run_that_did_not_reach_github(self, monkeypatch):
+        """If the stamps update but no workflow_dispatch exists, the relay did
+        not take and it is spawning on Render again."""
+        self._wire(monkeypatch, gh_dispatch=False,
+                   alerts={"111": [{"auto": True, "set_at": "2026-08-22T12:05:00Z"}], "222": []})
+        canary.check_weekly_relay()
+        r = self._res()
+        assert r["weekly.on_github"][0] is False
+        assert "spawning on Render" in r["weekly.on_github"][1]
+
+    def test_an_unreachable_api_says_NOT_VERIFIED_rather_than_passing_clean(self, monkeypatch):
+        self._wire(monkeypatch, api_ok=False,
+                   alerts={"111": [{"auto": True, "set_at": "2026-08-22T12:05:00Z"}], "222": []})
+        canary.check_weekly_relay()
+        r = self._res()
+        assert r["weekly.on_github"][0] is True and "NOT VERIFIED" in r["weekly.on_github"][1]

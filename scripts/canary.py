@@ -315,6 +315,90 @@ def check_cron_delivery() -> None:
            f"picks._saved_date={_saved} (expected ≥{exp})")
 
 
+def check_weekly_relay() -> None:
+    """Did Saturday's weekly run execute on GH Actions, and did it set alerts?
+
+    🔴 Why this exists. `run_weekly_recap` opens with `run_morning(...)` —
+    "Saturday: run crypto morning picks, then send a compact weekly recap" — so
+    the weekly trigger runs the FULL morning pipeline. Until 2026-08-15 it did
+    that LOCALLY ON RENDER via the generic /trigger/<mode> subprocess path; the
+    weekday morning trigger had been converted to a GH Actions relay in Jul 2026
+    but the Saturday path never was.
+
+    Observed Sat 2026-08-15: it generated and DELIVERED GLD + SLV and set **ZERO**
+    auto alerts for either real user, while the identical code yields
+    `GLD stop@381.41` + `SLV invalidation@49.71` anywhere else. `_auto_set_pick_alerts`
+    catches per-ticker, so every failure logged and continued and the run still
+    stamped success. Nothing was watching, and the weekly path only runs once a
+    week — the slowest possible way to notice.
+
+    Silent on days no weekly run fired: a check that cries wolf six days out of
+    seven trains you to ignore it.
+    """
+    import datetime as _dt, json as _json
+    from config_manager import get_config, et_today, get_allowed_users
+    try:
+        cfg = get_config()
+    except Exception as exc:
+        _check("weekly.relay", True, f"NOT VERIFIED — config unreadable ({exc})")
+        return
+
+    last = str(cfg.get("cron_last_weekly", ""))[:10]
+    today = et_today().isoformat()
+    if last != today:
+        _check("weekly.relay", True,
+               f"no weekly run today (last {last or 'never'}) — nothing to verify")
+        return
+
+    # 1. It must have run on GitHub Actions, not spawned on Render.
+    repo = os.environ.get("GITHUB_REPOSITORY") or "vsanil/stockpulz"
+    tok  = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+    on_gh = None
+    try:
+        r = requests.get(
+            f"https://api.github.com/repos/{repo}/actions/workflows/daily_run.yml/"
+            f"runs?created=>{today}&per_page=20",
+            headers={"Authorization": f"token {tok}",
+                     "Accept": "application/vnd.github+json"}, timeout=20)
+        if r.status_code == 200:
+            on_gh = any(x.get("event") == "workflow_dispatch"
+                        for x in (r.json().get("workflow_runs") or []))
+    except Exception:
+        on_gh = None
+    if on_gh is None:
+        _check("weekly.on_github", True, "NOT VERIFIED — GitHub API unreachable")
+    else:
+        _check("weekly.on_github", on_gh,
+               "weekly ran on GitHub Actions (relay working)",
+               fail_detail="the weekly run did NOT reach GitHub Actions — it is "
+                           "spawning on Render again, which is what silently "
+                           "produced zero alerts on 2026-08-15")
+
+    # 2. The defect itself: did it actually set alerts, for a REAL user?
+    #    Split by account — the synthetic bot's alerts MASKED this exact gap.
+    try:
+        meta = (_gist_all() or {}).get("price_alerts.json") or {}
+        body = meta.get("content")
+        if meta.get("truncated"):        # >1MB: content is partial, refetch raw
+            body = requests.get(meta["raw_url"], timeout=20).text
+        alerts = _json.loads(body or "{}")
+        real = set(map(str, get_allowed_users() or []))
+        n = 0
+        for uid in real:
+            for a in (alerts.get(uid) or []):
+                if isinstance(a, dict) and a.get("auto") \
+                   and str(a.get("set_at", ""))[:10] == today:
+                    n += 1
+        _check("weekly.alerts_set", n > 0,
+               f"{n} auto alert(s) created today across {len(real)} real user(s)",
+               fail_detail="the weekly run delivered picks but set ZERO auto "
+                           "alerts for any REAL user — the 2026-08-15 failure "
+                           "has recurred (check it ran on GH Actions, and the "
+                           "per-ticker 'alert set failed' lines in the log)")
+    except Exception as exc:
+        _check("weekly.alerts_set", True, f"NOT VERIFIED — alerts unreadable ({exc})")
+
+
 def check_selfheal_health() -> None:
     """Who watches the watcher.
 
@@ -735,6 +819,7 @@ def main() -> int:
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
                check_backtest_math, check_price_guard, check_storage_headroom,
                check_cron_delivery, check_selfheal_health, check_data_completeness,
+               check_weekly_relay,
                check_position_integrity,
                check_endpoints):
         try:
