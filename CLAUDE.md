@@ -479,6 +479,11 @@ Rules:
 - **`max_drawdown` is ORDER-DEPENDENT** — it walks a cumulative P&L curve, so a broken sort yields a plausible-looking but wrong risk figure. Pinned against date order explicitly.
 - **🔴 The order test first PASSED against a deleted sort, because the shuffled data was not discriminating.** Cumulative-drawdown examples often give the same answer in any order; you have to construct one where they differ — chronological `(+100, −50, +100, −50)` → **50**, losses-first `(−50, −50, +100, +100)` → **100**. **Rule: for an order-dependent metric, verify your fixture actually CHANGES the answer under reordering before trusting the test.** The mutation exposed it; the test looked fine.
 
+### `run_confirmation` — idempotency is the load-bearing rule (Aug 19)
+- 177 lines, no behaviour tests until now. **Render retries failed cron runs and delivery is NOT idempotent**, so without the `_confirmation_sent_date` guard every retry re-sends to every user. Pinned: sends once + persists the stamp, a same-day retry sends NOTHING, yesterday's stamp does not suppress today, and a DRY_RUN never stamps.
+- The stamp is read on **`et_today()`**, asserted by source scan — a UTC date rolls over at 7-8 PM ET, the documented cause of evening alerts double-firing.
+- Also pinned, the paths that must NOT reach users: no picks → no send; a **price-fetch failure alerts the OWNER and stays silent** (a confirmation built on no prices compares picks against nothing); `paused`/`skip_confirmation` honoured; one user's broken config does not stop the rest. All 6 mutations caught.
+
 ### crypto_screener — the crypto pick path is no longer 12% covered (Aug 19)
 - 12% → **44%**. Same risk class as the commodities screener that produced ZERO candidates for 10+ days behind green monitors: a starved section is indistinguishable from a quiet market.
 - Pinned: an **empty bulk response is a FAILURE, not "no coins"** (it retries), persistent failure **RAISES** rather than returning an empty list that would render as "no setups today", `sparkline` is never requested (a paid feature whose request triggers the free-tier 429s that phase 2 exists to avoid), a per-coin history failure degrades to `[]` instead of aborting the screen, and a short window returns `None` rather than a partial moving average.
