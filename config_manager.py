@@ -379,6 +379,55 @@ def is_synthetic_trade(trade: dict) -> bool:
     return str(trade.get("source") or "") == SYNTHETIC_SOURCE
 
 
+def _one_year_after(d):
+    """The one-year anniversary of a date. Feb 29 has no anniversary in a common
+    year; Mar 1 is the conventional substitute."""
+    try:
+        return d.replace(year=d.year + 1)
+    except ValueError:
+        return d.replace(year=d.year + 1, month=3, day=1)
+
+
+def is_long_term_hold(opened, closed=None) -> bool | None:
+    """Is this holding period long-term for US capital-gains purposes?
+
+    🔴 The IRS test is held MORE THAN one year, and the holding period starts
+    the day AFTER acquisition — so selling on the one-year anniversary is still
+    SHORT-term; you need one more day.
+
+    A day count cannot express that: one year is 365 days in a common year and
+    366 in a leap year, so the `days >= 365` this replaces mislabelled the
+    anniversary itself as long-term. That errs toward the LOWER rate (15% vs
+    ~35%), i.e. it UNDER-states the tax owed — the harmful direction for anyone
+    planning around it. Compare calendar dates instead.
+
+    Returns None when either date is missing or unparseable, so callers can
+    tell "not long-term" apart from "unknown".
+    """
+    from datetime import date as _d
+    try:
+        o = _d.fromisoformat(str(opened)[:10])
+        c = _d.fromisoformat(str(closed)[:10]) if closed is not None else et_today()
+    except (TypeError, ValueError):
+        return None
+    return c > _one_year_after(o)
+
+
+def days_until_long_term(opened, today=None) -> int | None:
+    """Days remaining before a still-open position qualifies as long-term.
+
+    None when already long-term, or when the open date is unusable.
+    """
+    from datetime import date as _d, timedelta as _td
+    try:
+        o = _d.fromisoformat(str(opened)[:10])
+        t = _d.fromisoformat(str(today)[:10]) if today is not None else et_today()
+    except (TypeError, ValueError):
+        return None
+    first_lt_day = _one_year_after(o) + _td(days=1)
+    return None if t >= first_lt_day else (first_lt_day - t).days
+
+
 def human_trades(trades) -> list:
     """Drop synthetic-bot trades from a list. Use at every aggregation point."""
     return [t for t in (trades or []) if not is_synthetic_trade(t)]
