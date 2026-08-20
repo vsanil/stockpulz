@@ -34,6 +34,18 @@ def log(monkeypatch):
     return store
 
 
+def _expected_days_to_lt(opened):
+    """First long-term day = the one-year anniversary PLUS one, since selling
+    ON the anniversary is still short-term. Computed here independently of
+    config_manager so the test does not check the helper against itself."""
+    from datetime import date, timedelta
+    try:
+        anniv = opened.replace(year=opened.year + 1)
+    except ValueError:                      # Feb 29
+        anniv = opened.replace(year=opened.year + 1, month=3, day=1)
+    return (anniv + timedelta(days=1) - date.today()).days
+
+
 class TestRealizedSplit:
     def test_a_hold_over_a_year_counts_as_long_term(self, client, log):
         log["closed"] = [_closed("AAPL", "2024-01-01", "2025-06-01", 500.0)]
@@ -46,14 +58,34 @@ class TestRealizedSplit:
         r = get(client, "/api/miniapp/tax_lots").get_json()["realized"]
         assert r["st_count"] == 1 and r["st_gain"] == 500.0
 
-    def test_the_boundary_is_365_days_as_the_code_defines_it(self, client, log):
-        """Pins the implementation's own rule. NOTE: the IRS test is 'more than
-        one year', so a 365-day hold is arguably short-term — flagged, not
-        silently changed, because it moves a tax figure."""
-        log["closed"] = [_closed("A", "2024-01-01", "2024-12-31", 100.0),   # 365d
-                         _closed("B", "2024-01-01", "2024-12-30", 100.0)]   # 364d
+    def test_the_one_year_ANNIVERSARY_is_still_short_term(self, client, log):
+        """🔴 Corrected Aug 19. The IRS test is held MORE THAN one year, and the
+        holding period starts the day after acquisition — so selling on the
+        anniversary is short-term. The old `days_held >= 365` called it
+        long-term, taxing it at 15% instead of ~35%: it UNDER-stated what was
+        owed, the harmful direction for anyone planning around it."""
+        log["closed"] = [_closed("ANNIV", "2025-01-01", "2026-01-01", 100.0),
+                         _closed("PLUS1", "2025-01-01", "2026-01-02", 100.0)]
         r = get(client, "/api/miniapp/tax_lots").get_json()["realized"]
-        assert r["lt_count"] == 1 and r["st_count"] == 1
+        assert r["st_count"] == 1 and r["lt_count"] == 1, \
+            "the anniversary itself must be short-term; one day later is long"
+
+    def test_a_leap_year_span_is_measured_on_the_calendar_not_in_days(
+            self, client, log):
+        """366 days across a leap year is still exactly one year — short-term.
+        A day count cannot express this, which is why the rule is date-based."""
+        log["closed"] = [_closed("LEAP", "2024-01-01", "2025-01-01", 100.0)]
+        r = get(client, "/api/miniapp/tax_lots").get_json()["realized"]
+        assert r["st_count"] == 1 and r["lt_count"] == 0
+
+    def test_synthetic_bot_trades_never_enter_a_tax_figure(self, client, log):
+        """A robot's mechanical fills carry no real tax liability."""
+        import config_manager
+        log["closed"] = [_closed("REAL", "2025-01-01", "2025-03-01", 100.0),
+                         _closed("BOT", "2025-01-01", "2025-03-01", 5000.0,
+                                 source=config_manager.SYNTHETIC_SOURCE)]
+        r = get(client, "/api/miniapp/tax_lots").get_json()["realized"]
+        assert r["total_gain"] == 100.0, "a bot trade entered the tax total"
 
     def test_gain_is_derived_when_gain_usd_is_absent(self, client, log):
         log["closed"] = [_closed("AAPL", "2025-01-01", "2025-03-01",
@@ -97,10 +129,11 @@ class TestRealizedSplit:
 class TestOpenLotGuidance:
     def test_a_lot_near_the_one_year_mark_is_flagged_to_wait(self, client, log):
         from datetime import date, timedelta
-        opened = (date.today() - timedelta(days=330)).isoformat()
-        log["open"] = [_open("AAPL", opened)]
+        opened = date.today() - timedelta(days=330)
+        log["open"] = [_open("AAPL", opened.isoformat())]
         tip = get(client, "/api/miniapp/tax_lots").get_json()["open_fifo_lifo"][0]
-        assert "Turns LT in 35d" in tip["tax_tip"]
+        assert f"Turns LT in {_expected_days_to_lt(opened)}d" in tip["tax_tip"], \
+            f"got {tip['tax_tip']!r}"
 
     def test_a_young_lot_gets_no_wait_nudge(self, client, log):
         from datetime import date, timedelta
@@ -126,13 +159,26 @@ class TestOpenLotGuidance:
 
     def test_days_to_lt_counts_down_and_clears_once_long_term(self, client, log):
         from datetime import date, timedelta
-        log["open"] = [_open("A", (date.today() - timedelta(days=100)).isoformat()),
+        young = date.today() - timedelta(days=100)
+        log["open"] = [_open("A", young.isoformat()),
                        _open("B", (date.today() - timedelta(days=400)).isoformat())]
         lots = {l["ticker"]: l
                 for g in get(client, "/api/miniapp/tax_lots").get_json()["open_fifo_lifo"]
                 for l in g["lots"]}
-        assert lots["A"]["days_to_lt"] == 265 and lots["A"]["is_lt"] is False
+        assert lots["A"]["days_to_lt"] == _expected_days_to_lt(young)
+        assert lots["A"]["is_lt"] is False
         assert lots["B"]["days_to_lt"] is None and lots["B"]["is_lt"] is True
+
+    def test_the_countdown_is_one_day_LONGER_than_the_old_naive_count(
+            self, client, log):
+        """Documents the correction: `365 - days_held` was a day short, because
+        the anniversary itself is still short-term."""
+        from datetime import date, timedelta
+        opened = date.today() - timedelta(days=200)
+        log["open"] = [_open("A", opened.isoformat())]
+        lot = get(client, "/api/miniapp/tax_lots").get_json()[
+            "open_fifo_lifo"][0]["lots"][0]
+        assert lot["days_to_lt"] == (365 - 200) + 1
 
 
 class TestAuth:

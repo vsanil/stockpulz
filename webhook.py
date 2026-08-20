@@ -2560,7 +2560,9 @@ def miniapp_history():
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     from config_manager import load_user_trade_log, load_backtest_trades
     log    = load_user_trade_log(chat_id)
-    closed = sorted(log.get("closed", []), key=lambda t: t.get("closed_date",""), reverse=True)
+    from config_manager import human_trades
+    closed = sorted(human_trades(log.get("closed", [])),
+                    key=lambda t: t.get("closed_date", ""), reverse=True)
 
     # Merge simulated backtest trades when user has fewer than 5 real trades
     has_simulated = False
@@ -2581,7 +2583,8 @@ def miniapp_pnl_history():
     if not chat_id: return jsonify({"error": "unauthorised"}), 403
     from config_manager import load_user_trade_log, load_backtest_trades
     log    = load_user_trade_log(chat_id)
-    closed = log.get("closed", [])
+    from config_manager import human_trades
+    closed = human_trades(log.get("closed", []))
 
     # Merge backtest if few real trades
     if len(closed) < 5:
@@ -3236,8 +3239,12 @@ def miniapp_my_performance():
         return jsonify({"error": "unauthorised"}), 403
 
     from config_manager import load_user_trade_log
+    from config_manager import human_trades
     log    = load_user_trade_log(chat_id)
-    closed = [t for t in log.get("closed", []) if t.get("source") != "backtest"]
+    # "REAL closed trade performance" per this endpoint's own docstring — a
+    # robot's mechanical fills are not the human's track record.
+    closed = [t for t in human_trades(log.get("closed", []))
+              if t.get("source") != "backtest"]
 
     if not closed:
         return jsonify({"ok": True, "trades": [], "summary": {}})
@@ -3544,8 +3551,12 @@ def miniapp_tax_lots():
     from datetime import date
     from collections import defaultdict
 
+    from config_manager import human_trades, is_long_term_hold, days_until_long_term
     log    = load_user_trade_log(chat_id)
-    closed = [t for t in log.get("closed", []) if t.get("source") != "backtest"]
+    # human_trades() drops synthetic-bot fills: a robot's mechanical trades
+    # carry no real tax liability and must not enter a tax figure.
+    closed = [t for t in human_trades(log.get("closed", []))
+              if t.get("source") != "backtest"]
     opens  = log.get("open", [])
     today  = date.today()
 
@@ -3562,9 +3573,11 @@ def miniapp_tax_lots():
         if opened_s and closed_s:
             try:
                 days_held = (date.fromisoformat(closed_s) - date.fromisoformat(opened_s)).days
-                is_lt = days_held >= 365
             except Exception:
                 pass
+            # The IRS test is "more than one year" measured on the calendar, not
+            # a >= 365 day count — see config_manager.is_long_term_hold.
+            is_lt = bool(is_long_term_hold(opened_s, closed_s))
 
         gain = float(t.get("gain_usd") or 0)
         entry  = float(t.get("entry_price") or 0)
@@ -3597,10 +3610,10 @@ def miniapp_tax_lots():
         if opened:
             try:
                 days_held = (today - date.fromisoformat(opened)).days
-                is_lt = days_held >= 365
             except Exception:
                 pass
-        days_to_lt = (365 - days_held) if (days_held is not None and not is_lt) else None
+            is_lt = bool(is_long_term_hold(opened))
+        days_to_lt = days_until_long_term(opened) if opened else None
         open_lots.append({
             "ticker":       t.get("ticker", ""),
             "opened_date":  opened,

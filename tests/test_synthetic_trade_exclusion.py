@@ -72,3 +72,50 @@ class TestPromptExcludesBot:
         ctx = pc.get_performance_context(lookback_days=3650)
         assert ctx == "" or "BOT TRACK RECORD" not in ctx, \
             "a robot's fills must never steer real picks"
+
+
+class TestPerUserViewsFilterSyntheticTrades:
+    """🔴 Aug 19: four USER-FACING views showed a robot's fills as the user's own.
+
+    Not live at the time — the bot trades on a separate test account and the
+    admin had 0 closed trades — but it would have been the moment a bot ran on a
+    real account again.
+
+    Scope is deliberate: this is NOT "all eight sites that read closed trades".
+    Three of those must keep seeing the bot's fills, and are asserted below.
+    """
+    import os as _os
+    import sys as _sys
+    _R = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    if _R not in _sys.path:
+        _sys.path.insert(0, _R)
+
+    @pytest.mark.parametrize("fn", [
+        "miniapp_tax_lots", "miniapp_my_performance",
+        "miniapp_history", "miniapp_pnl_history",
+    ])
+    def test_the_view_filters_through_human_trades(self, fn):
+        import inspect
+        import webhook
+        src = inspect.getsource(getattr(webhook, fn))
+        assert "human_trades(" in src, (
+            f"{fn} aggregates a user's closed trades without human_trades() — "
+            "a robot's mechanical fills would show as their own record")
+
+    @pytest.mark.parametrize("fn,why", [
+        ("_build_actionability",
+         "it measures whether a PUBLISHED PICK was reachable, and the bot's "
+         "mechanical fills are the evidence — it reads DEFAULT_TEST_CHAT_ID on "
+         "purpose. Filtering them would delete the metric."),
+        ("admin_fix_ticker",
+         "a rename migration must touch EVERY row, including synthetic ones, "
+         "or the rename is left half-applied."),
+        ("admin_user_detail",
+         "an admin debugging view must show the raw record, not a filtered one."),
+    ])
+    def test_these_deliberately_do_NOT_filter(self, fn, why):
+        import inspect
+        import webhook
+        src = inspect.getsource(getattr(webhook, fn))
+        assert "human_trades(" not in src, (
+            f"{fn} started filtering synthetic trades, but {why}")

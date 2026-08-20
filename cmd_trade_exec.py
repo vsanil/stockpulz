@@ -9,6 +9,7 @@ import threading
 from datetime import date
 from telegram_api import send_message, send_photo, send_inline_keyboard
 from config_manager import (load_picks, load_user_trade_log, et_today,
+                            days_until_long_term,
                             mutate_user_trade_log, NO_WRITE)
 from formatters import _p, _esc
 from cmd_helpers import _resolve_ticker_candidates, _fetch_live_price
@@ -593,8 +594,11 @@ def _execute_sold(ticker: str, chat_id: str,
                                         f"(held {days_held} days). Short-term gains are taxed at your "
                                         f"income rate — typically higher than the 15-20% long-term rate."
                                     )
-                                elif days_held < 365:
-                                    days_left = 365 - days_held
+                                elif days_until_long_term(opened_str):
+                                    # One definition of the holding period — a
+                                    # `365 - days_held` count is off by a day
+                                    # (see config_manager.is_long_term_hold).
+                                    days_left = days_until_long_term(opened_str)
                                     tax_note = (
                                         f"\n\n💡 <b>Tax Tip:</b> You've held this {days_held} days — "
                                         f"just {days_left} more days would qualify for the <b>lower "

@@ -600,3 +600,93 @@ class TestMacroCache:
 
     def test_missing_cache_returns_none(self, _gist_store):
         assert config_manager.load_macro_cache() is None
+
+
+class TestLongTermHoldingPeriod:
+    """🔴 One definition of the tax holding period (Aug 19).
+
+    It was forked across three files — webhook.py (twice), cmd_market.py and
+    cmd_trade_exec.py — all using `days >= 365`. That mislabels the one-year
+    anniversary as long-term, taxing it at 15% instead of ~35%: it UNDER-states
+    what is owed, the harmful direction for anyone planning around it.
+
+    The IRS test is held MORE THAN one year, and the holding period starts the
+    day AFTER acquisition, so the anniversary itself is short-term. A day count
+    cannot express that — one year is 365 days in a common year and 366 in a
+    leap year — so the rule compares calendar dates.
+    """
+
+    @pytest.mark.parametrize("opened,closed,expected,why", [
+        ("2025-01-01", "2026-01-01", False, "the anniversary itself is SHORT"),
+        ("2025-01-01", "2026-01-02", True,  "one day past the anniversary"),
+        ("2024-01-01", "2025-01-01", False, "leap span, still exactly one year"),
+        ("2024-01-01", "2025-01-02", True,  "leap span plus one day"),
+        ("2024-02-29", "2025-03-01", False, "Feb 29 -> Mar 1 anniversary"),
+        ("2024-02-29", "2025-03-02", True,  "Feb 29 anniversary plus one"),
+        ("2025-01-01", "2025-06-01", False, "five months"),
+        ("2020-01-01", "2026-01-01", True,  "several years"),
+    ])
+    def test_the_boundary(self, opened, closed, expected, why):
+        assert config_manager.is_long_term_hold(opened, closed) is expected, why
+
+    def test_a_365_day_count_would_disagree_on_the_anniversary(self):
+        """Pins the actual defect this replaced, so it cannot quietly return."""
+        from datetime import date
+        o, c = date(2025, 1, 1), date(2026, 1, 1)
+        assert (c - o).days == 365, "the old rule called this long-term"
+        assert config_manager.is_long_term_hold(o.isoformat(), c.isoformat()) is False
+
+    @pytest.mark.parametrize("bad", [None, "", "not-a-date", "2025-13-01"])
+    def test_an_unusable_OPEN_date_returns_None_not_False(self, bad):
+        """None means 'unknown'. False would assert short-term on no evidence."""
+        assert config_manager.is_long_term_hold(bad, "2026-01-01") is None
+
+    @pytest.mark.parametrize("bad", ["", "not-a-date", "2025-13-01"])
+    def test_an_unusable_CLOSE_date_returns_None(self, bad):
+        assert config_manager.is_long_term_hold("2025-01-01", bad) is None
+
+    def test_omitting_the_close_date_means_STILL_OPEN_not_unknown(self):
+        """closed=None is a signal, not garbage — measure against today."""
+        assert config_manager.is_long_term_hold("2020-01-01") is True
+        assert config_manager.is_long_term_hold("2026-08-01") is False
+
+    def test_the_countdown_reaches_zero_the_day_before_it_qualifies(self):
+        from datetime import date
+        # opened 2025-01-01 -> first long-term day is 2026-01-02
+        assert config_manager.days_until_long_term("2025-01-01", "2026-01-01") == 1
+        assert config_manager.days_until_long_term("2025-01-01", "2026-01-02") is None
+
+    def test_the_countdown_is_one_longer_than_the_naive_day_count(self):
+        assert config_manager.days_until_long_term("2025-01-01", "2025-07-01") == \
+            (365 - 181) + 1
+
+    def test_an_already_long_term_lot_has_no_countdown(self):
+        assert config_manager.days_until_long_term("2020-01-01", "2026-01-01") is None
+
+    def test_an_unusable_open_date_has_no_countdown(self):
+        assert config_manager.days_until_long_term("garbage", "2026-01-01") is None
+
+    def test_no_caller_still_hardcodes_the_day_count(self):
+        """The rule was forked three ways; keep it collapsed.
+
+        Tokenised rather than grepped — comments AND docstrings must be
+        excluded, or the scan flags the very docstring that explains the fix.
+        """
+        import io
+        import pathlib
+        import tokenize
+        root = pathlib.Path(config_manager.__file__).parent
+        offenders = []
+        for f in sorted(root.glob("*.py")):
+            try:
+                toks = list(tokenize.generate_tokens(
+                    io.StringIO(f.read_text()).readline))
+            except (tokenize.TokenError, SyntaxError, IndentationError):
+                continue
+            code = "".join(t.string if t.type not in
+                           (tokenize.COMMENT, tokenize.STRING) else " "
+                           for t in toks)
+            for pat in ("days>=365", "days_held>=365", "365-days_held"):
+                if pat in code.replace(" ", ""):
+                    offenders.append(f"{f.name}:{pat}")
+        assert not offenders, f"the holding-period rule re-forked at {offenders}"

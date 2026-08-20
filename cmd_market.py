@@ -536,13 +536,11 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                 # Determine holding period
                 opened = t.get("opened_date") or t.get("opened_at", "")
                 closed_d = t.get("closed_date") or t.get("closed_at", "")
-                long_term = False
-                try:
-                    days = (_date.fromisoformat(str(closed_d)[:10]) -
-                            _date.fromisoformat(str(opened)[:10])).days
-                    long_term = days >= 365
-                except Exception:
-                    pass
+                # One definition of the tax holding period — see
+                # config_manager.is_long_term_hold. A `days >= 365` count
+                # mislabels the one-year anniversary as long-term.
+                from config_manager import is_long_term_hold
+                long_term = bool(is_long_term_hold(opened, closed_d))
 
                 if long_term:
                     lt_trades.append(t)
