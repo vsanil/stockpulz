@@ -1,0 +1,25 @@
+name: Verify Storage
+
+# Manual only — a diagnostic, not a monitor. Run it after changing SUPABASE_KEY
+# or an RLS policy to confirm the CI surface can actually WRITE, then check
+# Render separately via /health and the app logs.
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify storage backend + write access
+        env:
+          GIST_ID:        ${{ secrets.GIST_ID }}
+          GH_GIST_TOKEN:  ${{ secrets.GH_GIST_TOKEN }}
+          SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/verify_storage.py
