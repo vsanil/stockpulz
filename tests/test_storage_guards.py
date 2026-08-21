@@ -129,11 +129,13 @@ class TestSupabaseSchemaGuard:
     It simply never got the chance.
     """
 
-    def _client(self, missing=(), hang=(), other_error=()):
+    def _client(self, missing=(), hang=(), other_error=(), write_error=None):
         class _Q:
             def __init__(self, table): self.t = table
             def select(self, *a, **k): return self
             def limit(self, *a, **k): return self
+            def delete(self, *a, **k): return self
+            def eq(self, *a, **k): return self
             def execute(self):
                 import time
                 if self.t in hang:
@@ -145,8 +147,15 @@ class TestSupabaseSchemaGuard:
                 if self.t in other_error:
                     raise Exception("connection refused")
                 return type("R", (), {"data": []})()
+        class _Rpc:
+            def __init__(self, err): self.err = err
+            def execute(self):
+                if self.err:
+                    raise Exception(self.err)
+                return type("R", (), {"data": 1})()
         class _C:
             def table(self_inner, name): return _Q(name)
+            def rpc(self_inner, name, params): return _Rpc(write_error)
         return _C()
 
     def _backend(self, monkeypatch, client):
@@ -189,6 +198,24 @@ class TestSupabaseSchemaGuard:
             b._verify_schema(timeout=0.5)
         assert time.time() - t0 < 5, "a hung probe must not stall startup"
         assert "timed out" in str(e.value)
+
+    def test_rls_blocked_writes_raise_even_though_the_schema_reads_fine(self, monkeypatch):
+        """🔴 2026-08-21: SELECT under RLS just returns fewer rows (no error),
+        so the schema-existence probe alone stayed green while every real
+        write ('new row violates row-level security policy...') threw into
+        production handlers. Must be caught here, at construction."""
+        b = self._backend(monkeypatch, self._client(
+            write_error="{'message': 'new row violates row-level security "
+                        "policy for table \"user_records\"', 'code': '42501'}"))
+        with pytest.raises(RuntimeError) as e:
+            b._verify_schema(timeout=1.0)
+        msg = str(e.value)
+        assert "not writable" in msg
+        assert "service_role" in msg, "must point at the fix: wrong key or missing RLS policy"
+
+    def test_a_writable_schema_passes(self, monkeypatch):
+        b = self._backend(monkeypatch, self._client())
+        b._verify_schema(timeout=1.0)          # must not raise
 
     def test_get_storage_backend_FALLS_BACK_to_gist_when_the_schema_is_missing(self, monkeypatch):
         """The whole point: the outage becomes one startup line and no impact."""
