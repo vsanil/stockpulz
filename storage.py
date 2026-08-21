@@ -234,6 +234,58 @@ class SupabaseBackend(StorageBackend):
         if errors:
             raise RuntimeError(f"Supabase unreachable or unverifiable: {'; '.join(errors)}")
 
+        self._verify_write_access(timeout)
+
+    def _verify_write_access(self, timeout: float = 4.0) -> None:
+        """A schema that EXISTS can still deny every write.
+
+        🔴 2026-08-21: RLS enabled on `user_records` with no policy permitting
+        the key in use (an anon/publishable key instead of the sb_secret_
+        service-role key bypasses RLS entirely, as documented in CLAUDE.md)
+        makes every user-facing write throw `new row violates row-level
+        security policy for table "user_records"` straight into command/
+        mini-app handlers — while the read-only SELECT probe above stays
+        green, because SELECT under RLS just returns fewer rows, it doesn't
+        error. Same doctrine as the missing-table check: prove the backend
+        actually WORKS before trusting it with storage.
+
+        Deletes then re-inserts one disposable row so the INSERT is always a
+        genuine attempt (an insert-if-absent on a row already present from a
+        prior successful probe would otherwise never re-exercise the check).
+        """
+        import threading
+        probe_filename, probe_chat_id = "__write_probe__", "0"
+        error: list[str] = []
+
+        def _probe() -> None:
+            try:
+                try:
+                    (self._client.table("user_records").delete()
+                     .eq("filename", probe_filename).eq("chat_id", probe_chat_id)
+                     .execute())
+                except Exception:
+                    pass  # best-effort cleanup — the insert below is the real test
+                self._client.rpc("upsert_user_record", {
+                    "p_filename": probe_filename,
+                    "p_chat_id": probe_chat_id,
+                    "p_content": {},
+                    "p_expected_version": None,
+                }).execute()
+            except Exception as exc:
+                error.append(str(exc))
+
+        t = threading.Thread(target=_probe, daemon=True)
+        t.start()
+        t.join(timeout=timeout)
+        if t.is_alive():
+            raise RuntimeError(f"Supabase write probe timed out after {timeout}s")
+        if error:
+            raise RuntimeError(
+                f"Supabase schema present but not writable: {error[0][:200]}. "
+                f"Check SUPABASE_KEY is the service_role (sb_secret_) key, not the "
+                f"anon/publishable key, and that RLS policies allow it — or unset "
+                f"SUPABASE_URL/SUPABASE_KEY to stay on the Gist.")
+
     def read(self, filename: str) -> dict | list | None:
         import threading
         result = [None]
