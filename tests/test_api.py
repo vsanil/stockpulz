@@ -725,11 +725,19 @@ class TestReleaseHardening:
         r = client.get("/health")
         assert r.status_code == 200
         data = r.get_json()
-        allowed = {"status", "commit", "branch"}
+        allowed = {"status", "commit", "branch", "storage"}
         assert set(data) <= allowed, \
             f"/health grew an unexpected field: {sorted(set(data) - allowed)}"
         assert data["status"] == "ok"
-        blob = json.dumps(data).lower()
+
+        # `storage` is a fixed ENUM of backend names, never an id/url/token.
+        # Pinned as an enum so the field cannot become free text that smuggles
+        # one through — the substring scan below skips this field precisely
+        # because "gist" is a legitimate VALUE here while gist_id is not.
+        assert data.get("storage") in {"gist", "supabase", "unavailable"}, \
+            f"/health storage must be a known backend name, got {data.get('storage')!r}"
+
+        blob = json.dumps({k: v for k, v in data.items() if k != "storage"}).lower()
         for banned in ("config", "allowed", "admin", "chat_id", "token",
                        "secret", "gist", "key"):
             assert banned not in blob, f"/health leaked {banned!r}"
@@ -1446,3 +1454,34 @@ class TestOnlyWeeklyAndMorningReachRunMorning:
         import inspect
         import agent
         assert "No new picks are generated" in (inspect.getdoc(agent.run_week_ahead) or "")
+
+
+class TestHealthReportsStorageBackend:
+    """🔴 2026-08-21: Render, the workflows and the synthetic bot were each on a
+    DIFFERENT storage backend and the only way to tell was reading service logs.
+    A half-live migration is invisible from outside without this field.
+    """
+
+    def test_it_reports_the_backend_in_use(self, client):
+        assert client.get("/health").get_json()["storage"] in {
+            "gist", "supabase", "unavailable"}
+
+    def test_a_broken_backend_reports_unavailable_rather_than_500ing(
+            self, client, monkeypatch):
+        """/health must answer even when storage is down — that is when it is
+        needed most."""
+        import storage
+        monkeypatch.setattr(storage, "get_storage_backend",
+                            lambda: (_ for _ in ()).throw(RuntimeError("down")))
+        r = client.get("/health")
+        assert r.status_code == 200
+        assert r.get_json()["storage"] == "unavailable"
+
+    def test_it_never_carries_an_id_url_or_token(self, client, monkeypatch):
+        """The value is a backend NAME. If it ever becomes free text, the
+        allowlist guard above stops it — this pins the intent at the source."""
+        import storage
+        monkeypatch.setattr(storage, "get_storage_backend",
+                            lambda: type("B", (), {"name": lambda s: "gist"})())
+        v = client.get("/health").get_json()["storage"]
+        assert v == "gist" and "/" not in v and len(v) < 20

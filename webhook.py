@@ -678,10 +678,21 @@ def health():
     The SHA is safe here: the repo is public and it reveals nothing about users
     or configuration. RENDER_GIT_COMMIT is set automatically by Render.
     """
+    # `storage` is the BACKEND NAME only — "gist" | "supabase" | "unavailable".
+    # Never an id, url or token. It is here for the same reason as `commit`:
+    # on 2026-08-21 Render, the workflows and the synthetic bot were each on a
+    # different backend and the only way to tell was reading service logs. A
+    # half-live migration is invisible from outside without this.
+    try:
+        from storage import get_storage_backend
+        _store = get_storage_backend().name()
+    except Exception:
+        _store = "unavailable"
     return jsonify({
         "status": "ok",
         "commit": (os.environ.get("RENDER_GIT_COMMIT") or "unknown")[:7],
         "branch": os.environ.get("RENDER_GIT_BRANCH") or "unknown",
+        "storage": _store,
     }), 200
 
 
