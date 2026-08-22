@@ -40,10 +40,15 @@ def _load_dotenv() -> bool:
         return False
 
 
-def _mask(v: str) -> str:
-    if not v:
-        return "<unset>"
-    return f"{v[:12]}…{v[-4:]} ({len(v)} chars)"
+def _describe(v: str) -> str:
+    """Presence and shape ONLY — never any characters of the value.
+
+    An earlier version printed the first 12 chars to identify the key type.
+    GitHub Actions masks exact secret values, but a PREFIX may not match the
+    mask and would be published to the workflow log. The prefix test below
+    tells us what we need without ever emitting key material.
+    """
+    return "<unset>" if not v else f"set ({len(v)} chars)"
 
 
 def main() -> int:
@@ -55,15 +60,18 @@ def main() -> int:
 
     url, key = os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_KEY", "")
     print("\n1. Environment")
-    print(f"   SUPABASE_URL : {_mask(url)}")
-    print(f"   SUPABASE_KEY : {_mask(key)}")
+    print(f"   SUPABASE_URL : {_describe(url)}")
+    print(f"   SUPABASE_KEY : {_describe(key)}")
     if key:
         if key.startswith("sb_secret_"):
-            print("   key type     : service_role (sb_secret_) — bypasses RLS ✅")
+            print("   key type     : service_role — bypasses RLS ✅")
         elif key.startswith("sb_publishable_") or key.startswith("eyJ"):
-            print("   key type     : 🔴 anon/publishable — RLS will block user_records writes")
+            print("   key type     : 🔴 anon/publishable — RLS WILL block user_records writes.")
+            print("                  This is almost certainly the whole problem: a")
+            print("                  service_role key bypasses RLS, so a 42501 error")
+            print("                  cannot happen with one.")
         else:
-            print("   key type     : unrecognised prefix — cannot tell from the value alone")
+            print("   key type     : unrecognised prefix — the write probe below is the answer")
 
     # ── 2. What does the app actually resolve to? ────────────────────────────
     print("\n2. Backend the app resolves to")
