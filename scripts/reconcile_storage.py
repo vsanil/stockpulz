@@ -77,6 +77,25 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
+
+
+def _sb_read(sb, name):
+    """🔴 Read the table the file actually lives in.
+
+    SupabaseBackend.read() hits `documents`; user-keyed files live as rows in
+    `user_records` and are reached via read_all_users(). Using read() for those
+    reports an empty result and reads as "Supabase is missing everything" —
+    which is exactly the false alarm this comparison raised on 2026-08-22.
+    """
+    from config_manager import USER_KEYED_FILES
+    if name in USER_KEYED_FILES and sb.supports_rows():
+        try:
+            return sb.read_all_users(name)
+        except Exception:
+            return None
+    return sb.read(name)
+
+
     import storage
     from config_manager import USER_KEYED_FILES
     gist = storage.GistBackend()
@@ -84,7 +103,7 @@ def main() -> int:
 
     plan = []
     for name in GIST_WINS + MERGE:
-        g, s = gist.read(name), sb.read(name)
+        g, s = gist.read(name), _sb_read(sb, name)
         if name in MERGE:
             merged = (_merge_alerts if name == "price_alerts.json"
                       else _merge_traffic)(g or {}, s or {})
@@ -128,7 +147,7 @@ def main() -> int:
     print("\n  verifying…")
     bad = []
     for name, merged, _why, _same in plan:
-        got = sb.read(name)
+        got = _sb_read(sb, name)
         if json.dumps(got, sort_keys=True) != json.dumps(merged, sort_keys=True):
             bad.append(name)
     if bad:
