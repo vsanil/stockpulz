@@ -281,7 +281,46 @@ def diff_file(name: str) -> int:
     return 0
 
 
+def alert_roundtrip() -> int:
+    """Reproduce the canary's alert add→read on THIS surface, with diagnostics.
+
+    🔴 2026-08-22: canary `alert.add` read back `[]` on Supabase. Both the writer
+    (mutate_gist_file) and the reader (_load_gist_file) are row-aware, so the
+    obvious split was ruled out — this shows what actually comes back.
+
+    Uses a disposable uid so no real user's alerts are touched.
+    """
+    import storage
+    from price_alert_manager import add_alert, remove_alert, _load_alerts
+    uid = "999000999"
+    print(f"\n  backend: {storage.get_storage_backend().name()}")
+    try:
+        remove_alert(uid, "MSFT")
+    except Exception:
+        pass
+    add_alert(uid, "MSFT", 100.0)
+    m = _load_alerts() or {}
+    print(f"  _load_alerts() -> {len(m)} keys")
+    print(f"    key types  : {sorted({type(k).__name__ for k in m})}")
+    print(f"    our uid    : {uid!r} present={uid in m}  "
+          f"(int form present={int(uid) in m})")
+    mine = [a for a in (m.get(uid) or m.get(int(uid)) or []) if a.get("ticker") == "MSFT"]
+    ok = len(mine) == 1 and abs(float(mine[0]["target"]) - 100.0) < 0.01
+    print(f"    read back  : {[a.get('target') for a in mine]}  -> {'✅' if ok else '🔴 EMPTY/WRONG'}")
+    if not ok:
+        print(f"    sample keys: {list(m)[:8]}")
+    try:
+        remove_alert(uid, "MSFT")
+        print("    cleaned up")
+    except Exception as exc:
+        print(f"    ⚠️ cleanup failed: {exc}")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
+    if "--alert-roundtrip" in sys.argv:
+        _load_dotenv()
+        sys.exit(alert_roundtrip())
     if "--diff" in sys.argv:
         _load_dotenv()
         sys.exit(diff_file(sys.argv[sys.argv.index("--diff") + 1]))
