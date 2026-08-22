@@ -3562,14 +3562,18 @@ def miniapp_tax_lots():
     from datetime import date
     from collections import defaultdict
 
-    from config_manager import human_trades, is_long_term_hold, days_until_long_term
+    from config_manager import (human_trades, is_long_term_hold,
+                                days_until_long_term, et_today)
     log    = load_user_trade_log(chat_id)
     # human_trades() drops synthetic-bot fills: a robot's mechanical trades
     # carry no real tax liability and must not enter a tax figure.
     closed = [t for t in human_trades(log.get("closed", []))
               if t.get("source") != "backtest"]
     opens  = log.get("open", [])
-    today  = date.today()
+    # 🔴 ONE clock. `date.today()` is UTC on Render and rolls over at 7-8 PM ET,
+    # so mixing it with the helpers' et_today() default made days_held and
+    # is_lt/days_to_lt disagree by a day for hours every night.
+    today  = et_today()
 
     # ── Realized ST vs LT gains ────────────────────────────────────────────────
     st_gain = lt_gain = 0.0
@@ -3623,8 +3627,8 @@ def miniapp_tax_lots():
                 days_held = (today - date.fromisoformat(opened)).days
             except Exception:
                 pass
-            is_lt = bool(is_long_term_hold(opened))
-        days_to_lt = days_until_long_term(opened) if opened else None
+            is_lt = bool(is_long_term_hold(opened, today))
+        days_to_lt = days_until_long_term(opened, today) if opened else None
         open_lots.append({
             "ticker":       t.get("ticker", ""),
             "opened_date":  opened,

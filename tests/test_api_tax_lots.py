@@ -34,16 +34,24 @@ def log(monkeypatch):
     return store
 
 
+def _today():
+    """The ET clock, because that is what the endpoint reads. A test that stamps
+    on date.today() while the code uses et_today() passes ~80% of the day and
+    fails in the UTC/ET window — this project's most-repeated bug class."""
+    from config_manager import et_today
+    return et_today()
+
+
 def _expected_days_to_lt(opened):
     """First long-term day = the one-year anniversary PLUS one, since selling
     ON the anniversary is still short-term. Computed here independently of
     config_manager so the test does not check the helper against itself."""
-    from datetime import date, timedelta
+    from datetime import timedelta
     try:
         anniv = opened.replace(year=opened.year + 1)
     except ValueError:                      # Feb 29
         anniv = opened.replace(year=opened.year + 1, month=3, day=1)
-    return (anniv + timedelta(days=1) - date.today()).days
+    return (anniv + timedelta(days=1) - _today()).days
 
 
 class TestRealizedSplit:
@@ -128,40 +136,40 @@ class TestRealizedSplit:
 
 class TestOpenLotGuidance:
     def test_a_lot_near_the_one_year_mark_is_flagged_to_wait(self, client, log):
-        from datetime import date, timedelta
-        opened = date.today() - timedelta(days=330)
+        from datetime import timedelta
+        opened = _today() - timedelta(days=330)
         log["open"] = [_open("AAPL", opened.isoformat())]
         tip = get(client, "/api/miniapp/tax_lots").get_json()["open_fifo_lifo"][0]
         assert f"Turns LT in {_expected_days_to_lt(opened)}d" in tip["tax_tip"], \
             f"got {tip['tax_tip']!r}"
 
     def test_a_young_lot_gets_no_wait_nudge(self, client, log):
-        from datetime import date, timedelta
-        log["open"] = [_open("AAPL", (date.today() - timedelta(days=30)).isoformat())]
+        from datetime import timedelta
+        log["open"] = [_open("AAPL", (_today() - timedelta(days=30)).isoformat())]
         tip = get(client, "/api/miniapp/tax_lots").get_json()["open_fifo_lifo"][0]
         assert tip["tax_tip"] == "", "a 335-day wait is not actionable guidance"
 
     def test_an_existing_LT_lot_advises_selling_it_first(self, client, log):
-        from datetime import date, timedelta
-        log["open"] = [_open("AAPL", (date.today() - timedelta(days=400)).isoformat()),
-                       _open("AAPL", (date.today() - timedelta(days=10)).isoformat())]
+        from datetime import timedelta
+        log["open"] = [_open("AAPL", (_today() - timedelta(days=400)).isoformat()),
+                       _open("AAPL", (_today() - timedelta(days=10)).isoformat())]
         tip = get(client, "/api/miniapp/tax_lots").get_json()["open_fifo_lifo"][0]
         assert tip["lt_count"] == 1 and tip["st_count"] == 1
         assert "sell LT first" in tip["tax_tip"]
 
     def test_lots_are_grouped_per_ticker(self, client, log):
-        from datetime import date, timedelta
-        d = (date.today() - timedelta(days=10)).isoformat()
+        from datetime import timedelta
+        d = (_today() - timedelta(days=10)).isoformat()
         log["open"] = [_open("AAPL", d), _open("AAPL", d), _open("MSFT", d)]
         groups = get(client, "/api/miniapp/tax_lots").get_json()["open_fifo_lifo"]
         by = {g["ticker"]: g for g in groups}
         assert len(by["AAPL"]["lots"]) == 2 and len(by["MSFT"]["lots"]) == 1
 
     def test_days_to_lt_counts_down_and_clears_once_long_term(self, client, log):
-        from datetime import date, timedelta
-        young = date.today() - timedelta(days=100)
+        from datetime import timedelta
+        young = _today() - timedelta(days=100)
         log["open"] = [_open("A", young.isoformat()),
-                       _open("B", (date.today() - timedelta(days=400)).isoformat())]
+                       _open("B", (_today() - timedelta(days=400)).isoformat())]
         lots = {l["ticker"]: l
                 for g in get(client, "/api/miniapp/tax_lots").get_json()["open_fifo_lifo"]
                 for l in g["lots"]}
@@ -173,8 +181,8 @@ class TestOpenLotGuidance:
             self, client, log):
         """Documents the correction: `365 - days_held` was a day short, because
         the anniversary itself is still short-term."""
-        from datetime import date, timedelta
-        opened = date.today() - timedelta(days=200)
+        from datetime import timedelta
+        opened = _today() - timedelta(days=200)
         log["open"] = [_open("A", opened.isoformat())]
         lot = get(client, "/api/miniapp/tax_lots").get_json()[
             "open_fifo_lifo"][0]["lots"][0]
@@ -184,3 +192,51 @@ class TestOpenLotGuidance:
 class TestAuth:
     def test_it_requires_authentication(self, client):
         assert client.get("/api/miniapp/tax_lots").status_code == 403
+
+
+class TestOneClock:
+    """🔴 FOURTH occurrence of this project's most-repeated bug class (Aug 22).
+
+    miniapp_tax_lots computed days_held from date.today() while the new
+    is_long_term_hold / days_until_long_term helpers defaulted to et_today().
+    Measured at 04:35 UTC: date.today()=2026-08-21, et_today()=2026-08-22 — so
+    days_held and is_lt/days_to_lt disagreed by a day for 4-5 hours every night.
+
+    This test FORCES the divergence instead of waiting for the calendar, which
+    is the rule that came out of the Aug 11 buy-counts incident.
+    """
+
+    def test_the_endpoint_reads_ONE_clock_and_it_is_ET(self, client, log, monkeypatch):
+        from datetime import timedelta
+        import config_manager
+        import webhook
+
+        real_et = config_manager.et_today()
+        # Force ET a day ahead of the local clock, the exact CI/Render window.
+        monkeypatch.setattr(config_manager, "et_today",
+                            lambda: real_et + timedelta(days=1))
+        opened = real_et + timedelta(days=1) - timedelta(days=200)
+        log["open"] = [_open("A", opened.isoformat())]
+        lot = get(client, "/api/miniapp/tax_lots").get_json()[
+            "open_fifo_lifo"][0]["lots"][0]
+        # days_held and the countdown must both be measured against the SAME
+        # (shifted) day — 200 held, and one more than the naive 365-200.
+        assert lot["days_held"] == 200, \
+            f"days_held used a different clock than the countdown: {lot['days_held']}"
+        assert lot["days_to_lt"] == (365 - 200) + 1
+
+    def test_the_source_has_no_bare_date_today_left(self):
+        """Comments and strings are stripped first — the fix's own comment
+        MENTIONS date.today() while explaining why it was removed, and a naive
+        scan flags it. Third time this trap has appeared today."""
+        import inspect
+        import io
+        import tokenize
+        import webhook
+        src = inspect.getsource(webhook.miniapp_tax_lots)
+        toks = list(tokenize.generate_tokens(io.StringIO(src).readline))
+        code = "".join(t.string if t.type not in (tokenize.COMMENT, tokenize.STRING)
+                       else " " for t in toks)
+        assert "date.today()" not in code.replace(" ", ""), \
+            "a bare date.today() returned — it is UTC on Render and rolls at 7-8 PM ET"
+        assert "et_today()" in code
