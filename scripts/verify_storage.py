@@ -51,6 +51,61 @@ def _describe(v: str) -> str:
     return "<unset>" if not v else f"set ({len(v)} chars)"
 
 
+def compare() -> int:
+    """Report DRIFT between the Gist and Supabase for every user-keyed file.
+
+    🔴 Why this matters after a stalled migration. The Aug 19 migration copied
+    Gist → Supabase, then Supabase became unwritable, so every write for the
+    next three days landed on the GIST. Switching the app back to Supabase
+    therefore risks serving a stale copy and writing that stale state forward.
+    Compare before trusting the cutover.
+    """
+    import json
+    import storage
+    from config_manager import USER_KEYED_FILES
+
+    gist = storage.GistBackend()
+    try:
+        sb = storage.SupabaseBackend()
+    except Exception as exc:
+        print(f"  🔴 cannot reach Supabase: {str(exc)[:200]}")
+        return 1
+
+    files = sorted(set(USER_KEYED_FILES) | {
+        "picks.json", "traffic_hours.json", "usage_counts.json", "weekly_picks.json"})
+    print(f"\n  {'file':<26}{'gist':>10}{'supabase':>11}   verdict")
+    print("  " + "─" * 62)
+    drift = []
+    for f in files:
+        try:
+            g = gist.read(f)
+        except Exception:
+            g = None
+        try:
+            v = sb.read(f)
+        except Exception:
+            v = None
+        gj = json.dumps(g, sort_keys=True) if g is not None else ""
+        vj = json.dumps(v, sort_keys=True) if v is not None else ""
+        if gj == vj:
+            verdict = "identical" if gj else "both empty"
+        else:
+            verdict = "🔴 DIFFERS"
+            drift.append(f)
+        print(f"  {f:<26}{len(gj):>10}{len(vj):>11}   {verdict}")
+
+    print()
+    if not drift:
+        print("  ✅ Every file matches. The cutover is safe.")
+        return 0
+    print(f"  🔴 {len(drift)} file(s) differ: {', '.join(drift)}")
+    print("     The Gist is almost certainly the NEWER copy — it received every")
+    print("     write while Supabase was unwritable. Re-run the migration")
+    print("     (scripts/migrate_to_supabase.py) to carry those writes across")
+    print("     BEFORE relying on Supabase, or the last few days are lost.")
+    return 1
+
+
 def main() -> int:
     print("═" * 68)
     print("  StockPulz storage verification")
@@ -138,4 +193,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--compare" in sys.argv:
+        _load_dotenv()
+        sys.exit(compare())
     sys.exit(main())
