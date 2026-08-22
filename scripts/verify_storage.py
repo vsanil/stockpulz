@@ -51,6 +51,30 @@ def _describe(v: str) -> str:
     return "<unset>" if not v else f"set ({len(v)} chars)"
 
 
+def _which_is_newer(name, g, v) -> str:
+    """Say WHICH side is authoritative — never assume the Gist wins.
+
+    picks.json diverged in BOTH directions (daily_run wrote Supabase while the
+    bot wrote the Gist), and on Aug 19 traffic_hours held DISJOINT event streams
+    that had to be merged, not overwritten. Blindly taking one side loses data.
+    """
+    # Whole-file docs often carry their own date stamp.
+    for key in ("_saved_date", "_confirmation_sent_date"):
+        if isinstance(g, dict) and isinstance(v, dict) and (key in g or key in v):
+            gd, vd = str(g.get(key, "")), str(v.get(key, ""))
+            if gd != vd:
+                return f"gist={gd or '—'} supabase={vd or '—'} → {'GIST' if gd > vd else 'SUPABASE'} newer"
+    # Per-user files: compare which chat_ids each side holds.
+    if isinstance(g, dict) and isinstance(v, dict):
+        gk, vk = set(g), set(v)
+        only_g, only_v = gk - vk, vk - gk
+        if only_g or only_v:
+            return (f"gist-only keys={len(only_g)} supabase-only={len(only_v)}"
+                    f" → {'GIST' if len(only_g) >= len(only_v) else 'SUPABASE'} more complete")
+        return "same keys, different contents → inspect before overwriting"
+    return "DIFFERS — cannot rank automatically"
+
+
 def compare() -> int:
     """Report DRIFT between the Gist and Supabase for every user-keyed file.
 
@@ -90,7 +114,7 @@ def compare() -> int:
         if gj == vj:
             verdict = "identical" if gj else "both empty"
         else:
-            verdict = "🔴 DIFFERS"
+            verdict = "🔴 " + _which_is_newer(f, g, v)
             drift.append(f)
         print(f"  {f:<26}{len(gj):>10}{len(vj):>11}   {verdict}")
 
