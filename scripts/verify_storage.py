@@ -128,7 +128,11 @@ def compare() -> int:
             v = None
         gj = json.dumps(g, sort_keys=True) if g is not None else ""
         vj = json.dumps(v, sort_keys=True) if v is not None else ""
-        if gj == vj:
+        # 🔴 Compare VALUES, not serialised strings. Postgres JSONB normalises
+        # numbers (220.0 → 220), so a byte-for-byte comparison reports drift on
+        # data that is semantically identical — user_trades.json looked 30 bytes
+        # "smaller" on Supabase purely from that.
+        if g == v:
             verdict = "identical" if gj else "both empty"
         else:
             verdict = "🔴 " + _which_is_newer(f, g, v)

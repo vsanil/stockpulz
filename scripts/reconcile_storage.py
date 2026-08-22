@@ -113,7 +113,7 @@ def _sb_read(sb, name):
         if merged is None:
             print(f"  ! {name}: nothing on the Gist — skipped")
             continue
-        same = json.dumps(merged, sort_keys=True) == json.dumps(s, sort_keys=True)
+        same = merged == s          # value equality — JSONB normalises numbers
         plan.append((name, merged, why, same))
 
     print("\n  plan")
@@ -148,7 +148,7 @@ def _sb_read(sb, name):
     bad = []
     for name, merged, _why, _same in plan:
         got = _sb_read(sb, name)
-        if json.dumps(got, sort_keys=True) != json.dumps(merged, sort_keys=True):
+        if got != merged:
             bad.append(name)
     if bad:
         print(f"  🚨 VERIFY FAILED: {', '.join(bad)}")
