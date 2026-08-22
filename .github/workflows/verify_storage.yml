@@ -48,6 +48,15 @@ jobs:
           SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
         run: python scripts/verify_storage.py --diff user_trades.json
+      - name: Alert round-trip on this surface
+        if: always()
+        continue-on-error: true
+        env:
+          GIST_ID:        ${{ secrets.GIST_ID }}
+          GH_GIST_TOKEN:  ${{ secrets.GH_GIST_TOKEN }}
+          SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/verify_storage.py --alert-roundtrip
       - name: Reconcile Gist -> Supabase (${{ inputs.mode }})
         if: inputs.mode != 'compare-only'
         env:
