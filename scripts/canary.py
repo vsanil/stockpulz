@@ -419,7 +419,7 @@ def check_weekly_relay() -> None:
     try:
         r = requests.get(
             f"https://api.github.com/repos/{repo}/actions/workflows/daily_run.yml/"
-            f"runs?created=>{today}&per_page=20",
+            f"runs?created=>={today}&per_page=20",
             headers={"Authorization": f"token {tok}",
                      "Accept": "application/vnd.github+json"}, timeout=20)
         if r.status_code == 200:
@@ -483,7 +483,7 @@ def check_selfheal_health() -> None:
     tok  = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
     since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
     url = (f"https://api.github.com/repos/{repo}/actions/workflows/"
-           f"self_heal.yml/runs?created=>{since}&per_page=50")
+           f"self_heal.yml/runs?created=>={since}&per_page=50")
     try:
         r = requests.get(url, headers={"Authorization": f"token {tok}",
                                        "Accept": "application/vnd.github+json"}, timeout=20)
