@@ -233,7 +233,43 @@ def main() -> int:
     return 1
 
 
+def diff_file(name: str) -> int:
+    """Show exactly WHAT differs for one file — never guess from byte counts."""
+    import json
+    import storage
+    gist = storage.GistBackend()
+    sb = storage.SupabaseBackend()
+    g, v = gist.read(name) or {}, _sb_read(sb, name) or {}
+    print(f"\n  {name}: gist keys={len(g)} supabase keys={len(v)}")
+    for k in sorted(set(g) | set(v)):
+        gv, vv = g.get(k), v.get(k)
+        if gv == vv:
+            continue
+        print(f"\n  ── key {k!r}")
+        if isinstance(gv, dict) and isinstance(vv, dict):
+            for sub in sorted(set(gv) | set(vv)):
+                a, b = gv.get(sub), vv.get(sub)
+                if a == b:
+                    continue
+                if isinstance(a, list) and isinstance(b, list):
+                    print(f"     {sub}: gist={len(a)} items, supabase={len(b)} items")
+                    ga = {json.dumps(x, sort_keys=True) for x in a}
+                    vb = {json.dumps(x, sort_keys=True) for x in b}
+                    for m in list(ga - vb)[:3]:
+                        print(f"       only in GIST     : {m[:150]}")
+                    for m in list(vb - ga)[:3]:
+                        print(f"       only in SUPABASE : {m[:150]}")
+                else:
+                    print(f"     {sub}: gist={str(a)[:70]!r} supabase={str(b)[:70]!r}")
+        else:
+            print(f"     gist={str(gv)[:120]!r}\n     supa={str(vv)[:120]!r}")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--diff" in sys.argv:
+        _load_dotenv()
+        sys.exit(diff_file(sys.argv[sys.argv.index("--diff") + 1]))
     if "--compare" in sys.argv:
         _load_dotenv()
         sys.exit(compare())

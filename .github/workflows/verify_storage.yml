@@ -38,7 +38,9 @@ jobs:
           SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
         continue-on-error: true
-        run: python scripts/verify_storage.py --compare
+        run: |
+          python scripts/verify_storage.py --compare
+          python scripts/verify_storage.py --diff user_trades.json
       - name: Reconcile Gist -> Supabase (${{ inputs.mode }})
         if: inputs.mode != 'compare-only'
         env:
