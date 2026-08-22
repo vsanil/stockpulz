@@ -14,6 +14,10 @@ Rules:
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
 - After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
+- **🔴 The graph goes stale silently and answering from it then describes a codebase that no longer exists.** Found 2026-08-22 at **40 commits** of drift — it predated the delivery fan-out, the coverage work, the tax holding-period rule and the storage reconciliation. **Check `## Graph Freshness` in `GRAPH_REPORT.md` against `git rev-parse HEAD` BEFORE trusting it**, and re-read source directly when they disagree.
+- **`graph.json` is ~7.7 MB and is TRACKED**, so every resync adds another blob of that size to history. Resync when it is load-bearing, not reflexively.
+- **The HTML visualisation is skipped above 5,000 nodes** (this repo is ~9,000). Raise `GRAPHIFY_VIZ_NODE_LIMIT` or pass `--no-viz`; the skip is not an error.
+- **⚠️ The god-node list includes CLAUDE.md PROSE HEADINGS, not just code** — "Memory / OOM architecture (settled Jun 12…)" ranks 7th at 66 edges. Do not read that list as pure architecture.
 
 ## Memory / OOM architecture (settled Jun 12, 2026 — do not relitigate)
 
