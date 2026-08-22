@@ -158,7 +158,9 @@ def compare() -> int:
         print(f"     Ahead on: {', '.join(superset)} (merged rows / Supabase-only counters).")
         print("     The Gist remains as the rollback copy, one reconcile behind.")
         return 0
-    print(f"  🔴 {len(real)} file(s) have GIST-ONLY content: {', '.join(real)}")
+    print(f"  🔴 {len(real)} file(s) DIFFER and could not be ranked: {', '.join(real)}")
+    print("     'same keys, different contents' means the direction is UNKNOWN —")
+    print("     run --diff <file> before assuming either side is authoritative.")
     print("     The Gist received writes Supabase never got. Run")
     print("     scripts/reconcile_storage.py --dry-run, then apply, BEFORE")
     print("     relying on Supabase — otherwise those writes are lost.")

@@ -47,7 +47,10 @@ jobs:
           GH_GIST_TOKEN:  ${{ secrets.GH_GIST_TOKEN }}
           SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/verify_storage.py --diff user_trades.json
+        run: |
+          for f in data_quality.json user_trades.json; do
+            python scripts/verify_storage.py --diff "$f" || true
+          done
       - name: Alert round-trip on this surface
         if: always()
         continue-on-error: true
