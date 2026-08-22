@@ -5,6 +5,13 @@ name: Verify Storage
 # Render separately via /health and the app logs.
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: What to do after the compare
+        required: true
+        default: compare-only
+        type: choice
+        options: [compare-only, reconcile-dry-run, reconcile-apply]
 
 jobs:
   verify:
@@ -30,4 +37,18 @@ jobs:
           GH_GIST_TOKEN:  ${{ secrets.GH_GIST_TOKEN }}
           SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
+        continue-on-error: true
         run: python scripts/verify_storage.py --compare
+      - name: Reconcile Gist -> Supabase (${{ inputs.mode }})
+        if: inputs.mode != 'compare-only'
+        env:
+          GIST_ID:        ${{ secrets.GIST_ID }}
+          GH_GIST_TOKEN:  ${{ secrets.GH_GIST_TOKEN }}
+          SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
+        run: |
+          if [ "${{ inputs.mode }}" = "reconcile-dry-run" ]; then
+            python scripts/reconcile_storage.py --dry-run
+          else
+            python scripts/reconcile_storage.py
+          fi
