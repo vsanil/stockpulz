@@ -234,3 +234,102 @@ class TestSupabaseSchemaGuard:
         assert isinstance(b, storage.GistBackend), \
             "a half-configured Supabase must never take over storage"
         monkeypatch.setattr(storage, "_backend_instance", None)
+
+
+class TestRowMutateSurvivesInPlaceMutators:
+    """🔴 2026-08-22: alerts silently stopped persisting on the row backend.
+
+    mutate_gist_file's row branch took a SHALLOW copy of the row mapping:
+
+        before  = backend.read_all_users(f) or {}
+        current = dict(before)                      # values are SHARED
+        new_contents, result = mutator(current)
+        for uid, val in new_contents.items():
+            if before.get(uid) != val:              # list compared to ITSELF
+                write(...)
+
+    add_alert's mutator does `alerts.setdefault(uid, []).append(entry)` — an
+    IN-PLACE append. With a shallow copy that mutates the very list `before`
+    holds, so the guard sees no change and skips the write. The alert vanished
+    with no error, for any user who ALREADY had a row.
+
+    It only bit the row backend: the Gist path re-parses JSON on every read and
+    writes the whole blob unconditionally, so nothing aliases.
+    """
+
+    class _RowBackend:
+        def __init__(self, rows):
+            self.rows = rows
+            self.writes = []
+
+        def supports_rows(self):
+            return True
+
+        def read_all_users(self, f):
+            import copy
+            return copy.deepcopy(self.rows)      # a real backend re-materialises
+
+        def read_user(self, f, uid):
+            return self.rows.get(uid), 1
+
+        def write_user(self, f, uid, val, ver):
+            self.writes.append((uid, val))
+            self.rows[uid] = val
+            return 2
+
+        def name(self):
+            return "supabase"
+
+    def _wire(self, monkeypatch, rows):
+        import config_manager as cm
+        be = self._RowBackend(rows)
+        monkeypatch.setattr("storage.get_storage_backend", lambda: be)
+        monkeypatch.setattr(cm, "USER_KEYED_FILES", {"price_alerts.json"},
+                            raising=False)
+        return be
+
+    def test_an_in_place_append_to_an_EXISTING_row_is_persisted(
+            self, monkeypatch):
+        import config_manager as cm
+        be = self._wire(monkeypatch, {"111": [{"ticker": "AAPL"}]})
+
+        def _mut(alerts):
+            alerts.setdefault("111", []).append({"ticker": "MSFT"})
+            return alerts, "ok"
+
+        cm.mutate_gist_file("price_alerts.json", _mut)
+        assert be.rows["111"] == [{"ticker": "AAPL"}, {"ticker": "MSFT"}], \
+            "the appended alert was silently dropped — this is the live bug"
+        assert be.writes, "no write was issued at all"
+
+    def test_a_brand_new_row_still_works(self, monkeypatch):
+        import config_manager as cm
+        be = self._wire(monkeypatch, {})
+
+        def _mut(alerts):
+            alerts.setdefault("222", []).append({"ticker": "NVDA"})
+            return alerts, "ok"
+
+        cm.mutate_gist_file("price_alerts.json", _mut)
+        assert be.rows["222"] == [{"ticker": "NVDA"}]
+
+    def test_an_in_place_REMOVE_is_persisted(self, monkeypatch):
+        import config_manager as cm
+        be = self._wire(monkeypatch, {"111": [{"ticker": "AAPL"},
+                                              {"ticker": "MSFT"}]})
+
+        def _mut(alerts):
+            alerts["111"] = [a for a in alerts["111"] if a["ticker"] != "MSFT"]
+            return alerts, "ok"
+
+        cm.mutate_gist_file("price_alerts.json", _mut)
+        assert be.rows["111"] == [{"ticker": "AAPL"}]
+
+    def test_a_genuinely_unchanged_row_writes_NOTHING(self, monkeypatch):
+        """The skip-if-unchanged optimisation must survive the fix — a wasted
+        write counts against GitHub's secondary rate limit, which has cost this
+        project data before."""
+        import config_manager as cm
+        be = self._wire(monkeypatch, {"111": [{"ticker": "AAPL"}]})
+        cm.mutate_gist_file("price_alerts.json", lambda a: (a, "ok"))
+        assert be.writes == [], f"wrote without a change: {be.writes}"
