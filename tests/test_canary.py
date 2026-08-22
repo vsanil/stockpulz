@@ -2,6 +2,7 @@
 import os
 import importlib.util
 import datetime
+import pytest
 
 _PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "scripts", "canary.py")
@@ -361,3 +362,97 @@ class TestWeeklyRelayCheck:
         canary.check_weekly_relay()
         r = self._res()
         assert r["weekly.on_github"][0] is True and "NOT VERIFIED" in r["weekly.on_github"][1]
+
+
+class TestSyntheticUserCheck:
+    """🔴 The bot opened ZERO positions for two days across 30 green runs.
+
+    Its per-ticker failures are caught and logged one line at a time, so the
+    workflow stays green and the only symptom is an ABSENCE. This check asserts
+    the presence.
+
+    Patches `config_manager`, NOT `canary` — the check imports function-locally,
+    so patching the canary module would not take (the same scope trap that made
+    an earlier test write to the live gist).
+    """
+
+    def _wire(self, monkeypatch, *, picks_date, real=(), paper=(), today=None,
+              picks_raises=False, account_raises=False):
+        import datetime as _dt
+        import config_manager as cm
+        day = today or _dt.date(2026, 8, 21)          # a Friday
+        monkeypatch.setattr(cm, "et_today", lambda: day)
+        monkeypatch.setattr(cm, "DEFAULT_TEST_CHAT_ID", "900000001", raising=False)
+
+        def _picks():
+            if picks_raises:
+                raise RuntimeError("gist down")
+            return {"_saved_date": picks_date} if picks_date else {}
+        monkeypatch.setattr(cm, "load_picks", _picks)
+
+        def _log(uid):
+            if account_raises:
+                raise RuntimeError("store down")
+            return {"open": [{"ticker": t, "opened_date": d} for t, d in real]}
+        monkeypatch.setattr(cm, "load_user_trade_log", _log)
+        monkeypatch.setattr(cm, "load_user_paper", lambda uid: {
+            "positions": [{"ticker": t, "bought_date": d} for t, d in paper]})
+        canary.RESULTS.clear()
+
+    def _result(self):
+        return next(r for r in canary.RESULTS if r[0] == "synthetic.opened")
+
+    def test_it_FAILS_when_picks_exist_but_nothing_was_opened(self, monkeypatch):
+        """The exact Aug 20-21 failure."""
+        self._wire(monkeypatch, picks_date="2026-08-21")
+        canary.check_synthetic_user()
+        name, ok, detail = self._result()[:3]
+        assert ok is False, "the two-day outage would have passed unnoticed"
+
+    def test_it_passes_when_positions_were_opened_today(self, monkeypatch):
+        self._wire(monkeypatch, picks_date="2026-08-21",
+                   paper=[("AAPL", "2026-08-21"), ("MSFT", "2026-08-21")])
+        canary.check_synthetic_user()
+        assert self._result()[1] is True
+
+    def test_real_positions_alone_are_enough(self, monkeypatch):
+        self._wire(monkeypatch, picks_date="2026-08-21",
+                   real=[("AAPL", "2026-08-21")])
+        canary.check_synthetic_user()
+        assert self._result()[1] is True
+
+    def test_YESTERDAYS_positions_do_not_count(self, monkeypatch):
+        """Otherwise a bot that died today looks alive on stale holdings —
+        which is precisely how the outage hid."""
+        self._wire(monkeypatch, picks_date="2026-08-21",
+                   paper=[("AAPL", "2026-08-20")], real=[("X", "2026-08-19")])
+        canary.check_synthetic_user()
+        assert self._result()[1] is False
+
+    def test_it_is_silent_at_the_weekend(self, monkeypatch):
+        import datetime as _dt
+        self._wire(monkeypatch, picks_date="2026-08-22",
+                   today=_dt.date(2026, 8, 22))       # Saturday
+        canary.check_synthetic_user()
+        ok, detail = self._result()[1], self._result()[2]
+        assert ok is True and "weekend" in detail.lower()
+
+    def test_no_picks_today_is_not_a_failure(self, monkeypatch):
+        """With nothing published there is correctly nothing to buy."""
+        self._wire(monkeypatch, picks_date="2026-08-19")   # stale
+        canary.check_synthetic_user()
+        assert self._result()[1] is True
+
+    @pytest.mark.parametrize("mode", ["picks_raises", "account_raises"])
+    def test_unreachable_data_reports_NOT_VERIFIED_never_a_clean_pass(
+            self, monkeypatch, mode):
+        self._wire(monkeypatch, picks_date="2026-08-21", **{mode: True})
+        canary.check_synthetic_user()
+        ok, detail = self._result()[1], self._result()[2]
+        assert ok is True and "NOT VERIFIED" in detail, \
+            "a green line must never imply a check that could not run"
+
+    def test_it_is_registered_in_the_runner(self):
+        """A check nobody calls is not a monitor."""
+        import inspect
+        assert "check_synthetic_user," in inspect.getsource(canary.main)

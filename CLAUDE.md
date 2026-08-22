@@ -177,6 +177,14 @@ Rules:
   - **A withheld section is NOT listed in the `_quiet` "no setups today" line.** That line is a claim about the MARKET — that we looked and found nothing. With no signal we cannot look, so saying it would be false. Same treatment as a section hidden by a user's own preference. Restore the `_quiet.append("🎯 Options")` line only when the signal is live.
   - Guard: `TestOptionsStrikeGate` — withheld without a strike, still ships when fully specified, expiry required, NaN/inf/0/negative/bool/string strikes rejected, suppression announced, and never listed as a quiet market.
 
+### The synthetic bot is now WATCHED too — `canary.check_synthetic_user()` (Aug 22)
+- **It opened ZERO positions for two days across 30 consecutive "success" runs** (Aug 20-21, the Supabase RLS key). Per-ticker failures are caught and logged one line at a time, so the workflow stays green and **the only symptom is an ABSENCE** — which nothing was asserting. Found because the owner asked, not because anything reported it.
+- **The bot is the app's best bug detector** — paper `target_price=None` (positions could never sell), paper cash drained to $271, levels that made a position born stopped-out, and this. **A dead detector is worse than none, because you stop looking.**
+- Asserts at least one real or paper position carries TODAY's date. **Yesterday's positions do not count** — a bot that died today would otherwise look alive on stale holdings, which is exactly how this hid.
+- **Silent when there is nothing to verify**: weekends (the `open` phase is `* * 1-5`) and days with no picks (correctly nothing to buy). Unreachable data prints `NOT VERIFIED`, never a clean pass.
+- Patches in tests target **`config_manager`, not `canary`** — the check imports function-locally, the same scope trap that once let a "patched" test write to the live gist.
+- **Verified by RUNNING it against live data, not only in tests** — it correctly FAILS for Fri Aug 21, the real outage day. That rule exists because the last new canary check had two scope bugs that would have `NameError`d on the one day it mattered.
+
 ### The weekly path is now WATCHED, not remembered (Aug 19)
 - **`canary.check_weekly_relay()`** — the Saturday weekly run executes `run_morning`, and until Aug 15 did it on Render, delivering picks while setting **zero** auto alerts and still reporting success. It runs **once a week**, so nothing noticed for weeks. A reminder is the wrong instrument for that; a monitor is.
 - Lives in the **canary** (daily 12:30 UTC, Saturdays included — 30 min after the 12:00 UTC weekly run) rather than a new workflow: one more scheduled thing is one more thing that can rot unobserved, which is the failure being fixed. Same reasoning as `check_selfheal_health`.
