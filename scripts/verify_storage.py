@@ -116,7 +116,7 @@ def compare() -> int:
         "picks.json", "traffic_hours.json", "usage_counts.json", "weekly_picks.json"})
     print(f"\n  {'file':<26}{'gist':>10}{'supabase':>11}   verdict")
     print("  " + "─" * 62)
-    drift = []
+    drift, _last_verdict = [], {}
     for f in files:
         try:
             g = gist.read(f)
@@ -136,6 +136,7 @@ def compare() -> int:
             verdict = "identical" if gj else "both empty"
         else:
             verdict = "🔴 " + _which_is_newer(f, g, v)
+            _last_verdict[f] = verdict
             drift.append(f)
         print(f"  {f:<26}{len(gj):>10}{len(vj):>11}   {verdict}")
 
@@ -143,11 +144,21 @@ def compare() -> int:
     if not drift:
         print("  ✅ Every file matches. The cutover is safe.")
         return 0
-    print(f"  🔴 {len(drift)} file(s) differ: {', '.join(drift)}")
-    print("     The Gist is almost certainly the NEWER copy — it received every")
-    print("     write while Supabase was unwritable. Re-run the migration")
-    print("     (scripts/migrate_to_supabase.py) to carry those writes across")
-    print("     BEFORE relying on Supabase, or the last few days are lost.")
+    # A Supabase SUPERSET is the expected end state after reconciliation — it
+    # holds everything the Gist has plus rows the Gist never received. Only
+    # Gist-only content is genuine, unmigrated drift.
+    superset = [f for f in drift if "gist-only keys=0" in _last_verdict.get(f, "")
+                or f in ("usage_counts.json", "traffic_hours.json")]
+    real = [f for f in drift if f not in superset]
+    if not real:
+        print(f"  ✅ Supabase is a SUPERSET of the Gist — nothing is unmigrated.")
+        print(f"     Ahead on: {', '.join(superset)} (merged rows / Supabase-only counters).")
+        print("     The Gist remains as the rollback copy, one reconcile behind.")
+        return 0
+    print(f"  🔴 {len(real)} file(s) have GIST-ONLY content: {', '.join(real)}")
+    print("     The Gist received writes Supabase never got. Run")
+    print("     scripts/reconcile_storage.py --dry-run, then apply, BEFORE")
+    print("     relying on Supabase — otherwise those writes are lost.")
     return 1
 
 
