@@ -193,6 +193,15 @@ Rules:
 - **🔴 Two scope bugs while writing it, both already in this file's rule list**: I invented a `_gist_json()` helper that does not exist (the real one is `_gist_all()`, returning file METADATA needing a truncation-aware parse), and used `get_config`/`et_today`/`get_allowed_users` as if module-level when canary.py imports them function-locally. It would have `NameError`d on the one Saturday it mattered. **Run a new check once before trusting it.**
 - Guard: `TestWeeklyRelayCheck` — 7 cases incl. the exact Aug 15 failure, that a SYNTHETIC-account alert does not satisfy it, and that yesterday's alerts do not count. Patches `config_manager`, not `canary`, because the imports are function-local.
 
+### 🔴 GitHub's `created=>DATE` EXCLUDES that date — the canary check could never pass (Aug 22)
+- `canary.check_weekly_relay` queried `runs?created=>{today}`. **Verified against the live API: `created=>2026-08-22` returns 0 runs; `created=>=2026-08-22` returns 1.** So `weekly.on_github` reported "the weekly run did NOT reach GitHub Actions" **every single time** — it has been a false alarm since it was written, and `check_selfheal_health` was looking a day short for the same reason. Both now use `>=`.
+- **A monitor that cries wolf is worse than no monitor** — it trains you to ignore the one time it is right. That is the same reasoning that makes these checks silent on days they have nothing to verify.
+
+### 🔴 THIRD wrong-store conclusion in one session (Aug 22) — always name the store you read
+- I reported `data_quality.json` "stuck at 2026-08-19" and the prescreener silently failing. **It was not.** Supabase holds `2026-08-21` — current, because no prescreener runs on a Saturday. I had read the **Gist** from a local shell whose `.env` has `SUPABASE_*` commented out, so I measured the rollback copy and called the app broken.
+- The other two the same day: reading `documents` for files that live as `user_records` ROWS (reported every user's data as missing), and comparing `json.dumps` output when Postgres JSONB normalises numbers (reported false drift).
+- **Rule: before reporting any stored value as missing, stale or wrong, state WHICH backend you read and confirm it is the one the writer used.** `get_storage_backend()` is environment-dependent, and a local shell is usually NOT the production surface.
+
 ### 🔴 Shallow copy + an in-place mutator = the write is SKIPPED (Aug 22, live)
 - `mutate_gist_file`'s ROW branch did `current = dict(before)`. That shares the nested lists, and `add_alert`'s mutator appends **in place** (`alerts.setdefault(uid, []).append(entry)`) — so it mutated the very object `before` held, the `before.get(uid) != val` guard compared the list to **itself**, saw no change, and skipped the write.
 - **Effect: every alert for a user who ALREADY had a row vanished with no error anywhere.** Alerts are the app's core feature. New users were unaffected (no prior row → the guard sees a real change), which is why it looked intermittent.
