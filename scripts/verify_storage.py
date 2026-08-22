@@ -51,6 +51,23 @@ def _describe(v: str) -> str:
     return "<unset>" if not v else f"set ({len(v)} chars)"
 
 
+def _sb_read(sb, name):
+    """🔴 Read the table the file actually lives in.
+
+    SupabaseBackend.read() hits `documents`; user-keyed files live as rows in
+    `user_records` and are reached via read_all_users(). Using read() for those
+    reports an empty result and reads as "Supabase is missing everything" —
+    which is exactly the false alarm this comparison raised on 2026-08-22.
+    """
+    from config_manager import USER_KEYED_FILES
+    if name in USER_KEYED_FILES and sb.supports_rows():
+        try:
+            return sb.read_all_users(name)
+        except Exception:
+            return None
+    return sb.read(name)
+
+
 def _which_is_newer(name, g, v) -> str:
     """Say WHICH side is authoritative — never assume the Gist wins.
 
@@ -106,7 +123,7 @@ def compare() -> int:
         except Exception:
             g = None
         try:
-            v = sb.read(f)
+            v = _sb_read(sb, f)
         except Exception:
             v = None
         gj = json.dumps(g, sort_keys=True) if g is not None else ""
