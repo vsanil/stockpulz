@@ -315,6 +315,68 @@ def check_cron_delivery() -> None:
            f"picks._saved_date={_saved} (expected ≥{exp})")
 
 
+def check_synthetic_user() -> None:
+    """Did the synthetic-user bot actually OPEN positions today?
+
+    🔴 Why this exists. On 2026-08-20/21 the bot opened ZERO positions for two
+    days across **30 consecutive "success" runs**. The Aug 19 workflow wiring
+    pointed it at Supabase with an RLS-bound key, so every paper buy threw
+    `42501 new row violates row-level security policy` — per-ticker, caught, and
+    logged one line at a time, so the workflow stayed green and the run reported
+    `held all (real: [], paper: [])`. Nobody noticed until the owner asked.
+
+    That is the same shape as every other bug this project has had: the failure
+    is swallowed, the monitor is green, and the only symptom is an ABSENCE. An
+    absence needs something asserting the presence.
+
+    The bot is the app's best bug detector — it found the paper `target_price=None`
+    defect, the drained paper cash, and levels that made a position born
+    stopped-out. A dead detector is worse than none, because you stop looking.
+
+    Silent when there is nothing to verify: it only runs Mon-Fri, and with no
+    picks there is correctly nothing to buy. A check that cries wolf on weekends
+    trains you to ignore it.
+    """
+    from config_manager import (load_user_trade_log, load_user_paper,
+                                load_picks, et_today, DEFAULT_TEST_CHAT_ID)
+    today = et_today()
+    if today.weekday() >= 5:
+        _check("synthetic.opened", True, "weekend — the open phase does not run")
+        return
+    try:
+        picks = load_picks() or {}
+    except Exception as exc:
+        _check("synthetic.opened", True, f"NOT VERIFIED — picks unreadable ({exc})")
+        return
+    if str(picks.get("_saved_date", ""))[:10] != today.isoformat():
+        _check("synthetic.opened", True,
+               "no picks saved for today — nothing for the bot to buy")
+        return
+
+    uid = DEFAULT_TEST_CHAT_ID
+    try:
+        log = load_user_trade_log(uid) or {}
+        paper = load_user_paper(uid) or {}
+    except Exception as exc:
+        _check("synthetic.opened", True, f"NOT VERIFIED — test account unreadable ({exc})")
+        return
+
+    iso = today.isoformat()
+    real_today = [t.get("ticker") for t in log.get("open", [])
+                  if str(t.get("opened_date", ""))[:10] == iso]
+    paper_today = [t.get("ticker") for t in paper.get("positions", [])
+                   if str(t.get("bought_date") or t.get("opened_date", ""))[:10] == iso]
+    n = len(real_today) + len(paper_today)
+    _check(
+        "synthetic.opened", n > 0,
+        f"opened {len(real_today)} real + {len(paper_today)} paper today",
+        fail_detail=("the bot opened NOTHING today despite picks existing — it is "
+                     "the app's main bug detector and it is blind. Check the "
+                     "synthetic_user run log for swallowed per-ticker errors "
+                     "(storage writes, paper cash, price fetches)."),
+    )
+
+
 def check_weekly_relay() -> None:
     """Did Saturday's weekly run execute on GH Actions, and did it set alerts?
 
@@ -820,6 +882,7 @@ def main() -> int:
                check_backtest_math, check_price_guard, check_storage_headroom,
                check_cron_delivery, check_selfheal_health, check_data_completeness,
                check_weekly_relay,
+               check_synthetic_user,
                check_position_integrity,
                check_endpoints):
         try:
