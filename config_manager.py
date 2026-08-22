@@ -1130,8 +1130,16 @@ def mutate_gist_file(filename: str, mutator, default=None):
     # it actually changed.
     if backend.supports_rows() and filename in USER_KEYED_FILES:
         with _lock_for(filename):
+            import copy as _copy
             before  = backend.read_all_users(filename) or {}
-            current = dict(before)
+            # 🔴 DEEP copy, not dict(). A shallow copy SHARES the nested lists,
+            # so a mutator that appends in place — which add_alert does via
+            # `alerts.setdefault(uid, []).append(entry)` — mutates the very
+            # object `before` holds. The `before.get(uid) != val` guard below
+            # then compares the list to ITSELF, sees no change, and SKIPS the
+            # write. Measured 2026-08-22: every alert for a user who already had
+            # a row vanished silently, with no error anywhere.
+            current = _copy.deepcopy(before)
             new_contents, result = mutator(current)
             if new_contents is NO_WRITE:
                 return result
