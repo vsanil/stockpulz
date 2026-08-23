@@ -146,16 +146,41 @@ jobs:
           fi
           NF=$(git diff --name-only origin/main HEAD | tr '\n' ' ')
           echo "files=$NF" >> "$GITHUB_OUTPUT"
+          # 🔴 PR-GATED since 2026-08-23 (owner's call). NOTHING self-heal writes
+          # reaches main or production without a human. Previously a green test
+          # run pushed straight to main and Render deployed it, so an LLM's
+          # change could reach real users with the suite as the only gate —
+          # ca03822 did exactly that on 2026-08-22 while nobody was looking.
+          # The fix was sound, but "sound this time" is not a control.
+          git push -u origin "$BR"
+          echo "branch=$BR" >> "$GITHUB_OUTPUT"
           if [ "$AUTO_MERGE" != "true" ]; then
-            echo "outcome=testfix" >> "$GITHUB_OUTPUT"          # manual test → do NOT push
+            echo "outcome=testfix" >> "$GITHUB_OUTPUT"           # manual run
           elif [ "${{ steps.verify.outputs.green }}" = "true" ]; then
-            git push origin "HEAD:main"                          # green → to main → Render deploys
-            echo "outcome=merged" >> "$GITHUB_OUTPUT"
+            # Try a real PR. `pull-requests: write` is declared, but the REPO
+            # setting "Allow GitHub Actions to create and approve pull requests"
+            # may be off — in which case fall back to a one-click compare link
+            # rather than demanding a broader permission than this needs.
+            PR=$(gh pr create --base main --head "$BR" \
+                   --title "self-heal: $M" \
+                   --body "Autonomous fix for a failed $M run (${URL}).
+
+            Tests green. **Review before merging** — this was written without a human in the loop.
+
+            Files: ${NF}" 2>/dev/null | tail -1) || true
+            case "$PR" in
+              https://*) : ;;
+              *) PR="https://github.com/${GITHUB_REPOSITORY}/compare/main...${BR}?expand=1" ;;
+            esac
+            echo "pr=$PR" >> "$GITHUB_OUTPUT"
+            echo "outcome=proposed" >> "$GITHUB_OUTPUT"
           else
-            git push -u origin "$BR"                             # red → branch for review, no deploy
-            echo "outcome=branch" >> "$GITHUB_OUTPUT"; echo "branch=$BR" >> "$GITHUB_OUTPUT"
+            echo "outcome=branch" >> "$GITHUB_OUTPUT"            # red → branch, no PR
           fi
 
+      # DORMANT while PR-gated: nothing is merged by this workflow, so this
+      # never fires. Kept intact so re-enabling auto-merge restores the
+      # commit-vs-/health verification that caught the Aug 11 non-deploy.
       - name: Post-deploy health check
         id: health
         if: ${{ steps.ship.outputs.outcome == 'merged' }}
@@ -204,10 +229,13 @@ jobs:
                 unverified) MSG="⚠️ Auto-fixed *$M* and merged \`$WANT\`. /health responds but reports NO commit — cannot confirm the deploy shipped. Verify in Render. Files: ${FILES}" ;;
                 *)    MSG="🚨 Auto-fixed & merged *$M* but /health is NOT responding — check now / roll back in Render. Files: ${FILES}" ;;
               esac ;;
-            branch)  MSG="⚠️ Auto-fix for *$M* did NOT deploy (tests red) — pushed to branch \`$BR\` for you to review." ;;
-            testfix) MSG="🧪 Self-heal TEST: produced a fix for *$M* (files: ${FILES}), tests green — NOT merged (manual run)." ;;
+            proposed)
+              PR="${{ steps.ship.outputs.pr }}"
+              MSG=$(printf '🔧 *Self-heal proposed a fix — YOUR REVIEW NEEDED*\n\n*Monitor:* %s\n*Tests:* green\n*Files:* %s\n*Branch:* `%s`\n\n👉 %s\n\nWritten by an LLM with no human in the loop. Nothing is deployed and nothing reaches main until you merge it.' "$M" "$FILES" "$BR" "$PR") ;;
+            branch)  MSG="⚠️ Self-heal produced a fix for *$M* but tests are RED — pushed to \`$BR\`, NOT proposed for merge. Needs you: ${URL}" ;;
+            testfix) MSG="🧪 Self-heal TEST run for *$M*: fix on \`$BR\` (files: ${FILES}), tests green — no PR (manual run)." ;;
             nofix)   MSG="⚠️ Couldn't confidently auto-fix *$M* — needs you. Failed run: ${URL}" ;;
-            *)       MSG="⚠️ Self-heal for *$M* ended without a result / errored — check the Actions log." ;;
+            *)       MSG="⚠️ Self-heal for *$M* ended without a result / errored — check the Actions log: ${URL}" ;;
           esac
           curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=${MSG}" -d parse_mode=Markdown >/dev/null || true
