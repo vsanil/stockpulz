@@ -747,6 +747,14 @@ Rules:
 - **✅ The exit-reason mix is no longer confounded (Aug 23).** `_levels_for` returns `(stop, target, source)` — `pick` | `stop` | `target` | `both` — recording WHICH leg was substituted. It threads through `add_holding` and `paper_buy` onto the position, and `paper_sell` carries it into history (a sold trade that drops it silently reverts the analysis to `unrecorded`). **Only the `pick` slice speaks to the ENGINE's published levels**; the rest is the ±5%/8% fallback, which is a different question — levels drifting from the live price by delivery time.
 - **Positions opened before 2026-08-23 report as `unrecorded`, never folded into `pick`** — folding them would overstate what the engine's own levels have actually been measured on.
 
+### Findings are a WORKLIST, not a report — `analysis/findings_state.json` (Aug 23)
+- The daily analysis detected well but could not be WORKED: regenerated from scratch, so a finding already ruled on returned identical forever. **That is the cry-wolf failure** — it trains you to skim the one file memory says to read first.
+- **FINDINGS vs METRICS.** Only addressable items get an id and a disposition; a standing measurement (reward:risk, exit mix, maturity) is a metric and is never "complete". Mixing them makes "address every finding" impossible.
+- **Every finding names the FILE to change** (`formatters.entry_window_pct`, `screener.suggested_stop_pct`, `ai_analyzer._validate_and_clean_picks`). "Consider reviewing" cannot be actioned at sign-in.
+- **🔁 A finding marked `fixed` that is STILL PRESENT is REOPENED** — `position_audit`'s rule, because otherwise "fixed" silently means "hidden" while the defect is live. A finding whose condition DISAPPEARS auto-resolves; that is the intended path and needs no bookkeeping.
+- **Decided (`acknowledged`/`wont_fix`) leaves the WORKLIST but stays visible** in its own section — neither nagged about nor forgotten.
+- **🔴 Integrity ids come from `position_audit`'s own `_fid`, never a second scheme.** Mine collided: two distinct broken AMBA positions shared one id, so resolving one would have silently resolved the other — the exact bug that file already fixed. Same rule as inheriting `evaluate_picks._load_ledger`.
+
 ### Pick evaluation — "are the recommendations beneficial?" (`scripts/evaluate_picks.py`)
 - **Separate from the pick engine on purpose. It tunes nothing and is never injected into the LLM prompt** — measuring the engine must not contaminate it (that's the loop `performance_context` already feeds; this is not that).
 - Daily it appends every pick to `pick_ledger.json` (deduped by date+ticker) — **signal quality is judged on every pick, traded or not**, so the sample isn't biased by execution. After `_HORIZON_DAYS` (30) it replays daily bars: first touch of target = win, stop = loss (stop checked FIRST, the conservative assumption so the engine is never flattered), else mark-to-market — and scores **alpha vs SPY over the same window**.
