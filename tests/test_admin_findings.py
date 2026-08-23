@@ -184,3 +184,61 @@ class TestAdminPageActuallyRenders:
     def test_the_whole_served_page_encodes_as_utf8(self, client):
         # Belt and braces: any future surrogate anywhere in the page fails here.
         self._admin_get(client).get_data().decode("utf-8")
+
+
+class TestRelativeDatesSurviveSupabaseTimestamps:
+    """🔴 Every timestamp on /admin read "NaNd ago" — users, cron health,
+    pending approvals, feedback. age() appended 'Z' unless the string already
+    ended in 'Z', but Supabase returns an OFFSET ('...+00:00'), so it built
+    '...+00:00Z' — an INVALID date. That does not throw, so the catch never
+    fired; NaN simply failed every `<` comparison and fell through to the
+    final `Math.round(m/1440)+'d ago'`.
+
+    Almost certainly introduced by the Supabase migration: Postgres returns an
+    offset where the Gist stored naive/Z stamps. 'Wired' was not 'working'.
+
+    🔴 This test evaluates the SERVED page, not webhook.py's source. The source
+    is a Python string, so '\\\\d' there is '\\d' by the time the browser sees
+    it — testing the raw text gave me a confidently wrong result first time.
+    """
+
+    def _served_age(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        html = client.get("/admin").get_data(as_text=True)
+        i = html.index("function age(iso)")
+        return html[i:html.index("function ini(", i)]
+
+    def _run(self, js, value):
+        import json
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node not available")
+        out = subprocess.run(
+            [node, "-e", js + f"\nconsole.log(age({json.dumps(value)}))"],
+            capture_output=True, text=True, timeout=30)
+        assert out.returncode == 0, out.stderr
+        return out.stdout.strip()
+
+    @pytest.mark.parametrize("stamp", [
+        "2026-08-21T20:47:03.931320+00:00",   # Supabase
+        "2026-08-21T20:47:03.931320",         # legacy naive
+        "2026-08-21T20:47:03Z",               # explicit Z
+        "2026-08-21T15:47:03-05:00",          # non-UTC offset
+    ])
+    def test_no_stamp_format_renders_NaN(self, client, stamp):
+        got = self._run(self._served_age(client), stamp)
+        assert "NaN" not in got, f"{stamp} rendered {got!r}"
+
+    def test_the_supabase_format_gives_the_RIGHT_age(self, client):
+        """Not merely non-NaN — all four formats are the same instant, so a
+        parser that silently dropped the zone would still avoid NaN while
+        being hours wrong."""
+        js = self._served_age(client)
+        assert self._run(js, "2026-08-21T20:47:03.931320+00:00") == \
+               self._run(js, "2026-08-21T20:47:03.931320Z")
+
+    def test_an_unparseable_stamp_shows_the_stamp_not_a_number(self, client):
+        assert "NaN" not in self._run(self._served_age(client), "not-a-date")
