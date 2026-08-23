@@ -46,10 +46,14 @@ STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # What still DEMANDS a decision. `acknowledged`/`wont_fix` are decisions
 # already made — keeping them in the worklist is the cry-wolf failure that
 # trains you to skim it.
-WORKLIST_STATUSES = ("open",)
+# `awaiting_approval` stays in the worklist: it is waiting on the OWNER, so it
+# is exactly what should be surfaced at sign-in. `approved` leaves it — the
+# decision is made and it is mine to implement.
+WORKLIST_STATUSES = ("open", "awaiting_approval")
 # What is still PRESENT in some form, and so should be auto-resolved the day
 # its condition disappears — including things you chose to live with.
-ACTIVE_STATUSES = ("open", "acknowledged", "wont_fix")
+ACTIVE_STATUSES = ("open", "acknowledged", "wont_fix",
+                   "awaiting_approval", "approved")
 
 
 class Finding:
@@ -150,9 +154,19 @@ def _apply_state(findings: list, state: dict, today: str) -> dict:
                        "title": f.title}
     # A finding that has DISAPPEARED is genuinely resolved — record it once.
     for fid, rec in state.items():
-        if fid not in seen and rec.get("status") in ACTIVE_STATUSES:
+        if fid in seen or rec.get("status") not in ACTIVE_STATUSES:
+            continue
+        # 🚨 The invariant. A finding whose condition DISAPPEARED while it was
+        # still awaiting the owner's consent was implemented without it. This
+        # cannot prevent that — nothing can stop an agent editing a file — but
+        # it makes it DETECTABLE, which turns an unenforceable promise into a
+        # checkable one. `resolved_UNAPPROVED` is deliberately never cleared
+        # automatically; it stays until a human looks at it.
+        if rec.get("status") == "awaiting_approval":
+            rec["status"] = "resolved_UNAPPROVED"
+        else:
             rec["status"] = "resolved"
-            rec["resolved_on"] = today
+        rec["resolved_on"] = today
     return state
 
 
@@ -450,6 +464,26 @@ def build(dry: bool = False, notify: bool = False) -> str:
             L.append(f"| `{f.id}` | {f.title} | {f.age_days}d | {f.where or '—'} |")
     else:
         L.append("_Nothing open. Every addressable finding has been resolved._")
+    violations = [fid for fid, r in state.items()
+                  if r.get("status") == "resolved_UNAPPROVED"]
+    if violations:
+        L += ["", "## 🚨 IMPLEMENTED WITHOUT APPROVAL", "",
+              "*These conditions disappeared while still awaiting your consent — "
+              "the change was made without it. This is a record, not a rollback.*", ""]
+        L += [f"- `{v}` — resolved {state[v].get('resolved_on')}" for v in violations]
+        L.append("")
+
+    awaiting = [f for f in findings if f.status == "awaiting_approval"]
+    if awaiting:
+        L += ["", f"### ⏳ Awaiting YOUR approval ({len(awaiting)})", ""]
+        for f in awaiting:
+            rec = state.get(f.id) or {}
+            L.append(f"- `{f.id}` — {f.title}\n"
+                     f"  - **proposed change:** {rec.get('proposed_change', '?')}\n"
+                     f"  - **files:** `{rec.get('proposed_files', '?')}`\n"
+                     f"  - approve with: `python3 scripts/findings.py approve {f.id}`")
+        L.append("")
+
     if decided:
         L += ["", f"### Decided, still present ({len(decided)})", "",
               "*You have already ruled on these — they are not in the worklist. "

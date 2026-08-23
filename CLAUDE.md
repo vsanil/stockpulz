@@ -757,6 +757,13 @@ Rules:
 - Now `TIGHT_STOP_ATR_MULT = 1.0` against the position's own `atr_pct`; **no ATR ⇒ reported as `not assessed`, never flagged** — unmeasurable is not a violation.
 - **Method note: the finding named a fix, and the fix was wrong.** Checking the engine's definition before implementing is what caught it. A worklist item is a hypothesis, not an instruction.
 
+### Approval workflow — `scripts/findings.py` (Aug 23)
+- **I claimed an approval step that did not exist.** `findings_state.json` held a status and a note, but nothing recorded that the OWNER sanctioned anything, and a finding I implemented looked identical to one that resolved on its own.
+- **`propose` → `awaiting_approval` → `approve` → `approved` → implement → `resolved`.** `propose` records the intended change AND the files; `approve` stamps a date + note. **Re-proposing after approval is refused, and a changed proposal clears stale consent** — a different plan must not inherit old permission.
+- **🚨 THE INVARIANT that makes it more than an honour system: a finding whose condition DISAPPEARS while still `awaiting_approval` is marked `resolved_UNAPPROVED`**, surfaced under its own heading, and **never auto-cleared**. It never passed through `approved`, so it was implemented without consent.
+- **Say plainly what this is: a RECORD and an AUDIT, not a lock.** Nothing can technically stop an agent editing a file. Making the violation DETECTABLE is what converts an unenforceable promise into a checkable one.
+- `awaiting_approval` stays in the WORKLIST (it waits on the owner); `approved` leaves it (the decision is made). Guard: `tests/test_findings_approval.py`, 13 cases.
+
 ### Findings reach the owner two ways — pull at sign-in, push only for NEW ACT (Aug 23)
 - **PULL (primary):** the session-start ritual — read `analysis/ENGINE_FINDINGS.md` BEFORE answering the first request, present open findings with evidence + fix + file, then ask which to implement. **Check the regenerated timestamp: >36h means the daily job did not run**, so say the agenda may be stale rather than presenting it as current.
 - **PUSH (narrow):** `analyze_engine.py --notify` DMs on **NEW ACT findings only** — never a digest, never MEASURE/HOLD, never a re-send, and **no "all clear" when there is nothing**. Exactly-once via `notified_on` in the state file, not "first seen today", so a second run the same day cannot re-send. A failed send does NOT mark it notified, or the alert would vanish.
