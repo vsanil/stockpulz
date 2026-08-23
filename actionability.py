@@ -33,7 +33,22 @@ _DEFAULT_WINDOW = entry_window_pct()
 
 # A stop closer than this to entry is inside ordinary daily noise for most
 # equities — it will be taken out by random movement regardless of direction.
+# 🔴 A FLAT threshold is the wrong test for "inside the noise", and it produced
+# a false positive: KMI was flagged at 2.99% against this 3.0%. But the engine's
+# stop is `1.5 x ATR%` (screener.suggested_stop_pct) — already volatility-scaled
+# — so a 2.99% stop implies ATR ~2% and is correctly OUTSIDE that ticker's noise.
+# Acting on the flag would have widened stops on exactly the low-volatility
+# names where a tight stop is right.
+#
+# Noise is per-ticker, so the test must be too: a stop is tight only when it is
+# inside the ticker's OWN recent range. The flat value is kept solely as a
+# last-resort floor for positions carrying no ATR, and such positions are
+# reported as `unknown` rather than flagged — an unmeasurable case is not a
+# violation.
 TIGHT_STOP_PCT = 3.0
+# A stop below this multiple of the ticker's ATR% is inside its own noise.
+# 1.0 x ATR is a single average day's move; the engine targets 1.5x.
+TIGHT_STOP_ATR_MULT = 1.0
 
 
 def _num(x):
@@ -128,8 +143,16 @@ def stop_distances(positions: list) -> list[dict]:
             continue
         seen.add(key)
         d = (e - s) / e * 100.0
-        out.append({"ticker": (pos.get("ticker") or "").upper(),
-                    "stop_pct": round(d, 2), "tight": d < TIGHT_STOP_PCT})
+        tk = (pos.get("ticker") or "").upper()
+        atr = _num(pos.get("atr_pct"))
+        if atr and atr > 0:
+            tight = d < atr * TIGHT_STOP_ATR_MULT      # inside its OWN noise
+            basis = f"{atr:.2f}% ATR"
+        else:
+            tight = False                               # unmeasurable != violation
+            basis = "no ATR recorded — not assessed"
+        out.append({"ticker": tk, "stop_pct": round(d, 2),
+                    "tight": tight, "basis": basis})
     return out
 
 
