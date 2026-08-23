@@ -757,6 +757,12 @@ Rules:
 - Now `TIGHT_STOP_ATR_MULT = 1.0` against the position's own `atr_pct`; **no ATR ⇒ reported as `not assessed`, never flagged** — unmeasurable is not a violation.
 - **Method note: the finding named a fix, and the fix was wrong.** Checking the engine's definition before implementing is what caught it. A worklist item is a hypothesis, not an instruction.
 
+### Findings reach the owner two ways — pull at sign-in, push only for NEW ACT (Aug 23)
+- **PULL (primary):** the session-start ritual — read `analysis/ENGINE_FINDINGS.md` BEFORE answering the first request, present open findings with evidence + fix + file, then ask which to implement. **Check the regenerated timestamp: >36h means the daily job did not run**, so say the agenda may be stale rather than presenting it as current.
+- **PUSH (narrow):** `analyze_engine.py --notify` DMs on **NEW ACT findings only** — never a digest, never MEASURE/HOLD, never a re-send, and **no "all clear" when there is nothing**. Exactly-once via `notified_on` in the state file, not "first seen today", so a second run the same day cannot re-send. A failed send does NOT mark it notified, or the alert would vanish.
+- **`--notify` is opt-in and only CI passes it** — running the script by hand cannot DM the owner.
+- Guard: `TestNewActNotification` — 10 cases covering every way it could become spam.
+
 ### Findings are a WORKLIST, not a report — `analysis/findings_state.json` (Aug 23)
 - The daily analysis detected well but could not be WORKED: regenerated from scratch, so a finding already ruled on returned identical forever. **That is the cry-wolf failure** — it trains you to skim the one file memory says to read first.
 - **FINDINGS vs METRICS.** Only addressable items get an id and a disposition; a standing measurement (reward:risk, exit mix, maturity) is a metric and is never "complete". Mixing them makes "address every finding" impossible.

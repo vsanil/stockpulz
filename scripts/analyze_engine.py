@@ -377,7 +377,42 @@ def _maturity(rows) -> list:
         blocked_until="the ledger reaches 30 matured picks (~Sep 10)")]
 
 
-def build(dry: bool = False) -> str:
+def _notify_new_act(findings: list, state: dict, today: str) -> int:
+    """DM the owner about ACT findings they have never been told about.
+
+    🔴 Deliberately narrow. NOT a daily digest, NOT MEASURE/HOLD, NOT a re-send
+    of anything already notified or already ruled on. Two monitors cried wolf
+    on 2026-08-22 (`weekly.on_github` every run, `data.completeness` every
+    weekend) and the lesson was the same both times: an alert that fires when
+    nothing is wrong trains you to ignore the one time it matters.
+
+    Exactly-once is tracked by `notified_on` in the state file rather than by
+    "first seen today", so a second run on the same day cannot re-send.
+    """
+    fresh = [f for f in findings
+             if f.kind == "finding" and f.tier == "ACT" and f.status == "open"
+             and not (state.get(f.id) or {}).get("notified_on")]
+    if not fresh:
+        return 0
+    lines = [f"🔎 *{len(fresh)} new engine finding(s) need a decision*", ""]
+    for f in fresh:
+        lines += [f"*{f.title}*", f"  {f.evidence[:220]}",
+                  f"  → fix in `{f.where or 'see the report'}`", ""]
+    lines.append("Full detail in `analysis/ENGINE_FINDINGS.md`. "
+                 "Nothing will be changed until you say so.")
+    try:
+        from telegram_api import send_message
+        send_message("\n".join(lines), chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""))
+    except Exception as exc:
+        print(f"[analyze] notify failed (non-critical): {exc}")
+        return 0
+    for f in fresh:
+        state.setdefault(f.id, {})["notified_on"] = today
+    print(f"[analyze] notified owner of {len(fresh)} new ACT finding(s).")
+    return len(fresh)
+
+
+def build(dry: bool = False, notify: bool = False) -> str:
     d = _load()
     closed = d["log"].get("closed") or []
     items = (_integrity(d["uid"], d["log"], d["paper"])
@@ -447,6 +482,8 @@ def build(dry: bool = False) -> str:
     L.append("\n\n".join(f.render() for f in metrics) or "_None._")
 
     doc = "\n".join(L) + "\n"
+    if not dry and notify:
+        _notify_new_act(findings, state, today)
     if not dry:
         os.makedirs(os.path.dirname(OUT), exist_ok=True)
         with open(OUT, "w") as fh:
@@ -458,8 +495,10 @@ def build(dry: bool = False) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--notify", action="store_true",
+                    help="DM the owner about NEW ACT findings (CI uses this)")
     args = ap.parse_args()
-    doc = build(dry=args.dry_run)
+    doc = build(dry=args.dry_run, notify=args.notify)
     print(doc)
     return 0
 

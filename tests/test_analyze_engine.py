@@ -272,3 +272,97 @@ class TestDispositions:
             "paper": {}, "rows": []})
         doc = m.build(dry=True)
         assert "**Fix:**" in doc
+
+
+class TestNewActNotification:
+    """DM on NEW ACT findings only.
+
+    🔴 Deliberately narrow. Two monitors cried wolf on 2026-08-22 —
+    `weekly.on_github` on every run and `data.completeness` every weekend — and
+    the lesson was identical: an alert that fires when nothing is wrong trains
+    you to ignore the one time it is right.
+    """
+
+    def _ae(self, tmp_path, monkeypatch):
+        import importlib.util
+        import os
+        spec = importlib.util.spec_from_file_location(
+            "ae4", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        monkeypatch.setattr(m, "STATE", str(tmp_path / "s.json"))
+        sent = []
+        import telegram_api
+        monkeypatch.setattr(telegram_api, "send_message",
+                            lambda text, chat_id=None: sent.append(text))
+        return m, sent
+
+    def _f(self, m, fid="i/1", tier="ACT", kind="finding"):
+        f = m.Finding(fid, tier, "T title", "T evidence", "fix", kind=kind,
+                      where="some_file.py")
+        f.status = "open"
+        return f
+
+    def test_a_new_ACT_finding_is_notified(self, tmp_path, monkeypatch):
+        m, sent = self._ae(tmp_path, monkeypatch)
+        assert m._notify_new_act([self._f(m)], {}, "2026-08-23") == 1
+        assert "T title" in sent[0] and "some_file.py" in sent[0]
+
+    def test_it_is_NOT_re_sent_on_a_later_run(self, tmp_path, monkeypatch):
+        """Exactly-once is tracked by notified_on, not by 'first seen today',
+        so a second run the same day cannot re-send."""
+        m, sent = self._ae(tmp_path, monkeypatch)
+        state = {}
+        m._notify_new_act([self._f(m)], state, "2026-08-23")
+        assert m._notify_new_act([self._f(m)], state, "2026-08-23") == 0
+        assert m._notify_new_act([self._f(m)], state, "2026-08-24") == 0
+        assert len(sent) == 1
+
+    @pytest.mark.parametrize("tier", ["MEASURE", "HOLD"])
+    def test_non_ACT_tiers_never_notify(self, tmp_path, monkeypatch, tier):
+        m, sent = self._ae(tmp_path, monkeypatch)
+        assert m._notify_new_act([self._f(m, tier=tier)], {}, "2026-08-23") == 0
+        assert sent == []
+
+    def test_metrics_never_notify(self, tmp_path, monkeypatch):
+        m, sent = self._ae(tmp_path, monkeypatch)
+        assert m._notify_new_act(
+            [self._f(m, tier="ACT", kind="metric")], {}, "2026-08-23") == 0
+
+    @pytest.mark.parametrize("status", ["acknowledged", "wont_fix"])
+    def test_something_already_ruled_on_never_notifies(
+            self, tmp_path, monkeypatch, status):
+        m, sent = self._ae(tmp_path, monkeypatch)
+        f = self._f(m)
+        f.status = status
+        assert m._notify_new_act([f], {}, "2026-08-23") == 0
+
+    def test_nothing_new_means_NO_message_at_all(self, tmp_path, monkeypatch):
+        """Not even an 'all clear' — that is the digest this must not become."""
+        m, sent = self._ae(tmp_path, monkeypatch)
+        assert m._notify_new_act([], {}, "2026-08-23") == 0
+        assert sent == []
+
+    def test_a_send_failure_does_not_break_the_report(self, tmp_path, monkeypatch):
+        """Telemetry must never take down the analysis it reports on."""
+        m, sent = self._ae(tmp_path, monkeypatch)
+        import telegram_api
+        monkeypatch.setattr(telegram_api, "send_message",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+        state = {}
+        assert m._notify_new_act([self._f(m)], state, "2026-08-23") == 0
+        assert not state.get("i/1", {}).get("notified_on"), \
+            "a failed send must not mark it notified, or the alert is lost"
+
+    def test_a_local_run_never_notifies(self):
+        """--notify is opt-in so running this by hand cannot DM the owner."""
+        import inspect
+        import importlib.util
+        import os
+        spec = importlib.util.spec_from_file_location(
+            "ae5", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        assert inspect.signature(m.build).parameters["notify"].default is False
