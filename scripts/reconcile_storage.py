@@ -26,7 +26,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Per-file strategy, derived from the measured comparison above.
 GIST_WINS = ("user_configs.json", "user_paper.json", "backtest_trades.json",
              "pending_users.json", "user_trades.json", "weekly_picks.json",
-             "picks.json")
+             "picks.json",
+             # 🔴 Added Aug 23. The 5 engine-finding dispositions were migrated
+             # out of the repo from a LOCAL shell, whose .env has no SUPABASE_*
+             # — so they landed in the Gist while production and the daily job
+             # read Supabase. Without this the store reads empty there and every
+             # finding already ruled on reopens as `open`.
+             "engine_findings_state.json")
 KEEP_SUPABASE = ("usage_counts.json",)
 MERGE = ("price_alerts.json", "traffic_hours.json")
 
