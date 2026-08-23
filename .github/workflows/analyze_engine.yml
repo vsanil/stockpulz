@@ -1,0 +1,43 @@
+name: Engine Analysis
+
+# Daily, after the market close and the evaluator have both had their say.
+# Writes analysis/ENGINE_FINDINGS.md and commits it, so the next session opens
+# with a standing agenda instead of re-deriving it.
+on:
+  schedule:
+    - cron: "0 22 * * *"      # 6 PM ET — after eod_summary (20:15 UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Analyse the engine
+        env:
+          GIST_ID:        ${{ secrets.GIST_ID }}
+          GH_GIST_TOKEN:  ${{ secrets.GH_GIST_TOKEN }}
+          SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/analyze_engine.py
+      - name: Commit the findings if they changed
+        run: |
+          git config user.name  "Engine Analysis"
+          git config user.email "noreply@anthropic.com"
+          if git diff --quiet -- analysis/; then
+            echo "findings unchanged — nothing to commit"
+          else
+            git add analysis/
+            git commit -m "analysis: refresh engine findings"
+            git pull --rebase --autostash origin main
+            git push origin HEAD:main
+          fi
