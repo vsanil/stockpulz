@@ -68,6 +68,12 @@ class StorageBackend(ABC):
         conflict (someone else wrote first) so the caller can retry."""
         raise NotImplementedError
 
+    def delete_user(self, filename: str, chat_id: str) -> bool:
+        """Remove a user's row entirely. Distinct from writing an empty record:
+        a tombstone leaves the key present, and pruning garbage means the key
+        must GO. Returns True if the backend supports deletion."""
+        return False
+
     def read_all_users(self, filename: str) -> dict:
         """Reassemble the whole {chat_id: content} mapping from rows."""
         raise NotImplementedError
@@ -367,6 +373,14 @@ class SupabaseBackend(StorageBackend):
             "p_expected_version": expected_version,
         }).execute()
         return resp.data if resp is not None else None
+
+    def delete_user(self, filename: str, chat_id: str) -> bool:
+        """Delete the row outright. Writing an empty record is a TOMBSTONE — the
+        key survives and still shows up in a store comparison — so pruning junk
+        needs a real delete."""
+        self._client.table("user_records").delete() \
+            .eq("filename", filename).eq("chat_id", str(chat_id)).execute()
+        return True
 
     def read_all_users(self, filename: str) -> dict:
         out: dict = {}

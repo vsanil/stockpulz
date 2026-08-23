@@ -14,7 +14,7 @@ on:
         required: true
         default: status
         type: choice
-        options: [status, propose, approve, reject]
+        options: [status, propose, approve, reject, prune-dry-run, prune-apply]
       id:
         description: Finding id (required for propose/approve/reject)
         required: false
@@ -62,6 +62,14 @@ jobs:
               test -n "${{ inputs.id }}" || { echo "id is required"; exit 1; }
               python scripts/findings.py propose "${{ inputs.id }}" \
                 --change "${{ inputs.change }}" --files "${{ inputs.files }}"
+              ;;
+            prune-dry-run)
+              python scripts/prune_alert_junk.py
+              exit 0
+              ;;
+            prune-apply)
+              python scripts/prune_alert_junk.py --apply
+              exit 0
               ;;
             approve|reject)
               test -n "${{ inputs.id }}" || { echo "id is required"; exit 1; }
