@@ -1,0 +1,73 @@
+name: Engine Findings
+
+# Manual only. The PROPOSE half of the approval workflow had no Supabase-capable
+# surface: analyze_engine.yml writes the store on its daily run, but an ad-hoc
+# `scripts/findings.py propose` from a laptop resolves to the GIST, because a
+# local .env carries no SUPABASE_*. That is the wrong-store trap that on
+# 2026-08-23 left five dispositions in the rollback copy while production read
+# Supabase. Running it here means a proposal always lands where /admin reads it.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        required: true
+        default: status
+        type: choice
+        options: [status, propose, approve, reject]
+      id:
+        description: Finding id (required for propose/approve/reject)
+        required: false
+        default: ""
+        type: string
+      change:
+        description: propose only — the concrete change being proposed
+        required: false
+        default: ""
+        type: string
+      files:
+        description: propose only — the files it would touch
+        required: false
+        default: ""
+        type: string
+      note:
+        description: approve/reject only — why
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  findings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run findings CLI against the LIVE store
+        env:
+          GIST_ID:        ${{ secrets.GIST_ID }}
+          GH_GIST_TOKEN:  ${{ secrets.GH_GIST_TOKEN }}
+          SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
+        run: |
+          set -e
+          case "${{ inputs.action }}" in
+            status)
+              python scripts/findings.py status
+              ;;
+            propose)
+              test -n "${{ inputs.id }}" || { echo "id is required"; exit 1; }
+              python scripts/findings.py propose "${{ inputs.id }}" \
+                --change "${{ inputs.change }}" --files "${{ inputs.files }}"
+              ;;
+            approve|reject)
+              test -n "${{ inputs.id }}" || { echo "id is required"; exit 1; }
+              python scripts/findings.py "${{ inputs.action }}" "${{ inputs.id }}" \
+                --note "${{ inputs.note }}"
+              ;;
+          esac
+          echo "── store after ──"
+          python scripts/findings.py status
