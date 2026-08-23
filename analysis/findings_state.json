@@ -1,0 +1,37 @@
+{
+  "entry_window/ANET/2026-08-05": {
+    "first_seen": "2026-08-23",
+    "last_seen": "2026-08-23",
+    "note": "",
+    "status": "open",
+    "title": "ANET filled 2.43% outside the published entry window"
+  },
+  "entry_window/NWSA/2026-08-06": {
+    "first_seen": "2026-08-23",
+    "last_seen": "2026-08-23",
+    "note": "",
+    "status": "open",
+    "title": "NWSA filled 2.15% outside the published entry window"
+  },
+  "integrity/425fd0b45bd0": {
+    "first_seen": "2026-08-23",
+    "last_seen": "2026-08-23",
+    "note": "",
+    "status": "open",
+    "title": "levels.target_below_entry on AMBA (historical)"
+  },
+  "integrity/638eb7bc69ed": {
+    "first_seen": "2026-08-23",
+    "last_seen": "2026-08-23",
+    "note": "",
+    "status": "open",
+    "title": "levels.target_below_entry on AMBA (historical)"
+  },
+  "stop_tight/KMI/2.99": {
+    "first_seen": "2026-08-23",
+    "last_seen": "2026-08-23",
+    "note": "",
+    "status": "open",
+    "title": "KMI stop at 2.99% is inside the noise threshold"
+  }
+}

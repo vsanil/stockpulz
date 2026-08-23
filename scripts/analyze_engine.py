@@ -40,27 +40,120 @@ OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 MIN_N = 30            # matches evaluate_picks._MIN_N and _MIN_DIRECTIVE_N
 
 
-class Finding:
-    """One observation, with the evidence that justifies acting on it."""
+STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "analysis", "findings_state.json")
 
-    def __init__(self, tier, title, evidence, action, n=None, blocked_until=None):
-        self.tier = tier                 # ACT | MEASURE | HOLD
+# What still DEMANDS a decision. `acknowledged`/`wont_fix` are decisions
+# already made — keeping them in the worklist is the cry-wolf failure that
+# trains you to skim it.
+WORKLIST_STATUSES = ("open",)
+# What is still PRESENT in some form, and so should be auto-resolved the day
+# its condition disappears — including things you chose to live with.
+ACTIVE_STATUSES = ("open", "acknowledged", "wont_fix")
+
+
+class Finding:
+    """One output of the analysis.
+
+    kind="finding"  addressable — it can be fixed and marked complete
+    kind="metric"   an ongoing measurement — never "done", so never dispositioned
+
+    That split matters: "address every finding" is impossible if a standing
+    measurement like reward:risk sits in the same list as a specific breach.
+
+    `fix` must name the FILE and the CHANGE. "Consider reviewing" is not a fix
+    and cannot be actioned at sign-in.
+    """
+
+    def __init__(self, fid, tier, title, evidence, fix, n=None,
+                 kind="finding", blocked_until=None, where=""):
+        self.id = fid
+        self.kind = kind
+        self.tier = tier
         self.title = title
         self.evidence = evidence
-        self.action = action
+        self.fix = fix
+        self.where = where
         self.n = n
         self.blocked_until = blocked_until
+        self.status = "open"
+        self.note = ""
+        self.first_seen = None
+        self.reopened = False
+
+    @property
+    def age_days(self) -> int:
+        if not self.first_seen:
+            return 0
+        try:
+            return (dt.date.today() - dt.date.fromisoformat(self.first_seen)).days
+        except Exception:
+            return 0
 
     def render(self) -> str:
         head = f"### [{self.tier}] {self.title}"
         if self.n is not None:
             head += f"  *(n={self.n})*"
-        body = [head, "", f"**Evidence:** {self.evidence}", "",
-                f"**Proposed action:** {self.action}"]
+        L = [head, ""]
+        if self.kind == "finding":
+            age = f", open {self.age_days}d" if self.age_days else ""
+            flag = "  🔁 **REOPENED**" if self.reopened else ""
+            L += [f"`{self.id}` · **{self.status}**{age}{flag}", ""]
+            if self.note:
+                L += [f"> {self.note}", ""]
+        L += [f"**Evidence:** {self.evidence}", "", f"**Fix:** {self.fix}"]
         if self.blocked_until:
-            body += ["", f"**Held until:** {self.blocked_until} — "
-                         f"below n={MIN_N} any conclusion is noise."]
-        return "\n".join(body)
+            L += ["", f"**Held until:** {self.blocked_until} — below n={MIN_N} "
+                      f"any conclusion is noise."]
+        if self.reopened:
+            L += ["", "🔁 Marked fixed previously but the condition is STILL "
+                      "PRESENT, so it is reopened. 'Fixed' must never mean 'hidden'."]
+        return "\n".join(L)
+
+
+def _load_state() -> dict:
+    try:
+        with open(STATE) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_state(state: dict) -> None:
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE, "w") as fh:
+        json.dump(state, fh, indent=2, sort_keys=True)
+
+
+def _apply_state(findings: list, state: dict, today: str) -> dict:
+    """Overlay saved dispositions; reopen anything marked fixed that is back.
+
+    Borrowed wholesale from position_audit.apply_dispositions, which learned
+    this the hard way: a finding marked resolved and still present means the
+    defect is live and the mark is hiding it.
+    """
+    seen = set()
+    for f in findings:
+        if f.kind != "finding":
+            continue
+        seen.add(f.id)
+        rec = state.get(f.id) or {}
+        f.first_seen = rec.get("first_seen") or today
+        f.note = rec.get("note", "")
+        prior = rec.get("status", "open")
+        if prior == "fixed":
+            f.status, f.reopened = "open", True      # still here => not fixed
+        else:
+            f.status = prior
+        state[f.id] = {"status": f.status, "note": f.note,
+                       "first_seen": f.first_seen, "last_seen": today,
+                       "title": f.title}
+    # A finding that has DISAPPEARED is genuinely resolved — record it once.
+    for fid, rec in state.items():
+        if fid not in seen and rec.get("status") in ACTIVE_STATUSES:
+            rec["status"] = "resolved"
+            rec["resolved_on"] = today
+    return state
 
 
 def _load():
@@ -96,155 +189,165 @@ def _load():
     return out
 
 
-def _levels_geometry(closed) -> Finding | None:
-    """The bot fills mechanically at published levels, so its closed trades are
-    the only direct read on whether the stop/target geometry is sane."""
+def _levels_geometry(closed) -> list:
     geo = []
     for t in closed:
         try:
-            e, s, g = (float(t["entry_price"]), float(t["stop_loss"]),
-                       float(t["target_price"]))
+            e, st, g = (float(t["entry_price"]), float(t["stop_loss"]),
+                        float(t["target_price"]))
         except (KeyError, TypeError, ValueError):
             continue
         if e > 0:
-            geo.append(((e - s) / e * 100, (g - e) / e * 100))
+            geo.append(((e - st) / e * 100, (g - e) / e * 100))
     if len(geo) < 3:
-        return None
-    stops = [a for a, _ in geo]
-    targs = [b for _, b in geo]
-    ms, mt = statistics.median(stops), statistics.median(targs)
+        return []
+    ms = statistics.median([a for a, _ in geo])
+    mt = statistics.median([b for _, b in geo])
     rr = mt / ms if ms else 0
-    return Finding(
-        "MEASURE", "Stop/target geometry on filled positions",
+    return [Finding(
+        "metric:levels_geometry", "MEASURE",
+        "Stop/target geometry on filled positions",
         f"median stop {ms:.1f}% below entry, median target {mt:.1f}% above, "
-        f"reward:risk {rr:.2f}:1 across {len(geo)} filled positions. "
-        f"The walk-forward backtest measured real ledger picks at 10.3%/5.5% "
-        f"= 1.9:1, so compare against that rather than config defaults.",
-        "If R:R drifts materially below ~1.9:1, the stops are tightening "
-        "relative to targets and will manufacture stop-outs. Route any change "
-        "through scripts/backtest_compare.py before shipping — a backtest win "
-        "is not permission to ship, but a backtest loss is a reason not to.",
-        n=len(geo))
+        f"reward:risk {rr:.2f}:1 across {len(geo)} filled positions. The "
+        f"walk-forward backtest measured real ledger picks at 10.3%/5.5% = "
+        f"1.9:1 — compare against that, never config defaults.",
+        "No action while R:R stays near 1.9:1. If it drifts materially below, "
+        "the stops are tightening relative to targets and will manufacture "
+        "stop-outs — route any change through scripts/backtest_compare.py "
+        "first.",
+        n=len(geo), kind="metric")]
 
 
-def _integrity(uid, log, paper) -> Finding | None:
-    """Arithmetic that must hold for ANY long position. Binary — one is enough."""
+def _integrity(uid, log, paper) -> list:
     try:
         import position_audit
-        findings = position_audit.audit_account(uid, log, paper)
+        raw = position_audit.audit_account(uid, log, paper)
     except Exception as exc:
-        return Finding("MEASURE", "Position audit could not run",
-                       f"{type(exc).__name__}: {exc}",
-                       "Check position_audit imports; this is the integrity net.")
-    live = [f for f in findings if f.get("live")]
-    if not findings:
-        return None
-    kinds = {}
-    for f in findings:
-        kinds[f.get("check", "?")] = kinds.get(f.get("check", "?"), 0) + 1
-    return Finding(
-        "ACT" if live else "MEASURE",
-        "Position integrity violations",
-        f"{len(findings)} finding(s) ({len(live)} on LIVE positions): "
-        + ", ".join(f"{k}×{v}" for k, v in sorted(kinds.items())),
-        "A live violation means a position that cannot win or was born "
-        "stopped-out. Fix the level; then check whether the generator can still "
-        "emit it — a historical-only finding needs no code change.",
-        n=len(findings))
+        return [Finding("metric:audit_broken", "MEASURE",
+                        "Position audit could not run",
+                        f"{type(exc).__name__}: {exc}",
+                        "Check position_audit imports — this is the integrity net.",
+                        kind="metric")]
+    out = []
+    for f in raw:
+        tk = f.get("ticker", "?")
+        chk = f.get("check", "?")
+        live = f.get("live")
+        # 🔴 Use position_audit's OWN id. It hashes (check, account, ticker,
+        # date, entry, target, stop, shares) precisely because the bot scales
+        # into the same ticker twice in a day — a coarser id collapses two
+        # distinct broken positions into one row, and resolving one silently
+        # resolves the other. Building a second id scheme here reintroduces the
+        # exact bug that file already fixed.
+        out.append(Finding(
+            f"integrity/{f.get('id') or (chk + '/' + tk)}",
+            "ACT" if live else "MEASURE",
+            f"{chk} on {tk}" + ("" if live else " (historical)"),
+            f.get("detail") or f"{chk} violation on {tk}"
+            + (" — LIVE position" if live else " — closed trade, not fixable retroactively"),
+            ("Fix the level on the live position, then check whether the "
+             "GENERATOR can still emit it — ai_analyzer._validate_and_clean_picks "
+             "is where a target below entry should be rejected before delivery."
+             if live else
+             "Historical: acknowledge it. It cannot be fixed retroactively. "
+             "Worth confirming ai_analyzer._validate_and_clean_picks now rejects "
+             "the shape so it cannot recur."),
+            where="ai_analyzer._validate_and_clean_picks"))
+    return out
 
 
 def _reachability(rows, log, paper) -> list:
-    """Could a user have acted at the price we published? Descriptive, so a few
-    dozen fills already inform — unlike a win rate."""
     try:
         import actionability
         positions = ((log.get("open") or []) + (log.get("closed") or [])
                      + (paper.get("positions") or []) + (paper.get("history") or []))
         res = actionability.analyse(rows, positions, log.get("closed") or [])
     except Exception as exc:
-        return [Finding("MEASURE", "Actionability could not run",
-                        f"{type(exc).__name__}: {exc}", "Check actionability inputs.")]
+        return [Finding("metric:actionability_broken", "MEASURE",
+                        "Actionability could not run", f"{type(exc).__name__}: {exc}",
+                        "Check actionability inputs.", kind="metric")]
     out = []
+
     entry = (res or {}).get("entry") or {}
-    if entry.get("n"):
-        breached, n = entry.get("outside_window", 0), entry["n"]
-        ex = ", ".join(f"{e.get('ticker')} +{e.get('slippage_pct')}%"
-                       for e in (entry.get("examples") or [])[:3])
+    for ex in (entry.get("examples") or []):
+        tk, slip = ex.get("ticker", "?"), ex.get("slippage_pct")
         out.append(Finding(
-            "ACT" if breached else "MEASURE",
-            "Picks filling outside the published entry window",
-            f"{breached} of {n} observations ({entry.get('outside_pct', 0)}%) "
-            f"filled beyond the window the morning message promises; worst "
-            f"{entry.get('worst_pct')}%." + (f" Examples: {ex}." if ex else "") +
-            " The message says \"enter within X% — skip if above\", so a breach "
-            "means a user who obeyed would have skipped a pick the bot bought.",
-            "A TRUST defect, not a performance one — no win rate shows it. "
-            "Either widen the published window to match reality, or warn on the "
-            "gap. formatters.entry_window_pct is the ONE definition; do not "
-            "re-hardcode 2 or 3.",
-            n=n))
+            f"entry_window/{tk}/{ex.get('date', '?')}",
+            "ACT", f"{tk} filled {slip}% outside the published entry window",
+            f"The morning message promises \"enter within X% — skip if above\". "
+            f"{tk} filled {slip}% above, so a user who OBEYED the instruction "
+            f"would have skipped a pick the bot bought. "
+            f"{entry.get('outside_window', 0)} of {entry.get('n', 0)} "
+            f"observations breach ({entry.get('outside_pct', 0)}%).",
+            "This is a TRUST defect, not a performance one. Either widen the "
+            "published window in formatters.entry_window_pct to match measured "
+            "reality, or make agent._build_premarket_gap_warnings warn on the "
+            "gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE "
+            "definition and it has drifted before.",
+            n=entry.get("n"),
+            where="formatters.entry_window_pct / agent._build_premarket_gap_warnings"))
 
     stops = (res or {}).get("stops") or {}
-    if stops.get("n"):
-        tight = stops.get("tight", 0)
-        ex = ", ".join(f"{e.get('ticker')} {e.get('stop_pct')}%"
-                       for e in (stops.get("tight_examples") or [])[:3])
+    for ex in (stops.get("tight_examples") or []):
+        tk, pct = ex.get("ticker", "?"), ex.get("stop_pct")
         out.append(Finding(
-            "ACT" if tight else "MEASURE",
-            "Stops tighter than the noise threshold",
-            f"median stop {stops.get('median_stop_pct')}% below entry across "
-            f"{stops['n']} positions; {tight} tighter than the "
-            f"{stops.get('threshold_pct')}% threshold."
-            + (f" {ex}." if ex else ""),
-            "A stop inside ordinary daily noise converts a good thesis into a "
-            "stop-out. Check whether the ATR-based level "
-            "(screener.suggested_stop_pct = 1.5x ATR%) collapsed for a "
-            "low-volatility name, and floor it if so.",
-            n=stops["n"]))
+            f"stop_tight/{tk}/{pct}", "ACT",
+            f"{tk} stop at {pct}% is inside the noise threshold",
+            f"Threshold is {stops.get('threshold_pct')}%; median across "
+            f"{stops.get('n')} positions is {stops.get('median_stop_pct')}%. A "
+            f"stop inside ordinary daily movement converts a sound thesis into "
+            f"a stop-out.",
+            "screener.suggested_stop_pct is 1.5x ATR%, which collapses for a "
+            "low-volatility name. Add a floor there (or in "
+            "ai_analyzer._ST_SECTIONS' 5% fallback) so no published stop sits "
+            "below the noise threshold.",
+            n=stops.get("n"),
+            where="screener.suggested_stop_pct (1.5x ATR%) — add a floor"))
+    if stops.get("n"):
+        out.append(Finding(
+            "metric:stop_distance", "MEASURE", "Stop distance distribution",
+            f"median {stops.get('median_stop_pct')}% across {stops['n']} "
+            f"positions; {stops.get('tight', 0)} below the "
+            f"{stops.get('threshold_pct')}% threshold.",
+            "Context for the geometry metric — no action on its own.",
+            n=stops["n"], kind="metric"))
 
     mix = ((res or {}).get("outcomes") or {}).get("counts") or {}
     if sum(mix.values()) >= 5:
         st, tg = mix.get("stop", 0), mix.get("target", 0)
-        ratio = (f"stops hit {st/tg:.1f}x as often as targets" if tg
-                 else "no target exits yet")
-        # Segment by whether the levels came from the PICK or the fallback —
-        # only the "pick" slice says anything about the engine's own levels.
         seg = _exit_mix_by_levels_source(log, paper)
-        seg_txt = ""
-        if seg:
-            parts = [f"{k}: {v}" for k, v in sorted(seg.items())]
-            seg_txt = ("  Segmented by levels source — " + " · ".join(parts) +
-                       ". Only the `pick` slice speaks to the ENGINE's levels; "
-                       "`stop`/`target`/`both` are the ±5%/8% fallback.")
+        segtxt = ("  By levels source — "
+                  + " · ".join(f"{k}: {v}" for k, v in sorted(seg.items()))
+                  + ". Only `pick` speaks to the ENGINE's levels."
+                  if seg else "")
         out.append(Finding(
-            "MEASURE", "Exit-reason mix",
-            f"{mix} — {ratio}.{seg_txt}",
-            "Read the `pick` slice alone when judging the published levels. A "
-            "high stop:target ratio THERE means the stops are too tight "
-            "relative to targets; the same ratio in the fallback slice means "
-            "the pick's levels did not bracket the fill, which is a different "
-            "problem (levels drifting from the live price by delivery time).",
-            n=sum(mix.values())))
+            "metric:exit_mix", "MEASURE", "Exit-reason mix",
+            f"{mix} — " + (f"stops hit {st/tg:.1f}x as often as targets."
+                           if tg else "no target exits yet.") + segtxt,
+            "Judge the published levels on the `pick` slice ALONE. A high "
+            "stop:target ratio there means stops are too tight; the same ratio "
+            "in the fallback slice means the pick's levels did not bracket the "
+            "fill — levels drifting from the live price by delivery time, which "
+            "is a different fix.",
+            n=sum(mix.values()), kind="metric"))
     return out
 
 
 def _exit_mix_by_levels_source(log, paper) -> dict:
     """Closed trades grouped by where their levels came from.
 
-    Positions opened before 2026-08-23 carry no `levels_source`; they are
-    reported as `unrecorded` rather than silently folded into `pick`, which
-    would overstate what the engine's own levels have been measured on.
+    Trades opened before 2026-08-23 carry no `levels_source` and report as
+    `unrecorded` — never folded into `pick`, which would overstate what the
+    engine's own levels have actually been measured on.
     """
     seg: dict = {}
-    rows = (log.get("closed") or []) + (paper.get("history") or [])
-    for t in rows:
-        src = t.get("levels_source") or "unrecorded"
-        seg[src] = seg.get(src, 0) + 1
+    for t in (log.get("closed") or []) + (paper.get("history") or []):
+        k = t.get("levels_source") or "unrecorded"
+        seg[k] = seg.get(k, 0) + 1
     return seg
 
 
-def _maturity(rows) -> Finding:
-    """How close the real evidence base is to saying anything."""
+def _maturity(rows) -> list:
     today = dt.date.today()
     matured = 0
     for r in rows:
@@ -255,64 +358,100 @@ def _maturity(rows) -> Finding:
         except Exception:
             continue
     if matured >= MIN_N:
-        return Finding(
-            "MEASURE", "Pick ledger has cleared the honesty gate",
-            f"{matured} matured picks (gate is {MIN_N}).",
-            "Run scripts/evaluate_picks.py and read the picked-vs-control edge. "
-            "This is the first evidence that can speak to SELECTION quality.",
-            n=matured)
-    return Finding(
-        "HOLD", "Engine win-rate questions are not yet answerable",
+        return [Finding(
+            "metric:maturity", "MEASURE",
+            "Pick ledger has cleared the honesty gate",
+            f"{matured} matured picks (gate {MIN_N}).",
+            "Run scripts/evaluate_picks.py and read the picked-vs-control edge "
+            "— the first evidence that can speak to SELECTION quality.",
+            n=matured, kind="metric")]
+    return [Finding(
+        "metric:maturity", "HOLD",
+        "Engine win-rate questions are not yet answerable",
         f"{matured} matured picks against a gate of {MIN_N}. The synthetic "
-        f"bot's own record is deliberately excluded — it is a robot's "
-        f"mechanical fills, and feeding it back steers real recommendations.",
-        "Do not tune selection weights on anything below the gate. The "
-        "descriptive findings above are safe to act on; win rate is not.",
-        n=matured, blocked_until="the ledger reaches 30 matured picks")
+        f"bot's own record is deliberately excluded — mechanical fills, and "
+        f"feeding them back steers real recommendations.",
+        "Do not tune selection weights below the gate. The findings above are "
+        "safe to act on; win rate is not.",
+        n=matured, kind="metric",
+        blocked_until="the ledger reaches 30 matured picks (~Sep 10)")]
 
 
 def build(dry: bool = False) -> str:
     d = _load()
-    closed = (d["log"].get("closed") or [])
-    findings = [f for f in (
-        _integrity(d["uid"], d["log"], d["paper"]),
-        _levels_geometry(closed),
-        _maturity(d["rows"]),
-    ) if f]
-    findings += _reachability(d["rows"], d["log"], d["paper"])
-    order = {"ACT": 0, "MEASURE": 1, "HOLD": 2}
-    findings.sort(key=lambda f: order.get(f.tier, 9))
+    closed = d["log"].get("closed") or []
+    items = (_integrity(d["uid"], d["log"], d["paper"])
+             + _reachability(d["rows"], d["log"], d["paper"])
+             + _levels_geometry(closed)
+             + _maturity(d["rows"]))
 
+    today = dt.date.today().isoformat()
+    state = _load_state()
+    state = _apply_state(items, state, today)
+
+    rank = {"ACT": 0, "MEASURE": 1, "HOLD": 2}
+    findings = [f for f in items if f.kind == "finding"]
+    metrics = [f for f in items if f.kind == "metric"]
+    findings.sort(key=lambda f: (f.status != "open", rank.get(f.tier, 9), -f.age_days))
+    metrics.sort(key=lambda f: rank.get(f.tier, 9))
+
+    todo = [f for f in findings if f.status in WORKLIST_STATUSES]
+    decided = [f for f in findings if f.status in ("acknowledged", "wont_fix")]
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    head = [
-        "# Engine findings — what to improve, and what the evidence supports",
+
+    L = [
+        "# Engine findings — the standing agenda",
         "",
         f"*Regenerated {stamp} by `scripts/analyze_engine.py`. "
-        "Read this at the start of a session; it is the standing agenda.*",
+        "Read this at the START of a session and work the open findings.*",
         "",
-        "**How to read the tiers**",
+        f"## Open: {len(todo)} finding(s) needing a decision",
         "",
-        "- **ACT** — actionable now. Binary or integrity findings where a single "
-        "instance is enough to justify a change.",
-        "- **MEASURE** — descriptive and informative at small n. Safe to reason "
-        "about; confirm direction before changing weights.",
-        f"- **HOLD** — needs n≥{MIN_N}. Acting earlier is tuning on noise.",
+    ]
+    if todo:
+        L.append("| id | what | age | fix in |")
+        L.append("|---|---|---|---|")
+        for f in todo:
+            L.append(f"| `{f.id}` | {f.title} | {f.age_days}d | {f.where or '—'} |")
+    else:
+        L.append("_Nothing open. Every addressable finding has been resolved._")
+    if decided:
+        L += ["", f"### Decided, still present ({len(decided)})", "",
+              "*You have already ruled on these — they are not in the worklist. "
+              "They will clear themselves the day the condition disappears.*", ""]
+        for f in decided:
+            L.append(f"- `{f.id}` — **{f.status}** — {f.title}"
+                     + (f" · _{f.note}_" if f.note else ""))
+    L += [
         "",
-        "🔴 **The bot's win rate is never an input to engine changes.** Its "
-        "trades are mechanical fills; in July they were steering real picks and "
-        "that loop was cut. What it measures well is levels, reachability and "
-        "integrity — not selection quality.",
+        "**To close one:** implement the fix, or record a decision in "
+        "`analysis/findings_state.json` "
+        "(`status`: `acknowledged` | `wont_fix`, plus a `note` saying why). "
+        "A finding whose condition DISAPPEARS is marked `resolved` "
+        "automatically — that is the intended path.",
+        "",
+        "🔁 **A finding marked `fixed` that is still present is REOPENED.** "
+        "Otherwise 'fixed' silently means 'hidden' while the defect is live.",
+        "",
+        "🔴 **Engine changes are never recommended from the bot's win rate.** "
+        "Mechanical fills; in July they were steering real picks and that loop "
+        f"was cut. Anything needing n≥{MIN_N} is HELD with its clearing date.",
         "",
         "---",
         "",
+        "## Findings",
+        "",
     ]
-    body = "\n\n".join(f.render() for f in findings) or "_No findings._"
-    doc = "\n".join(head) + body + "\n"
+    L.append("\n\n".join(f.render() for f in findings) or "_None._")
+    L += ["", "---", "", "## Metrics (ongoing — never 'complete')", ""]
+    L.append("\n\n".join(f.render() for f in metrics) or "_None._")
 
+    doc = "\n".join(L) + "\n"
     if not dry:
         os.makedirs(os.path.dirname(OUT), exist_ok=True)
         with open(OUT, "w") as fh:
             fh.write(doc)
+        _save_state(state)
     return doc
 
 

@@ -19,9 +19,9 @@ _spec.loader.exec_module(ae)
 
 class TestTiers:
     def test_win_rate_questions_are_HELD_below_the_gate(self):
-        f = ae._maturity([{"date": "2026-08-20"}] * 5)
+        f = ae._maturity([{"date": "2026-08-20"}] * 5)[0]
         assert f.tier == "HOLD" and f.blocked_until
-        assert "not" in f.action.lower() and "tune" in f.action.lower()
+        assert "not" in f.fix.lower() and "tune" in f.fix.lower()
 
     def test_the_gate_matches_the_evaluator(self):
         """30 is the bar for calling something conclusive in a report the owner
@@ -31,7 +31,7 @@ class TestTiers:
     def test_a_matured_ledger_unblocks_the_question(self):
         import datetime as dt
         old = (dt.date.today() - dt.timedelta(days=40)).isoformat()
-        f = ae._maturity([{"date": old} for _ in range(35)])
+        f = ae._maturity([{"date": old} for _ in range(35)])[0]
         assert f.tier == "MEASURE" and not f.blocked_until
 
     def test_controls_never_count_toward_maturity(self):
@@ -39,7 +39,7 @@ class TestTiers:
         inflate the sample the honesty gate protects."""
         import datetime as dt
         old = (dt.date.today() - dt.timedelta(days=40)).isoformat()
-        f = ae._maturity([{"date": old, "control": True} for _ in range(35)])
+        f = ae._maturity([{"date": old, "control": True} for _ in range(35)])[0]
         assert f.tier == "HOLD", "controls inflated the matured count"
 
 
@@ -48,28 +48,28 @@ class TestLevelsGeometry:
         return {"entry_price": entry, "stop_loss": stop, "target_price": target}
 
     def test_it_reports_reward_to_risk(self):
-        f = ae._levels_geometry([self._t(100, 95, 110)] * 4)
-        assert f and "2.00:1" in f.evidence
+        f = ae._levels_geometry([self._t(100, 95, 110)] * 4)[0]
+        assert "2.00:1" in f.evidence
 
     def test_it_compares_against_the_MEASURED_baseline_not_config(self):
         """A backtest's assumptions must come from what users actually got —
         reading config defaults manufactured a false finding once already."""
-        f = ae._levels_geometry([self._t(100, 95, 110)] * 4)
+        f = ae._levels_geometry([self._t(100, 95, 110)] * 4)[0]
         assert "1.9:1" in f.evidence and "config defaults" in f.evidence
 
     def test_too_few_positions_yields_nothing(self):
-        assert ae._levels_geometry([self._t(100, 95, 110)]) is None
+        assert ae._levels_geometry([self._t(100, 95, 110)]) == []
 
     def test_garbage_levels_do_not_crash_it(self):
         assert ae._levels_geometry(
             [{"entry_price": None}, {"entry_price": "x", "stop_loss": 1,
-                                     "target_price": 2}] * 3) is None
+                                     "target_price": 2}] * 3) == []
 
 
 class TestSafety:
     def test_the_no_win_rate_rule_is_stated_in_the_output(self):
         doc = ae.build(dry=True)
-        assert "win rate is never an input" in doc.lower()
+        assert "never recommended from the bot's win rate" in doc.lower()
 
     def test_the_document_always_renders_even_with_no_data(self, monkeypatch):
         monkeypatch.setattr(ae, "_load", lambda: {
@@ -175,3 +175,100 @@ class TestStorageAcceptsTheField:
         assert "levels_source" in src, \
             "a sold paper trade loses the levels source, so closed-trade " \
             "analysis silently reverts to unrecorded"
+
+
+class TestDispositions:
+    """Findings must be closable, and a decision must stick.
+
+    🔴 Two failure modes this guards, both learned elsewhere in this repo:
+      • position_audit: a finding marked resolved that is STILL PRESENT means
+        the defect is live and the mark is hiding it — so it REOPENS.
+      • the canary: a check that re-raises something already ruled on trains
+        you to skim it, so a decided finding leaves the worklist.
+    """
+
+    def _ae(self, tmp_path, monkeypatch):
+        import importlib.util
+        import os
+        spec = importlib.util.spec_from_file_location(
+            "ae2", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        monkeypatch.setattr(m, "STATE", str(tmp_path / "state.json"))
+        return m
+
+    def _f(self, m, fid="x/1", status=None):
+        return m.Finding(fid, "ACT", "t", "e", "fix", where="file.py")
+
+    def test_a_new_finding_starts_open_and_records_first_seen(self, tmp_path, monkeypatch):
+        m = self._ae(tmp_path, monkeypatch)
+        f = self._f(m)
+        m._apply_state([f], {}, "2026-08-23")
+        assert f.status == "open" and f.first_seen == "2026-08-23"
+
+    def test_an_acknowledged_finding_LEAVES_the_worklist(self, tmp_path, monkeypatch):
+        m = self._ae(tmp_path, monkeypatch)
+        f = self._f(m)
+        m._apply_state([f], {"x/1": {"status": "acknowledged"}}, "2026-08-23")
+        assert f.status == "acknowledged"
+        assert f.status not in m.WORKLIST_STATUSES, \
+            "a decision you already made must not keep demanding attention"
+
+    def test_a_finding_marked_FIXED_but_still_present_is_REOPENED(
+            self, tmp_path, monkeypatch):
+        """Otherwise 'fixed' silently means 'hidden' while the defect is live."""
+        m = self._ae(tmp_path, monkeypatch)
+        f = self._f(m)
+        m._apply_state([f], {"x/1": {"status": "fixed"}}, "2026-08-23")
+        assert f.status == "open" and f.reopened is True
+
+    def test_a_finding_that_DISAPPEARS_is_auto_resolved(self, tmp_path, monkeypatch):
+        """The intended path: implement the fix, the condition goes, it closes
+        itself. No manual bookkeeping."""
+        m = self._ae(tmp_path, monkeypatch)
+        state = {"gone/1": {"status": "open"}}
+        m._apply_state([], state, "2026-08-23")
+        assert state["gone/1"]["status"] == "resolved"
+        assert state["gone/1"]["resolved_on"] == "2026-08-23"
+
+    def test_something_lived_with_also_resolves_when_it_disappears(
+            self, tmp_path, monkeypatch):
+        m = self._ae(tmp_path, monkeypatch)
+        state = {"gone/2": {"status": "acknowledged"}}
+        m._apply_state([], state, "2026-08-23")
+        assert state["gone/2"]["status"] == "resolved"
+
+    def test_age_is_measured_from_first_seen_not_today(self, tmp_path, monkeypatch):
+        import datetime as dt
+        m = self._ae(tmp_path, monkeypatch)
+        f = self._f(m)
+        old = (dt.date.today() - dt.timedelta(days=12)).isoformat()
+        m._apply_state([f], {"x/1": {"status": "open", "first_seen": old}}, "z")
+        assert f.age_days == 12, "a stale finding must be visibly stale"
+
+    def test_metrics_are_never_dispositioned(self, tmp_path, monkeypatch):
+        """A standing measurement cannot be 'completed' — mixing it into the
+        worklist makes 'address every finding' impossible."""
+        m = self._ae(tmp_path, monkeypatch)
+        met = m.Finding("metric:x", "MEASURE", "t", "e", "fix", kind="metric")
+        state = {}
+        m._apply_state([met], state, "2026-08-23")
+        assert state == {}, "a metric was written into the disposition store"
+
+    def test_every_addressable_finding_names_where_to_fix_it(self, monkeypatch):
+        """'Consider reviewing' cannot be actioned at sign-in."""
+        import importlib.util
+        import os
+        spec = importlib.util.spec_from_file_location(
+            "ae3", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        monkeypatch.setattr(m, "_load", lambda: {
+            "uid": "0",
+            "log": {"open": [{"ticker": "AAPL", "entry_price": 100,
+                              "target_price": 90, "stop_loss": 95}], "closed": []},
+            "paper": {}, "rows": []})
+        doc = m.build(dry=True)
+        assert "**Fix:**" in doc
