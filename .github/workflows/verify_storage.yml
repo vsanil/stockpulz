@@ -56,7 +56,11 @@ jobs:
           SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:   ${{ secrets.SUPABASE_KEY }}
         run: |
-          for f in data_quality.json user_trades.json; do
+          # `only` doubles as the diff target list when supplied, so any file
+          # can be inspected without editing this workflow.
+          FILES="${{ inputs.only }}"
+          FILES="${FILES//,/ }"
+          for f in ${FILES:-data_quality.json user_trades.json}; do
             python scripts/verify_storage.py --diff "$f" || true
           done
       - name: Alert round-trip on this surface
