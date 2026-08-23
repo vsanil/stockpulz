@@ -747,6 +747,16 @@ Rules:
 - **✅ The exit-reason mix is no longer confounded (Aug 23).** `_levels_for` returns `(stop, target, source)` — `pick` | `stop` | `target` | `both` — recording WHICH leg was substituted. It threads through `add_holding` and `paper_buy` onto the position, and `paper_sell` carries it into history (a sold trade that drops it silently reverts the analysis to `unrecorded`). **Only the `pick` slice speaks to the ENGINE's published levels**; the rest is the ±5%/8% fallback, which is a different question — levels drifting from the live price by delivery time.
 - **Positions opened before 2026-08-23 report as `unrecorded`, never folded into `pick`** — folding them would overstate what the engine's own levels have actually been measured on.
 
+### Unwinnable picks are DROPPED before delivery (Aug 23)
+- **A long pick whose `target <= entry` can only close at a loss**; one whose `stop >= entry` is born stopped-out. Two AMBA picks (entry 82.67 → target 78.54) reached the synthetic account on 2026-08-03 and `position_audit` caught them only AFTER delivery. **Verified: they still survived `_validate_and_clean_picks` on Aug 23** — it checked tickers and backfilled stops but never compared the levels.
+- Now dropped there, loudly. **ABSENT levels are NOT a violation** (long-term picks carry no stop by design) and an **unparseable** level is not grounds to drop — only a level we can actually compare is. Guard: `TestUnwinnablePicksAreRejected`, 3 of 6 verified failing pre-fix.
+
+### 🔴 A FLAT stop-tightness threshold was wrong in BOTH directions (Aug 23)
+- `actionability.TIGHT_STOP_PCT = 3.0` flagged KMI at **2.99%**. But the engine's stop is **`1.5 × ATR%`** (`screener.suggested_stop_pct`) — already volatility-scaled — so 2.99% implies ATR ≈2% and is **correctly outside that ticker's noise**. **The proposed "add a floor" fix would have widened stops on exactly the low-volatility names where a tight stop is right.**
+- It also **missed** a 3.0% stop on a 6%-ATR name, which IS inside the noise — false negatives as well as false positives.
+- Now `TIGHT_STOP_ATR_MULT = 1.0` against the position's own `atr_pct`; **no ATR ⇒ reported as `not assessed`, never flagged** — unmeasurable is not a violation.
+- **Method note: the finding named a fix, and the fix was wrong.** Checking the engine's definition before implementing is what caught it. A worklist item is a hypothesis, not an instruction.
+
 ### Findings are a WORKLIST, not a report — `analysis/findings_state.json` (Aug 23)
 - The daily analysis detected well but could not be WORKED: regenerated from scratch, so a finding already ruled on returned identical forever. **That is the cry-wolf failure** — it trains you to skim the one file memory says to read first.
 - **FINDINGS vs METRICS.** Only addressable items get an id and a disposition; a standing measurement (reward:risk, exit mix, maturity) is a metric and is never "complete". Mixing them makes "address every finding" impossible.

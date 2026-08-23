@@ -1204,6 +1204,58 @@ def _validate_and_clean_picks(picks: dict, valid_stock_tickers: set) -> dict:
     else:
         print(f"[ai_analyzer] Ticker validation: all {total_after} picks passed.")
 
+    # ── Unwinnable levels: drop, never publish ────────────────────────────
+    # 🔴 A long pick whose target is at or below its entry can ONLY close at a
+    # loss; one whose stop is at or above entry is born stopped-out. Two AMBA
+    # picks with target 78.54 < entry 82.67 reached the synthetic account on
+    # 2026-08-03 and were caught by position_audit only AFTER delivery.
+    #
+    # Dropping is the honest response: we cannot invent a target, and a pick
+    # that cannot win must not be published. ABSENT levels are NOT a violation
+    # — long-term picks carry no stop by design — and an unparseable level is
+    # not grounds to drop either; only a level we can actually compare is.
+    _dropped_levels = 0
+    for asset_key, sections in list(result.items()):
+        if not isinstance(sections, dict):
+            continue
+        for timeframe, plist in list(sections.items()):
+            if not isinstance(plist, list):
+                continue
+            keep = []
+            for p in plist:
+                if not isinstance(p, dict):
+                    keep.append(p)
+                    continue
+                try:
+                    entry = float(p.get("entry_price"))
+                except (TypeError, ValueError):
+                    keep.append(p)
+                    continue
+                sym = p.get("ticker") or p.get("symbol") or "?"
+                bad = None
+                try:
+                    tgt = float(p["target_price"])
+                    if tgt <= entry:
+                        bad = f"target ${tgt:,.2f} <= entry ${entry:,.2f} (cannot win)"
+                except (KeyError, TypeError, ValueError):
+                    pass
+                if bad is None:
+                    try:
+                        stp = float(p["stop_loss"])
+                        if stp >= entry:
+                            bad = (f"stop ${stp:,.2f} >= entry ${entry:,.2f} "
+                                   f"(born stopped-out)")
+                    except (KeyError, TypeError, ValueError):
+                        pass
+                if bad:
+                    _dropped_levels += 1
+                    print(f"[ai_analyzer] DROPPED {sym} ({asset_key}/{timeframe}): {bad}")
+                    continue
+                keep.append(p)
+            sections[timeframe] = keep
+    if _dropped_levels:
+        print(f"[ai_analyzer] ⚠️ dropped {_dropped_levels} pick(s) with unwinnable levels.")
+
     # ── Stop-loss fallback: any short-term pick missing stop_loss gets 5% below entry ──
     _ST_SECTIONS = [
         ("stocks",      "short_term"),

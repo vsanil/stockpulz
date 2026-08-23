@@ -1,16 +1,19 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-08-23 05:12 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-08-23 05:22 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
-## Open: 5 finding(s) needing a decision
+## Open: 0 finding(s) needing a decision
 
-| id | what | age | fix in |
-|---|---|---|---|
-| `entry_window/ANET/2026-08-05` | ANET filled 2.43% outside the published entry window | 0d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/NWSA/2026-08-06` | NWSA filled 2.15% outside the published entry window | 0d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `stop_tight/KMI/2.99` | KMI stop at 2.99% is inside the noise threshold | 0d | screener.suggested_stop_pct (1.5x ATR%) — add a floor |
-| `integrity/638eb7bc69ed` | levels.target_below_entry on AMBA (historical) | 0d | ai_analyzer._validate_and_clean_picks |
-| `integrity/425fd0b45bd0` | levels.target_below_entry on AMBA (historical) | 0d | ai_analyzer._validate_and_clean_picks |
+_Nothing open. Every addressable finding has been resolved._
+
+### Decided, still present (4)
+
+*You have already ruled on these — they are not in the worklist. They will clear themselves the day the condition disappears.*
+
+- `entry_window/ANET/2026-08-05` — **acknowledged** — ANET filled 2.43% outside the published entry window · _Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect._
+- `entry_window/NWSA/2026-08-06` — **acknowledged** — NWSA filled 2.15% outside the published entry window · _Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect._
+- `integrity/638eb7bc69ed` — **acknowledged** — levels.target_below_entry on AMBA (historical) · _Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship._
+- `integrity/425fd0b45bd0` — **acknowledged** — levels.target_below_entry on AMBA (historical) · _Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship._
 
 **To close one:** implement the fix, or record a decision in `analysis/findings_state.json` (`status`: `acknowledged` | `wont_fix`, plus a `note` saying why). A finding whose condition DISAPPEARS is marked `resolved` automatically — that is the intended path.
 
@@ -24,7 +27,9 @@
 
 ### [ACT] ANET filled 2.43% outside the published entry window  *(n=48)*
 
-`entry_window/ANET/2026-08-05` · **open**
+`entry_window/ANET/2026-08-05` · **acknowledged**
+
+> Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
 **Evidence:** The morning message promises "enter within X% — skip if above". ANET filled 2.43% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 2 of 48 observations breach (4.2%).
 
@@ -32,23 +37,19 @@
 
 ### [ACT] NWSA filled 2.15% outside the published entry window  *(n=48)*
 
-`entry_window/NWSA/2026-08-06` · **open**
+`entry_window/NWSA/2026-08-06` · **acknowledged**
+
+> Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
 **Evidence:** The morning message promises "enter within X% — skip if above". NWSA filled 2.15% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 2 of 48 observations breach (4.2%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
-### [ACT] KMI stop at 2.99% is inside the noise threshold  *(n=63)*
-
-`stop_tight/KMI/2.99` · **open**
-
-**Evidence:** Threshold is 3.0%; median across 63 positions is 5.36%. A stop inside ordinary daily movement converts a sound thesis into a stop-out.
-
-**Fix:** screener.suggested_stop_pct is 1.5x ATR%, which collapses for a low-volatility name. Add a floor there (or in ai_analyzer._ST_SECTIONS' 5% fallback) so no published stop sits below the noise threshold.
-
 ### [MEASURE] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **open**
+`integrity/638eb7bc69ed` · **acknowledged**
+
+> Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
 **Evidence:** target $78.54 is at or below entry $82.67 — this long position cannot reach its target, so it can only ever close at a loss
 
@@ -56,7 +57,9 @@
 
 ### [MEASURE] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **open**
+`integrity/425fd0b45bd0` · **acknowledged**
+
+> Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
 **Evidence:** target $79.74 is at or below entry $82.21 — this long position cannot reach its target, so it can only ever close at a loss
 
@@ -68,7 +71,7 @@
 
 ### [MEASURE] Stop distance distribution  *(n=63)*
 
-**Evidence:** median 5.36% across 63 positions; 1 below the 3.0% threshold.
+**Evidence:** median 5.36% across 63 positions; 0 below the 3.0% threshold.
 
 **Fix:** Context for the geometry metric — no action on its own.
 

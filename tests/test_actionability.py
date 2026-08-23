@@ -6,6 +6,8 @@ already informative — and they separate "the engine chose badly" from "the sto
 was too tight", which a win rate conflates.
 """
 import os, sys
+
+import actionability
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -63,8 +65,18 @@ class TestEntryWindow:
 
 class TestStops:
     def test_a_stop_inside_daily_noise_is_flagged(self):
-        r = analyse([], [{"ticker": "T", "entry_price": 100.0, "stop_loss": 98.0}], [])
+        """Judged against the ticker's OWN ATR since 2026-08-23 — a flat
+        threshold both false-positived on low-vol names and missed genuinely
+        tight stops on volatile ones. A 2% stop on a 4%-ATR name is inside a
+        single average day's move."""
+        r = analyse([], [{"ticker": "T", "entry_price": 100.0,
+                          "stop_loss": 98.0, "atr_pct": 4.0}], [])
         assert r["stops"]["tight"] == 1
+
+    def test_a_stop_with_no_ATR_is_not_flagged(self):
+        """Unmeasurable is not a violation."""
+        r = analyse([], [{"ticker": "T", "entry_price": 100.0, "stop_loss": 98.0}], [])
+        assert r["stops"]["tight"] == 0
 
     def test_a_normal_stop_is_not_flagged(self):
         r = analyse([], [{"ticker": "T", "entry_price": 100.0, "stop_loss": 94.0}], [])
@@ -178,3 +190,48 @@ class TestPaperSellPreservesTheJoinKey:
         body = src[src.index('data["history"].append'):]
         for field in ("bought_date", "stop_loss", "target_price"):
             assert field in body, f"paper_sell history record drops {field}"
+
+
+class TestStopTightnessIsPerTicker:
+    """🔴 A FLAT threshold is the wrong test for "inside the noise" (Aug 23).
+
+    KMI was flagged at 2.99% against a flat 3.0%. But the engine's stop is
+    1.5 x ATR% — already volatility-scaled — so 2.99% implies ATR ~2% and is
+    correctly OUTSIDE that ticker's noise. Acting on the flag would have widened
+    stops on exactly the low-volatility names where a tight stop is right.
+
+    The flat threshold was wrong in BOTH directions: it also passed a 3.0% stop
+    on a 6%-ATR name, which is genuinely inside the noise.
+    """
+
+    def _one(self, stop_pct, atr=None, entry=100.0):
+        pos = {"ticker": "T", "entry_price": entry,
+               "stop_loss": entry * (1 - stop_pct / 100)}
+        if atr is not None:
+            pos["atr_pct"] = atr
+        return actionability.stop_distances([pos])[0]
+
+    def test_a_low_volatility_name_is_not_flagged_for_a_small_stop(self):
+        """The KMI false positive."""
+        assert self._one(2.99, atr=2.0)["tight"] is False
+
+    def test_a_high_volatility_name_IS_flagged_for_the_same_stop(self):
+        """The false NEGATIVE the flat threshold allowed: 3.0% is not < 3.0,
+        so a 3% stop on a 6%-ATR name passed unnoticed."""
+        assert self._one(3.0, atr=6.0)["tight"] is True
+
+    def test_a_position_with_no_ATR_is_not_assessed(self):
+        """Unmeasurable is not a violation — flagging it would manufacture
+        findings nobody can act on."""
+        r = self._one(1.0)
+        assert r["tight"] is False and "not assessed" in r["basis"]
+
+    def test_the_basis_is_reported_so_the_judgement_is_checkable(self):
+        assert "ATR" in self._one(4.0, atr=3.0)["basis"]
+
+    def test_the_multiple_is_one_average_day(self):
+        """1.0x ATR is a single average day's move; the engine targets 1.5x, so
+        anything under 1x is inside ordinary daily noise."""
+        assert actionability.TIGHT_STOP_ATR_MULT == 1.0
+        assert self._one(2.9, atr=3.0)["tight"] is True     # under 1x
+        assert self._one(3.1, atr=3.0)["tight"] is False    # over 1x

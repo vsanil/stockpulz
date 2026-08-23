@@ -333,3 +333,52 @@ class TestBuildCommodityCandidates:
             result = _build_commodity_candidates()
 
         assert result == []
+
+
+class TestUnwinnablePicksAreRejected:
+    """🔴 A long pick whose target sits at or below its entry can ONLY close at
+    a loss. Two reached the synthetic account on 2026-08-03 (AMBA, entry 82.67
+    → target 78.54) and were caught by position_audit AFTER delivery.
+
+    Validation checked tickers and backfilled stops but never compared the
+    levels, so the shape could still ship. Dropping is the only honest response:
+    we cannot invent a target, and a pick that cannot win must not be published.
+    """
+
+    def _picks(self, **over):
+        p = {"ticker": "AMBA", "entry_price": 82.67, "target_price": 78.54,
+             "stop_loss": 75.68}
+        p.update(over)
+        return {"stocks": {"short_term": [
+            p, {"ticker": "MSFT", "entry_price": 100.0,
+                "target_price": 110.0, "stop_loss": 95.0}]}}
+
+    def _run(self, picks):
+        import ai_analyzer
+        out = ai_analyzer._validate_and_clean_picks(picks, {"AMBA", "MSFT"})
+        return [x["ticker"] for x in out["stocks"]["short_term"]]
+
+    def test_a_target_below_entry_is_dropped(self):
+        assert self._run(self._picks()) == ["MSFT"]
+
+    def test_a_target_EQUAL_to_entry_is_dropped(self):
+        """Zero upside is not a trade."""
+        assert self._run(self._picks(target_price=82.67)) == ["MSFT"]
+
+    def test_a_stop_at_or_above_entry_is_dropped(self):
+        """Born stopped-out — the next price check closes it instantly."""
+        assert self._run(self._picks(target_price=95.0, stop_loss=82.67)) == ["MSFT"]
+
+    def test_a_healthy_pick_is_untouched(self):
+        out = self._run(self._picks(target_price=95.0))
+        assert out == ["AMBA", "MSFT"], "a valid pick was dropped"
+
+    def test_a_pick_with_no_target_still_ships(self):
+        """LONG-TERM picks carry no stop by design and may carry no target —
+        absence is not a violation, and dropping them would silently delete a
+        whole section."""
+        assert "AMBA" in self._run(self._picks(target_price=None, stop_loss=None))
+
+    def test_unparseable_levels_do_not_drop_the_pick(self):
+        """Only a level we can actually compare justifies a drop."""
+        assert "AMBA" in self._run(self._picks(target_price="n/a"))
