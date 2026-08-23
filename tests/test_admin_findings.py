@@ -5,6 +5,7 @@ notification is assent, not review. The dashboard can show the proposed change,
 the files and the evidence, behind OAuth. Telegram keeps the NOTIFICATION;
 the decision happens where it can be read.
 """
+import pathlib
 import pytest
 
 from tests.conftest import post, get, TEST_CHAT_ID
@@ -78,7 +79,7 @@ class TestItIsWiredIn:
         assert "_require_admin" in src[i:i + 200], "the route is not admin-gated"
 
     def test_the_card_is_rendered_on_the_dashboard(self):
-        assert "findingsCard(d.findings)" in self._src()
+        assert "findingsCard(d.findings," in self._src()
 
     def test_the_payload_carries_findings(self):
         assert '"findings": _findings' in self._src()
@@ -105,3 +106,42 @@ class TestItIsWiredIn:
         import webhook
         s = inspect.getsource(webhook.admin_finding_disposition)
         assert "et_today()" in s and "date.today()" not in s
+
+
+class TestCardIsVisibleWhenEmpty:
+    """🔴 The card rendered `''` with nothing pending, so the owner went to
+    /admin, saw no card at all, and reasonably concluded the feature was not
+    built. An invisible control is indistinguishable from a broken one — the
+    resting state has to SAY there is nothing waiting."""
+
+    def _js(self):
+        src = pathlib.Path("webhook.py").read_text()
+        i = src.index("function findingsCard(")
+        return src[i:src.index("\nasync function setFinding", i)]
+
+    def test_an_empty_list_still_renders_the_card(self):
+        js = self._js()
+        assert "if(!rows||!rows.length) return '';" not in js, (
+            "the empty case must not bail out — that is the invisible-card bug"
+        )
+        assert "Nothing awaiting your approval" in js
+
+    def test_the_empty_state_reports_how_many_were_decided(self):
+        # Otherwise "nothing pending" is ambiguous between "you cleared them"
+        # and "the store is empty because it was silently wiped".
+        assert "decidedN" in self._js()
+
+    def test_decided_findings_are_counted_but_never_listed(self):
+        src = pathlib.Path("webhook.py").read_text()
+        i = src.index('"findings": _findings')
+        blk = src[max(0, i - 900):i + 120]
+        assert "findings_decided" in blk
+        # The list itself stays restricted to items awaiting a decision.
+        assert "_pending" in blk and "awaiting_approval" in blk
+
+    def test_the_repo_file_store_is_fully_gone(self):
+        """Render's filesystem is ephemeral: an approval written to a repo file
+        vanishes on redeploy and the GH Actions job never sees it."""
+        for f in ("scripts/analyze_engine.py", "scripts/findings.py",
+                  "webhook.py"):
+            assert "analysis/findings_state.json" not in pathlib.Path(f).read_text(), f
