@@ -757,6 +757,18 @@ Rules:
 - Now `TIGHT_STOP_ATR_MULT = 1.0` against the position's own `atr_pct`; **no ATR ⇒ reported as `not assessed`, never flagged** — unmeasurable is not a violation.
 - **Method note: the finding named a fix, and the fix was wrong.** Checking the engine's definition before implementing is what caught it. A worklist item is a hypothesis, not an instruction.
 
+### 🔴 Anything the WEB SERVICE writes must live in STORAGE, never a repo file (Aug 23)
+- I first put `findings_state.json` in `analysis/` beside the generated report. **Render's filesystem is ephemeral**, so an approval made on `/admin` would vanish on the next deploy — and the daily GitHub Actions job, running on a different machine, would never see it either.
+- The store is now `engine_findings_state.json` via `config_manager.get_finding_dispositions` / `set_finding_disposition`, the **same mechanism `audit_dispositions` already used**. The generated REPORT stays in the repo (it is regenerated output, committed by the job); the DECISIONS do not.
+- **Rule: a repo file is fine for generated output. It is never a store for anything a user or the web service writes.**
+
+### Approving findings belongs on `/admin`, not a Telegram button (Aug 23)
+- **A one-tap approve on a phone notification is assent, not review** — it would feel like a control while being a rubber stamp, which is worse than no control because it stops you looking.
+- The dashboard shows the proposed change, the files and the evidence, behind OAuth. **Telegram keeps the NOTIFICATION; the decision happens where it can be read.** The card states that approving clears implementation and **does not deploy**.
+- **Approving something never PROPOSED returns 409** — otherwise "approved" attaches to a title rather than a concrete change.
+- A `resolved_UNAPPROVED` violation is **reported with no button** — it must not be dismissible with a click.
+- **Two bugs caught before shipping**: the route used `dt.date.today()` with `dt` NOT importable in webhook.py (would have `NameError`d on every approve — the same class as the two never-imported names found the day before), and the button markup hit the documented escaping trap where a single backslash is consumed by Python and emits a bare quote. **`scripts/check_js.py` caught the second — run it after ANY admin-page edit.**
+
 ### Approval workflow — `scripts/findings.py` (Aug 23)
 - **I claimed an approval step that did not exist.** `findings_state.json` held a status and a note, but nothing recorded that the OWNER sanctioned anything, and a finding I implemented looked identical to one that resolved on its own.
 - **`propose` → `awaiting_approval` → `approve` → `approved` → implement → `resolved`.** `propose` records the intended change AND the files; `approve` stamps a date + note. **Re-proposing after approval is refused, and a changed proposal clears stale consent** — a different plan must not inherit old permission.
