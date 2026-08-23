@@ -25,19 +25,40 @@ def _mod(name, path, tmp_state):
 
 
 @pytest.fixture
-def fw(tmp_path):
-    return _mod("fw", "findings.py", tmp_path / "s.json")
+def fw(tmp_path, monkeypatch):
+    """Dispositions moved to the STORAGE backend (Render's filesystem is
+    ephemeral, so a repo file would lose every approval on redeploy). Patch
+    config_manager, not the module's STATE path, or the test writes to the
+    live store — the exact scope trap that once let a 'patched' test write to
+    the real gist."""
+    m = _mod("fw", "findings.py", tmp_path / "s.json")
+    data = {}
+    import config_manager as cm
+
+    def _set(fid, status, note="", extra=None):
+        rec = dict(data.get(fid) or {})
+        rec.update(extra or {})
+        rec["status"] = status
+        if note:
+            rec["note"] = note
+        data[fid] = rec
+        return rec
+
+    monkeypatch.setattr(cm, "get_finding_dispositions", lambda: data)
+    monkeypatch.setattr(cm, "set_finding_disposition", _set)
+    m._store = data
+    return m
 
 
 class TestLifecycle:
     def test_propose_then_approve(self, fw):
         assert fw.propose("x/1", "add a floor", "screener.py") == 0
-        st = json.load(open(fw.STATE))
+        st = fw._store
         assert st["x/1"]["status"] == "awaiting_approval"
         assert st["x/1"]["proposed_change"] == "add a floor"
 
         assert fw.approve("x/1", note="go ahead") == 0
-        st = json.load(open(fw.STATE))
+        st = fw._store
         assert st["x/1"]["status"] == "approved"
         assert st["x/1"]["approved_on"] and st["x/1"]["approved_note"] == "go ahead"
 
@@ -45,7 +66,7 @@ class TestLifecycle:
         assert fw.approve("nope/1") == 1
 
     def test_approving_an_unproposed_but_known_finding_is_refused(self, fw):
-        json.dump({"x/1": {"status": "open"}}, open(fw.STATE, "w"))
+        fw._store["x/1"] = {"status": "open"}
         assert fw.approve("x/1") == 1, "approval must follow a concrete proposal"
 
     def test_re_proposing_after_approval_is_refused(self, fw):
@@ -56,20 +77,19 @@ class TestLifecycle:
     def test_a_re_proposal_before_approval_CLEARS_stale_consent(self, fw):
         """If the plan changes, prior consent does not carry over."""
         fw.propose("x/1", "a", "f.py")
-        json.load(open(fw.STATE))
+        fw._store
         fw.propose("x/1", "b", "f.py")
-        st = json.load(open(fw.STATE))
+        st = fw._store
         assert "approved_on" not in st["x/1"] and st["x/1"]["proposed_change"] == "b"
 
     def test_reject_records_the_reason(self, fw):
         fw.propose("x/1", "a", "f.py")
         assert fw.reject("x/1", note="not worth it") == 0
-        st = json.load(open(fw.STATE))
+        st = fw._store
         assert st["x/1"]["status"] == "wont_fix" and st["x/1"]["note"] == "not worth it"
 
     def test_status_exits_nonzero_when_a_violation_exists(self, fw, capsys):
-        json.dump({"x/1": {"status": "resolved_UNAPPROVED",
-                           "resolved_on": "2026-08-23"}}, open(fw.STATE, "w"))
+        fw._store["x/1"] = {"status": "resolved_UNAPPROVED", "resolved_on": "2026-08-23"}
         assert fw.status() == 1
         assert "WITHOUT APPROVAL" in capsys.readouterr().out
 

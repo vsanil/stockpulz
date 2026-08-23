@@ -37,17 +37,17 @@ VIOLATION = "resolved_UNAPPROVED"
 
 
 def _load() -> dict:
-    try:
-        with open(STATE) as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return {}
+    from config_manager import get_finding_dispositions
+    return get_finding_dispositions()
 
 
 def _save(state: dict) -> None:
-    os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    with open(STATE, "w") as fh:
-        json.dump(state, fh, indent=2, sort_keys=True)
+    """Persist through the storage backend so /admin and CI see the same store."""
+    from config_manager import set_finding_disposition
+    for fid, rec in state.items():
+        rec = dict(rec)
+        status = rec.pop("status", "open")
+        set_finding_disposition(fid, status, rec.pop("note", ""), extra=rec)
 
 
 def _today() -> str:
