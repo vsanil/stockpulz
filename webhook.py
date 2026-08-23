@@ -1370,7 +1370,11 @@ function findingsCard(rows,decidedN){
             +'<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'wont_fix\\')\">Decline</button>'
           : '<span class="fb-meta">Approved '+(x.approved_on||'')+' &mdash; cleared to implement.</span>');
     return '<div class="fb">'
-      +'<div class="fb-meta">'+(bad?'\uD83D\uDEA8 ':'')+x.status+' &middot; <code>'+x.id+'</code></div>'
+      // NOT '\\uD83D\\uDEA8'. This JS lives inside a Python triple-quoted
+      // string, and Python reads that as two LONE SURROGATES rather than an
+      // emoji \u2014 the response then dies with UnicodeEncodeError and the WHOLE
+      // /admin page 500s. Use an HTML entity, which is inert to Python.
+      +'<div class="fb-meta">'+(bad?'&#128680; ':'')+x.status+' &middot; <code>'+x.id+'</code></div>'
       +'<div class="fb-text">'+(x.proposed_change||x.note||'(no proposal recorded)')+'</div>'
       +(x.proposed_files?'<div class="fb-meta">files: <code>'+x.proposed_files+'</code></div>':'')
       +'<div style="margin-top:6px">'+acts+'</div>'
