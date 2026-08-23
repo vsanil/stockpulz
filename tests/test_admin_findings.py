@@ -145,3 +145,42 @@ class TestCardIsVisibleWhenEmpty:
         for f in ("scripts/analyze_engine.py", "scripts/findings.py",
                   "webhook.py"):
             assert "analysis/findings_state.json" not in pathlib.Path(f).read_text(), f
+
+
+class TestAdminPageActuallyRenders:
+    """🔴 The whole /admin page 500'd for ~40 minutes in production and every
+    test was green, because nothing ever FETCHED it with an admin session —
+    the tests all asserted on the JS source string instead.
+
+    Cause: the card used '\\uD83D\\uDEA8' for an emoji. That is correct in JS
+    source, but this JS lives inside a Python triple-quoted string, so PYTHON
+    read it as two LONE SURROGATES. Flask cannot encode those to UTF-8, so the
+    response died with UnicodeEncodeError and the page never rendered at all.
+    The symptom looked exactly like a missing card.
+    """
+
+    def _admin_get(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        return client.get("/admin")
+
+    def test_the_dashboard_returns_200_and_is_encodable(self, client):
+        r = self._admin_get(client)
+        assert r.status_code == 200, f"/admin is {r.status_code}, not rendering"
+        r.get_data()  # the encode step that actually blew up
+
+    def test_the_findings_card_is_present_in_the_served_page(self, client):
+        assert b"Engine findings" in self._admin_get(client).get_data()
+
+    def test_no_lone_surrogate_escapes_anywhere_in_webhook(self):
+        """The bug class, not just the instance. A surrogate escape inside a
+        Python string is always wrong — use a literal emoji or an HTML entity."""
+        import re
+        src = pathlib.Path("webhook.py").read_text()
+        hits = [src[max(0, m.start() - 60):m.start() + 12]
+                for m in re.finditer(r"(?<!\\)\\u[dD][89abAB][0-9a-fA-F]{2}", src)]
+        assert not hits, f"lone surrogate escape(s) in webhook.py: {hits}"
+
+    def test_the_whole_served_page_encodes_as_utf8(self, client):
+        # Belt and braces: any future surrogate anywhere in the page fails here.
+        self._admin_get(client).get_data().decode("utf-8")
