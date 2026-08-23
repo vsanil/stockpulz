@@ -7,7 +7,8 @@ major path (picks, prices, sizing, paper trade, alerts, watchlist, backtest,
 delivery/cron health, endpoint health) AND verifies the underlying math, then
 DMs a report to the admin.
 
-Non-destructive: before any mutation it snapshots the affected Gist files and
+Non-destructive: before any mutation it snapshots the affected files FROM THE
+LIVE BACKEND (Gist or Supabase, whichever the app resolves to) and
 ALWAYS restores them in a finally block, so the admin's real data is byte-for-byte
 unchanged after a run — the paper buy / alert / watchlist round-trips leave nothing.
 
@@ -67,34 +68,93 @@ def _gist_all() -> dict:
     return r.json().get("files", {})
 
 
-def _gist_restore(snapshot: dict) -> None:
-    """Write the snapshotted contents back verbatim, with retries. GitHub can
-    409/403 on rapid successive PATCHes to the same gist (the canary does ~8
-    writes during a run), so a single restore PATCH sometimes conflicts — retry
-    with backoff until it lands, else the run leaves residue on the account."""
+def _store():
+    """The backend the APP uses — NOT the raw Gist API.
+
+    🔴 Every data read here used to go through `_gist_all()` while production
+    and CI resolve to Supabase. Two live consequences, both measured
+    2026-08-23: `data.completeness` FAILED on a 2026-08-19 stamp while Supabase
+    held 2026-08-21 (a false alarm that fired self_heal), and the mutating
+    round-trips WROTE through the app to Supabase while restoring the GIST — so
+    the restore undid nothing and residue accumulated in production storage.
+
+    A monitor that reads a different store than the app is not monitoring the
+    app. Imported function-locally to match the rest of this file.
+    """
+    from storage import get_storage_backend
+    return get_storage_backend()
+
+
+def _store_read(name: str):
+    """Read `name` from the table it actually lives in.
+
+    User-keyed files are ROWS on a row backend and need `read_all_users`;
+    `read()` hits `documents` and would report them empty — the exact false
+    alarm that nearly triggered a rollback on 2026-08-22.
+    """
+    from config_manager import USER_KEYED_FILES
+    b = _store()
+    if name in USER_KEYED_FILES and b.supports_rows():
+        return b.read_all_users(name)
+    return b.read(name)
+
+
+def _snapshot() -> dict:
+    """Capture the stores the mutating checks touch, from the LIVE backend."""
+    snap = {}
+    for fn in _SNAP_FILES:
+        try:
+            snap[fn] = _store_read(fn)
+        except Exception:
+            snap[fn] = None          # never let one unreadable file abort the run
+    return snap
+
+
+def _restore(snapshot: dict) -> None:
+    """Put every snapshotted store back, with retries.
+
+    🔴 Rows do not disappear the way a whole-file rewrite made them disappear.
+    On the Gist a restore rewrote the entire blob, so any chat_id the run
+    CREATED vanished for free. On a row backend that key survives, so rows the
+    run added must be tombstoned explicitly — otherwise every canary run leaves
+    a synthetic user behind in production storage.
+
+    Writes go through the same backend the run mutated. Retried because GitHub
+    409/403s on rapid successive PATCHes (the run does ~8 writes) and Supabase
+    can lose a CAS race; residue is the failure this exists to prevent.
+    """
     import time
-    files = {fn: {"content": c} for fn, c in snapshot.items() if c is not None}
-    if not files:
-        return
-    time.sleep(1.5)   # let GitHub settle after the run's writes
+    from config_manager import USER_KEYED_FILES
+    b = _store()
+    time.sleep(1.5)                  # let the backend settle after the writes
     last = ""
     for attempt in range(1, 7):
-        r = requests.patch(f"https://api.github.com/gists/{_GID}",
-                           headers={"Authorization": f"token {_TOK}"},
-                           json={"files": files}, timeout=25)
-        if r.status_code < 400:
+        try:
+            for fn, before in snapshot.items():
+                if before is None:
+                    continue
+                if fn in USER_KEYED_FILES and b.supports_rows():
+                    after = b.read_all_users(fn) or {}
+                    for uid in set(after) - set(before):
+                        _cur, ver = b.read_user(fn, str(uid))
+                        empty = [] if isinstance(after.get(uid), list) else {}
+                        b.write_user(fn, str(uid), empty, ver)
+                    for uid, content in before.items():
+                        _cur, ver = b.read_user(fn, str(uid))
+                        b.write_user(fn, str(uid), content, ver)
+                else:
+                    b.write(fn, before)
             return
-        last = f"{r.status_code} {r.text[:80]}"
-        time.sleep(2 * attempt)
-    raise RuntimeError(f"gist restore failed after retries: {last}")
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {exc}"[:120]
+            time.sleep(2 * attempt)
+    raise RuntimeError(f"restore failed after retries: {last}")
 
 
 def _raw_picks() -> dict:
     """Read picks.json directly (NOT load_picks, which returns None off-day)."""
-    import json
-    files = _gist_all()
     try:
-        return json.loads(files.get("picks.json", {}).get("content") or "{}")
+        return _store_read("picks.json") or {}
     except Exception:
         return {}
 
@@ -286,6 +346,11 @@ def check_storage_headroom() -> None:
     NOT some far-off 10k. This check makes the runway visible instead of a
     surprise."""
     WARN = 700_000          # ~70% of the limit — migrate when this trips
+    # Deliberately still the GIST: this measures GitHub's per-file API limit,
+    # which is a property of the Gist and of nothing else. Once the app is on a
+    # row backend the Gist is the ROLLBACK copy, and its headroom still decides
+    # whether a rollback is possible — so the check stays, and the note says
+    # which store it graded rather than implying it graded production.
     try:
         files = _gist_all()
     except Exception as e:
@@ -298,7 +363,7 @@ def check_storage_headroom() -> None:
             biggest, worst = name, size
     ok = worst < WARN
     _check("storage.headroom", ok,
-           f"largest file {biggest} = {worst/1024:.0f} KB "
+           f"GIST: largest file {biggest} = {worst/1024:.0f} KB "
            f"({worst/1_000_000*100:.0f}% of the ~1 MB limit)"
            + ("" if ok else "  → TIME TO MIGRATE to a row store"))
 
@@ -397,7 +462,7 @@ def check_weekly_relay() -> None:
     Silent on days no weekly run fired: a check that cries wolf six days out of
     seven trains you to ignore it.
     """
-    import datetime as _dt, json as _json
+    import datetime as _dt
     from config_manager import get_config, et_today, get_allowed_users
     try:
         cfg = get_config()
@@ -439,11 +504,9 @@ def check_weekly_relay() -> None:
     # 2. The defect itself: did it actually set alerts, for a REAL user?
     #    Split by account — the synthetic bot's alerts MASKED this exact gap.
     try:
-        meta = (_gist_all() or {}).get("price_alerts.json") or {}
-        body = meta.get("content")
-        if meta.get("truncated"):        # >1MB: content is partial, refetch raw
-            body = requests.get(meta["raw_url"], timeout=20).text
-        alerts = _json.loads(body or "{}")
+        # Read the LIVE store. Reading the Gist here would grade the rollback
+        # copy, and on 2026-08-23 that copy was days out of step with production.
+        alerts = _store_read("price_alerts.json") or {}
         real = set(map(str, get_allowed_users() or []))
         n = 0
         for uid in real:
@@ -551,8 +614,7 @@ def check_data_completeness() -> None:
     """
     FUNDAMENTAL_MIN = 80.0        # % of attempted fetches that must succeed
     try:
-        import json as _json
-        dq = _json.loads(_gist_all().get("data_quality.json", {}).get("content") or "{}")
+        dq = _store_read("data_quality.json") or {}
     except Exception as e:
         _check("data.completeness", True, f"NOT VERIFIED this run — {type(e).__name__}")
         return
@@ -635,6 +697,48 @@ def check_position_integrity() -> None:
                           f"they cannot behave correctly regardless of the market"))
 
 
+def check_storage_surfaces() -> None:
+    """🔴 A surface silently on the WRONG backend is invisible for days.
+
+    Measured 2026-08-23: every Supabase `cron_last_*` was frozen at 2026-08-19
+    while the Gist's ran to that very morning — Render had been writing to the
+    Gist while GitHub Actions wrote to Supabase, so the same file existed twice
+    with different contents. Nothing reported it. It surfaced only because the
+    two stores were diffed by hand, four days later.
+
+    That is the SAME split-brain as 2026-08-19 (`d11a1c9`), which was declared
+    closed. It reopened because closing it was a configuration act with no
+    monitor behind it. This is the monitor.
+
+    Compares the backend THIS job resolves to against what the web service
+    reports at /health. They must agree — one store, or writes land in two.
+    """
+    base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
+            or "https://stock-agent-enqx.onrender.com").rstrip("/")
+    try:
+        mine = _store().name()
+    except Exception as exc:
+        _check("storage.surfaces", True,
+               f"NOT VERIFIED this run — local backend unresolvable ({exc})")
+        return
+    try:
+        theirs = (requests.get(base + "/health", timeout=25).json() or {}).get("storage")
+    except Exception as exc:
+        _check("storage.surfaces", True,
+               f"NOT VERIFIED this run — {type(exc).__name__}")
+        return
+    # A green line must never imply a check that could not run.
+    if not theirs or theirs == "unavailable":
+        _check("storage.surfaces", True,
+               f"NOT VERIFIED — the web service reports storage={theirs!r}")
+        return
+    _check("storage.surfaces", mine == theirs,
+           f"both surfaces agree on {theirs}",
+           fail_detail=(f"SPLIT BRAIN: this job writes to {mine}, the web service "
+                        f"writes to {theirs} — the same file now exists in two "
+                        f"stores with different contents, and neither is complete"))
+
+
 def check_endpoints() -> None:
     base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
             or "https://stock-agent-enqx.onrender.com").rstrip("/")
@@ -651,9 +755,7 @@ def check_endpoints() -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_mutations(admin: str) -> None:
-    snap_files = _gist_all()
-    snapshot = {fn: snap_files.get(fn, {}).get("content")
-                for fn in _SNAP_FILES if fn in snap_files}
+    snapshot = _snapshot()
     try:
         _check("snapshot", bool(snapshot), f"{len(snapshot)} files snapshotted")
 
@@ -834,7 +936,7 @@ def check_mutations(admin: str) -> None:
     finally:
         # ALWAYS restore — guarantees the admin's data is unchanged after a run.
         try:
-            _gist_restore(snapshot)
+            _restore(snapshot)
             _check("restore", True, "all mutated stores restored to snapshot")
         except Exception as e:
             _check("restore", False, f"RESTORE FAILED: {e}")
@@ -884,7 +986,7 @@ def main() -> int:
                check_weekly_relay,
                check_synthetic_user,
                check_position_integrity,
-               check_endpoints):
+               check_storage_surfaces, check_endpoints):
         try:
             fn()
         except Exception as e:

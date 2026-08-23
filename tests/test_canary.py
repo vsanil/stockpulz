@@ -129,11 +129,14 @@ class TestCanaryHelpers:
         # stamps tomorrow's date and the check correctly reads it as a FUTURE
         # screener run — failing three tests every night for four hours while the
         # code under test was fine. Same class as the documented UTC-vs-ET bug.
-        import json
         from config_manager import et_today
         payload = {"date": date or et_today().isoformat(), "sources": sources}
-        monkeypatch.setattr(canary, "_gist_all",
-                            lambda: {"data_quality.json": {"content": json.dumps(payload)}})
+        # Stub the LIVE-STORE read, not the raw Gist API. The canary used to
+        # read the Gist while the app resolved to Supabase, so it graded the
+        # rollback copy — a false "stale" alarm on 2026-08-23 that fired
+        # self_heal. Stubbing _gist_all here would pin the old wrong path.
+        monkeypatch.setattr(canary, "_store_read",
+                            lambda name: payload if name == "data_quality.json" else None)
         canary.RESULTS.clear()
         canary.check_data_completeness()
         name, ok, note = canary.RESULTS[-1]
@@ -193,7 +196,7 @@ class TestCanaryHelpers:
         assert not ok and "stale" in note
 
     def test_missing_file_says_not_verified_rather_than_green(self, monkeypatch):
-        monkeypatch.setattr(canary, "_gist_all", lambda: {})
+        monkeypatch.setattr(canary, "_store_read", lambda name: None)
         canary.RESULTS.clear()
         canary.check_data_completeness()
         _, ok, note = canary.RESULTS[-1]
@@ -201,9 +204,9 @@ class TestCanaryHelpers:
         assert ok and "NOT VERIFIED" in note
 
     def test_an_unreachable_gist_says_not_verified(self, monkeypatch):
-        def _boom():
-            raise RuntimeError("gist down")
-        monkeypatch.setattr(canary, "_gist_all", _boom)
+        def _boom(name):
+            raise RuntimeError("store down")
+        monkeypatch.setattr(canary, "_store_read", _boom)
         canary.RESULTS.clear()
         canary.check_data_completeness()
         _, ok, note = canary.RESULTS[-1]
@@ -284,8 +287,9 @@ class TestWeeklyRelayCheck:
         monkeypatch.setattr(cm, "get_config", lambda: {
             "cron_last_weekly": (today.isoformat() if weekly_today else "2026-08-15") + "T12:00:43Z"})
         monkeypatch.setattr(cm, "get_allowed_users", lambda: ["111", "222"])
-        monkeypatch.setattr(canary, "_gist_all", lambda: {
-            "price_alerts.json": {"content": json.dumps(alerts if alerts is not None else {})}})
+        monkeypatch.setattr(canary, "_store_read",
+                            lambda name: (alerts if alerts is not None else {})
+                            if name == "price_alerts.json" else None)
 
         class _R:
             status_code = 200 if api_ok else 503
