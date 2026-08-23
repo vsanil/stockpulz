@@ -92,7 +92,7 @@ def _live_price(ticker: str) -> float | None:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = None,
-              stop_loss: float | None = None, target_price: float | None = None) -> str:
+              stop_loss: float | None = None, target_price: float | None = None, levels_source: str | None = None) -> str:
     """Simulate buying shares for a user. Returns Telegram-formatted confirmation."""
     ticker = ticker.upper()
     live   = _live_price(ticker)
@@ -120,6 +120,7 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
             # Update stop/target if provided on scale-in
             if stop_loss   is not None: existing["stop_loss"]    = round(stop_loss, 4)
             if target_price is not None: existing["target_price"] = round(target_price, 4)
+            if levels_source: existing["levels_source"] = levels_source
         else:
             pos = {
                 "ticker":      ticker,
@@ -131,6 +132,10 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
             }
             if stop_loss   is not None: pos["stop_loss"]    = round(stop_loss, 4)
             if target_price is not None: pos["target_price"] = round(target_price, 4)
+            # Whether these levels came from the PICK or from the ±5%/8%
+            # fallback. Without it the exit-reason mix cannot distinguish "our
+            # published level was hit" from "the fallback was hit".
+            if levels_source: pos["levels_source"] = levels_source
             data["positions"].append(pos)
 
         data["cash"] = round(data["cash"] - cost, 2)
@@ -205,6 +210,10 @@ def paper_sell(ticker: str, chat_id: str, shares: float | None = None,
             "bought_date":  position.get("bought_date"),
             "stop_loss":    position.get("stop_loss"),
             "target_price": position.get("target_price"),
+            # Carried for the same reason as the levels themselves: a closed
+            # trade whose stop was SUBSTITUTED says nothing about the engine's
+            # published levels, and without this the exit mix cannot tell.
+            "levels_source": position.get("levels_source"),
         })
 
         # Update position

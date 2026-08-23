@@ -251,7 +251,7 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
                 entry_override=None, stop_override=None,
                 shares_override=None, timeframe_override=None,
                 target_override=None, asset_type_override=None,
-                source: str | None = None) -> tuple[dict, bool]:
+                source: str | None = None, levels_source: str | None = None) -> tuple[dict, bool]:
     """
     Add a ticker to a user's portfolio (no price/qty needed).
     Uses today's pick levels for target/stop alerts if available.
@@ -348,6 +348,8 @@ def add_holding(ticker: str, chat_id: str, picks: dict | None = None,
     # close_trade spreads **trade, so this carries into the closed record too.
     if source:
         trade["source"] = source
+    if levels_source:
+        trade["levels_source"] = levels_source
 
     def _mut(log):
         log = log or {"open": [], "closed": [], "watchlist": []}

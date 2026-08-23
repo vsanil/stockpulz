@@ -115,19 +115,23 @@ class TestLevelsBracketFill:
     filled at $1,177.74 carrying the pick's $1,290 stop)."""
 
     def test_stop_above_fill_is_replaced(self):
-        s, t = su._levels_for(1177.74, 1290.0, 1540.0)   # the real FICO case
+        s, t, src = su._levels_for(1177.74, 1290.0, 1540.0)  # the real FICO case
+        assert src == "stop", "the substituted leg must be recorded"
         assert s < 1177.74 < t
         assert s == round(1177.74 * 0.95, 4)
 
     def test_target_below_fill_is_replaced(self):
-        s, t = su._levels_for(100.0, 90.0, 95.0)
+        s, t, src = su._levels_for(100.0, 90.0, 95.0)
+        assert src == "target"
         assert s < 100.0 < t
         assert t == round(100.0 * 1.08, 4)
 
     def test_valid_pick_levels_are_kept(self):
-        s, t = su._levels_for(100.0, 92.0, 115.0)
+        s, t, src = su._levels_for(100.0, 92.0, 115.0)
+        assert src == "pick", "nothing was substituted — must read as pick"
         assert (s, t) == (92.0, 115.0), "must not override levels that already bracket the fill"
 
     def test_missing_levels_are_filled(self):
-        s, t = su._levels_for(50.0, None, None)          # LT picks carry no stop
+        s, t, src = su._levels_for(50.0, None, None)     # LT picks carry no stop
+        assert src == "both"
         assert s < 50.0 < t
