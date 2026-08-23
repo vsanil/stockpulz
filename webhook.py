@@ -1349,6 +1349,41 @@ function auditSection(a){
     +rows+'</div>';
 }
 
+function findingsCard(rows){
+  if(!rows||!rows.length) return '';
+  var head='<h2>Engine findings</h2>';
+  var body=rows.map(function(x){
+    var bad = x.status==='resolved_UNAPPROVED';
+    var acts = bad
+      ? '<span class="fb-meta">Implemented without approval &mdash; review the commit history.</span>'
+      : (x.status==='awaiting_approval'
+          ? '<button class=\"btn-success\" onclick=\"setFinding(\\''+x.id+'\\',\\'approved\\')\">Approve</button> '
+            +'<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'wont_fix\\')\">Decline</button>'
+          : '<span class="fb-meta">Approved '+(x.approved_on||'')+' &mdash; cleared to implement.</span>');
+    return '<div class="fb">'
+      +'<div class="fb-meta">'+(bad?'\uD83D\uDEA8 ':'')+x.status+' &middot; <code>'+x.id+'</code></div>'
+      +'<div class="fb-text">'+(x.proposed_change||x.note||'(no proposal recorded)')+'</div>'
+      +(x.proposed_files?'<div class="fb-meta">files: <code>'+x.proposed_files+'</code></div>':'')
+      +'<div style="margin-top:6px">'+acts+'</div>'
+      +'</div>';
+  }).join('');
+  return '<div class="card">'+head
+    +'<div class="fb-meta" style="margin-bottom:8px">Approving clears me to implement &mdash; it does '
+    +'<b>not</b> deploy anything. A finding whose condition disappears while still awaiting approval '
+    +'is flagged as implemented without consent.</div>'
+    +body+'</div>';
+}
+
+async function setFinding(id,status){
+  try{
+    var r=await fetch('/admin/findings/'+encodeURIComponent(id),
+      {method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({status:status})});
+    if(!r.ok){alert('Failed: HTTP '+r.status);return;}
+    load();
+  }catch(e){alert('Network error');}
+}
+
 async function setAudit(id,status){
   try{
     var r=await fetch('/admin/audit/'+encodeURIComponent(id),
@@ -1367,6 +1402,7 @@ async function load(){
   if(!r.ok){document.getElementById('root').innerHTML='<p class="empty">Error '+r.status+'</p>';return;}
   var d=await r.json();
   document.getElementById('root').innerHTML=
+    findingsCard(d.findings)+
     metrics(d.stats)
     +pendingSection(d.pending)
     +broadcastBar()
@@ -1565,6 +1601,35 @@ def admin_audit_disposition(finding_id):
     return jsonify({"ok": True, "status": status, "record": rec})
 
 
+@app.route("/admin/findings/<path:finding_id>", methods=["POST"])
+@_require_admin
+def admin_finding_disposition(finding_id):
+    """Approve / decline / reopen an engine finding.
+
+    `approve` is the consent gate: a finding must have been PROPOSED first
+    (status awaiting_approval), so approval always attaches to a concrete
+    change and set of files rather than to a title. Approving something that
+    was never proposed is refused — otherwise "approved" would mean nothing.
+    """
+    from config_manager import (get_finding_dispositions, set_finding_disposition,
+                                et_today)
+    body   = request.get_json(silent=True) or {}
+    status = str(body.get("status", "")).strip().lower()
+    if status not in ("approved", "wont_fix", "acknowledged", "open"):
+        return jsonify({"error": "status must be approved|wont_fix|acknowledged|open"}), 400
+
+    cur = (get_finding_dispositions() or {}).get(finding_id) or {}
+    if status == "approved" and cur.get("status") != "awaiting_approval":
+        return jsonify({"error": "nothing proposed for this finding — approval "
+                                 "must attach to a concrete change"}), 409
+
+    extra = {}
+    if status == "approved":
+        extra["approved_on"] = et_today().isoformat()   # ET, per the one-clock rule
+    rec = set_finding_disposition(finding_id, status, body.get("note", ""), extra=extra)
+    return jsonify({"ok": True, "status": status, "record": rec})
+
+
 @app.route("/admin/data")
 @_require_admin
 def admin_data():
@@ -1651,7 +1716,20 @@ def admin_data():
         for cid, info in pending_raw.items()
     ]
 
+        # Engine findings awaiting a decision. Per-call try/except so an unreadable
+    # store can never take the dashboard down — same rule as the audit card.
+    try:
+        from config_manager import get_finding_dispositions
+        _disp = get_finding_dispositions() or {}
+        _findings = [dict(v, id=k) for k, v in sorted(_disp.items())
+                     if v.get("status") in ("awaiting_approval", "approved",
+                                            "resolved_UNAPPROVED")]
+    except Exception as _f_exc:
+        print(f"[admin] findings unreadable (non-critical): {_f_exc}")
+        _findings = []
+
     return jsonify({
+        "findings": _findings,
         "stats": {
             "total_users":      len(users),
             "active_today":     active_today,

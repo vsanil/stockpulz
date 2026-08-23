@@ -319,6 +319,47 @@ def load_audit_dispositions() -> dict:
     return _load_gist_file(AUDIT_DISPOSITIONS_FILE) or {}
 
 
+ENGINE_FINDINGS_FILE = "engine_findings_state.json"
+
+
+def get_finding_dispositions() -> dict:
+    """Decisions on engine findings, keyed by finding id.
+
+    🔴 Lives in STORAGE, not in the repo. The daily analysis writes the REPORT
+    to analysis/ENGINE_FINDINGS.md and commits it, but the DECISIONS cannot live
+    beside it: Render's filesystem is ephemeral, so an approval made on /admin
+    would vanish on the next deploy and the GitHub Actions job would never see
+    it. Same reasoning — and same mechanism — as audit_dispositions.
+    """
+    return _load_gist_file(ENGINE_FINDINGS_FILE) or {}
+
+
+def set_finding_disposition(finding_id: str, status: str, note: str = "",
+                            extra: dict | None = None) -> dict:
+    """status: open | awaiting_approval | approved | acknowledged | wont_fix.
+
+    `extra` carries the proposal (proposed_change, proposed_files) and the
+    consent stamp (approved_on) so the whole lifecycle is one record.
+    """
+    from datetime import datetime, timezone
+    fid = str(finding_id)[:96]
+
+    def _mut(data):
+        data = data or {}
+        rec = dict(data.get(fid) or {})
+        rec.update(extra or {})
+        rec["status"] = status
+        if note:
+            rec["note"] = str(note)[:600]
+        rec["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if data.get(fid) == rec:
+            return NO_WRITE, rec
+        data[fid] = rec
+        return data, rec
+
+    return mutate_gist_file(ENGINE_FINDINGS_FILE, _mut, default={})
+
+
 def set_audit_disposition(finding_id: str, status: str, note: str = "") -> dict:
     """status: 'resolved' | 'ignored' | 'open' (which clears the mark)."""
     from datetime import datetime, timezone

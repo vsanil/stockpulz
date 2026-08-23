@@ -116,17 +116,26 @@ class Finding:
 
 
 def _load_state() -> dict:
+    """🔴 From STORAGE, not the repo. Render's filesystem is ephemeral, so an
+    approval made on /admin would be lost on the next deploy and this job would
+    never see it. The generated REPORT stays in the repo; the DECISIONS do not."""
     try:
-        with open(STATE) as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
+        from config_manager import get_finding_dispositions
+        return get_finding_dispositions()
+    except Exception as exc:
+        print(f"[analyze] disposition store unreadable ({exc}) — treating as empty")
         return {}
 
 
 def _save_state(state: dict) -> None:
-    os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    with open(STATE, "w") as fh:
-        json.dump(state, fh, indent=2, sort_keys=True)
+    try:
+        from config_manager import set_finding_disposition
+        for fid, rec in state.items():
+            rec = dict(rec)
+            status = rec.pop("status", "open")
+            set_finding_disposition(fid, status, rec.pop("note", ""), extra=rec)
+    except Exception as exc:
+        print(f"[analyze] could not persist dispositions ({exc})")
 
 
 def _apply_state(findings: list, state: dict, today: str) -> dict:

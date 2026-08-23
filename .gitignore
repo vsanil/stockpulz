@@ -12,3 +12,4 @@ graphify-out/cache/
 # walk-forward backtest artifacts (bar cache + holdout-view ledger)
 scripts/.backtest_bars.pkl
 scripts/.holdout_views.json
+analysis/findings_state.json
