@@ -40,8 +40,6 @@ OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 MIN_N = 30            # matches evaluate_picks._MIN_N and _MIN_DIRECTIVE_N
 
 
-STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "analysis", "findings_state.json")
 
 # What still DEMANDS a decision. `acknowledged`/`wont_fix` are decisions
 # already made — keeping them in the worklist is the cry-wolf failure that
@@ -502,8 +500,9 @@ def build(dry: bool = False, notify: bool = False) -> str:
                      + (f" · _{f.note}_" if f.note else ""))
     L += [
         "",
-        "**To close one:** implement the fix, or record a decision in "
-        "`analysis/findings_state.json` "
+        "**To close one:** implement the fix, or record a decision on the "
+        "**/admin** dashboard (Engine findings card) or via "
+        "`scripts/findings.py` "
         "(`status`: `acknowledged` | `wont_fix`, plus a `note` saying why). "
         "A finding whose condition DISAPPEARS is marked `resolved` "
         "automatically — that is the intended path.",

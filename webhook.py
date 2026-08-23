@@ -1349,9 +1349,18 @@ function auditSection(a){
     +rows+'</div>';
 }
 
-function findingsCard(rows){
-  if(!rows||!rows.length) return '';
+function findingsCard(rows,decidedN){
+  rows = rows||[];
   var head='<h2>Engine findings</h2>';
+  // 🔴 Renders even with nothing pending. An invisible card reads as a broken
+  // feature — the whole point is that you can come here and SEE there is
+  // nothing waiting on you, rather than wondering where it went.
+  if(!rows.length){
+    return '<div class="card">'+head
+      +'<div class="fb-meta">Nothing awaiting your approval. '
+      +(decidedN?(decidedN+' finding(s) already decided.'):'')
+      +'</div></div>';
+  }
   var body=rows.map(function(x){
     var bad = x.status==='resolved_UNAPPROVED';
     var acts = bad
@@ -1402,7 +1411,7 @@ async function load(){
   if(!r.ok){document.getElementById('root').innerHTML='<p class="empty">Error '+r.status+'</p>';return;}
   var d=await r.json();
   document.getElementById('root').innerHTML=
-    findingsCard(d.findings)+
+    findingsCard(d.findings, d.findings_decided)+
     metrics(d.stats)
     +pendingSection(d.pending)
     +broadcastBar()
@@ -1721,15 +1730,21 @@ def admin_data():
     try:
         from config_manager import get_finding_dispositions
         _disp = get_finding_dispositions() or {}
+        _pending = ("awaiting_approval", "approved", "resolved_UNAPPROVED")
         _findings = [dict(v, id=k) for k, v in sorted(_disp.items())
-                     if v.get("status") in ("awaiting_approval", "approved",
-                                            "resolved_UNAPPROVED")]
+                     if v.get("status") in _pending]
+        # Decided items are NOT listed (that is the cry-wolf failure) but the
+        # count is, so an empty card reads as "nothing waiting" rather than
+        # "this feature is broken".
+        _decided = sum(1 for v in _disp.values()
+                       if v.get("status") not in _pending)
     except Exception as _f_exc:
         print(f"[admin] findings unreadable (non-critical): {_f_exc}")
-        _findings = []
+        _findings, _decided = [], 0
 
     return jsonify({
         "findings": _findings,
+        "findings_decided": _decided,
         "stats": {
             "total_users":      len(users),
             "active_today":     active_today,

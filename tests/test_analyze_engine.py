@@ -195,7 +195,10 @@ class TestDispositions:
                 os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
         m = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(m)
-        monkeypatch.setattr(m, "STATE", str(tmp_path / "state.json"))
+        # No STATE patch: dispositions live in STORAGE now, and every test
+        # here passes the state dict in explicitly, so nothing is read from
+        # or written to a backend. Patching the old file constant was
+        # vestigial — it survived the move and pointed at nothing.
         return m
 
     def _f(self, m, fid="x/1", status=None):
@@ -291,7 +294,9 @@ class TestNewActNotification:
                 os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
         m = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(m)
-        monkeypatch.setattr(m, "STATE", str(tmp_path / "s.json"))
+        # No STATE patch — see the note in TestDispositions. _notify_new_act
+        # mutates the state dict it is GIVEN; only main() persists, so these
+        # tests never reach a storage backend.
         sent = []
         import telegram_api
         monkeypatch.setattr(telegram_api, "send_message",

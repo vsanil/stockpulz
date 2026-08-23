@@ -28,8 +28,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-STATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "analysis", "findings_state.json")
 
 AWAITING = "awaiting_approval"
 APPROVED = "approved"
