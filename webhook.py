@@ -913,8 +913,16 @@ var picks={},activeTab='',_dData=null,_dTab='overview';
 function age(iso){
   if(!iso)return'—';
   try{
-    var d=new Date(iso+(iso.endsWith('Z')?'':'Z')),now=new Date();
+    // A naive timestamp is UTC and needs the Z. But Supabase returns an
+    // OFFSET (...+00:00), and appending Z to that makes an INVALID date —
+    // which does not throw, so the catch never fires and NaN falls through
+    // every comparison below to render "NaNd ago". Only add Z when there is
+    // no zone at all.
+    var s=String(iso),zoned=/(Z|[+-]\\d{2}:?\\d{2})$/.test(s);
+    var d=new Date(zoned?s:s+'Z'),now=new Date();
     var m=Math.round((now-d)/60000);
+    // Never let a bad date render as a number. Show the raw stamp instead.
+    if(!isFinite(m))return s.slice(0,16).replace('T',' ');
     if(m<2)return'just now';if(m<60)return m+'m ago';
     if(m<1440)return Math.round(m/60)+'h ago';return Math.round(m/1440)+'d ago';
   }catch(e){return iso.slice(0,16).replace('T',' ');}
