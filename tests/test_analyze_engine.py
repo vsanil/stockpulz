@@ -86,3 +86,92 @@ class TestSafety:
         rank = {"ACT": 0, "MEASURE": 1, "HOLD": 2}
         assert tiers == sorted(tiers, key=lambda t: rank[t]), \
             "an ACT finding could be buried below a HOLD"
+
+
+class TestLevelsSourceIsRecorded:
+    """🔴 The exit-reason mix was CONFOUNDED until 2026-08-23.
+
+    `_levels_for` substitutes ±5%/8% when a pick's levels do not bracket the
+    actual fill. A stop-out on a SUBSTITUTED stop says nothing about the
+    engine's published levels — only about the fallback. Without recording
+    which was used, the stop:target ratio mixes two different measurements.
+    """
+
+    def _lf(self):
+        import importlib.util
+        import os
+        import sys
+        os.environ.setdefault("GIST_ID", "x")
+        os.environ.setdefault("GH_GIST_TOKEN", "x")
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        spec = importlib.util.spec_from_file_location(
+            "su", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "synthetic_user.py"))
+        su = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(su)
+        return su._levels_for
+
+    @pytest.mark.parametrize("px,stop,target,want", [
+        (100, 95, 110, "pick"),        # both bracket the fill
+        (100, 105, 110, "stop"),       # stop above the fill
+        (100, 95, 90, "target"),       # target below the fill
+        (100, None, None, "both"),
+        (1177.74, 1290, 1400, "stop"), # the live FICO case
+    ])
+    def test_it_reports_which_leg_was_substituted(self, px, stop, target, want):
+        s, t, src = self._lf()(px, stop, target)
+        assert src == want
+        assert s < px < t, "the returned levels must still bracket the fill"
+
+    def test_a_substituted_level_is_never_silently_inherited(self):
+        """The whole point: an unusable pick level must not be passed through."""
+        s, _t, src = self._lf()(100, 105, 110)
+        assert s < 100 and src == "stop"
+
+    def test_the_analysis_separates_pick_levels_from_the_fallback(self):
+        import importlib.util
+        import os
+        spec = importlib.util.spec_from_file_location(
+            "ae", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
+        ae2 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ae2)
+        seg = ae2._exit_mix_by_levels_source(
+            {"closed": [{"levels_source": "pick"}, {"levels_source": "stop"}]},
+            {"history": [{"levels_source": "pick"}, {}]})
+        assert seg == {"pick": 2, "stop": 1, "unrecorded": 1}
+
+    def test_pre_existing_trades_are_unrecorded_not_counted_as_pick(self):
+        """Folding them into `pick` would overstate what the engine's own
+        levels have actually been measured on."""
+        import importlib.util
+        import os
+        spec = importlib.util.spec_from_file_location(
+            "ae", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
+        ae2 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ae2)
+        seg = ae2._exit_mix_by_levels_source({"closed": [{}, {}]}, {})
+        assert seg == {"unrecorded": 2}
+
+
+class TestStorageAcceptsTheField:
+    """A stub narrower than production hides a signature change — the
+    add_alert(kind=) and send_inline_keyboard(buttons=) lesson."""
+
+    @pytest.mark.parametrize("mod,fn", [("trade_logger", "add_holding"),
+                                        ("paper_trader", "paper_buy")])
+    def test_the_writer_accepts_levels_source(self, mod, fn):
+        import importlib
+        import inspect
+        f = getattr(importlib.import_module(mod), fn)
+        assert "levels_source" in inspect.signature(f).parameters, \
+            f"{mod}.{fn} cannot record where the levels came from"
+
+    def test_paper_sell_carries_it_into_history(self):
+        import inspect
+        import paper_trader
+        src = inspect.getsource(paper_trader.paper_sell)
+        assert "levels_source" in src, \
+            "a sold paper trade loses the levels source, so closed-trade " \
+            "analysis silently reverts to unrecorded"

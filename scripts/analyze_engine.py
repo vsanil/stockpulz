@@ -205,16 +205,42 @@ def _reachability(rows, log, paper) -> list:
     mix = ((res or {}).get("outcomes") or {}).get("counts") or {}
     if sum(mix.values()) >= 5:
         st, tg = mix.get("stop", 0), mix.get("target", 0)
+        ratio = (f"stops hit {st/tg:.1f}x as often as targets" if tg
+                 else "no target exits yet")
+        # Segment by whether the levels came from the PICK or the fallback —
+        # only the "pick" slice says anything about the engine's own levels.
+        seg = _exit_mix_by_levels_source(log, paper)
+        seg_txt = ""
+        if seg:
+            parts = [f"{k}: {v}" for k, v in sorted(seg.items())]
+            seg_txt = ("  Segmented by levels source — " + " · ".join(parts) +
+                       ". Only the `pick` slice speaks to the ENGINE's levels; "
+                       "`stop`/`target`/`both` are the ±5%/8% fallback.")
         out.append(Finding(
             "MEASURE", "Exit-reason mix",
-            f"{mix} — stops are being hit {st/tg:.1f}x as often as targets."
-            if tg else f"{mix} — no target exits yet.",
-            "Read WITH the geometry finding, not alone: _levels_for substitutes "
-            "+/-5%/8% when a pick's levels do not bracket the actual fill, so "
-            "part of this ratio is the fallback rather than the engine. Record "
-            "whether levels were inherited or substituted to make this clean.",
+            f"{mix} — {ratio}.{seg_txt}",
+            "Read the `pick` slice alone when judging the published levels. A "
+            "high stop:target ratio THERE means the stops are too tight "
+            "relative to targets; the same ratio in the fallback slice means "
+            "the pick's levels did not bracket the fill, which is a different "
+            "problem (levels drifting from the live price by delivery time).",
             n=sum(mix.values())))
     return out
+
+
+def _exit_mix_by_levels_source(log, paper) -> dict:
+    """Closed trades grouped by where their levels came from.
+
+    Positions opened before 2026-08-23 carry no `levels_source`; they are
+    reported as `unrecorded` rather than silently folded into `pick`, which
+    would overstate what the engine's own levels have been measured on.
+    """
+    seg: dict = {}
+    rows = (log.get("closed") or []) + (paper.get("history") or [])
+    for t in rows:
+        src = t.get("levels_source") or "unrecorded"
+        seg[src] = seg.get(src, 0) + 1
+    return seg
 
 
 def _maturity(rows) -> Finding:
