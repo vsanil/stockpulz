@@ -78,13 +78,6 @@ def _merge_traffic(g: dict, s: dict) -> dict:
     return out
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
-
-
-
 def _sb_read(sb, name):
     """🔴 Read the table the file actually lives in.
 
@@ -102,6 +95,27 @@ def _sb_read(sb, name):
     return sb.read(name)
 
 
+def main() -> int:
+    """🔴 This function's BODY was orphaned from 7fee123 until 2026-08-23.
+
+    _sb_read was inserted into the middle of main(), so main() became three
+    statements that parse argv and return None, while the real logic sat after
+    _sb_read's `return` — unreachable. The script printed NOTHING and exited 0,
+    so a dispatched run looked like a clean success and reconciled nothing.
+    Same family as the documented decorator gotcha: never insert a helper `def`
+    into the middle of an existing function.
+    """
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--only", default="",
+                    help="comma-separated filenames; restricts the plan to "
+                         "those files. Use it when a blanket run would be "
+                         "unsafe — picks.json is GIST_WINS but the Gist copy "
+                         "can be the SMALLER one, and overwriting then loses "
+                         "data.")
+    args = ap.parse_args()
+    only = {s.strip() for s in args.only.split(",") if s.strip()}
+
     import storage
     from config_manager import USER_KEYED_FILES
     gist = storage.GistBackend()
@@ -109,6 +123,8 @@ def _sb_read(sb, name):
 
     plan = []
     for name in GIST_WINS + MERGE:
+        if only and name not in only:
+            continue
         g, s = gist.read(name), _sb_read(sb, name)
         if name in MERGE:
             merged = (_merge_alerts if name == "price_alerts.json"
@@ -129,6 +145,8 @@ def _sb_read(sb, name):
         print(f"  {name:<24}{why:<16}keys={keys!s:<6}"
               f"{'no change' if same else 'WRITE'}")
     for name in KEEP_SUPABASE:
+        if only and name not in only:
+            continue
         print(f"  {name:<24}{'KEEP SUPABASE':<16}(the Gist copy is empty)")
 
     if args.dry_run:
