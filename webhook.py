@@ -846,6 +846,7 @@ a{color:var(--accent);text-decoration:none}
 .fbug{background:rgba(96,165,250,.14);color:#93c5fd;border:1px solid rgba(96,165,250,.35)}
 /* Amber, not green: an engine change is the one that needs a closer look. */
 .feng{background:rgba(251,191,36,.14);color:#fcd34d;border:1px solid rgba(251,191,36,.4)}
+.func{background:rgba(148,163,184,.14);color:#cbd5e1;border:1px solid rgba(148,163,184,.35)}
 .fdet{margin-top:8px}
 .fdet>summary{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;cursor:pointer;list-style:none;font-size:13px;font-weight:600;color:var(--muted);background:var(--card-hover);border:1px solid var(--border);border-radius:12px;user-select:none}
 .fdet>summary::-webkit-details-marker{display:none}
@@ -1410,17 +1411,27 @@ function findingsCard(rows,decidedN){
     // change alters what real users are told to buy, so it needs outcome
     // evidence over time — the n>=30 gate — and never the bot's win rate.
     // Unclassified renders as engine: fail toward the closer look.
-    var isBug = x.category === 'bug';
-    var chip  = '<span class="fchip '+(isBug?'fbug':'feng')+'">'
-              + (isBug ? 'Technical bug' : 'Decision-engine change') + '</span>';
-    var basis = isBug
-      ? '<div class="fb-meta">Fixes broken behaviour. Does not change how picks are chosen.</div>'
-      : '<div class="fb-meta">Changes how picks are chosen or levelled &mdash; '
+    // 🔴 THREE states, not two. A record proposed before the category field
+    // existed has none, and defaulting it to 'engine' made the card assert
+    // "Changes how picks are chosen" about a STORAGE CLEANUP — a claim the
+    // data does not support. Fail-safe means demanding a closer look, never
+    // inventing a fact. Unclassified says so and claims nothing.
+    var cat = (x.category === 'bug' || x.category === 'engine') ? x.category : '';
+    var CHIP = {bug:['fbug','Technical bug'],
+                engine:['feng','Decision-engine change'],
+                '':['func','Not yet classified']};
+    var chip = '<span class="fchip '+CHIP[cat][0]+'">'+CHIP[cat][1]+'</span>';
+    var basis = '';
+    if(cat==='bug'){
+      basis = '<div class="fb-meta">Fixes broken behaviour. Does not change how picks are chosen.</div>';
+    } else if(cat==='engine'){
+      basis = '<div class="fb-meta">Changes how picks are chosen or levelled &mdash; '
         + (x.n ? ('based on '+x.n+' observation(s)'
                   + (x.n < 30 ? '. <b>Below the 30 needed to be conclusive.</b>'
                               : '.'))
                : 'no outcome sample recorded yet.')
         + '</div>';
+    }
     var plain = x.proposed_summary || x.proposed_change || x.note
               || '(no description recorded)';
     var tech  = x.proposed_summary ? (x.proposed_change||'') : '';

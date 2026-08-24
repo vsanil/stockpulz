@@ -146,3 +146,78 @@ class TestTheCliAndWorkflowCarryIt:
         silently takes the default."""
         wf = pathlib.Path(".github/workflows/findings.yml").read_text()
         assert "--category" in wf and "options: [engine, bug]" in wf
+
+
+class TestUnclassifiedNeverInventsAClaim:
+    """🔴 The live card said "Changes how picks are chosen or levelled" about a
+    STORAGE CLEANUP. The record predated the category field, so it fell to the
+    'engine' default and the card asserted something the data does not support.
+
+    Fail-safe means demanding a CLOSER LOOK, never inventing a fact. A wrong
+    statement on an approval screen is worse than an absent one — it is exactly
+    the rubber stamp the dashboard exists to prevent.
+    """
+
+    def _js(self):
+        src = pathlib.Path("webhook.py").read_text()
+        i = src.index("function findingsCard(")
+        return src[i:src.index("\nasync function setFinding", i)]
+
+    def test_a_record_with_no_category_is_shown_as_unclassified(self):
+        js = self._js()
+        assert "Not yet classified" in js
+        assert "x.category === 'bug' || x.category === 'engine'" in js, \
+            "an unrecognised category must fall to unclassified, not to engine"
+
+    def test_unclassified_makes_NO_claim_about_picks(self):
+        """The specific falsehood: a storage cleanup labelled as changing how
+        picks are chosen."""
+        js = self._js()
+        i = js.index("var basis = ''")
+        # The claim may only appear inside the explicit engine branch.
+        branch = js[i:js.index("var plain", i)]
+        assert "else if(cat==='engine')" in branch
+        assert branch.index("Changes how picks are chosen") > branch.index("cat==='engine'")
+
+    def test_the_unclassified_chip_is_visually_neutral(self):
+        """Not amber: unclassified is not a warning, it is an absence."""
+        # Anchor on the BACKGROUND declaration itself. A window scan passed
+        # against an amber background because the border kept the slate value —
+        # an assertion that accepts the wrong answer is not a guard.
+        css = pathlib.Path("webhook.py").read_text()
+        assert ".func{background:rgba(148,163,184" in css, \
+            "the unclassified chip must be slate — it is an absence, not a warning"
+
+
+class TestReclassify:
+    """A misclassified or badly-worded finding is a DESCRIPTION problem.
+    Re-proposing would clear the owner's consent and demand it again for a
+    change that has not moved."""
+
+    def test_it_does_not_touch_status(self):
+        src = pathlib.Path("scripts/findings.py").read_text()
+        i = src.index("def reclassify(")
+        body = src[i:src.index("def approve(", i)]
+        assert '"status"' not in body, "reclassify must not alter consent"
+
+    def test_it_rejects_an_unknown_category(self):
+        src = pathlib.Path("scripts/findings.py").read_text()
+        i = src.index("def reclassify(")
+        assert 'category not in ("bug", "engine")' in src[i:src.index("def approve(", i)]
+
+    def test_every_subcommand_actually_dispatches(self):
+        """🔴 reclassify was registered as a parser but never dispatched, so it
+        parsed cleanly and silently fell through to status(). Same class as a
+        CLI flag wired but not passed through the workflow."""
+        import ast
+        src = pathlib.Path("scripts/findings.py").read_text()
+        main = next(f for f in ast.walk(ast.parse(src))
+                    if isinstance(f, ast.FunctionDef) and f.name == "main")
+        dispatched = {n.comparators[0].value for n in ast.walk(main)
+                      if isinstance(n, ast.Compare)
+                      and isinstance(n.comparators[0], ast.Constant)}
+        registered = {n.args[0].value for n in ast.walk(main)
+                      if isinstance(n, ast.Call)
+                      and getattr(n.func, "attr", "") == "add_parser"}
+        assert not (registered - dispatched - {"status"}), \
+            "a subcommand is registered but never reaches a function"
