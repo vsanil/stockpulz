@@ -20,8 +20,16 @@ on:
         required: false
         default: ""
         type: string
+      summary:
+        description: >-
+          propose only — ONE plain-English sentence the owner reads on /admin.
+          No function names, no file paths, no jargon. This is what leads the
+          card; the technical text sits behind a disclosure.
+        required: false
+        default: ""
+        type: string
       change:
-        description: propose only — the concrete change being proposed
+        description: propose only — the TECHNICAL description (behind the disclosure)
         required: false
         default: ""
         type: string
@@ -61,7 +69,8 @@ jobs:
             propose)
               test -n "${{ inputs.id }}" || { echo "id is required"; exit 1; }
               python scripts/findings.py propose "${{ inputs.id }}" \
-                --change "${{ inputs.change }}" --files "${{ inputs.files }}"
+                --change "${{ inputs.change }}" --files "${{ inputs.files }}" \
+                --summary "${{ inputs.summary }}"
               ;;
             prune-dry-run)
               python scripts/prune_alert_junk.py
