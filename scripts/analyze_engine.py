@@ -71,7 +71,7 @@ class Finding:
 
     def __init__(self, fid, tier, title, evidence, fix, n=None,
                  kind="finding", blocked_until=None, where="",
-                 category="engine"):
+                 category=None, plain=""):
         """`category` splits the two things the owner is being asked to judge:
 
           "bug"     a technical defect. One instance is enough to act on; the
@@ -86,10 +86,18 @@ class Finding:
         a bug gets waved through and silently alters everyone's picks. Fail
         toward the answer that demands a closer look.
         """
-        if category not in self.CATEGORIES:
-            raise ValueError(f"category must be one of {self.CATEGORIES}")
+        # 🔴 REQUIRED for an addressable finding — there is no default.
+        # A default does not demand a closer look, it INVENTS a classification
+        # the author never made, and the /admin card then states it as fact.
+        # Metrics are not classified: they are measurements, not decisions.
+        if kind == "finding" and category not in self.CATEGORIES:
+            raise ValueError(
+                f"finding {fid!r} needs an explicit category "
+                f"{self.CATEGORIES} — a bug and a change to how picks are "
+                f"chosen carry different evidence bars")
         self.id = fid
         self.category = category
+        self.plain = plain
         self.kind = kind
         self.tier = tier
         self.title = title
@@ -116,36 +124,51 @@ class Finding:
                       "engine": "DECISION-ENGINE CHANGE"}
 
     def render(self) -> str:
-        # The category leads the header. A technical bug and a change to how
-        # picks are chosen are different decisions with different evidence
-        # bars, and reading them as one list is how an engine change gets
-        # waved through on a single instance.
-        tag = self.CATEGORY_LABEL[self.category] if self.kind == "finding" else "METRIC"
         # Tier stays FIRST: an existing guard parses it from this header to
         # assert ACT findings are never buried below a HOLD. The category
-        # reads just as clearly in second position.
+        # reads just as clearly in second position, and it must be there — a
+        # technical bug and a change to how picks are chosen are different
+        # decisions with different evidence bars.
+        tag = (self.CATEGORY_LABEL[self.category] if self.kind == "finding"
+               else "METRIC")
         head = f"### [{self.tier}] [{tag}] {self.title}"
         if self.n is not None:
             head += f"  *(n={self.n})*"
         L = [head, ""]
         if self.kind == "finding":
             age = f", open {self.age_days}d" if self.age_days else ""
-            flag = "  🔁 **REOPENED**" if self.reopened else ""
+            flag = "  \U0001F501 **REOPENED**" if self.reopened else ""
             L += [f"`{self.id}` · **{self.status}**{age}{flag}", ""]
             if self.note:
                 L += [f"> {self.note}", ""]
+        # 🔴 The PLAIN sentence leads. The /admin card learned this the hard
+        # way: leading with engineer-facing text made the proposal unreadable,
+        # and a change you cannot read is one you can only rubber-stamp. The
+        # same file is the agenda read at session start, so the technical text
+        # is DEMOTED, never dropped — raw markdown still carries all of it.
+        if self.plain:
+            L += [self.plain, ""]
+        # The evidence bar stays ABOVE the fold: it is a caution, not detail.
         if self.kind == "finding" and self.category == "engine":
             gate = (f"n={self.n}" if self.n is not None else "no outcome sample")
             L += [f"**This changes what users are recommended.** Judge it on "
                   f"outcomes over time ({gate}; {MIN_N} needed to be "
                   f"conclusive), never on the synthetic bot's win rate.", ""]
+        elif self.kind == "finding" and self.category == "bug":
+            L += ["**Technical bug** — fixes broken behaviour; changes nothing "
+                  "about how picks are chosen.", ""]
+        if self.plain:
+            L += ["<details><summary>Technical detail</summary>", ""]
         L += [f"**Evidence:** {self.evidence}", "", f"**Fix:** {self.fix}"]
         if self.blocked_until:
             L += ["", f"**Held until:** {self.blocked_until} — below n={MIN_N} "
                       f"any conclusion is noise."]
         if self.reopened:
-            L += ["", "🔁 Marked fixed previously but the condition is STILL "
-                      "PRESENT, so it is reopened. 'Fixed' must never mean 'hidden'."]
+            L += ["", "\U0001F501 Marked fixed previously but the condition is "
+                      "STILL PRESENT, so it is reopened. 'Fixed' must never "
+                      "mean 'hidden'."]
+        if self.plain:
+            L += ["", "</details>"]
         return "\n".join(L)
 
 
@@ -314,7 +337,12 @@ def _integrity(uid, log, paper) -> list:
              "Historical: acknowledge it. It cannot be fixed retroactively. "
              "Worth confirming ai_analyzer._validate_and_clean_picks now rejects "
              "the shape so it cannot recur."),
-            where="ai_analyzer._validate_and_clean_picks", category="bug"))
+            where="ai_analyzer._validate_and_clean_picks", category="bug",
+            plain=(f"A {tk} position has levels that cannot work: "
+                   + ("it is live, so it will behave wrongly until the levels "
+                      "are corrected." if live else
+                      "the trade is already closed, so this is a record of "
+                      "what shipped, not something fixable now."))))
     return out
 
 
@@ -347,7 +375,12 @@ def _reachability(rows, log, paper) -> list:
             "gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE "
             "definition and it has drifted before.",
             n=entry.get("n"),
-            where="formatters.entry_window_pct / agent._build_premarket_gap_warnings", category="bug"))
+            where="formatters.entry_window_pct / agent._build_premarket_gap_warnings",
+            category="bug",
+            plain=(f"{tk} was bought {slip}% above the price the morning "
+                   f"message told people not to go past, so anyone who "
+                   f"followed that instruction would have skipped a pick the "
+                   f"bot itself took.")))
 
     stops = (res or {}).get("stops") or {}
     for ex in (stops.get("tight_examples") or []):
@@ -364,7 +397,11 @@ def _reachability(rows, log, paper) -> list:
             "ai_analyzer._ST_SECTIONS' 5% fallback) so no published stop sits "
             "below the noise threshold.",
             n=stops.get("n"),
-            where="screener.suggested_stop_pct (1.5x ATR%) — add a floor", category="engine"))
+            where="screener.suggested_stop_pct (1.5x ATR%) — add a floor",
+            category="engine",
+            plain=(f"{tk}'s sell-stop sits only {pct}% below the buy price — "
+                   f"inside the range this stock moves on an ordinary day — so "
+                   f"a normal wobble would sell a position that was fine.")))
     if stops.get("n"):
         out.append(Finding(
             "metric:stop_distance", "MEASURE", "Stop distance distribution",
