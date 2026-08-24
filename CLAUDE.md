@@ -1162,3 +1162,21 @@ Rules:
 - **The 200MA leg is the subtle part**: `_long_term_score` fetches its own bars, so the backtest patches `screener._alpaca_single_bars` to a point-in-time slice. Without that patch the one leg that *looks* like price data reads TODAY's price and quietly reintroduces look-ahead. Guard pins it.
 - **🔴 The first run printed `CI[4530.0-6540.0]`** — `wilson()` already returns percentages and I multiplied again. A garbled confidence interval is the single worst number to get wrong, because it is the one that decides whether to believe the rest. Guard pins the format and bans `lo*100`.
 - SEC facts cache is **~65 MB** at 296 tickers → `.gitignore`d; refetchable, and one fetch per TICKER (not per date) because the same filings serve every decision date.
+
+### 🔴 THE NUMBER THAT MATTERS MOST: the eligible pool LOST to SPY (Aug 24)
+Both buckets in the LT backtest were drawn from the same eligible pool, so comparing them to each other could never answer *"is any of this better than buying the index?"* Measured over the same 18 windows / 180-day horizon:
+
+| | median |
+|---|---|
+| **SPY buy-and-hold** | **+6.61%** (report) / +7.43% (wider date set) |
+| mid-ranked bucket | +3.68% |
+| eligible pool, unranked | +2.98% |
+| top-ranked bucket | +2.67% |
+
+Only **43% of screened tickers beat SPY**, and the top-ranked bucket was the WORST of the three stock groups.
+- **This is now printed by `backtest_longterm.py` on every run** — a comparison nobody remembers to make is a comparison that does not happen. Guard pins it above the bucket table.
+- **🔴 Do NOT read this as "the screener is broken."** In a narrow-leadership bull market the median stock trails a cap-weighted index BY CONSTRUCTION — a handful of mega-caps carry the index. That is a property of markets, not evidence of a bad rubric.
+- **The 18 windows OVERLAP heavily** (21-day steps, 180-day holds), so they are nowhere near 18 independent observations. It is one market regime looked at repeatedly. Survivorship also flatters the pool — and it still lost, which makes the direction more credible than the magnitude.
+- **What it does establish**: in the only window measurable, stock-picking from this universe did not beat indexing, and the ranking did not help. Three independent measurements now agree (ST edge −1.6, LT edge −2.2, pool vs SPY −3.6).
+- **Still genuinely open: Claude's final SELECTION.** Every test to date grades the SCREENER'S RANKING. The model picks from the ranked pool and that step has never been measured; the live ledger settles it ~Sep 10-12. It is the last place an edge could hide.
+- **Product implication, and it is the owner's call, not a code change**: "these picks beat the market" is not a claim the evidence supports. "A disciplined daily routine with real risk levels and alerts that work" is supportable today. A third option worth weighing — show picks ALONGSIDE SPY in the app, so a user learns the truth from us rather than from their statement.
