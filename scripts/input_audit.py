@@ -179,6 +179,41 @@ def p_gist():
     return bool(d), f"picks._saved_date={d.get('_saved_date')}"
 
 
+def p_supabase():
+    """The PRIMARY store — everything except picks.json lives here.
+
+    🔴 It had no row at all until 2026-08-24, while this file's own rule says
+    every external source gets one. The Gist row was covering for it and saying
+    "all storage", which is how a probe ended up testing Supabase while claiming
+    to test the Gist.
+
+    🔴 THIS IS A READ PROBE AND CANNOT DETECT AN RLS WRITE DENIAL. Row-level
+    security makes SELECT return FEWER ROWS, not an error — which is exactly
+    why the 2026-08-21 outage stayed invisible: schema checks passed while every
+    per-user write threw 42501. `scripts/verify_storage.py` does the real write
+    round-trip; this only answers "is the primary store reachable and serving
+    data". Reporting more than that would be the false-pass this file exists to
+    prevent.
+    """
+    import os as _os
+    url = _os.environ.get("SUPABASE_URL", "")
+    key = _os.environ.get("SUPABASE_KEY", "")
+    if not (url and key):
+        # Deliberate on a local shell — the Gist is the store there. Not broken.
+        return False, "SUPABASE_* unset — Gist is the store on this surface"
+    from storage import get_storage_backend
+    b = get_storage_backend()
+    if b.name() != "supabase":
+        # Configured but not resolved = construction failed and fell back.
+        # That is the silent split-brain, and it must never read as ok.
+        return False, f"configured but resolved to {b.name()} — verify failed?"
+    doc = b.read("data_quality.json")
+    rows = b.read_all_users("user_configs.json") or {}
+    ok = doc is not None and bool(rows)
+    return ok, (f"backend=supabase docs={'ok' if doc is not None else 'EMPTY'} "
+                f"user_rows={len(rows)} (reads only — see verify_storage.py)")
+
+
 def p_telegram():
     import os, requests
     tok = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -272,6 +307,7 @@ INPUTS = [
     # rollback copy. Saying "all storage" invited exactly the mistake this probe
     # was making.
     ("GitHub Gist",         p_gist,             "CORE   picks.json + rollback copy",          ("gist", "storage")),
+    ("Supabase",            p_supabase,         "CORE   all storage EXCEPT picks.json",       ("supabase", "SupabaseBackend")),
     ("Telegram",            p_telegram,         "CORE   all delivery",                        ("telegram",)),
 ]
 
