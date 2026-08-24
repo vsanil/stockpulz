@@ -257,10 +257,28 @@ class TestOrderSensitiveConversions:
         monkeypatch.setattr(agent, "_log_cron_run", lambda *a, **k: None)
 
     def test_friday_wrap_delivers_wrap_then_nudge_then_lesson(self, monkeypatch):
-        from datetime import date
+        """🔴 The clock is PINNED, and it has to be. This test stamped the trade
+        with `date.today()` (the LOCAL date) while run_friday_wrap filters on
+        `datetime.now(ET).date()`. Once ET rolled into Monday the window moved
+        to the new week, the Sunday-stamped trade fell outside it, no nudge was
+        emitted, and the assertion raised ValueError. It passed all week and
+        failed on a Sunday night — the fifth appearance of this class here.
+
+        A test must stamp dates on the SAME clock the code under test reads,
+        and must FORCE that condition rather than wait for the calendar. Friday
+        2026-08-21 sits mid-week, so the trade is always inside the window.
+        """
+        import datetime as _dt
+        friday = _dt.datetime(2026, 8, 21, 18, 0, tzinfo=agent.ET)
+
+        class _FixedDT(_dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return friday if tz is not None else _dt.datetime(2026, 8, 21, 18, 0)
+        monkeypatch.setattr(agent, "datetime", _FixedDT)
         monkeypatch.setattr(agent, "load_user_trade_log", lambda uid: {
             "open": [], "closed": [
-                {"ticker": "AAPL", "closed_date": date.today().isoformat(),
+                {"ticker": "AAPL", "closed_date": friday.date().isoformat(),
                  "return_pct": 5.0, "gain_usd": 50.0}] * 6})
         monkeypatch.setattr(agent, "_download_prices", lambda t, **k: {})
         monkeypatch.setattr(agent, "_get_client",
