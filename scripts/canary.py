@@ -697,6 +697,65 @@ def check_position_integrity() -> None:
                           f"they cannot behave correctly regardless of the market"))
 
 
+def check_selfheal_unmerged() -> None:
+    """Remind about self-heal fixes sitting unreviewed on branches.
+
+    🔴 THIS CHECK MUST NEVER FAIL, and the reason is not squeamishness. A canary
+    FAILURE triggers self_heal, which writes another branch — so a failing
+    "you have unmerged branches" check would manufacture the very condition it
+    reports, every single day, forever. It is informational by construction.
+
+    Why it exists: for four days self_heal wrote real fixes and proposed none,
+    because its gate had no pytest installed and so could never report green.
+    Nobody was told. A branch nobody is told about is a fix that does not
+    exist.
+    """
+    import datetime as _dt
+    repo = os.environ.get("GITHUB_REPOSITORY") or "vsanil/stockpulz"
+    tok = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+    if not tok:
+        _check("selfheal.unmerged", True, "NOT VERIFIED — no GitHub token")
+        return
+    try:
+        r = requests.get(f"https://api.github.com/repos/{repo}/branches",
+                         headers={"Authorization": f"token {tok}",
+                                  "Accept": "application/vnd.github+json"},
+                         params={"per_page": 100}, timeout=20)
+        if r.status_code != 200:
+            _check("selfheal.unmerged", True,
+                   f"NOT VERIFIED — GitHub returned {r.status_code}")
+            return
+        names = [b.get("name", "") for b in (r.json() or [])
+                 if str(b.get("name", "")).startswith("auto/self-heal-")]
+        live = []
+        for n in names:
+            c = requests.get(
+                f"https://api.github.com/repos/{repo}/compare/main...{n}",
+                headers={"Authorization": f"token {tok}"}, timeout=20).json()
+            if c.get("ahead_by"):
+                live.append(n)
+    except Exception as exc:
+        _check("selfheal.unmerged", True,
+               f"NOT VERIFIED this run — {type(exc).__name__}")
+        return
+
+    if not live:
+        _check("selfheal.unmerged", True, "no unreviewed auto-fixes")
+        return
+    ages = []
+    for n in live:
+        try:
+            ages.append((_dt.date.today()
+                         - _dt.date.fromtimestamp(int(n.rsplit("-", 1)[1]))).days)
+        except Exception:
+            pass
+    oldest = f", oldest {max(ages)}d" if ages else ""
+    # PASS on purpose — see the docstring. The note is the reminder.
+    _check("selfheal.unmerged", True,
+           f"\u26a0 {len(live)} auto-fix(es) awaiting YOUR review on /admin{oldest}: "
+           + ", ".join(live[:3]))
+
+
 def check_storage_surfaces() -> None:
     """🔴 A surface silently on the WRONG backend is invisible for days.
 
@@ -986,7 +1045,8 @@ def main() -> int:
                check_weekly_relay,
                check_synthetic_user,
                check_position_integrity,
-               check_storage_surfaces, check_endpoints):
+               check_storage_surfaces, check_selfheal_unmerged,
+               check_endpoints):
         try:
             fn()
         except Exception as e:

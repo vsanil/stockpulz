@@ -132,12 +132,14 @@ class TestCardIsVisibleWhenEmpty:
         assert "decidedN" in self._js()
 
     def test_decided_findings_are_counted_but_never_listed(self):
+        # Anchor on the DECLARATION, not a fixed byte window — inserting an
+        # unrelated block above it pushed the anchor out of range and failed for
+        # a reason unrelated to the behaviour. That trap recurred all evening.
         src = pathlib.Path("webhook.py").read_text()
-        i = src.index('"findings": _findings')
-        blk = src[max(0, i - 900):i + 120]
-        assert "findings_decided" in blk
-        # The list itself stays restricted to items awaiting a decision.
-        assert "_pending" in blk and "awaiting_approval" in blk
+        assert '"findings_decided": _decided' in src
+        i = src.index("_pending = (")
+        decl = src[i:src.index(")", i)]
+        assert "awaiting_approval" in decl and "approved" in decl
 
     def test_the_repo_file_store_is_fully_gone(self):
         """Render's filesystem is ephemeral: an approval written to a repo file
