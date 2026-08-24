@@ -49,12 +49,6 @@ class TestTheSplitExists:
         with pytest.raises(ValueError):
             _ae().Finding("a", "ACT", "t", "e", "f", category="cosmetic")
 
-    def test_the_default_is_engine_not_bug(self):
-        """🔴 Fail toward the closer look. A bug mislabelled as an engine change
-        costs a moment's scrutiny; an engine change mislabelled as a bug gets
-        waved through and silently alters everyone's picks."""
-        assert _ae().Finding("a", "ACT", "t", "e", "f").category == "engine"
-
 
 class TestTheDerivedFindingsAreClassified:
     """Classification is a judgement, so it is pinned rather than inferred."""
@@ -221,3 +215,75 @@ class TestReclassify:
                       and getattr(n.func, "attr", "") == "add_parser"}
         assert not (registered - dispatched - {"status"}), \
             "a subcommand is registered but never reaches a function"
+
+
+class TestTheReportReadsLikeTheCard:
+    """The same complaint applied to analysis/ENGINE_FINDINGS.md: technical
+    text led every entry, and a finding with no category would still be
+    asserted as one. Both surfaces must agree, or the app tells the owner two
+    different stories about the same finding."""
+
+    def _f(self, **kw):
+        m = _ae()
+        base = dict(fid="x/1", tier="ACT", title="t", evidence="EV", fix="FX")
+        base.update(kw)
+        return m.Finding(**base)
+
+    def test_the_plain_sentence_leads_the_entry(self):
+        r = self._f(category="bug", plain="A pick cannot win.").render()
+        assert r.index("A pick cannot win.") < r.index("**Evidence:**")
+
+    def test_the_technical_text_is_demoted_not_dropped(self):
+        """This file is also the agenda read at session start, so evidence and
+        fix must still be present in the raw markdown."""
+        r = self._f(category="bug", plain="p").render()
+        assert "<details><summary>Technical detail</summary>" in r
+        assert "**Evidence:** EV" in r and "**Fix:** FX" in r
+        assert r.rstrip().endswith("</details>")
+
+    def test_the_engine_caveat_stays_ABOVE_the_fold(self):
+        """It is a caution, not detail — hiding it defeats the point."""
+        r = self._f(category="engine", plain="p", n=12).render()
+        assert r.index("changes what users are recommended") < r.index("<details>")
+
+    def test_a_bug_says_plainly_that_picks_are_unaffected(self):
+        r = self._f(category="bug", plain="p").render()
+        assert "changes nothing about how picks are chosen" in r
+        assert "changes what users are recommended" not in r
+
+    def test_a_finding_with_no_plain_text_still_renders(self):
+        """Backwards compatible: no disclosure, evidence inline."""
+        r = self._f(category="bug").render()
+        assert "<details>" not in r and "**Evidence:** EV" in r
+
+
+class TestCategoryIsRequiredNotDefaulted:
+    """🔴 Reversal of the earlier design, on the owner's evidence. A DEFAULT
+    does not demand a closer look — it invents a classification the author
+    never made, and the card then states it as fact. Every addressable finding
+    must choose."""
+
+    def test_a_finding_without_a_category_raises(self):
+        with pytest.raises(ValueError):
+            _ae().Finding("x", "ACT", "t", "e", "f")
+
+    def test_the_error_names_the_finding(self):
+        with pytest.raises(ValueError, match="stop_tight/KMI"):
+            _ae().Finding("stop_tight/KMI", "ACT", "t", "e", "f")
+
+    def test_a_metric_needs_no_category(self):
+        """Metrics are measurements, not decisions."""
+        assert _ae().Finding("m:x", "MEASURE", "t", "e", "f",
+                             kind="metric").category is None
+
+    def test_every_derived_finding_declares_one(self):
+        """An AST sweep, so a NEW finding added later cannot skip it."""
+        import ast
+        src = SRC.read_text()
+        for n in ast.walk(ast.parse(src)):
+            if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "Finding":
+                kw = {k.arg for k in n.keywords}
+                if kw and "kind" in kw:
+                    continue          # metric
+                assert "category" in kw, f"Finding at line {n.lineno} has no category"
+                assert "plain" in kw, f"Finding at line {n.lineno} has no plain text"

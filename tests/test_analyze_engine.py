@@ -202,7 +202,11 @@ class TestDispositions:
         return m
 
     def _f(self, m, fid="x/1", status=None):
-        return m.Finding(fid, "ACT", "t", "e", "fix", where="file.py")
+        # category is REQUIRED for an addressable finding — there is no
+        # default, because a default invents a classification the author
+        # never made and the /admin card then states it as fact.
+        return m.Finding(fid, "ACT", "t", "e", "fix", where="file.py",
+                         category="bug")
 
     def test_a_new_finding_starts_open_and_records_first_seen(self, tmp_path, monkeypatch):
         m = self._ae(tmp_path, monkeypatch)
@@ -305,7 +309,8 @@ class TestNewActNotification:
 
     def _f(self, m, fid="i/1", tier="ACT", kind="finding"):
         f = m.Finding(fid, tier, "T title", "T evidence", "fix", kind=kind,
-                      where="some_file.py")
+                      where="some_file.py",
+                      category=(None if kind == "metric" else "bug"))
         f.status = "open"
         return f
 
