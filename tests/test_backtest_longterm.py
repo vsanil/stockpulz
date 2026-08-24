@@ -112,6 +112,17 @@ class TestHonestVerdict:
         rubric from a rising market. Saying nothing would overstate it."""
         assert "no SPY benchmark" in SRC.read_text()
 
+    def test_the_index_benchmark_is_on_the_report(self):
+        """🔴 The first version compared two buckets drawn from the SAME pool,
+        which cannot say whether any of the screening beat simply buying the
+        index. Measured: it did not. That comparison has to be printed, not
+        left for someone to think of."""
+        src = SRC.read_text()
+        assert "SPY buy-and-hold over the same windows" in src
+        i = src.index("BENCHMARK")
+        assert src.index("LONG-TERM RUBRIC") > i, \
+            "the benchmark must appear before the buckets it contextualises"
+
     def test_a_baseline_bucket_exists(self):
         """A win rate alone is unreadable — it might just be the market."""
         assert '"baseline"' in SRC.read_text()

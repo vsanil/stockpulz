@@ -307,6 +307,32 @@ def main() -> int:
     picked = [r for r in rows if r["bucket"] == "picked"]
     base = [r for r in rows if r["bucket"] == "baseline"]
 
+    # 🔴 The comparison that matters most, and the one the first version left
+    # out: BOTH buckets were drawn from the eligible pool, so comparing them to
+    # each other cannot tell you whether any of the screening beat simply
+    # buying the index. Measured 2026-08-24 it did not — SPY +7.43% median vs
+    # the pool's +2.98%. That is expected in a narrow-leadership bull market
+    # (the median stock trails a cap-weighted index by construction), but it
+    # has to be ON THE REPORT, not left for someone to think of.
+    if spy is not None and rows:
+        import collections
+        by_date = collections.defaultdict(list)
+        for r in rows:
+            by_date[r["date"]].append(r["ret_pct"])
+        bench = []
+        for d in sorted(by_date):
+            try:
+                ts = pd.Timestamp(d)
+                a = float(spy.asof(ts))
+                b = float(spy.asof(ts + pd.Timedelta(days=LT_HORIZON_DAYS)))
+                if a > 0:
+                    bench.append((b - a) / a * 100)
+            except Exception:
+                continue
+        if bench:
+            print(f"\n  BENCHMARK  SPY buy-and-hold over the same windows: "
+                  f"median {statistics.median(bench):+.2f}%")
+
     print("\n  LONG-TERM RUBRIC — point-in-time fundamentals")
     print("  " + "─" * 68)
     p = summarise(picked, "top-ranked")
