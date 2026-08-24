@@ -67,9 +67,29 @@ class Finding:
     and cannot be actioned at sign-in.
     """
 
+    CATEGORIES = ("bug", "engine")
+
     def __init__(self, fid, tier, title, evidence, fix, n=None,
-                 kind="finding", blocked_until=None, where=""):
+                 kind="finding", blocked_until=None, where="",
+                 category="engine"):
+        """`category` splits the two things the owner is being asked to judge:
+
+          "bug"     a technical defect. One instance is enough to act on; the
+                    fix restores intended behaviour and changes no strategy.
+          "engine"  a change to HOW picks are chosen or levelled. It alters
+                    what real users are told to buy, so it needs OUTCOME
+                    evidence accumulated over time — the n>=30 honesty gate —
+                    and never the synthetic bot's win rate.
+
+        🔴 The default is "engine" on purpose. A bug mislabelled as an engine
+        change costs a moment's extra scrutiny; an engine change mislabelled as
+        a bug gets waved through and silently alters everyone's picks. Fail
+        toward the answer that demands a closer look.
+        """
+        if category not in self.CATEGORIES:
+            raise ValueError(f"category must be one of {self.CATEGORIES}")
         self.id = fid
+        self.category = category
         self.kind = kind
         self.tier = tier
         self.title = title
@@ -92,8 +112,19 @@ class Finding:
         except Exception:
             return 0
 
+    CATEGORY_LABEL = {"bug": "TECHNICAL BUG",
+                      "engine": "DECISION-ENGINE CHANGE"}
+
     def render(self) -> str:
-        head = f"### [{self.tier}] {self.title}"
+        # The category leads the header. A technical bug and a change to how
+        # picks are chosen are different decisions with different evidence
+        # bars, and reading them as one list is how an engine change gets
+        # waved through on a single instance.
+        tag = self.CATEGORY_LABEL[self.category] if self.kind == "finding" else "METRIC"
+        # Tier stays FIRST: an existing guard parses it from this header to
+        # assert ACT findings are never buried below a HOLD. The category
+        # reads just as clearly in second position.
+        head = f"### [{self.tier}] [{tag}] {self.title}"
         if self.n is not None:
             head += f"  *(n={self.n})*"
         L = [head, ""]
@@ -103,6 +134,11 @@ class Finding:
             L += [f"`{self.id}` · **{self.status}**{age}{flag}", ""]
             if self.note:
                 L += [f"> {self.note}", ""]
+        if self.kind == "finding" and self.category == "engine":
+            gate = (f"n={self.n}" if self.n is not None else "no outcome sample")
+            L += [f"**This changes what users are recommended.** Judge it on "
+                  f"outcomes over time ({gate}; {MIN_N} needed to be "
+                  f"conclusive), never on the synthetic bot's win rate.", ""]
         L += [f"**Evidence:** {self.evidence}", "", f"**Fix:** {self.fix}"]
         if self.blocked_until:
             L += ["", f"**Held until:** {self.blocked_until} — below n={MIN_N} "
@@ -156,9 +192,14 @@ def _apply_state(findings: list, state: dict, today: str) -> dict:
             f.status, f.reopened = "open", True      # still here => not fixed
         else:
             f.status = prior
-        state[f.id] = {"status": f.status, "note": f.note,
-                       "first_seen": f.first_seen, "last_seen": today,
-                       "title": f.title}
+        # 🔴 UPDATE, never replace. A replace dropped proposed_change /
+        # proposed_summary / proposed_files, so the night after I proposed a fix
+        # the card would render "(no description recorded)" and the owner could
+        # not see what they were being asked to approve.
+        rec.update({"status": f.status, "note": f.note,
+                    "first_seen": f.first_seen, "last_seen": today,
+                    "title": f.title, "category": f.category, "n": f.n})
+        state[f.id] = rec
     # A finding that has DISAPPEARED is genuinely resolved — record it once.
     for fid, rec in state.items():
         if fid in seen or rec.get("status") not in ACTIVE_STATUSES:
@@ -273,7 +314,7 @@ def _integrity(uid, log, paper) -> list:
              "Historical: acknowledge it. It cannot be fixed retroactively. "
              "Worth confirming ai_analyzer._validate_and_clean_picks now rejects "
              "the shape so it cannot recur."),
-            where="ai_analyzer._validate_and_clean_picks"))
+            where="ai_analyzer._validate_and_clean_picks", category="bug"))
     return out
 
 
@@ -306,7 +347,7 @@ def _reachability(rows, log, paper) -> list:
             "gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE "
             "definition and it has drifted before.",
             n=entry.get("n"),
-            where="formatters.entry_window_pct / agent._build_premarket_gap_warnings"))
+            where="formatters.entry_window_pct / agent._build_premarket_gap_warnings", category="bug"))
 
     stops = (res or {}).get("stops") or {}
     for ex in (stops.get("tight_examples") or []):
@@ -323,7 +364,7 @@ def _reachability(rows, log, paper) -> list:
             "ai_analyzer._ST_SECTIONS' 5% fallback) so no published stop sits "
             "below the noise threshold.",
             n=stops.get("n"),
-            where="screener.suggested_stop_pct (1.5x ATR%) — add a floor"))
+            where="screener.suggested_stop_pct (1.5x ATR%) — add a floor", category="engine"))
     if stops.get("n"):
         out.append(Finding(
             "metric:stop_distance", "MEASURE", "Stop distance distribution",
