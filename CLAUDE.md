@@ -1100,7 +1100,7 @@ Rules:
 
 ### Findings carry a CATEGORY: technical bug vs decision-engine change (owner's call, Aug 23)
 - **The two are not alike and must never be read as one list.** A **bug** restores intended behaviour and changes no strategy — ONE instance is enough to act on. An **engine** change alters what real users are told to buy, so it needs OUTCOME evidence accumulated over time (`MIN_N` = 30) and **never the synthetic bot's win rate** — that is the loop cut in July when a robot's mechanical fills started steering real picks. Reading them together is how an engine change gets waved through on a single observation.
-- **🔴 The default is `engine`, not `bug`.** A bug mislabelled as an engine change costs a moment's extra scrutiny; an engine change mislabelled as a bug gets waved through and silently alters everyone's picks. **Fail toward the answer that demands the closer look.** An unknown category raises.
+- **🔴 A category is REQUIRED — there is no default (revised Aug 23, same day).** The first version defaulted to `engine`, argued as fail-safe because it demands closer scrutiny. **That reasoning was wrong**: a default does not demand a look, it INVENTS a classification the author never made, and the card then states it as fact — which is how `/admin` came to claim a storage cleanup *"changes how picks are chosen"*. Constructing an addressable `Finding` without one now RAISES, naming the finding. Metrics need none; they are measurements, not decisions. A STORED record with no category renders **unclassified** and asserts nothing.
 - Classification is a JUDGEMENT, so it is explicit per construction site and pinned by test — never inferred from the tier:
   - `integrity/*` → **bug** (arithmetic that shipped; a pick that cannot win)
   - `entry_window/*` → **bug** (a published promise not honoured; binary, one breach is enough)
@@ -1117,3 +1117,10 @@ Rules:
 - **🔴 `reclassify` was registered as a parser but never dispatched** — it parsed cleanly and silently fell through to `status()`. THIRD instance in one session of wiring a flag without wiring the feature (`--summary` reached the CLI but not the workflow; `--category` the same). Guard is now an **AST check that every registered subcommand reaches a function**.
 - **🔴 A mutation initially PASSED**: the chip-colour test scanned a 140-char window and matched the BORDER while the background went amber. **An assertion that accepts the wrong answer is not a guard** — anchor on the exact declaration, not a window.
 - **⚠️ Backticks inside a double-quoted `git commit -m` are EXECUTED by the shell.** A message mentioning `` `findings.py reclassify` `` committed as "Adds  (+ workflow action)". Use `git commit -F -` with a quoted heredoc for any message containing backticks.
+
+### `ENGINE_FINDINGS.md` reads like the `/admin` card (Aug 23)
+- The same two defects applied to the report: engineer-facing text led every entry, and a finding with no category would still be asserted as one. **Both surfaces must agree, or the app tells the owner two different stories about one finding.**
+- **The plain sentence leads; evidence, fix and where are DEMOTED into a collapsed `<details>` block — never dropped.** This file is also the agenda read at session start, so the raw markdown still carries everything.
+- **The engine evidence-bar caveat stays ABOVE the fold** — it is a caution, not detail, and hiding it defeats the point. A `bug` states plainly that it changes nothing about how picks are chosen.
+- Every derived finding carries a `plain=` line: what happened, in words that do not name a function. An **AST sweep** asserts every `Finding` declares both `category` and `plain`, so a new one cannot skip it.
+- **Deleted `test_the_default_is_engine_not_bug` rather than relaxing it** — a test that contradicts current intent is worse than no test. Same rule that retired the obsolete watchlist-sparkline guard.
