@@ -697,6 +697,21 @@ def check_position_integrity() -> None:
                           f"they cannot behave correctly regardless of the market"))
 
 
+def check_selfheal_demo() -> None:
+    """🔴 DELIBERATE FAILURE — a live end-to-end test of the self-heal loop.
+
+    Added 2026-08-24 by the owner's request, to prove the PR path works now that
+    the test gate can actually run. Until today self_heal installed no pytest,
+    so its gate reported green=false on every run and a PR was never opened.
+
+    THE FIX IS TO DELETE THIS FUNCTION and remove `check_selfheal_demo` from the
+    list in main(). Nothing else. It asserts nothing about the app.
+    """
+    _check("selfheal.demo", False, "",
+           fail_detail="deliberate test failure — delete check_selfheal_demo() "
+                       "from scripts/canary.py and its entry in main()")
+
+
 def check_selfheal_unmerged() -> None:
     """Remind about self-heal fixes sitting unreviewed on branches.
 
@@ -1046,6 +1061,7 @@ def main() -> int:
                check_synthetic_user,
                check_position_integrity,
                check_storage_surfaces, check_selfheal_unmerged,
+               check_selfheal_demo,
                check_endpoints):
         try:
             fn()
