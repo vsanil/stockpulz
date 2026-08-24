@@ -14,7 +14,7 @@ on:
         required: true
         default: status
         type: choice
-        options: [status, propose, approve, reject, prune-dry-run, prune-apply]
+        options: [status, propose, approve, reject, reclassify, prune-dry-run, prune-apply]
       id:
         description: Finding id (required for propose/approve/reject)
         required: false
@@ -88,6 +88,11 @@ jobs:
             prune-apply)
               python scripts/prune_alert_junk.py --apply
               exit 0
+              ;;
+            reclassify)
+              test -n "${{ inputs.id }}" || { echo "id is required"; exit 1; }
+              python scripts/findings.py reclassify "${{ inputs.id }}" \
+                --category "${{ inputs.category }}" --summary "${{ inputs.summary }}"
               ;;
             approve|reject)
               test -n "${{ inputs.id }}" || { echo "id is required"; exit 1; }

@@ -80,6 +80,35 @@ def propose(fid: str, change: str, files: str, summary: str = "",
     return 0
 
 
+def reclassify(fid: str, category: str = "", summary: str = "") -> int:
+    """Correct a finding's CATEGORY or its plain-English summary in place.
+
+    Deliberately does NOT touch status. A proposal written badly, or classified
+    wrongly, is a description problem — re-proposing would clear the owner's
+    consent and demand it again for a change that has not moved. But a card the
+    owner cannot read, or one that mislabels a storage cleanup as a change to
+    how picks are chosen, is worse than no card: it makes approval a rubber
+    stamp on a claim that is not true.
+    """
+    st = _load()
+    rec = st.get(fid)
+    if not rec:
+        print(f"  unknown finding: {fid}")
+        return 1
+    if category:
+        if category not in ("bug", "engine"):
+            print("  category must be bug or engine")
+            return 1
+        rec["category"] = category
+    if summary:
+        rec["proposed_summary"] = summary
+    _save(st)
+    print(f"  ✏️  {fid} reclassified"
+          f"{' → ' + category if category else ''}"
+          f"{chr(10) + '     plain : ' + summary if summary else ''}")
+    return 0
+
+
 def approve(fid: str, note: str = "") -> int:
     st = _load()
     rec = st.get(fid)
@@ -144,6 +173,9 @@ def main() -> int:
                         "No function names, no file paths, no jargon.")
     a = sub.add_parser("approve"); a.add_argument("id"); a.add_argument("--note", default="")
     r = sub.add_parser("reject");  r.add_argument("id"); r.add_argument("--note", required=True)
+    c = sub.add_parser("reclassify"); c.add_argument("id")
+    c.add_argument("--category", default="", choices=("", "bug", "engine"))
+    c.add_argument("--summary", default="")
     sub.add_parser("status")
     args = ap.parse_args()
     if args.cmd == "propose":
@@ -153,6 +185,8 @@ def main() -> int:
         return approve(args.id, args.note)
     if args.cmd == "reject":
         return reject(args.id, args.note)
+    if args.cmd == "reclassify":
+        return reclassify(args.id, args.category, args.summary)
     return status()
 
 
