@@ -67,10 +67,16 @@ jobs:
 
       - name: Notify admin — fixing
         run: |
+          # 🔴 This used to promise "I'll merge + deploy it and confirm". Since the
+          # PR gate it never merges, so the very first message a human sees was
+          # false — and someone reading only this one would assume the fix had
+          # shipped itself. Say what actually happens.
+          # No parse_mode: see the result notifier for why formatting costs
+          # delivery here.
           curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TG_CHAT}" \
-            --data-urlencode "text=🔧 A *${{ steps.ctx.outputs.monitor }}* check failed — auto-diagnosing. If the fix passes all tests I'll merge + deploy it and confirm; otherwise I'll flag you." \
-            -d parse_mode=Markdown >/dev/null || true
+            --data-urlencode "text=🔧 A ${{ steps.ctx.outputs.monitor }} check failed — auto-diagnosing. If a fix passes the tests I will open it for YOUR review; nothing merges or deploys on its own." \
+            >/dev/null || true
 
       - name: Branch
         run: |
@@ -82,7 +88,13 @@ jobs:
 
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: pip install -r requirements.txt
+      # 🔴 pytest EXPLICITLY. It is not a runtime dependency, so it is not in
+      # requirements.txt — test.yml has always installed it separately. Without
+      # it the hard gate below died with `No module named pytest`, reported
+      # green=false, and self-heal could NEVER reach the `proposed` branch. Five
+      # consecutive runs (Aug 21-24) wrote real fixes to branches that were
+      # never proposed, and the DM blamed red tests that had never run.
+      - run: pip install -r requirements.txt pytest
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
@@ -122,10 +134,23 @@ jobs:
       - name: Verify tests (hard gate)
         id: verify
         run: |
-          if python -m pytest tests/ -q >/tmp/pytest.txt 2>&1 && python scripts/check_js.py >/tmp/js.txt 2>&1; then
-            echo "green=true"  >> "$GITHUB_OUTPUT"
+          # Can the gate even run? A missing runner is an INFRASTRUCTURE fault,
+          # not a red suite, and reporting it as "tests failed" is what let a
+          # broken gate look like a stream of bad fixes for four days.
+          if ! python -m pytest --version >/dev/null 2>&1; then
+            echo "green=false"    >> "$GITHUB_OUTPUT"
+            echo "gate=unrunnable" >> "$GITHUB_OUTPUT"
+            echo "::error::pytest is not installed — the hard gate cannot run."
+            exit 0
+          fi
+          python -m pytest tests/ -q >/tmp/pytest.txt 2>&1; PT=$?
+          python scripts/check_js.py >/tmp/js.txt 2>&1;    JS=$?
+          if [ "$PT" -eq 0 ] && [ "$JS" -eq 0 ]; then
+            echo "green=true" >> "$GITHUB_OUTPUT"; echo "gate=ok" >> "$GITHUB_OUTPUT"
           else
-            echo "green=false" >> "$GITHUB_OUTPUT"; tail -20 /tmp/pytest.txt || true
+            echo "green=false" >> "$GITHUB_OUTPUT"; echo "gate=red" >> "$GITHUB_OUTPUT"
+            tail -20 /tmp/pytest.txt || true
+            [ "$JS" -eq 0 ] || tail -10 /tmp/js.txt || true
           fi
 
       - name: Ship — push to main (auto+green), branch (auto+red), or report (test)
@@ -231,11 +256,26 @@ jobs:
               esac ;;
             proposed)
               PR="${{ steps.ship.outputs.pr }}"
-              MSG=$(printf '🔧 *Self-heal proposed a fix — YOUR REVIEW NEEDED*\n\n*Monitor:* %s\n*Tests:* green\n*Files:* %s\n*Branch:* `%s`\n\n👉 %s\n\nWritten by an LLM with no human in the loop. Nothing is deployed and nothing reaches main until you merge it.' "$M" "$FILES" "$BR" "$PR") ;;
-            branch)  MSG="⚠️ Self-heal produced a fix for *$M* but tests are RED — pushed to \`$BR\`, NOT proposed for merge. Needs you: ${URL}" ;;
+              MSG=$(printf '🔧 SELF-HEAL PROPOSED A FIX — YOUR REVIEW NEEDED\n\nMonitor: %s\nTests: green\nFiles: %s\nBranch: %s\n\n👉 %s\n\nWritten by an LLM with no human in the loop. Nothing is deployed and nothing reaches main until you merge it.' "$M" "$FILES" "$BR" "$PR") ;;
+            branch)
+              if [ "${{ steps.verify.outputs.gate }}" = "unrunnable" ]; then
+                MSG="🚨 Self-heal wrote a fix for $M but THE TEST GATE COULD NOT RUN (pytest missing) — pushed to $BR, NOT proposed. This is an infrastructure fault, not a bad fix: ${URL}"
+              else
+                MSG="⚠️ Self-heal produced a fix for $M but tests are RED — pushed to $BR, NOT proposed for merge. Needs you: ${URL}"
+              fi ;;
             testfix) MSG="🧪 Self-heal TEST run for *$M*: fix on \`$BR\` (files: ${FILES}), tests green — no PR (manual run)." ;;
             nofix)   MSG="⚠️ Couldn't confidently auto-fix *$M* — needs you. Failed run: ${URL}" ;;
             *)       MSG="⚠️ Self-heal for *$M* ended without a result / errored — check the Actions log: ${URL}" ;;
           esac
-          curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=${MSG}" -d parse_mode=Markdown >/dev/null || true
+          # 🔴 NO parse_mode. Messages carry snake_case filenames, and an odd
+          # number of underscores makes Telegram reject the whole message with a
+          # 400 — silently, when the response is discarded. Plain text always
+          # delivers, and delivery matters more than bold text.
+          RESP=$(curl -s -w '\n%{http_code}' "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=${MSG}") || true
+          CODE=$(printf '%s' "$RESP" | tail -1)
+          if [ "$CODE" != "200" ]; then
+            echo "::error::self-heal could not notify the admin (HTTP $CODE): $(printf '%s' "$RESP" | head -c 300)"
+          else
+            echo "[self-heal] admin notified (HTTP 200)"
+          fi

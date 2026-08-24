@@ -1377,6 +1377,39 @@ function auditSection(a){
     +rows+'</div>';
 }
 
+function selfhealCard(rows){
+  rows = rows||[];
+  var head='<h2>Self-heal fixes awaiting review</h2>';
+  // Always renders. An invisible card is indistinguishable from a broken one —
+  // and the whole reason this exists is that fixes sat on branches for four
+  // days with nobody told.
+  if(!rows.length){
+    return '<div class="card">'+head
+      +'<div class="fb-meta">Nothing waiting. Automatic fixes appear here when a '
+      +'monitor fails and the fix passes every test.</div></div>';
+  }
+  var body=rows.map(function(x){
+    var age='';
+    if(x.when){ try{ age=' &middot; '+age_(x.when); }catch(e){} }
+    return '<div class="fb">'
+      +'<div class="fb-meta">'+x.branch+age+'</div>'
+      +'<div class="fb-text" style="font-size:15px">Automatic fix touching <code>'
+        +x.files+'</code></div>'
+      +'<div class="fb-meta">'+x.ahead+' commit(s) ahead of main'
+        +(x.behind?(' &middot; '+x.behind+' behind — may be stale'):'')+'</div>'
+      +'<div style="margin-top:8px"><a class="btn-sm" target="_blank" rel="noopener" href="'
+        +x.url+'">Review &amp; merge on GitHub &rarr;</a></div>'
+      +'</div>';
+  }).join('');
+  return '<div class="card">'+head
+    +'<div class="fb-meta" style="margin-bottom:10px">Written by an LLM with no human '
+    +'in the loop, and gated on the full test suite. <b>Read the diff before merging</b> '
+    +'&mdash; merging deploys to production.</div>'
+    +body+'</div>';
+}
+
+function age_(iso){ return age(iso); }
+
 function findingsCard(rows,decidedN){
   rows = rows||[];
   var head='<h2>Engine findings</h2>';
@@ -1490,6 +1523,7 @@ async function load(){
   if(!r.ok){document.getElementById('root').innerHTML='<p class="empty">Error '+r.status+'</p>';return;}
   var d=await r.json();
   document.getElementById('root').innerHTML=
+    selfhealCard(d.selfheal)+
     findingsCard(d.findings, d.findings_decided)+
     metrics(d.stats)
     +pendingSection(d.pending)
@@ -1594,6 +1628,69 @@ def admin_logout():
 @_require_admin
 def admin_dashboard():
     return _ADMIN_DASH_HTML, 200
+
+
+_SELFHEAL_CACHE: dict = {"at": 0.0, "rows": []}
+
+
+def _build_selfheal_prs() -> list:
+    """Self-heal fixes awaiting review — the ones nobody was told about.
+
+    🔴 Why this card exists: for four days self_heal wrote real fixes to
+    branches and never proposed them, because its test gate had no pytest and
+    so could never report green. The DMs that should have flagged it were
+    unverifiable by construction. A branch nobody is told about is a fix that
+    does not exist, so the dashboard now shows them whether or not a DM landed.
+
+    Read-only. It links to GitHub for review rather than offering a merge
+    button — merging deploys to production, and the diff lives where it can
+    actually be read.
+    """
+    import time as _t
+    if _t.time() - _SELFHEAL_CACHE["at"] < 120:      # don't hammer GitHub per load
+        return _SELFHEAL_CACHE["rows"]
+    tok = os.environ.get("GITHUB_TOKEN", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "vsanil/stockpulz")
+    if not tok:
+        return []
+    h = {"Authorization": f"token {tok}", "Accept": "application/vnd.github+json"}
+    rows = []
+    try:
+        br = requests.get(f"https://api.github.com/repos/{repo}/branches",
+                          headers=h, params={"per_page": 100}, timeout=8)
+        if br.status_code != 200:
+            return _SELFHEAL_CACHE["rows"]
+        for b in br.json() or []:
+            name = b.get("name", "")
+            if not name.startswith("auto/self-heal-"):
+                continue
+            try:
+                cmp_ = requests.get(
+                    f"https://api.github.com/repos/{repo}/compare/main...{name}",
+                    headers=h, timeout=8).json()
+            except Exception:
+                continue
+            # ahead_by 0 means it is already in main — merged or superseded.
+            if not cmp_.get("ahead_by"):
+                continue
+            files = [f.get("filename") for f in (cmp_.get("files") or [])][:6]
+            commits = cmp_.get("commits") or []
+            when = (commits[-1].get("commit", {}).get("author", {}).get("date")
+                    if commits else None)
+            rows.append({
+                "branch": name,
+                "files": ", ".join(files) or "(no files)",
+                "ahead": cmp_.get("ahead_by"),
+                "behind": cmp_.get("behind_by"),
+                "when": when,
+                "url": f"https://github.com/{repo}/compare/main...{name}?expand=1",
+            })
+    except Exception as exc:
+        print(f"[admin] self-heal branches unreadable (non-critical): {exc}")
+        return _SELFHEAL_CACHE["rows"]
+    rows.sort(key=lambda r: r.get("when") or "")
+    _SELFHEAL_CACHE.update({"at": _t.time(), "rows": rows})
+    return rows
 
 
 def _build_audit_findings() -> dict:
@@ -1821,7 +1918,16 @@ def admin_data():
         print(f"[admin] findings unreadable (non-critical): {_f_exc}")
         _findings, _decided = [], 0
 
+    # Per-call try/except: an unreachable GitHub must never take the dashboard
+    # down — same rule as the audit card.
+    try:
+        _prs = _build_selfheal_prs()
+    except Exception as _p_exc:
+        print(f"[admin] self-heal card unavailable (non-critical): {_p_exc}")
+        _prs = []
+
     return jsonify({
+        "selfheal": _prs,
         "findings": _findings,
         "findings_decided": _decided,
         "stats": {
