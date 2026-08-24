@@ -47,22 +47,60 @@ class _Rows:
 
 
 class TestReadsGoThroughTheAppsBackend:
-    def test_no_data_read_uses_the_raw_gist_api(self):
-        """Only the headroom check may touch the Gist directly — it measures
-        GitHub's per-file limit, which is a property of the Gist alone."""
+    # Functions allowed to read the Gist directly, each with WHY. An
+    # unexplained allowlist is how a bug class re-opens quietly, so the test
+    # below requires a substantive reason in the function's own docstring.
+    GIST_ALLOWED = {
+        "check_storage_headroom":
+            "measures GitHub's per-file API limit, a property of the Gist alone",
+        "_raw_picks":
+            "save_picks/load_picks bypass the backend and hit the Gist API "
+            "directly, so for picks.json the Gist IS the live store",
+    }
+
+    def test_only_allowlisted_functions_read_the_raw_gist_api(self):
         tree = ast.parse(SRC.read_text())
-        callers = []
+        callers = set()
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef):
                 continue
             for node in ast.walk(fn):
                 if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                         and node.func.id == "_gist_all"):
-                    callers.append(fn.name)
-        assert callers == ["check_storage_headroom"], (
-            f"_gist_all() is called from {callers} — those read the rollback "
-            f"copy, not the store the app writes to"
+                    callers.add(fn.name)
+        unexpected = callers - set(self.GIST_ALLOWED)
+        assert not unexpected, (
+            f"{sorted(unexpected)} read the Gist directly. Unless that file's "
+            f"WRITER also uses the Gist, this reads the rollback copy."
         )
+
+    def test_every_allowlisted_function_documents_why(self):
+        """A reason in the docstring, not just an entry in a set."""
+        tree = ast.parse(SRC.read_text())
+        docs = {f.name: (ast.get_docstring(f) or "")
+                for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)}
+        for name in self.GIST_ALLOWED:
+            assert len(docs.get(name, "")) > 120, \
+                f"{name} reads the Gist directly but does not explain why"
+
+    def test_picks_are_read_from_the_store_the_WRITER_uses(self):
+        """🔴 The sharper rule. Converting _raw_picks to the backend on
+        2026-08-24 made it read Supabase's frozen `_saved_date=2026-08-21`
+        while production served that day's correct 7 picks — a false alarm
+        that fired self_heal.
+
+        config_manager.save_picks writes via the raw Gist API, so the canary
+        must read the Gist for this ONE file."""
+        cm = pathlib.Path("config_manager.py").read_text()
+        i = cm.index("def save_picks")
+        writer = cm[i:cm.index("def load_picks", i)]
+        assert "api.github.com/gists" in writer, \
+            "save_picks no longer writes to the Gist — _raw_picks must follow it"
+        src = SRC.read_text()
+        j = src.index("def _raw_picks")
+        reader = src[j:src.index("def _expected_delivery_date", j)]
+        assert "_gist_all()" in reader, \
+            "the reader must follow the writer to the Gist"
 
     def test_user_keyed_files_are_read_as_ROWS(self):
         """read() hits `documents`; user-keyed files live in `user_records`.
@@ -74,9 +112,11 @@ class TestReadsGoThroughTheAppsBackend:
         assert m._store_read("price_alerts.json") == {"42": [{"ticker": "AAPL"}]}
 
     def test_documents_are_read_as_documents(self):
+        """A whole-blob file goes through read(), not read_all_users()."""
         m = _canary()
-        m._store = lambda: _Rows({"picks.json": {"_saved_date": "2026-08-22"}})
-        assert m._raw_picks()["_saved_date"] == "2026-08-22"
+        b = _Rows({"data_quality.json": {"date": "2026-08-22"}})
+        m._store = lambda: b
+        assert m._store_read("data_quality.json") == {"date": "2026-08-22"}
 
 
 class TestRestoreActuallyRestores:

@@ -152,9 +152,30 @@ def _restore(snapshot: dict) -> None:
 
 
 def _raw_picks() -> dict:
-    """Read picks.json directly (NOT load_picks, which returns None off-day)."""
+    """Read picks.json directly (NOT load_picks, which returns None off-day).
+
+    🔴 THE GIST, deliberately — this file is the one exception to "read the
+    live store". `config_manager.save_picks()` and `load_picks()` bypass the
+    storage backend entirely and hit the Gist API with a hardcoded URL, so for
+    picks.json the Gist IS the live store. Supabase holds only a frozen copy
+    from the Aug-19 migration that nothing ever updates.
+
+    Converting this to `_store_read` on 2026-08-24 broke the check exactly that
+    way: it read Supabase's `_saved_date=2026-08-21` and reported stale picks
+    while production was serving the correct 7 for that day. The general rule
+    (a monitor must read the store the app uses) was right; the mistake was
+    assuming every file resolves through the backend.
+
+    The rule underneath is sharper: READ THE STORE THE WRITER USED. For every
+    other file that is the backend. For this one it is the Gist.
+    """
+    import json as _json
     try:
-        return _store_read("picks.json") or {}
+        meta = (_gist_all() or {}).get("picks.json") or {}
+        body = meta.get("content")
+        if meta.get("truncated"):          # >1MB: content is partial
+            body = requests.get(meta["raw_url"], timeout=20).text
+        return _json.loads(body or "{}")
     except Exception:
         return {}
 
