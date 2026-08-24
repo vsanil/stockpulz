@@ -83,3 +83,71 @@ class TestTheInventoryLabelIsHonest:
         i = src.index("INPUTS")
         for name in set(__import__("re").findall(r"\bp_[a-z_]+\b", src[i:])):
             assert name in defined, f"INPUTS references {name}, which does not exist"
+
+
+class TestTheSupabaseRow:
+    """🔴 The primary store had NO row until 2026-08-24, while this file's own
+    rule says every external source gets one. The Gist row was covering for it
+    with the label "all storage" — which is how a probe ended up testing
+    Supabase while claiming to test the Gist."""
+
+    def test_the_row_exists(self):
+        """Imports the module and inspects INPUTS for real — a source scan
+        passes against a COMMENTED-OUT row, which is how this guard first
+        failed to catch its own mutation."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("ia_t", str(SRC.resolve()))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        names = [row[0] for row in m.INPUTS]
+        assert "Supabase" in names, \
+            f"the primary store is not inventoried; rows: {names}"
+
+    def test_it_says_what_it_covers(self):
+        src = SRC.read_text()
+        i = src.index('"Supabase"')
+        row = src[i:src.index("\n", i)]
+        assert "picks.json" in row, \
+            "the row must record that picks.json is the exception"
+
+    def test_an_unconfigured_surface_is_not_reported_as_ok(self):
+        """A local shell has no SUPABASE_* by design. Saying 'ok' there would
+        claim the primary store was verified when it was never contacted."""
+        body = _body("p_supabase")
+        assert 'return False, "SUPABASE_* unset' in body
+
+    def test_a_silent_fallback_is_reported_as_DEAD(self):
+        """Configured but resolved to the Gist means construction failed and
+        fell back — the split-brain that ran undetected for four days. It must
+        never read as ok."""
+        # Anchor on THAT branch's return, not on "return False" anywhere in
+        # the function — the unset branch also returns False, so a loose scan
+        # passes even when this one is flipped to True.
+        fn = _fn("p_supabase")
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.If):
+                continue
+            if "!= 'supabase'" in ast.unparse(node.test).replace('"', "'"):
+                rets = [n for n in ast.walk(node) if isinstance(n, ast.Return)]
+                assert rets, "the fallback branch returns nothing"
+                first = rets[0].value
+                ok = first.elts[0] if isinstance(first, ast.Tuple) else first
+                assert isinstance(ok, ast.Constant) and ok.value is False, \
+                    "a silent fallback to the Gist must never report ok"
+                return
+        raise AssertionError("no branch detects a fallback away from supabase")
+
+    def test_it_states_that_a_READ_probe_cannot_see_RLS_write_denial(self):
+        """RLS makes SELECT return fewer rows, not an error — which is exactly
+        why the 2026-08-21 outage stayed invisible. Claiming more than reach is
+        the false pass this file exists to prevent."""
+        doc = ast.get_docstring(_fn("p_supabase")) or ""
+        assert "RLS" in doc and "verify_storage" in doc
+
+    def test_it_actually_reads_both_table_shapes(self):
+        """Documents and per-user ROWS are different tables; reading only one
+        would miss the half that was denied."""
+        fn = _fn("p_supabase")
+        calls = {n.func.attr for n in ast.walk(fn)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+        assert {"read", "read_all_users"} <= calls
