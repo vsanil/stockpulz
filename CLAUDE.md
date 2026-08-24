@@ -1145,3 +1145,20 @@ Rules:
 - `test_friday_wrap_delivers_wrap_then_nudge_then_lesson` stamped its closed trade with **`date.today()`** (the LOCAL date) while `run_friday_wrap` filters on **`datetime.now(ET).date()`**. Once ET rolled into Monday, `week_start` moved to the new week, the Sunday-stamped trade fell outside `week_start <= closed_d <= today`, no nudge was emitted, and `order.index("nudge")` raised `ValueError`.
 - **It was pre-existing and reproducible on the previous commit** — it had simply passed every earlier run tonight. **A suite that goes red on a calendar boundary blocks self_heal**, whose merge gate is `pytest tests/ -q`.
 - Fixed by PINNING the clock to Friday 2026-08-21 (mid-week, so the trade is always inside the window) rather than stamping from whatever clock the runner happens to have. The neighbouring tax-harvest test already froze `et_today`; this one had been missed. **Rule restated: a test must stamp dates on the SAME clock the code reads, and must FORCE the condition rather than wait for the calendar.**
+
+### 🔴 FIRST LONG-TERM RESULT (Aug 24) — no detectable edge there either
+`scripts/backtest_longterm.py`, TRAIN window, **296 tickers · 18 rebalances · 5,328 ticker-dates scored · 180-day horizon**:
+
+| bucket | n | win | 95% CI | median | alpha vs SPY |
+|---|---|---|---|---|---|
+| top-ranked | 90 | **55.6%** | 45.3–65.4 | +2.67% | **−4.74%** |
+| mid-ranked | 90 | **57.8%** | 47.5–67.5 | +3.68% | **−4.79%** |
+
+**EDGE −2.2 points — within noise.** The LT rubric does not rank better than arbitrary selection from the same eligible pool, which is the same verdict the short-term score got on Aug 12 (−1.6 points, n=510). **Two independent legs of the engine, both showing no ranking advantage.**
+- **Both buckets have alpha of about −4.75%**, i.e. the whole eligible pool trailed SPY over 180 days in this window and the ranking changed nothing. That the two alphas agree to 0.05 points is itself the finding: the score is not sorting.
+- n=90/side clears `MIN_N`, but the CIs are ±10 points and overlap heavily — this is failure-to-detect, **not proof of no edge**. A real 3-point edge would not reliably show at this n.
+- **Restate with any quote: ANNUAL figures not TTM** (so it grades the RUBRIC, not the live pipeline), today's universe (survivorship flatters it), and **no stops** — LT picks carry none by design, so outcome is mark-to-market plus alpha.
+- **Do not tune the LT weights on this.** It says the weights are unlikely to be where the value is, which is a reason to look elsewhere, not a direction to move them.
+- **The 200MA leg is the subtle part**: `_long_term_score` fetches its own bars, so the backtest patches `screener._alpaca_single_bars` to a point-in-time slice. Without that patch the one leg that *looks* like price data reads TODAY's price and quietly reintroduces look-ahead. Guard pins it.
+- **🔴 The first run printed `CI[4530.0-6540.0]`** — `wilson()` already returns percentages and I multiplied again. A garbled confidence interval is the single worst number to get wrong, because it is the one that decides whether to believe the rest. Guard pins the format and bans `lo*100`.
+- SEC facts cache is **~65 MB** at 296 tickers → `.gitignore`d; refetchable, and one fetch per TICKER (not per date) because the same filings serve every decision date.

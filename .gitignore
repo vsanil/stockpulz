@@ -13,3 +13,5 @@ graphify-out/cache/
 scripts/.backtest_bars.pkl
 scripts/.holdout_views.json
 analysis/findings_state.json
+# SEC companyfacts cache — ~65MB of third-party filings, refetchable
+scripts/.sec_facts.pkl
