@@ -845,8 +845,11 @@ a{color:var(--accent);text-decoration:none}
 .fdet{margin-top:8px}
 .fdet>summary{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;cursor:pointer;list-style:none;font-size:13px;font-weight:600;color:var(--muted);background:var(--card-hover);border:1px solid var(--border);border-radius:12px;user-select:none}
 .fdet>summary::-webkit-details-marker{display:none}
-.fdet>summary::before{content:'\25B8';display:inline-block;transition:transform .15s}
-.fdet[open]>summary::before{transform:rotate(90deg)}
+/* The chevron is an HTML ENTITY in the markup, never a CSS \ escape: in a
+   Python triple-quoted string '\25B8' is read as an OCTAL escape (\25) and
+   renders the literal text 'B8'. Same family as the lone-surrogate trap. */
+.fchev{display:inline-block;transition:transform .15s}
+.fdet[open] .fchev{transform:rotate(90deg)}
 .fdet[open]>summary{border-color:var(--accent,#4ade80)}
 .fdet>summary:active{transform:scale(.98)}
 .fdet>*:not(summary){padding:8px 2px 0}
@@ -1403,7 +1406,7 @@ function findingsCard(rows,decidedN){
     var tech  = x.proposed_summary ? (x.proposed_change||'') : '';
     var det = '';
     if(tech || x.proposed_files){
-      det = '<details class="fdet"><summary>Technical detail</summary>'
+      det = '<details class="fdet"><summary><span class="fchev">&#9656;</span>Technical detail</summary>'
           + (tech?'<div class="fb-text">'+tech+'</div>':'')
           + (x.proposed_files?'<div class="fb-meta">files: <code>'+x.proposed_files+'</code></div>':'')
           + '<div class="fb-meta">id: <code>'+x.id+'</code></div>'

@@ -293,6 +293,23 @@ class TestTheCardIsReadable:
         assert "border:1px solid var(--border)" in blk
         assert ".fdet>summary:active{transform:scale(.98)}" in css
 
+    def test_the_chevron_is_an_entity_not_a_backslash_escape(self, client):
+        """🔴 It rendered the literal text 'B8'. In a Python triple-quoted
+        string `content:'\\25B8'` is read as an OCTAL escape (\\25) plus the
+        characters B and 8. Same family as the lone-surrogate trap: a backslash
+        escape written for CSS/JS is eaten by Python first."""
+        import re
+        src = pathlib.Path("webhook.py").read_text()
+        assert not re.search(r"content:'\\[0-9]", src), \
+            "a backslash escape in CSS content will be eaten by Python"
+        with client.session_transaction() as sess:
+            sess["admin"] = True
+        page = client.get("/admin").get_data(as_text=True)
+        # Assert on the RENDERED markup, not a substring of the whole page:
+        # the CSS comment explaining this fix contains the literal artifact, so
+        # a naive scan flags itself. Fourth time that trap has appeared.
+        assert '<span class="fchev">&#9656;</span>Technical detail' in page
+
     def test_the_propose_cli_accepts_a_plain_summary(self):
         src = pathlib.Path("scripts/findings.py").read_text()
         assert '"--summary"' in src
