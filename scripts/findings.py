@@ -52,7 +52,8 @@ def _today() -> str:
     return dt.date.today().isoformat()
 
 
-def propose(fid: str, change: str, files: str, summary: str = "") -> int:
+def propose(fid: str, change: str, files: str, summary: str = "",
+            category: str = "engine") -> int:
     """Record WHAT I intend to change, before changing it.
 
     🔴 `summary` is the PLAIN-ENGLISH sentence the owner actually reads on
@@ -71,7 +72,7 @@ def propose(fid: str, change: str, files: str, summary: str = "") -> int:
         return 1
     rec.update({"status": AWAITING, "proposed_on": _today(),
                 "proposed_change": change, "proposed_files": files,
-                "proposed_summary": summary})
+                "proposed_summary": summary, "category": category})
     rec.pop("approved_on", None)          # a changed proposal needs fresh consent
     rec.pop("approved_note", None)
     _save(st)
@@ -133,6 +134,11 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("propose"); p.add_argument("id")
     p.add_argument("--change", required=True); p.add_argument("--files", default="")
+    p.add_argument("--category", default="engine", choices=("bug", "engine"),
+                   help="bug = technical defect, one instance is enough. "
+                        "engine = changes what gets recommended, needs outcome "
+                        "evidence over time. Defaults to engine: fail toward "
+                        "the answer that demands closer scrutiny.")
     p.add_argument("--summary", default="",
                    help="ONE plain-English sentence the owner reads on /admin. "
                         "No function names, no file paths, no jargon.")
@@ -141,7 +147,8 @@ def main() -> int:
     sub.add_parser("status")
     args = ap.parse_args()
     if args.cmd == "propose":
-        return propose(args.id, args.change, args.files, args.summary)
+        return propose(args.id, args.change, args.files, args.summary,
+                       args.category)
     if args.cmd == "approve":
         return approve(args.id, args.note)
     if args.cmd == "reject":

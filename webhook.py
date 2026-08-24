@@ -842,6 +842,10 @@ a{color:var(--accent);text-decoration:none}
    toggle in the mini-app was styled as a label and the owner said it did not
    even look clickable. Surface + edge + a declared min-height, so a later
    font tweak cannot quietly shrink the touch target below 44px. */
+.fchip{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.02em;padding:3px 9px;border-radius:999px;margin:2px 0 6px}
+.fbug{background:rgba(96,165,250,.14);color:#93c5fd;border:1px solid rgba(96,165,250,.35)}
+/* Amber, not green: an engine change is the one that needs a closer look. */
+.feng{background:rgba(251,191,36,.14);color:#fcd34d;border:1px solid rgba(251,191,36,.4)}
 .fdet{margin-top:8px}
 .fdet>summary{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;cursor:pointer;list-style:none;font-size:13px;font-weight:600;color:var(--muted);background:var(--card-hover);border:1px solid var(--border);border-radius:12px;user-select:none}
 .fdet>summary::-webkit-details-marker{display:none}
@@ -1401,6 +1405,22 @@ function findingsCard(rows,decidedN){
     // engineer — it names functions and bug classes — and rendering it as the
     // whole card made the proposal unreadable, which turns approving into a
     // rubber stamp. Detail stays one tap away, never in the way.
+    // The two things the owner is judging are NOT alike. A technical bug
+    // restores intended behaviour and changes no strategy. A decision-engine
+    // change alters what real users are told to buy, so it needs outcome
+    // evidence over time — the n>=30 gate — and never the bot's win rate.
+    // Unclassified renders as engine: fail toward the closer look.
+    var isBug = x.category === 'bug';
+    var chip  = '<span class="fchip '+(isBug?'fbug':'feng')+'">'
+              + (isBug ? 'Technical bug' : 'Decision-engine change') + '</span>';
+    var basis = isBug
+      ? '<div class="fb-meta">Fixes broken behaviour. Does not change how picks are chosen.</div>'
+      : '<div class="fb-meta">Changes how picks are chosen or levelled &mdash; '
+        + (x.n ? ('based on '+x.n+' observation(s)'
+                  + (x.n < 30 ? '. <b>Below the 30 needed to be conclusive.</b>'
+                              : '.'))
+               : 'no outcome sample recorded yet.')
+        + '</div>';
     var plain = x.proposed_summary || x.proposed_change || x.note
               || '(no description recorded)';
     var tech  = x.proposed_summary ? (x.proposed_change||'') : '';
@@ -1419,7 +1439,9 @@ function findingsCard(rows,decidedN){
       // emoji — the response then dies with UnicodeEncodeError and the WHOLE
       // /admin page 500s. Use an HTML entity, which is inert to Python.
       +'<div class="fb-meta">'+(bad?'&#128680; ':'')+(LABEL[x.status]||x.status)+'</div>'
+      +chip
       +'<div class="fb-text" style="font-size:15px;line-height:1.5">'+plain+'</div>'
+      +basis
       +det
       +'<div style="margin-top:8px">'+acts+'</div>'
       +'</div>';

@@ -20,6 +20,15 @@ on:
         required: false
         default: ""
         type: string
+      category:
+        description: >-
+          propose only — bug (technical defect, one instance is enough) or
+          engine (changes what gets recommended; needs outcome evidence over
+          time). Defaults to engine, the answer needing closer scrutiny.
+        required: false
+        default: engine
+        type: choice
+        options: [engine, bug]
       summary:
         description: >-
           propose only — ONE plain-English sentence the owner reads on /admin.
@@ -70,7 +79,7 @@ jobs:
               test -n "${{ inputs.id }}" || { echo "id is required"; exit 1; }
               python scripts/findings.py propose "${{ inputs.id }}" \
                 --change "${{ inputs.change }}" --files "${{ inputs.files }}" \
-                --summary "${{ inputs.summary }}"
+                --summary "${{ inputs.summary }}" --category "${{ inputs.category }}"
               ;;
             prune-dry-run)
               python scripts/prune_alert_junk.py
