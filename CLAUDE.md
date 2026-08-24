@@ -1124,3 +1124,9 @@ Rules:
 - **The engine evidence-bar caveat stays ABOVE the fold** — it is a caution, not detail, and hiding it defeats the point. A `bug` states plainly that it changes nothing about how picks are chosen.
 - Every derived finding carries a `plain=` line: what happened, in words that do not name a function. An **AST sweep** asserts every `Finding` declares both `category` and `plain`, so a new one cannot skip it.
 - **Deleted `test_the_default_is_engine_not_bug` rather than relaxing it** — a test that contradicts current intent is worse than no test. Same rule that retired the obsolete watchlist-sparkline guard.
+
+### Findings workflow trimmed — 4 actions, not 7 (owner's call, Aug 23)
+- `findings.yml` is now **`status | propose | approve | reject`**. `reclassify` and the two `prune-*` actions were removed as overhead: each had run exactly once.
+- **Everything else is unchanged** — the daily analysis, `ENGINE_FINDINGS.md` with plain wording + bug/engine labels, the dispositions worklist, the `/admin` card with Approve/Decline, and the new-ACT DM all stay. The trim was ceremony, not capability.
+- **⚠️ `scripts/findings.py reclassify` and `scripts/prune_alert_junk.py` are now reachable only from a shell**, so they must be run WHERE `SUPABASE_*` IS SET — a local `.env` has neither and `get_storage_backend()` hands back the Gist, which is the rollback copy. Both docstrings say so. **Rule: unwiring a CI entry point turns it into a wrong-store footgun; say so at the entry point itself.**
+- If either is needed regularly again, re-add it to `findings.yml` rather than running it locally.

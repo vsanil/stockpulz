@@ -83,6 +83,12 @@ def propose(fid: str, change: str, files: str, summary: str = "",
 def reclassify(fid: str, category: str = "", summary: str = "") -> int:
     """Correct a finding's CATEGORY or its plain-English summary in place.
 
+    ⚠️ No longer exposed by findings.yml (trimmed as overhead). It is reachable
+    only from a shell, so RUN IT WHERE SUPABASE_* IS SET — a local .env has
+    neither, and get_storage_backend() would hand you the Gist while /admin
+    reads Supabase. That wrong-store trap is what left five dispositions in the
+    rollback copy on 2026-08-23.
+
     Deliberately does NOT touch status. A proposal written badly, or classified
     wrongly, is a description problem — re-proposing would clear the owner's
     consent and demand it again for a change that has not moved. But a card the

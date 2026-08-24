@@ -19,6 +19,11 @@ WHAT IT WILL NEVER TOUCH:
   • the canonical test account (`DEFAULT_TEST_CHAT_ID`), which is real storage
     for the synthetic bot.
 
+⚠️ Not wired to any workflow (it has run; the row-aware canary restore now
+prevents the residue that made it necessary). If it is ever needed again, run
+it WHERE SUPABASE_* IS SET — from a local shell get_storage_backend() returns
+the Gist, which is the rollback copy, not what the app reads.
+
 Dry run by default. `--apply` writes.
 
     python3 scripts/prune_alert_junk.py            # show what would go
