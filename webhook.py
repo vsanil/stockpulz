@@ -838,6 +838,18 @@ a{color:var(--accent);text-decoration:none}
 .fb-row{padding:8px 0;border-bottom:1px solid var(--border)}
 .fb-row:last-child{border-bottom:none}
 .fb-meta{font-size:11px;color:var(--muted);margin-bottom:3px}
+/* The technical detail disclosure. It must READ as a control: the Analysis
+   toggle in the mini-app was styled as a label and the owner said it did not
+   even look clickable. Surface + edge + a declared min-height, so a later
+   font tweak cannot quietly shrink the touch target below 44px. */
+.fdet{margin-top:8px}
+.fdet>summary{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;cursor:pointer;list-style:none;font-size:13px;font-weight:600;color:var(--muted);background:var(--card-hover);border:1px solid var(--border);border-radius:12px;user-select:none}
+.fdet>summary::-webkit-details-marker{display:none}
+.fdet>summary::before{content:'\25B8';display:inline-block;transition:transform .15s}
+.fdet[open]>summary::before{transform:rotate(90deg)}
+.fdet[open]>summary{border-color:var(--accent,#4ade80)}
+.fdet>summary:active{transform:scale(.98)}
+.fdet>*:not(summary){padding:8px 2px 0}
 .fb-text{font-size:12px;color:var(--text);line-height:1.45}
 .unread{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:middle}
 .empty{color:var(--muted);font-size:12px;text-align:center;padding:20px 0}
@@ -1360,41 +1372,60 @@ function auditSection(a){
 function findingsCard(rows,decidedN){
   rows = rows||[];
   var head='<h2>Engine findings</h2>';
-  // 🔴 Renders even with nothing pending. An invisible card reads as a broken
+  // Renders even with nothing pending. An invisible card reads as a broken
   // feature — the whole point is that you can come here and SEE there is
   // nothing waiting on you, rather than wondering where it went.
   if(!rows.length){
     return '<div class="card">'+head
-      +'<div class="fb-meta">Nothing awaiting your approval. '
-      +(decidedN?(decidedN+' finding(s) already decided.'):'')
+      +'<div class="fb-meta">Nothing waiting on you. '
+      +(decidedN?(decidedN+' already decided.'):'')
       +'</div></div>';
   }
-  var body=rows.map(function(x){
+  // Plain words, not the internal status string. The owner reads this to
+  // decide; `awaiting_approval` and `resolved_UNAPPROVED` are my vocabulary.
+  var LABEL={awaiting_approval:'Waiting for your decision',
+             approved:'You approved this &mdash; I can build it',
+             resolved_UNAPPROVED:'Built WITHOUT your approval'};
+  var body=rows.map(function(x,i){
     var bad = x.status==='resolved_UNAPPROVED';
     var acts = bad
-      ? '<span class="fb-meta">Implemented without approval &mdash; review the commit history.</span>'
+      ? '<span class="fb-meta">This was implemented without your approval. Check the commit history.</span>'
       : (x.status==='awaiting_approval'
           ? '<button class=\"btn-success\" onclick=\"setFinding(\\''+x.id+'\\',\\'approved\\')\">Approve</button> '
             +'<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'wont_fix\\')\">Decline</button>'
-          : '<span class="fb-meta">Approved '+(x.approved_on||'')+' &mdash; cleared to implement.</span>');
+          : '<span class="fb-meta">Approved '+(x.approved_on||'')+'.</span>');
+    // 🔴 The PLAIN sentence leads. The technical text is written for an
+    // engineer — it names functions and bug classes — and rendering it as the
+    // whole card made the proposal unreadable, which turns approving into a
+    // rubber stamp. Detail stays one tap away, never in the way.
+    var plain = x.proposed_summary || x.proposed_change || x.note
+              || '(no description recorded)';
+    var tech  = x.proposed_summary ? (x.proposed_change||'') : '';
+    var det = '';
+    if(tech || x.proposed_files){
+      det = '<details class="fdet"><summary>Technical detail</summary>'
+          + (tech?'<div class="fb-text">'+tech+'</div>':'')
+          + (x.proposed_files?'<div class="fb-meta">files: <code>'+x.proposed_files+'</code></div>':'')
+          + '<div class="fb-meta">id: <code>'+x.id+'</code></div>'
+          + '</details>';
+    }
     return '<div class="fb">'
-      // NOT '\\uD83D\\uDEA8'. This JS lives inside a Python triple-quoted
+      // Emoji here must be an HTML ENTITY. A surrogate-pair escape is correct
+      // in JS source but this JS lives inside a Python triple-quoted
       // string, and Python reads that as two LONE SURROGATES rather than an
-      // emoji \u2014 the response then dies with UnicodeEncodeError and the WHOLE
+      // emoji — the response then dies with UnicodeEncodeError and the WHOLE
       // /admin page 500s. Use an HTML entity, which is inert to Python.
-      +'<div class="fb-meta">'+(bad?'&#128680; ':'')+x.status+' &middot; <code>'+x.id+'</code></div>'
-      +'<div class="fb-text">'+(x.proposed_change||x.note||'(no proposal recorded)')+'</div>'
-      +(x.proposed_files?'<div class="fb-meta">files: <code>'+x.proposed_files+'</code></div>':'')
-      +'<div style="margin-top:6px">'+acts+'</div>'
+      +'<div class="fb-meta">'+(bad?'&#128680; ':'')+(LABEL[x.status]||x.status)+'</div>'
+      +'<div class="fb-text" style="font-size:15px;line-height:1.5">'+plain+'</div>'
+      +det
+      +'<div style="margin-top:8px">'+acts+'</div>'
       +'</div>';
   }).join('');
   return '<div class="card">'+head
-    +'<div class="fb-meta" style="margin-bottom:8px">Approving clears me to implement &mdash; it does '
-    +'<b>not</b> deploy anything. A finding whose condition disappears while still awaiting approval '
-    +'is flagged as implemented without consent.</div>'
+    +'<div class="fb-meta" style="margin-bottom:10px">Changes I want to make to the app. '
+    +'Approving lets me write the code &mdash; it does <b>not</b> put anything live.</div>'
     +body+'</div>';
 }
-
 async function setFinding(id,status){
   try{
     var r=await fetch('/admin/findings/'+encodeURIComponent(id),

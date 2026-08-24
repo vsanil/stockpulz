@@ -52,19 +52,30 @@ def _today() -> str:
     return dt.date.today().isoformat()
 
 
-def propose(fid: str, change: str, files: str) -> int:
-    """Record WHAT I intend to change, before changing it."""
+def propose(fid: str, change: str, files: str, summary: str = "") -> int:
+    """Record WHAT I intend to change, before changing it.
+
+    🔴 `summary` is the PLAIN-ENGLISH sentence the owner actually reads on
+    /admin. The technical `change` is written for an engineer — it names
+    functions, files and bug classes — and the first proposal rendered that
+    text as the whole card. The owner's response was "does this say findings in
+    simple wordings?", which is the correct reaction: the entire argument for
+    approving on a dashboard rather than a Telegram button was that the change
+    could be READ before consenting. An unreadable proposal makes the review
+    theatre, which is the failure the dashboard exists to avoid.
+    """
     st = _load()
     rec = st.setdefault(fid, {})
     if rec.get("status") == APPROVED:
         print(f"  {fid} is already approved — implement it, do not re-propose.")
         return 1
     rec.update({"status": AWAITING, "proposed_on": _today(),
-                "proposed_change": change, "proposed_files": files})
+                "proposed_change": change, "proposed_files": files,
+                "proposed_summary": summary})
     rec.pop("approved_on", None)          # a changed proposal needs fresh consent
     rec.pop("approved_note", None)
     _save(st)
-    print(f"  ⏳ {fid} → awaiting your approval\n     change: {change}\n     files : {files}")
+    print(f"  ⏳ {fid} → awaiting your approval\n     plain : {summary or '(none — the card will fall back to the technical text)'}\n     change: {change}\n     files : {files}")
     return 0
 
 
@@ -122,12 +133,15 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("propose"); p.add_argument("id")
     p.add_argument("--change", required=True); p.add_argument("--files", default="")
+    p.add_argument("--summary", default="",
+                   help="ONE plain-English sentence the owner reads on /admin. "
+                        "No function names, no file paths, no jargon.")
     a = sub.add_parser("approve"); a.add_argument("id"); a.add_argument("--note", default="")
     r = sub.add_parser("reject");  r.add_argument("id"); r.add_argument("--note", required=True)
     sub.add_parser("status")
     args = ap.parse_args()
     if args.cmd == "propose":
-        return propose(args.id, args.change, args.files)
+        return propose(args.id, args.change, args.files, args.summary)
     if args.cmd == "approve":
         return approve(args.id, args.note)
     if args.cmd == "reject":
