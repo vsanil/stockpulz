@@ -147,9 +147,36 @@ def p_anthropic():
 
 
 def p_gist():
-    import config_manager as cm
-    d = cm._load_gist_file("picks.json")
-    return bool(d), f"picks._saved_date={(d or {}).get('_saved_date')}"
+    """Probe the GIST ITSELF, not whichever backend happens to be active.
+
+    🔴 This read `cm._load_gist_file("picks.json")`, which resolves through
+    `get_storage_backend()`. On any surface with SUPABASE_* set — production
+    and CI both — that probed SUPABASE while the row said "GitHub Gist", so a
+    green line here said nothing about the Gist at all. Same class as probing
+    Polygon's free endpoint and calling the paid options feed healthy.
+
+    picks.json is also the right file to read here and the wrong one to read
+    through the backend: `config_manager.save_picks()` hits the Gist API with
+    a hardcoded URL, so the Gist is its live store and Supabase holds only a
+    frozen copy from the Aug-19 migration.
+    """
+    import json as _json
+    import os as _os
+    import requests as _rq
+    gid = _os.environ.get("GIST_ID", "")
+    tok = _os.environ.get("GH_GIST_TOKEN") or _os.environ.get("GITHUB_TOKEN") or ""
+    if not (gid and tok):
+        return False, "GIST_ID / GH_GIST_TOKEN not set"
+    r = _rq.get(f"https://api.github.com/gists/{gid}",
+                headers={"Authorization": f"token {tok}"}, timeout=20)
+    if r.status_code != 200:
+        return False, f"HTTP {r.status_code}"
+    meta = (r.json().get("files") or {}).get("picks.json") or {}
+    body = meta.get("content")
+    if meta.get("truncated"):
+        body = _rq.get(meta["raw_url"], timeout=20).text
+    d = _json.loads(body or "{}")
+    return bool(d), f"picks._saved_date={d.get('_saved_date')}"
 
 
 def p_telegram():
@@ -239,7 +266,12 @@ INPUTS = [
     ("Commodity candidates", p_commodity_candidates, "CORE  the entire commodities section",   ("_build_commodity_candidates", "commodity")),
     ("Options strike",      p_options_strike,   "CORE  strike/expiry on every options play",  ("nearest_otm_call",)),
     ("Anthropic",           p_anthropic,        "CORE   pick selection + all NL",             ("anthropic", "llm_client")),
-    ("GitHub Gist",         p_gist,             "CORE   all storage",                         ("gist", "storage")),
+    # Label corrected 2026-08-24: the Gist is no longer "all storage" — Supabase
+    # is the live store for everything EXCEPT picks.json, whose writer
+    # (save_picks) still hits the Gist API directly. The Gist also remains the
+    # rollback copy. Saying "all storage" invited exactly the mistake this probe
+    # was making.
+    ("GitHub Gist",         p_gist,             "CORE   picks.json + rollback copy",          ("gist", "storage")),
     ("Telegram",            p_telegram,         "CORE   all delivery",                        ("telegram",)),
 ]
 
