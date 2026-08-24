@@ -86,7 +86,7 @@ class TestItIsWiredIn:
 
     def test_the_card_says_approval_does_not_deploy(self):
         """The tap authorises drafting, not shipping — say so on the button."""
-        assert "does " in self._src() and "not</b> deploy" in self._src()
+        assert "not</b> put anything live" in self._src()
 
     def test_an_unapproved_implementation_is_surfaced_not_actionable(self):
         src = self._src()
@@ -95,7 +95,7 @@ class TestItIsWiredIn:
         # character window spills into the SIBLING ternary branch, whose
         # buttons belong to awaiting_approval. Fixed-width windows misled me
         # three times today.
-        i = src.index("Implemented without approval")
+        i = src.index("implemented without your approval")
         arm = src[i:src.index("</span>", i)]
         assert "button" not in arm, \
             "a violation must be reported, never dismissed with a click"
@@ -124,7 +124,7 @@ class TestCardIsVisibleWhenEmpty:
         assert "if(!rows||!rows.length) return '';" not in js, (
             "the empty case must not bail out — that is the invisible-card bug"
         )
-        assert "Nothing awaiting your approval" in js
+        assert "Nothing waiting on you" in js
 
     def test_the_empty_state_reports_how_many_were_decided(self):
         # Otherwise "nothing pending" is ambiguous between "you cleared them"
@@ -242,3 +242,58 @@ class TestRelativeDatesSurviveSupabaseTimestamps:
 
     def test_an_unparseable_stamp_shows_the_stamp_not_a_number(self, client):
         assert "NaN" not in self._run(self._served_age(client), "not-a-date")
+
+
+class TestTheCardIsReadable:
+    """🔴 The first real proposal rendered its TECHNICAL description as the whole
+    card — `_history__history_*`, "iteration site is already guarded",
+    `get_allowed_users()`. The owner's reaction was "does this say findings in
+    simple wordings?", which is the correct one.
+
+    The entire argument for approving on a dashboard rather than a one-tap
+    Telegram button was that the change could be READ before consenting. An
+    unreadable proposal makes the review a rubber stamp — the exact failure the
+    dashboard exists to prevent.
+    """
+
+    def _js(self):
+        src = pathlib.Path("webhook.py").read_text()
+        i = src.index("function findingsCard(")
+        return src[i:src.index("\nasync function setFinding", i)]
+
+    def test_the_plain_summary_leads(self):
+        js = self._js()
+        assert "x.proposed_summary || x.proposed_change" in js, \
+            "the plain sentence must be preferred over the technical text"
+
+    def test_the_technical_text_moves_behind_a_disclosure(self):
+        js = self._js()
+        assert "Technical detail" in js and "<details" in js
+        # And it must not ALSO be shown inline when a summary exists.
+        assert "x.proposed_summary ? (x.proposed_change||'') : ''" in js
+
+    def test_an_old_proposal_without_a_summary_still_renders(self):
+        """Backwards compatible: proposals recorded before the field existed
+        must not render blank."""
+        assert "x.proposed_summary || x.proposed_change || x.note" in self._js()
+
+    def test_internal_status_strings_are_translated_to_plain_words(self):
+        js = self._js()
+        assert "Waiting for your decision" in js
+        assert "Built WITHOUT your approval" in js
+
+    def test_the_disclosure_looks_like_a_control(self):
+        """The mini-app's Analysis toggle was styled as a label and the owner
+        said it did not look clickable. Same mistake, same fix."""
+        css = pathlib.Path("webhook.py").read_text()
+        i = css.index(".fdet>summary{")
+        blk = css[i:i + 400]
+        assert "min-height:44px" in blk, "touch target must be DECLARED, not emergent"
+        assert "var(--card-hover)" in blk, "theme token, never a hardcoded overlay"
+        assert "border:1px solid var(--border)" in blk
+        assert ".fdet>summary:active{transform:scale(.98)}" in css
+
+    def test_the_propose_cli_accepts_a_plain_summary(self):
+        src = pathlib.Path("scripts/findings.py").read_text()
+        assert '"--summary"' in src
+        assert "proposed_summary" in src
