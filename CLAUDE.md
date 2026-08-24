@@ -1097,3 +1097,14 @@ Rules:
   3. **Quotes** — a single `\'` is consumed by Python and emits a bare quote, silently breaking the whole `<script>`.
 - **Rule: never put a backslash escape in the admin HTML string. Use an HTML ENTITY** (`&#128680;`, `&#9656;`), which Python passes through untouched. `scripts/check_js.py` catches (3); only a test that FETCHES the page catches (1) and (2).
 - **⚠️ And the comment explaining the fix must not contain the artifact** — a scan for `B8` flagged its own CSS comment. **That self-flagging trap has now appeared FOUR times; anchor such assertions on RENDERED markup, or tokenise.**
+
+### Findings carry a CATEGORY: technical bug vs decision-engine change (owner's call, Aug 23)
+- **The two are not alike and must never be read as one list.** A **bug** restores intended behaviour and changes no strategy — ONE instance is enough to act on. An **engine** change alters what real users are told to buy, so it needs OUTCOME evidence accumulated over time (`MIN_N` = 30) and **never the synthetic bot's win rate** — that is the loop cut in July when a robot's mechanical fills started steering real picks. Reading them together is how an engine change gets waved through on a single observation.
+- **🔴 The default is `engine`, not `bug`.** A bug mislabelled as an engine change costs a moment's extra scrutiny; an engine change mislabelled as a bug gets waved through and silently alters everyone's picks. **Fail toward the answer that demands the closer look.** An unknown category raises.
+- Classification is a JUDGEMENT, so it is explicit per construction site and pinned by test — never inferred from the tier:
+  - `integrity/*` → **bug** (arithmetic that shipped; a pick that cannot win)
+  - `entry_window/*` → **bug** (a published promise not honoured; binary, one breach is enough)
+  - `stop_tight/*` → **engine** (stop placement decides when a thesis is abandoned)
+- Both surfaces show it. Report: `### [ACT] [DECISION-ENGINE CHANGE] …` — **the TIER stays first**, because an existing guard parses it from that header to assert an ACT finding is never buried below a HOLD. Card: a chip plus a basis line that names the sample size and says plainly when it is **below the 30 needed to be conclusive**.
+- **🔴 `_apply_state` did `state[f.id] = {...}`, REPLACING the record** and dropping `proposed_change` / `proposed_summary` / `proposed_files`. The night after proposing a fix for a DERIVED finding, the card would have rendered "(no description recorded)" — the owner could not have seen what they were approving. It now `update`s. **Rule: a nightly job that rewrites a record must merge, never replace — another writer owns some of those keys.**
+- Guard: `tests/test_finding_categories.py` (16), all 5 mutations caught incl. flipping the default and re-breaking the record replace.
