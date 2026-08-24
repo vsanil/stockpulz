@@ -1191,3 +1191,17 @@ Only **43% of screened tickers beat SPY**, and the top-ranked bucket was the WOR
 - **🔴 `canary.check_selfheal_unmerged()` MUST NEVER FAIL, and the reason is structural: a canary failure TRIGGERS self_heal, which writes another branch.** A failing "you have unmerged branches" check would manufacture the very condition it reports, every day, forever. It is informational by construction and silent when nothing is waiting.
 - Guards: `tests/test_selfheal_visibility.py` (12) + `TestTheGateCanActuallyRun` / `TestTheNotifierCanReportItsOwnFailure`. All 8 mutations caught.
 - **⚠️ Two existing tests used FIXED BYTE WINDOWS (`src[i-900:i+120]`) and broke when an unrelated block was inserted above the anchor.** Re-anchored on declarations. That trap appeared repeatedly — **anchor on a declaration or a unique marker, never on a character offset.**
+
+### self_heal's three orphaned branches: every diagnosis was CORRECT (Aug 24)
+Checked before deleting. All three found REAL bugs, and all three were later fixed by another route — the diagnosis was never the weak link, the delivery was.
+
+| branch | found | outcome |
+|---|---|---|
+| `storage.py` (Aug 20) | Supabase schema probe passes while every WRITE is denied by RLS (SELECT under RLS returns fewer rows, not an error) | **Superseded by a BETTER version.** Main's `_verify_write_access` deletes-then-reinserts so the INSERT is always a genuine attempt; the branch used insert-if-absent, which passes once then silently stops testing. |
+| `config_manager.py` (Aug 22) | `dict(before)` is shallow, so an in-place mutator lands in `before`, the change-guard reads "unchanged", and the alert is never persisted | **Identical fix already in main** (`_copy.deepcopy(before)`). |
+| `scripts/canary.py` (Aug 23) | the canary reads the GIST while production reads SUPABASE | **Superseded by the broader fix** — the branch corrected one read site; main converts all six, makes the restore row-aware, and adds the surface-agreement check. |
+
+- **Had the Aug 23 one been proposed, the wrong-store bug would have surfaced a day earlier** — and the false-alarm canary failure that fired self_heal *again* on Aug 24 would not have happened. That is the concrete cost of a gate that cannot pass.
+- **Diff a branch against its MERGE-BASE, never against current main.** A naive diff listed 40+ files, because main had moved that far, and completely hid what each branch actually changed.
+- All three deleted 2026-08-24 after verifying their content was in main. SHAs recorded in the commit message; leaving them would have made the new `/admin` card and the canary reminder cry wolf every day, which is exactly what those two were built to avoid.
+- **⚠️ A `wc -l` of a FAILED command also returns 0.** The first read-back after deleting hit `Recv failure: No route to host` and would have been reported as "0 branches remain" — verify with an explicit `if out=$(…); then` so a network failure cannot masquerade as a clean result.
