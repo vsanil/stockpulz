@@ -15,3 +15,8 @@ scripts/.holdout_views.json
 analysis/findings_state.json
 # SEC companyfacts cache — ~65MB of third-party filings, refetchable
 scripts/.sec_facts.pkl
+
+# macOS Finder metadata — rewritten constantly, and tracking it made
+# every pull/rebase fail with "unstaged changes" for a file nobody edits.
+.DS_Store
+**/.DS_Store
