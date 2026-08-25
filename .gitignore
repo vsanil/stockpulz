@@ -20,3 +20,8 @@ scripts/.sec_facts.pkl
 # every pull/rebase fail with "unstaged changes" for a file nobody edits.
 .DS_Store
 **/.DS_Store
+
+# Claude Code local settings — contains API keys in the permission allow list, never commit
+.claude/settings.local.json
+.claude/settings.deny-draft.json
+.claude/*.bak-*
