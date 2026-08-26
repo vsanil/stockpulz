@@ -511,6 +511,46 @@ def _notify_new_act(findings: list, state: dict, today: str) -> int:
     return len(fresh)
 
 
+def _notify_awaiting_approval(findings: list, state: dict, today: str) -> int:
+    """DM the owner when a finding is PROPOSED and now needs their decision.
+
+    🔴 The hole this closes: `_notify_new_act` filters on status == "open", so
+    the moment I proposed a fix the finding became `awaiting_approval` and
+    dropped out of the notification path entirely. Proposing a change actively
+    REMOVED it from the only channel that reaches the owner — the one state
+    that exists to ask them something was the one state that never asked.
+    That is why the Approve/Decline buttons went unseen until 2026-08-23.
+
+    Tracked by its OWN key (`proposed_notified_on`), not `notified_on`: a
+    finding may legitimately be announced twice — once as a new ACT finding,
+    once when a concrete fix is proposed for it. Sharing the key would silence
+    the second, which is the one carrying a decision.
+    """
+    fresh = [f for f in findings
+             if f.kind == "finding" and f.status == "awaiting_approval"
+             and not (state.get(f.id) or {}).get("proposed_notified_on")]
+    if not fresh:
+        return 0
+    lines = [f"🔔 *{len(fresh)} change(s) awaiting your approval*", ""]
+    for f in fresh:
+        rec = state.get(f.id) or {}
+        lines += [f"*{rec.get('proposed_summary') or f.title}*",
+                  f"  files: `{rec.get('proposed_files', '?')}`", ""]
+    lines.append("Approve or decline on /admin — Engine findings. "
+                 "Approving lets me write the code; it does NOT deploy anything.")
+    try:
+        from telegram_api import send_message
+        send_message("\n".join(lines), chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""))
+    except Exception as exc:
+        # A failed send must NOT mark them notified, or the ask vanishes.
+        print(f"[analyze] approval notify failed (non-critical): {exc}")
+        return 0
+    for f in fresh:
+        state.setdefault(f.id, {})["proposed_notified_on"] = today
+    print(f"[analyze] notified owner of {len(fresh)} finding(s) awaiting approval.")
+    return len(fresh)
+
+
 def build(dry: bool = False, notify: bool = False) -> str:
     d = _load()
     closed = d["log"].get("closed") or []
@@ -604,6 +644,10 @@ def build(dry: bool = False, notify: bool = False) -> str:
     doc = "\n".join(L) + "\n"
     if not dry and notify:
         _notify_new_act(findings, state, today)
+        # Separate call, separate state key: a finding can legitimately be
+        # announced as a new ACT finding AND later as a proposal awaiting a
+        # decision. Folding these together would silence the second.
+        _notify_awaiting_approval(findings, state, today)
     if not dry:
         os.makedirs(os.path.dirname(OUT), exist_ok=True)
         with open(OUT, "w") as fh:
