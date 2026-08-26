@@ -34,18 +34,56 @@ class TestTheAdminCard:
         assert not re.search(r"return\s*''\s*;", js), \
             "the card must never return empty — that is the invisible-card bug"
 
-    def test_it_links_out_for_review_rather_than_merging_in_place(self):
-        """Merging deploys to production, and the diff lives where it can
-        actually be read. A button beside a one-line summary invites approving
-        without reading — the failure the findings card already hit."""
-        js = self._js()
-        assert "Review &amp; merge on GitHub" in js
-        assert "setFinding" not in js and "fetch(" not in js
+    # NOTE: `test_it_links_out_for_review_rather_than_merging_in_place` was
+    # DELETED, not relaxed, on 2026-08-26. The owner asked to manage everything
+    # from the dashboard; a test asserting the opposite contradicts current
+    # intent, and a test that contradicts intent is worse than no test. What
+    # mattered in it — that approving must not be a rubber stamp — is now
+    # enforced by test_the_diff_itself_is_rendered_not_just_filenames below.
 
-    def test_it_warns_that_merging_deploys(self):
+    def test_the_diff_itself_is_rendered_not_just_filenames(self):
+        """The safety property that survived the redesign. A Merge button beside
+        a one-line summary invites approving without reading — exactly what the
+        findings card did when it showed raw function names. Showing the PATCH
+        is what makes this a review surface rather than a rubber stamp."""
         js = self._js()
-        assert "merging deploys to production" in js
-        assert "Read the diff before merging" in js
+        assert "diffHtml(f.patch)" in js, "the card must render the actual patch"
+        assert "Read the diff" in js
+
+    def test_both_actions_are_offered_and_merge_says_it_deploys(self):
+        js = self._js()
+        assert "selfhealAct(" in js
+        assert "Merge &amp; deploy" in js, "the button must say it deploys, not just 'merge'"
+        assert "Discard" in js
+        assert "Render deploys it to real users" in js
+
+    def test_a_destructive_action_asks_first(self):
+        assert "confirm(" in self._js(), "merge and discard must confirm"
+
+    def test_a_github_refusal_is_shown_not_swallowed(self):
+        """GITHUB_TOKEN dispatches workflows, which IMPLIES merge scope but does
+        not prove it — the Supabase RLS key passed every read probe while every
+        write was denied. A 403 that renders as success leaves the branch
+        unmerged and the owner believing otherwise."""
+        js = self._js()
+        assert "if(!r.ok)" in js and "HTTP " in js
+
+    def test_the_patch_is_capped_and_says_when_it_truncated(self):
+        """A silently partial diff beside a Merge button is worse than none."""
+        src = WEB.read_text()
+        i = src.index("def _build_selfheal_prs")
+        body = src[i:src.index("def _build_audit_findings", i)]
+        assert '"clipped"' in body
+        assert "diff truncated here" in self._js()
+
+    def test_newlines_use_fromCharCode_not_a_backslash_escape(self):
+        """This JS lives in a Python triple-quoted string. A literal backslash-n
+        is consumed by PYTHON and emits a real newline into a JS string literal
+        — a syntax error that kills the entire script. Same family as the
+        lone-surrogate emoji that 500'd the whole page."""
+        js = self._js()
+        assert "String.fromCharCode(10)" in js
+        assert "split('\\n')" not in js
 
     def test_already_merged_branches_are_hidden(self):
         """ahead_by == 0 means it is already in main — showing it is noise."""
@@ -97,3 +135,113 @@ class TestTheReminderCannotFeedItself:
 
     def test_it_is_registered(self):
         assert "check_selfheal_unmerged," in CAN.read_text()
+
+
+class TestTheMergeEndpoint:
+    """Managing fixes from /admin means the dashboard can now MERGE TO MAIN,
+    which Render auto-deploys. Everything here guards that button."""
+
+    def _admin(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        return client
+
+    def test_it_refuses_a_branch_that_is_not_a_self_heal_branch(self, client, monkeypatch):
+        """🔴 The load-bearing guard. `<path:branch>` accepts slashes, so it also
+        accepts `main` — without the prefix check this endpoint would merge or
+        DELETE any ref in the repo. A UI that only offers self-heal branches is
+        not a permission check."""
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+        for ref in ("main", "refs/heads/main"):
+            r = self._admin(client).post(f"/admin/selfheal/{ref}/discard")
+            assert r.status_code == 403, f"{ref} was not refused (got {r.status_code})"
+
+    def test_an_unknown_action_is_rejected(self, client, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+        r = self._admin(client).post("/admin/selfheal/auto/self-heal-x/nuke")
+        assert r.status_code == 400
+
+    def test_the_route_does_not_swallow_the_action_segment(self, client, monkeypatch):
+        """<path:> is greedy. If it captured 'self-heal-x/merge' as the branch,
+        the action would be lost and the endpoint would misbehave silently."""
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+        seen = {}
+
+        class _R:
+            status_code = 201
+            text = ""
+            def json(self): return {"sha": "abc123"}
+
+        def _post(url, **kw):
+            seen["url"] = url
+            seen["json"] = kw.get("json") or {}
+            return _R()
+
+        monkeypatch.setattr("webhook.requests.post", _post)
+        r = self._admin(client).post("/admin/selfheal/auto/self-heal-x/merge")
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert seen["json"].get("head") == "auto/self-heal-x", seen
+        assert seen["json"].get("base") == "main"
+
+    def test_a_github_403_surfaces_as_an_error_not_a_success(self, client, monkeypatch):
+        """The Supabase RLS lesson: a write denial that reads as success is the
+        worst available failure mode."""
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+
+        class _R:
+            status_code = 403
+            text = "Resource not accessible by integration"
+            def json(self): return {}
+
+        monkeypatch.setattr("webhook.requests.post", lambda *a, **k: _R())
+        r = self._admin(client).post("/admin/selfheal/auto/self-heal-x/merge")
+        assert r.status_code == 502
+        body = r.get_json() or {}
+        assert "403" in str(body.get("error", ""))
+        assert "not accessible" in str(body.get("detail", ""))
+
+    def test_discard_reports_the_sha_so_the_branch_is_restorable(self, client, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+
+        class _Get:
+            status_code = 200
+            def json(self): return {"object": {"sha": "deadbeef"}}
+
+        class _Del:
+            status_code = 204
+            text = ""
+            def json(self): return {}
+
+        monkeypatch.setattr("webhook.requests.get", lambda *a, **k: _Get())
+        monkeypatch.setattr("webhook.requests.delete", lambda *a, **k: _Del())
+        r = self._admin(client).post("/admin/selfheal/auto/self-heal-x/discard")
+        assert r.status_code == 200
+        body = r.get_json() or {}
+        assert body.get("sha") == "deadbeef"
+        assert "deadbeef" in body.get("note", ""), "the note must carry the restore command"
+
+    def test_it_requires_an_admin_session(self, client, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "t")
+        r = client.post("/admin/selfheal/auto/self-heal-x/merge")   # no session
+        assert r.status_code != 200
+
+
+class TestTheDashboardStillRenders:
+    """🔴 The /admin page 500'd for ~40 minutes once while every test was green,
+    because they all scanned the JS SOURCE and nothing ever FETCHED the page."""
+
+    def _get(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        return client.get("/admin")
+
+    def test_it_returns_200_and_encodes(self, client):
+        r = self._get(client)
+        assert r.status_code == 200
+        r.get_data().decode("utf-8")
+
+    def test_the_selfheal_card_is_in_the_served_page(self, client):
+        assert b"Self-heal fixes awaiting review" in self._get(client).get_data()
+
+    def test_the_merge_button_reaches_the_browser(self, client):
+        assert b"selfhealAct(" in self._get(client).get_data()
