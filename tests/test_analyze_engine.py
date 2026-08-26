@@ -376,3 +376,79 @@ class TestNewActNotification:
         m = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(m)
         assert inspect.signature(m.build).parameters["notify"].default is False
+
+
+class TestApprovalNotification:
+    """🔴 The hole this closes: `_notify_new_act` filters on status == "open",
+    so PROPOSING a fix moved the finding to `awaiting_approval` and dropped it
+    out of the notification path entirely. The one state that exists to ask the
+    owner something was the one state that never asked — which is why the
+    Approve/Decline buttons went unseen until 2026-08-23.
+    """
+
+    def _ae(self, monkeypatch):
+        import importlib.util, os
+        spec = importlib.util.spec_from_file_location(
+            "ae5", os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "analyze_engine.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        sent = []
+        import telegram_api
+        monkeypatch.setattr(telegram_api, "send_message",
+                            lambda text, chat_id=None: sent.append(text))
+        return m, sent
+
+    def _f(self, m, fid="i/1", status="awaiting_approval"):
+        f = m.Finding(fid, "ACT", "T title", "T evidence", "fix",
+                      kind="finding", where="some_file.py", category="bug")
+        f.status = status
+        return f
+
+    def test_a_proposed_finding_notifies(self, monkeypatch):
+        m, sent = self._ae(monkeypatch)
+        st = {"i/1": {"proposed_summary": "Prune junk alert keys",
+                      "proposed_files": "scripts/prune.py"}}
+        assert m._notify_awaiting_approval([self._f(m)], st, "2026-08-26") == 1
+        assert len(sent) == 1
+        assert "Prune junk alert keys" in sent[0]
+        assert "scripts/prune.py" in sent[0]
+
+    def test_it_is_exactly_once(self, monkeypatch):
+        m, sent = self._ae(monkeypatch)
+        st, f = {"i/1": {}}, self._f(m)
+        m._notify_awaiting_approval([f], st, "2026-08-26")
+        m._notify_awaiting_approval([f], st, "2026-08-26")
+        m._notify_awaiting_approval([f], st, "2026-08-27")   # next day too
+        assert len(sent) == 1, "a proposal must not be re-announced"
+
+    def test_it_uses_its_OWN_key_so_an_act_notice_does_not_silence_it(self, monkeypatch):
+        """A finding may legitimately be announced twice: once as a new ACT
+        finding, once when a concrete fix is proposed. Sharing `notified_on`
+        would silence the second — the one carrying a decision."""
+        m, sent = self._ae(monkeypatch)
+        st = {"i/1": {"notified_on": "2026-08-25"}}       # already announced as ACT
+        assert m._notify_awaiting_approval([self._f(m)], st, "2026-08-26") == 1
+        assert st["i/1"]["proposed_notified_on"] == "2026-08-26"
+        assert st["i/1"]["notified_on"] == "2026-08-25", "must not clobber the ACT key"
+
+    def test_nothing_awaiting_sends_nothing(self, monkeypatch):
+        m, sent = self._ae(monkeypatch)
+        assert m._notify_awaiting_approval([self._f(m, status="open")], {}, "2026-08-26") == 0
+        assert sent == []
+
+    def test_a_failed_send_does_not_mark_it_notified(self, monkeypatch):
+        """Otherwise the ask vanishes silently and is never retried."""
+        m, _ = self._ae(monkeypatch)
+        import telegram_api
+        def _boom(text, chat_id=None): raise RuntimeError("telegram down")
+        monkeypatch.setattr(telegram_api, "send_message", _boom)
+        st = {"i/1": {}}
+        assert m._notify_awaiting_approval([self._f(m)], st, "2026-08-26") == 0
+        assert "proposed_notified_on" not in st["i/1"]
+
+    def test_it_is_actually_called_by_the_build(self):
+        """A notifier nothing calls is the usage-counter bug again."""
+        import pathlib
+        src = pathlib.Path("scripts/analyze_engine.py").read_text()
+        assert "_notify_awaiting_approval(findings, state, today)" in src

@@ -777,6 +777,62 @@ def check_selfheal_unmerged() -> None:
            + ", ".join(live[:3]))
 
 
+def check_findings_awaiting() -> None:
+    """Remind about engine findings PROPOSED but not yet decided.
+
+    🔴 MUST NEVER FAIL, for the same structural reason as
+    check_selfheal_unmerged: a canary failure triggers self_heal, which writes
+    a branch. A failing "you have decisions waiting" check would manufacture
+    work every day forever. Informational by construction.
+
+    Why it exists: an `awaiting_approval` finding can sit indefinitely with
+    nothing nagging. The DM now fires ONCE when it is proposed, and a single
+    notification that is missed is a decision lost. This is the standing
+    reminder behind it.
+
+    Silent when nothing is waiting — a check that speaks every day trains you
+    to ignore it, which is how `weekly.on_github` and `data.completeness`
+    both became noise.
+    """
+    import datetime as _dt
+    try:
+        # Function-local import: canary does this everywhere, and patching
+        # `config_manager` (not `canary`) is what the tests must target.
+        from config_manager import ENGINE_FINDINGS_FILE, et_today
+        from storage import get_storage_backend
+        # 🔴 read_strict, NOT get_finding_dispositions(). That helper ends in
+        # `or {}`, so an UNREADABLE store returns empty and this check would
+        # report a clean "no decisions waiting" — the exact false pass that
+        # `prices.cg_cache` shipped with, where two failures agreeing read as
+        # success. Caught by running this check for real, not by its tests.
+        # read_strict raises on a transport error and returns None only when
+        # the file has genuinely never been written.
+        recs = get_storage_backend().read_strict(ENGINE_FINDINGS_FILE) or {}
+    except Exception as exc:
+        _check("findings.awaiting", True,
+               f"NOT VERIFIED this run — store unreadable ({type(exc).__name__})")
+        return
+
+    waiting = [(k, v) for k, v in recs.items()
+               if (v or {}).get("status") == "awaiting_approval"]
+    if not waiting:
+        _check("findings.awaiting", True, "no decisions waiting")
+        return
+
+    ages = []
+    for _k, v in waiting:
+        try:
+            d = _dt.date.fromisoformat(str(v.get("proposed_on", "")))
+            ages.append((et_today() - d).days)      # ET, per the one-clock rule
+        except Exception:
+            pass
+    oldest = f", oldest {max(ages)}d" if ages else ""
+    # PASS on purpose — the note is the reminder.
+    _check("findings.awaiting", True,
+           f"⚠ {len(waiting)} change(s) awaiting YOUR approval on /admin{oldest}: "
+           + ", ".join(k for k, _ in waiting[:3]))
+
+
 def check_storage_surfaces() -> None:
     """🔴 A surface silently on the WRONG backend is invisible for days.
 
@@ -1067,6 +1123,7 @@ def main() -> int:
                check_synthetic_user,
                check_position_integrity,
                check_storage_surfaces, check_selfheal_unmerged,
+               check_findings_awaiting,
                check_endpoints):
         try:
             fn()

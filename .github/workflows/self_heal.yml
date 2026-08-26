@@ -193,11 +193,20 @@ jobs:
             Tests green. **Review before merging** — this was written without a human in the loop.
 
             Files: ${NF}" 2>/dev/null | tail -1) || true
+            # 🔴 Say WHICH of the two this is. `gh pr create` fails silently
+            # when the repo setting "Allow GitHub Actions to create and approve
+            # pull requests" is off, and the fallback is a compare LINK, not a
+            # PR object. Reporting both as "proposed" overstates it: a compare
+            # link has no review thread, no checks, and nothing to merge from
+            # the PR list. Same family as /health asserting 200 while stale
+            # code served it.
             case "$PR" in
-              https://*) : ;;
-              *) PR="https://github.com/${GITHUB_REPOSITORY}/compare/main...${BR}?expand=1" ;;
+              *"/pull/"*) PRKIND="pr" ;;
+              *) PR="https://github.com/${GITHUB_REPOSITORY}/compare/main...${BR}?expand=1"
+                 PRKIND="compare" ;;
             esac
             echo "pr=$PR" >> "$GITHUB_OUTPUT"
+            echo "prkind=$PRKIND" >> "$GITHUB_OUTPUT"
             echo "outcome=proposed" >> "$GITHUB_OUTPUT"
           else
             echo "outcome=branch" >> "$GITHUB_OUTPUT"            # red → branch, no PR
@@ -256,7 +265,11 @@ jobs:
               esac ;;
             proposed)
               PR="${{ steps.ship.outputs.pr }}"
-              MSG=$(printf '🔧 SELF-HEAL PROPOSED A FIX — YOUR REVIEW NEEDED\n\nMonitor: %s\nTests: green\nFiles: %s\nBranch: %s\n\n👉 %s\n\nWritten by an LLM with no human in the loop. Nothing is deployed and nothing reaches main until you merge it.' "$M" "$FILES" "$BR" "$PR") ;;
+              case "${{ steps.ship.outputs.prkind }}" in
+                pr) HOW="Pull request opened" ;;
+                *)  HOW="NO pull request (Actions is not allowed to open one) — this is a compare link" ;;
+              esac
+              MSG=$(printf '🔧 SELF-HEAL PROPOSED A FIX — YOUR REVIEW NEEDED\n\nMonitor: %s\nTests: green\nFiles: %s\nBranch: %s\n%s\n\n👉 %s\n\nOr merge it from /admin — Self-heal fixes, where the full diff is shown.\n\nWritten by an LLM with no human in the loop. Nothing is deployed and nothing reaches main until you merge it.' "$M" "$FILES" "$BR" "$HOW" "$PR") ;;
             branch)
               if [ "${{ steps.verify.outputs.gate }}" = "unrunnable" ]; then
                 MSG="🚨 Self-heal wrote a fix for $M but THE TEST GATE COULD NOT RUN (pytest missing) — pushed to $BR, NOT proposed. This is an infrastructure fault, not a bad fix: ${URL}"

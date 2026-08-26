@@ -245,3 +245,155 @@ class TestTheDashboardStillRenders:
 
     def test_the_merge_button_reaches_the_browser(self, client):
         assert b"selfhealAct(" in self._get(client).get_data()
+
+
+class TestMonitorNamesActuallyMatch:
+    """🔴 self_heal triggers on workflow_run by NAME. Rename a monitor and
+    self-heal silently stops firing — forever, with no error anywhere. Nothing
+    asserted these matched until 2026-08-26."""
+
+    def test_every_trigger_name_is_a_real_workflow_name(self):
+        import re
+        wf = WF.read_text()
+        m = re.search(r"workflows:\s*\[([^\]]*)\]", wf)
+        assert m, "self_heal no longer declares a workflow_run trigger list"
+        wanted = [s.strip().strip('"').strip("'") for s in m.group(1).split(",")]
+        wanted = [w for w in wanted if w]
+        assert len(wanted) == 4, f"expected 4 monitors, got {wanted}"
+
+        actual = {}
+        for p in pathlib.Path(".github/workflows").glob("*.yml"):
+            nm = re.search(r"(?m)^name:\s*(.+?)\s*$", p.read_text())
+            if nm:
+                actual[nm.group(1).strip().strip('"').strip("'")] = p.name
+        missing = [w for w in wanted if w not in actual]
+        assert not missing, (
+            f"self_heal triggers on {missing}, which match NO workflow name. "
+            f"It will never fire for them. Known names: {sorted(actual)}")
+
+    def test_the_four_monitors_are_still_the_intended_ones(self):
+        wf = WF.read_text()
+        for name in ("Daily Canary", "Synthetic User", "Full Sweep", "Pick Evaluation"):
+            assert name in wf, f"{name} is no longer a self-heal trigger"
+
+
+class TestTheDmSaysWhetherAPrExists:
+    """`gh pr create` fails silently when the repo setting is off, and the
+    fallback is a compare LINK — no review thread, no checks, nothing in the PR
+    list. Reporting both as 'proposed' overstates it, the same way /health
+    asserting 200 hid stale code."""
+
+    def test_the_kind_is_recorded(self):
+        wf = WF.read_text()
+        assert "prkind=" in wf
+        assert '*"/pull/"*' in wf, "must detect a real PR by its /pull/ URL"
+
+    def test_the_message_distinguishes_them(self):
+        wf = WF.read_text()
+        assert "Pull request opened" in wf
+        assert "NO pull request" in wf
+
+    def test_it_points_at_the_dashboard_too(self):
+        assert "/admin" in WF.read_text()
+
+
+class TestFindingsAwaitingReminder:
+    """Same structural rule as TestTheReminderCannotFeedItself: a canary
+    FAILURE triggers self_heal, so this reminder must never fail."""
+
+    def _fn(self):
+        src = CAN.read_text()
+        i = src.index("def check_findings_awaiting")
+        return src[i:src.index("def check_storage_surfaces", i)]
+
+    def test_it_never_reports_a_failure(self):
+        import re
+        for m in re.finditer(r'_check\("findings\.awaiting",\s*(\w+)', self._fn()):
+            assert m.group(1) == "True", \
+                "a failing reminder would trigger self_heal and create work forever"
+
+    def test_it_is_silent_when_nothing_is_waiting(self):
+        assert "no decisions waiting" in self._fn()
+
+    def test_an_unreachable_store_is_NOT_VERIFIED(self):
+        assert "NOT VERIFIED" in self._fn()
+
+    def test_it_reads_the_clock_the_writer_uses(self):
+        """proposed_on is stamped with et_today(); a UTC date here would make
+        the age wrong for 4-5 hours every night — the class this repo has hit
+        five times."""
+        body = self._fn()
+        assert "et_today()" in body
+        assert "date.today()" not in body
+
+    def test_it_is_registered(self):
+        assert "check_findings_awaiting," in CAN.read_text()
+
+    def test_it_reports_what_is_waiting(self, monkeypatch):
+        import importlib.util, os
+        spec = importlib.util.spec_from_file_location(
+            "can_x", os.path.join(os.getcwd(), "scripts", "canary.py"))
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        seen = []
+        monkeypatch.setattr(m, "_check", lambda n, ok, d="", **k: seen.append((n, ok, d)))
+        # Patch `storage`, NOT canary — the import is function-local, the scope
+        # trap that once let a "patched" test write to the live gist.
+        self._patch_store(monkeypatch, {"i/1": {"status": "awaiting_approval",
+                                                "proposed_on": "2026-08-20"},
+                                        "i/2": {"status": "approved"}})
+        m.check_findings_awaiting()
+        assert seen and seen[0][1] is True, "must never fail"
+        assert "1 change(s)" in seen[0][2]
+        assert "i/1" in seen[0][2]
+
+    def _patch_store(self, monkeypatch, payload):
+        import storage
+
+        class _B:
+            def read_strict(self, _f):
+                if isinstance(payload, Exception):
+                    raise payload
+                return payload
+
+        monkeypatch.setattr(storage, "get_storage_backend", lambda: _B())
+
+    def test_an_unreadable_store_does_NOT_report_nothing_waiting(self, monkeypatch):
+        """🔴 Found by RUNNING the check, not by its tests. The first version
+        called get_finding_dispositions(), which ends in `or {}` — so a store it
+        could not read returned empty and the check reported a clean
+        "no decisions waiting". A pending approval would have been invisible
+        exactly when storage was broken. Same false pass as `prices.cg_cache`,
+        where two failures agreeing read as success."""
+        import importlib.util, os
+        spec = importlib.util.spec_from_file_location(
+            "can_y", os.path.join(os.getcwd(), "scripts", "canary.py"))
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        seen = []
+        monkeypatch.setattr(m, "_check", lambda n, ok, d="", **k: seen.append((n, ok, d)))
+        self._patch_store(monkeypatch, OSError("gist unreachable"))
+        m.check_findings_awaiting()
+        assert seen and seen[0][1] is True, "must never fail, even unreadable"
+        assert "NOT VERIFIED" in seen[0][2]
+        assert "no decisions waiting" not in seen[0][2], \
+            "an unreadable store must never read as 'nothing to approve'"
+
+    def test_it_does_not_use_the_swallowing_reader(self):
+        """⚠ Comments and docstrings are STRIPPED first. The fix's own comment
+        names `get_finding_dispositions` while explaining its removal, so a
+        naive scan flags itself — that trap has now appeared eight times in
+        this repo. Scan code, never prose."""
+        import io, tokenize
+        body = self._fn()
+        code = []
+        try:
+            for tok in tokenize.generate_tokens(io.StringIO(body).readline):
+                if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+                    code.append(tok.string)
+        except (tokenize.TokenError, IndentationError):
+            # A sliced function body may not tokenise cleanly; fall back to
+            # dropping comment lines, which is enough for this assertion.
+            code = [ln.split("#", 1)[0] for ln in body.splitlines()]
+        src = " ".join(code)
+        assert "read_strict" in src
+        assert "get_finding_dispositions" not in src, \
+            "that helper ends in `or {}` and hides an unreadable store"
