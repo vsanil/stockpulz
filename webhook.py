@@ -1391,21 +1391,76 @@ function selfhealCard(rows){
   var body=rows.map(function(x){
     var age='';
     if(x.when){ try{ age=' &middot; '+age_(x.when); }catch(e){} }
+    var d=x.diff||[];
+    var stat=d.map(function(f){
+      return '<div class="fb-meta"><code>'+esc(f.path)+'</code> +'+f.add+' &minus;'+f['del']+'</div>';
+    }).join('');
+    var patches=d.map(function(f){
+      return '<div style="margin-top:10px"><div class="fb-meta"><code>'+esc(f.path)+'</code></div>'
+        +'<pre style="overflow-x:auto;font-size:12px;line-height:1.45;margin:4px 0">'
+        +diffHtml(f.patch)+'</pre>'
+        +(f.clipped?'<div class="fb-meta">&#9888; diff truncated here &mdash; open on GitHub for the rest</div>':'')
+        +'</div>';
+    }).join('');
+    var more=x.more_files?('<div class="fb-meta">+'+x.more_files+' more file(s) not shown</div>'):'';
     return '<div class="fb">'
-      +'<div class="fb-meta">'+x.branch+age+'</div>'
+      +'<div class="fb-meta">'+esc(x.branch)+age+'</div>'
       +'<div class="fb-text" style="font-size:15px">Automatic fix touching <code>'
-        +x.files+'</code></div>'
+        +esc(x.files)+'</code></div>'
       +'<div class="fb-meta">'+x.ahead+' commit(s) ahead of main'
-        +(x.behind?(' &middot; '+x.behind+' behind — may be stale'):'')+'</div>'
-      +'<div style="margin-top:8px"><a class="btn-sm" target="_blank" rel="noopener" href="'
-        +x.url+'">Review &amp; merge on GitHub &rarr;</a></div>'
+        +(x.behind?(' &middot; '+x.behind+' behind &mdash; may be stale'):'')+'</div>'
+      +stat
+      +'<details class="fdet"><summary><span class="fchev">&#9656;</span>Read the diff</summary>'
+        +patches+more
+        +'<div class="fb-meta" style="margin-top:8px"><a target="_blank" rel="noopener" href="'
+        +x.url+'">Open on GitHub &rarr;</a></div>'
+      +'</details>'
+      +'<div style="margin-top:8px">'
+        +'<button class="btn-success" onclick="selfhealAct(\\''+x.branch+'\\',\\'merge\\')">Merge &amp; deploy</button> '
+        +'<button class="btn-sm" onclick="selfhealAct(\\''+x.branch+'\\',\\'discard\\')">Discard</button>'
+      +'</div>'
       +'</div>';
   }).join('');
   return '<div class="card">'+head
     +'<div class="fb-meta" style="margin-bottom:10px">Written by an LLM with no human '
     +'in the loop, and gated on the full test suite. <b>Read the diff before merging</b> '
-    +'&mdash; merging deploys to production.</div>'
+    +'&mdash; merging goes straight to main and Render deploys it to real users.</div>'
     +body+'</div>';
+}
+
+// Newline via fromCharCode, NOT a backslash escape: this JS lives inside a
+// Python triple-quoted string, so Python would consume the escape and emit a
+// real newline into a JS string literal — a syntax error that kills the whole
+// script. Same family as the lone-surrogate emoji that 500'd the page.
+function diffHtml(p){
+  var NL=String.fromCharCode(10);
+  return esc(p||'').split(NL).map(function(l){
+    var c=l.charAt(0), col='';
+    if(c==='+') col='color:#2ea043';
+    else if(c==='-') col='color:#f85149';
+    else if(c==='@') col='color:#8b949e;font-weight:600';
+    return '<div style="'+col+'">'+(l===''?'&nbsp;':l)+'</div>';
+  }).join('');
+}
+
+async function selfhealAct(branch,action){
+  var msg = action==='merge'
+    ? 'Merge '+branch+' into main?'+String.fromCharCode(10)+String.fromCharCode(10)
+      +'This DEPLOYS to production in about 2 minutes.'
+    : 'Delete branch '+branch+'?'+String.fromCharCode(10)+String.fromCharCode(10)
+      +'The response records the SHA so it can be restored.';
+  if(!confirm(msg)) return;
+  try{
+    var r=await fetch('/admin/selfheal/'+branch+'/'+action,{method:'POST'});
+    var j={};
+    try{ j=await r.json(); }catch(e){}
+    // A 403 from GitHub must be LOUD. The token dispatches workflows, which
+    // implies merge scope but does not prove it — a silent no-op here would
+    // read as success and the branch would sit unmerged.
+    if(!r.ok){ alert('Failed (HTTP '+r.status+'): '+(j.error||'')+String.fromCharCode(10)+(j.detail||'')); return; }
+    alert(j.note||'Done.');
+    load();
+  }catch(e){ alert('Network error'); }
 }
 
 function age_(iso){ return age(iso); }
@@ -1642,9 +1697,10 @@ def _build_selfheal_prs() -> list:
     unverifiable by construction. A branch nobody is told about is a fix that
     does not exist, so the dashboard now shows them whether or not a DM landed.
 
-    Read-only. It links to GitHub for review rather than offering a merge
-    button — merging deploys to production, and the diff lives where it can
-    actually be read.
+    Carries the full PATCH, not just filenames. The card offers Merge and
+    Discard, and a merge button beside a one-line summary is a rubber stamp —
+    the diff is what makes it a review. That was the same defect the findings
+    card had when it rendered raw function names at the owner.
     """
     import time as _t
     if _t.time() - _SELFHEAL_CACHE["at"] < 120:      # don't hammer GitHub per load
@@ -1673,7 +1729,23 @@ def _build_selfheal_prs() -> list:
             # ahead_by 0 means it is already in main — merged or superseded.
             if not cmp_.get("ahead_by"):
                 continue
-            files = [f.get("filename") for f in (cmp_.get("files") or [])][:6]
+            raw_files = cmp_.get("files") or []
+            files = [f.get("filename") for f in raw_files][:6]
+            # The reviewable payload. Capped so one enormous refactor cannot
+            # blow up the page or the 120s cache: 20 files, 4k chars each.
+            # A truncated hunk SAYS it was truncated — silently showing a
+            # partial diff beside a Merge button would be worse than none.
+            diff = []
+            for f in raw_files[:20]:
+                patch = f.get("patch") or ""
+                clipped = len(patch) > 4000
+                diff.append({
+                    "path": f.get("filename", "?"),
+                    "add": f.get("additions", 0),
+                    "del": f.get("deletions", 0),
+                    "patch": patch[:4000],
+                    "clipped": clipped,
+                })
             commits = cmp_.get("commits") or []
             when = (commits[-1].get("commit", {}).get("author", {}).get("date")
                     if commits else None)
@@ -1683,6 +1755,8 @@ def _build_selfheal_prs() -> list:
                 "ahead": cmp_.get("ahead_by"),
                 "behind": cmp_.get("behind_by"),
                 "when": when,
+                "diff": diff,
+                "more_files": max(0, len(raw_files) - 20),
                 "url": f"https://github.com/{repo}/compare/main...{name}?expand=1",
             })
     except Exception as exc:
@@ -1813,6 +1887,76 @@ def admin_finding_disposition(finding_id):
         extra["approved_on"] = et_today().isoformat()   # ET, per the one-clock rule
     rec = set_finding_disposition(finding_id, status, body.get("note", ""), extra=extra)
     return jsonify({"ok": True, "status": status, "record": rec})
+
+
+@app.route("/admin/selfheal/<path:branch>/<action>", methods=["POST"])
+@_require_admin
+def admin_selfheal_action(branch, action):
+    """Merge or discard a self-heal branch from the dashboard.
+
+    🔴 MERGING DEPLOYS. main is what Render auto-deploys, so this is a
+    production button, not a staging one — the card labels it that way.
+
+    🔴 The branch prefix is enforced SERVER-SIDE. `<path:branch>` accepts
+    slashes (branches are `auto/self-heal-*`), which also means it accepts
+    `main` — without this guard the endpoint would merge or DELETE any ref in
+    the repo. The allowlist is the control; the UI only ever offers self-heal
+    branches, but a UI is not a permission check.
+
+    Failures are returned verbatim. GITHUB_TOKEN dispatches workflows today,
+    which IMPLIES merge scope but does not prove it — the Supabase RLS key
+    passed every read probe while every write was denied. A 403 here must be
+    visible, never a silent no-op.
+    """
+    if action not in ("merge", "discard"):
+        return jsonify({"error": "action must be merge|discard"}), 400
+    if not branch.startswith("auto/self-heal-"):
+        return jsonify({"error": "refusing: only auto/self-heal-* branches "
+                                 "may be merged or deleted here"}), 403
+    tok = os.environ.get("GITHUB_TOKEN", "")
+    if not tok:
+        return jsonify({"error": "GITHUB_TOKEN not configured"}), 500
+    repo = os.environ.get("GITHUB_REPOSITORY", "vsanil/stockpulz")
+    h = {"Authorization": f"token {tok}", "Accept": "application/vnd.github+json"}
+
+    try:
+        if action == "merge":
+            r = requests.post(f"https://api.github.com/repos/{repo}/merges",
+                              headers=h, timeout=15,
+                              json={"base": "main", "head": branch,
+                                    "commit_message":
+                                        f"Merge self-heal fix {branch} (approved on /admin)"})
+            if r.status_code in (200, 201):
+                sha = (r.json() or {}).get("sha", "")
+                _SELFHEAL_CACHE["at"] = 0          # card must not show it as pending
+                return jsonify({"ok": True, "merged": True, "sha": sha,
+                                "note": "Merged to main. Render auto-deploys in ~2 min; "
+                                        "confirm via /health."})
+            if r.status_code == 204:
+                _SELFHEAL_CACHE["at"] = 0
+                return jsonify({"ok": True, "merged": False,
+                                "note": "Already in main — nothing to merge."})
+            # 409 conflict, 403 permission, 422 bad ref — say which, plainly.
+            return jsonify({"error": f"GitHub refused the merge (HTTP {r.status_code})",
+                            "detail": (r.text or "")[:300]}), 502
+
+        # discard — record the SHA first so it is restorable
+        ref = requests.get(
+            f"https://api.github.com/repos/{repo}/git/refs/heads/{branch}",
+            headers=h, timeout=10)
+        sha = ((ref.json() or {}).get("object") or {}).get("sha", "") if ref.status_code == 200 else ""
+        d = requests.delete(
+            f"https://api.github.com/repos/{repo}/git/refs/heads/{branch}",
+            headers=h, timeout=10)
+        if d.status_code in (204, 200):
+            _SELFHEAL_CACHE["at"] = 0
+            return jsonify({"ok": True, "deleted": True, "sha": sha,
+                            "note": f"Branch deleted. Restore with: "
+                                    f"git push origin {sha}:refs/heads/{branch}"})
+        return jsonify({"error": f"GitHub refused the delete (HTTP {d.status_code})",
+                        "detail": (d.text or "")[:300]}), 502
+    except Exception as exc:
+        return jsonify({"error": f"GitHub unreachable: {exc}"}), 502
 
 
 @app.route("/admin/data")
