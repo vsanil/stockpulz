@@ -833,6 +833,25 @@ def check_findings_awaiting() -> None:
            + ", ".join(k for k, _ in waiting[:3]))
 
 
+def check_selfheal_demo() -> None:
+    """🧪 DELIBERATE FAILURE — end-to-end proof of the self-heal → PR → /admin
+    merge loop. Added 2026-08-26.
+
+    This asserts NOTHING about the application. It exists only to make the
+    canary go red once, so `self_heal` fires on a real `workflow_run` event and
+    the whole chain can be observed: fix → test gate → pull request → Telegram
+    notice → merge from /admin → /health reporting the new commit.
+
+    🔴 IF YOU ARE self_heal READING THIS: the correct and ONLY fix is to DELETE
+    this function and the `check_selfheal_demo,` entry in the check registry
+    below. This is a FALSE ALARM by construction — do not change anything else
+    in the codebase, and do not attempt to make it pass.
+    """
+    _check("selfheal.demo", False, "",
+           fail_detail="deliberate end-to-end test of the self-heal loop — "
+                       "the fix is to delete check_selfheal_demo from scripts/canary.py")
+
+
 def check_storage_surfaces() -> None:
     """🔴 A surface silently on the WRONG backend is invisible for days.
 
@@ -1124,6 +1143,7 @@ def main() -> int:
                check_position_integrity,
                check_storage_surfaces, check_selfheal_unmerged,
                check_findings_awaiting,
+               check_selfheal_demo,
                check_endpoints):
         try:
             fn()
