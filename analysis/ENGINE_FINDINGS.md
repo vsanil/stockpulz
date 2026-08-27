@@ -1,6 +1,6 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-08-25 22:34 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-08-27 03:02 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 0 finding(s) needing a decision
 
@@ -25,9 +25,9 @@ _Nothing open. Every addressable finding has been resolved._
 
 ## Findings
 
-### [ACT] [TECHNICAL BUG] ANET filled 2.43% outside the published entry window  *(n=56)*
+### [ACT] [TECHNICAL BUG] ANET filled 2.43% outside the published entry window  *(n=59)*
 
-`entry_window/ANET/2026-08-05` · **acknowledged**, open 2d
+`entry_window/ANET/2026-08-05` · **acknowledged**, open 4d
 
 > Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
@@ -37,15 +37,15 @@ ANET was bought 2.43% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". ANET filled 2.43% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 2 of 56 observations breach (3.6%).
+**Evidence:** The morning message promises "enter within X% — skip if above". ANET filled 2.43% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 2 of 59 observations breach (3.4%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] NWSA filled 2.15% outside the published entry window  *(n=56)*
+### [ACT] [TECHNICAL BUG] NWSA filled 2.15% outside the published entry window  *(n=59)*
 
-`entry_window/NWSA/2026-08-06` · **acknowledged**, open 2d
+`entry_window/NWSA/2026-08-06` · **acknowledged**, open 4d
 
 > Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
@@ -55,7 +55,7 @@ NWSA was bought 2.15% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NWSA filled 2.15% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 2 of 56 observations breach (3.6%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NWSA filled 2.15% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 2 of 59 observations breach (3.4%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
@@ -63,7 +63,7 @@ NWSA was bought 2.15% above the price the morning message told people not to go 
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **acknowledged**, open 2d
+`integrity/638eb7bc69ed` · **acknowledged**, open 4d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -81,7 +81,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **acknowledged**, open 2d
+`integrity/425fd0b45bd0` · **acknowledged**, open 4d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -101,21 +101,21 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ## Metrics (ongoing — never 'complete')
 
-### [MEASURE] [METRIC] Stop distance distribution  *(n=72)*
+### [MEASURE] [METRIC] Stop distance distribution  *(n=76)*
 
-**Evidence:** median 5.21% across 72 positions; 0 below the 3.0% threshold.
+**Evidence:** median 5.1% across 76 positions; 0 below the 3.0% threshold.
 
 **Fix:** Context for the geometry metric — no action on its own.
 
-### [MEASURE] [METRIC] Exit-reason mix  *(n=16)*
+### [MEASURE] [METRIC] Exit-reason mix  *(n=17)*
 
-**Evidence:** {'manual': 5, 'stop': 8, 'target': 3} — stops hit 2.7x as often as targets.  By levels source — unrecorded: 33. Only `pick` speaks to the ENGINE's levels.
+**Evidence:** {'manual': 5, 'stop': 9, 'target': 3} — stops hit 3.0x as often as targets.  By levels source — pick: 2 · unrecorded: 33. Only `pick` speaks to the ENGINE's levels.
 
 **Fix:** Judge the published levels on the `pick` slice ALONE. A high stop:target ratio there means stops are too tight; the same ratio in the fallback slice means the pick's levels did not bracket the fill — levels drifting from the live price by delivery time, which is a different fix.
 
-### [MEASURE] [METRIC] Stop/target geometry on filled positions  *(n=16)*
+### [MEASURE] [METRIC] Stop/target geometry on filled positions  *(n=17)*
 
-**Evidence:** median stop 6.4% below entry, median target 11.1% above, reward:risk 1.73:1 across 16 filled positions. The walk-forward backtest measured real ledger picks at 10.3%/5.5% = 1.9:1 — compare against that, never config defaults.
+**Evidence:** median stop 6.0% below entry, median target 11.2% above, reward:risk 1.86:1 across 17 filled positions. The walk-forward backtest measured real ledger picks at 10.3%/5.5% = 1.9:1 — compare against that, never config defaults.
 
 **Fix:** No action while R:R stays near 1.9:1. If it drifts materially below, the stops are tightening relative to targets and will manufacture stop-outs — route any change through scripts/backtest_compare.py first.
 
