@@ -1,12 +1,13 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-08-28 06:02 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-08-29 03:36 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
-## Open: 1 finding(s) needing a decision
+## Open: 2 finding(s) needing a decision
 
 | id | what | age | fix in |
 |---|---|---|---|
-| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 0d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 1d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 0d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
 
 ### Decided, still present (4)
 
@@ -27,9 +28,9 @@
 
 ## Findings
 
-### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=64)*
+### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=71)*
 
-`entry_window/NVDA/2026-08-27` · **open**
+`entry_window/NVDA/2026-08-27` · **open**, open 1d
 
 NVDA was bought 8.98% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -37,15 +38,31 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 3 of 64 observations breach (4.7%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 4 of 71 observations breach (5.6%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] ANET filled 2.43% outside the published entry window  *(n=64)*
+### [ACT] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=71)*
 
-`entry_window/ANET/2026-08-05` · **acknowledged**, open 5d
+`entry_window/AMZN/2026-08-28` · **open**
+
+AMZN was bought 4.0% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
+
+**Technical bug** — fixes broken behaviour; changes nothing about how picks are chosen.
+
+<details><summary>Technical detail</summary>
+
+**Evidence:** The morning message promises "enter within X% — skip if above". AMZN filled 4.0% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 4 of 71 observations breach (5.6%).
+
+**Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
+
+</details>
+
+### [ACT] [TECHNICAL BUG] ANET filled 2.43% outside the published entry window  *(n=71)*
+
+`entry_window/ANET/2026-08-05` · **acknowledged**, open 6d
 
 > Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
@@ -55,15 +72,15 @@ ANET was bought 2.43% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". ANET filled 2.43% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 3 of 64 observations breach (4.7%).
+**Evidence:** The morning message promises "enter within X% — skip if above". ANET filled 2.43% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 4 of 71 observations breach (5.6%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] NWSA filled 2.15% outside the published entry window  *(n=64)*
+### [ACT] [TECHNICAL BUG] NWSA filled 2.15% outside the published entry window  *(n=71)*
 
-`entry_window/NWSA/2026-08-06` · **acknowledged**, open 5d
+`entry_window/NWSA/2026-08-06` · **acknowledged**, open 6d
 
 > Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
@@ -73,7 +90,7 @@ NWSA was bought 2.15% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NWSA filled 2.15% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 3 of 64 observations breach (4.7%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NWSA filled 2.15% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 4 of 71 observations breach (5.6%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
@@ -81,7 +98,7 @@ NWSA was bought 2.15% above the price the morning message told people not to go 
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **acknowledged**, open 5d
+`integrity/638eb7bc69ed` · **acknowledged**, open 6d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -99,7 +116,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **acknowledged**, open 5d
+`integrity/425fd0b45bd0` · **acknowledged**, open 6d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -119,9 +136,9 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ## Metrics (ongoing — never 'complete')
 
-### [MEASURE] [METRIC] Stop distance distribution  *(n=81)*
+### [MEASURE] [METRIC] Stop distance distribution  *(n=89)*
 
-**Evidence:** median 5.05% across 81 positions; 0 below the 3.0% threshold.
+**Evidence:** median 5.0% across 89 positions; 0 below the 3.0% threshold.
 
 **Fix:** Context for the geometry metric — no action on its own.
 
