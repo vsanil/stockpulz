@@ -1,13 +1,13 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-08-29 03:36 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-08-30 00:01 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 2 finding(s) needing a decision
 
 | id | what | age | fix in |
 |---|---|---|---|
-| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 1d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 0d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 2d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 1d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
 
 ### Decided, still present (4)
 
@@ -30,7 +30,7 @@
 
 ### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=71)*
 
-`entry_window/NVDA/2026-08-27` · **open**, open 1d
+`entry_window/NVDA/2026-08-27` · **open**, open 2d
 
 NVDA was bought 8.98% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -46,7 +46,7 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 ### [ACT] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=71)*
 
-`entry_window/AMZN/2026-08-28` · **open**
+`entry_window/AMZN/2026-08-28` · **open**, open 1d
 
 AMZN was bought 4.0% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -62,7 +62,7 @@ AMZN was bought 4.0% above the price the morning message told people not to go p
 
 ### [ACT] [TECHNICAL BUG] ANET filled 2.43% outside the published entry window  *(n=71)*
 
-`entry_window/ANET/2026-08-05` · **acknowledged**, open 6d
+`entry_window/ANET/2026-08-05` · **acknowledged**, open 7d
 
 > Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
@@ -80,7 +80,7 @@ ANET was bought 2.43% above the price the morning message told people not to go 
 
 ### [ACT] [TECHNICAL BUG] NWSA filled 2.15% outside the published entry window  *(n=71)*
 
-`entry_window/NWSA/2026-08-06` · **acknowledged**, open 6d
+`entry_window/NWSA/2026-08-06` · **acknowledged**, open 7d
 
 > Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
@@ -98,7 +98,7 @@ NWSA was bought 2.15% above the price the morning message told people not to go 
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **acknowledged**, open 6d
+`integrity/638eb7bc69ed` · **acknowledged**, open 7d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -116,7 +116,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **acknowledged**, open 6d
+`integrity/425fd0b45bd0` · **acknowledged**, open 7d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
