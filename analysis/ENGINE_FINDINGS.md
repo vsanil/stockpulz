@@ -1,6 +1,6 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-09-01 01:10 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-09-01 23:55 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 3 finding(s) needing a decision
 
@@ -29,7 +29,7 @@
 
 ## Findings
 
-### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=74)*
+### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=77)*
 
 `entry_window/NVDA/2026-08-27` · **open**, open 4d
 
@@ -39,13 +39,13 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 74 observations breach (6.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 77 observations breach (6.5%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=74)*
+### [ACT] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=77)*
 
 `entry_window/AMZN/2026-08-28` · **open**, open 3d
 
@@ -55,13 +55,13 @@ AMZN was bought 4.0% above the price the morning message told people not to go p
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". AMZN filled 4.0% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 74 observations breach (6.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". AMZN filled 4.0% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 77 observations breach (6.5%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=74)*
+### [ACT] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=77)*
 
 `entry_window/NOW/2026-08-31` · **open**
 
@@ -71,13 +71,13 @@ NOW was bought 2.68% above the price the morning message told people not to go p
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NOW filled 2.68% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 74 observations breach (6.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NOW filled 2.68% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 77 observations breach (6.5%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] ANET filled 2.43% outside the published entry window  *(n=74)*
+### [ACT] [TECHNICAL BUG] ANET filled 2.43% outside the published entry window  *(n=77)*
 
 `entry_window/ANET/2026-08-05` · **acknowledged**, open 9d
 
@@ -89,13 +89,13 @@ ANET was bought 2.43% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". ANET filled 2.43% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 74 observations breach (6.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". ANET filled 2.43% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 77 observations breach (6.5%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] NWSA filled 2.15% outside the published entry window  *(n=74)*
+### [ACT] [TECHNICAL BUG] NWSA filled 2.15% outside the published entry window  *(n=77)*
 
 `entry_window/NWSA/2026-08-06` · **acknowledged**, open 9d
 
@@ -107,7 +107,7 @@ NWSA was bought 2.15% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NWSA filled 2.15% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 74 observations breach (6.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NWSA filled 2.15% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 5 of 77 observations breach (6.5%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
@@ -153,21 +153,21 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ## Metrics (ongoing — never 'complete')
 
-### [MEASURE] [METRIC] Stop distance distribution  *(n=92)*
+### [MEASURE] [METRIC] Stop distance distribution  *(n=95)*
 
-**Evidence:** median 5.0% across 92 positions; 0 below the 3.0% threshold.
+**Evidence:** median 5.0% across 95 positions; 0 below the 3.0% threshold.
 
 **Fix:** Context for the geometry metric — no action on its own.
 
-### [MEASURE] [METRIC] Exit-reason mix  *(n=18)*
+### [MEASURE] [METRIC] Exit-reason mix  *(n=22)*
 
-**Evidence:** {'manual': 5, 'stop': 10, 'target': 3} — stops hit 3.3x as often as targets.  By levels source — pick: 4 · unrecorded: 33. Only `pick` speaks to the ENGINE's levels.
+**Evidence:** {'manual': 5, 'stop': 14, 'target': 3} — stops hit 4.7x as often as targets.  By levels source — pick: 13 · unrecorded: 33. Only `pick` speaks to the ENGINE's levels.
 
 **Fix:** Judge the published levels on the `pick` slice ALONE. A high stop:target ratio there means stops are too tight; the same ratio in the fallback slice means the pick's levels did not bracket the fill — levels drifting from the live price by delivery time, which is a different fix.
 
-### [MEASURE] [METRIC] Stop/target geometry on filled positions  *(n=18)*
+### [MEASURE] [METRIC] Stop/target geometry on filled positions  *(n=22)*
 
-**Evidence:** median stop 5.8% below entry, median target 11.1% above, reward:risk 1.90:1 across 18 filled positions. The walk-forward backtest measured real ledger picks at 10.3%/5.5% = 1.9:1 — compare against that, never config defaults.
+**Evidence:** median stop 5.5% below entry, median target 11.1% above, reward:risk 2.01:1 across 22 filled positions. The walk-forward backtest measured real ledger picks at 10.3%/5.5% = 1.9:1 — compare against that, never config defaults.
 
 **Fix:** No action while R:R stays near 1.9:1. If it drifts materially below, the stops are tightening relative to targets and will manufacture stop-outs — route any change through scripts/backtest_compare.py first.
 
