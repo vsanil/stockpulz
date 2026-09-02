@@ -63,6 +63,15 @@ def _at(hour, minute=0):
     return datetime(2026, 8, 11, hour, minute, tzinfo=timezone.utc)
 
 
+# `summarise()` defaults to the REAL current month when none is given — correct
+# for production (the admin card wants "this month"), but a test that stamps
+# hits into a hardcoded past month and then calls summarise() with no month
+# reads the (empty) real-world month instead. Passing this explicitly is the
+# same fix as every other UTC/ET clock mismatch in this codebase: a test must
+# read on the SAME clock it wrote with, not on whatever day it happens to run.
+_MONTH = _at(0).strftime("%Y-%m")
+
+
 class TestColdHitsSurviveSpinDown:
     """🔴 The reason this module is not just 'count in memory, flush on a timer'.
 
@@ -87,7 +96,7 @@ class TestColdHitsSurviveSpinDown:
         tt.record("123", cold=True, now=_at(3))
         tt._pending.clear()                        # <- the process dies here
         tt._pending_hits = 0
-        assert tt.summarise(store.data)["cold_starts"] == 1
+        assert tt.summarise(store.data, month=_MONTH)["cold_starts"] == 1
 
     def test_warm_hits_flush_once_the_threshold_is_reached(self, store):
         for _ in range(tt._FLUSH_AFTER_HITS):
@@ -159,7 +168,7 @@ class TestSummary:
         monkeypatch.setenv("KEEPWARM_HOURS_UTC", "10,11,12")
         tt.record("123", cold=True, now=_at(4))            # asleep
         tt.record("123", cold=False, now=_at(11))          # warm
-        s = tt.summarise(store.data)
+        s = tt.summarise(store.data, month=_MONTH)
         assert s["total"] == 2
         assert s["outside_window"] == 1 and s["outside_window_cold"] == 1
 
@@ -169,7 +178,7 @@ class TestSummary:
         under-reports is the exact failure this module guards against."""
         tt.record("123", cold=False, now=_at(14))
         assert store.writes == 0                            # nothing written yet
-        assert tt.summarise(store.data)["total"] == 1
+        assert tt.summarise(store.data, month=_MONTH)["total"] == 1
 
     def test_merging_pending_never_mutates_the_stored_blob(self, store):
         tt.record("123", cold=True, now=_at(4))             # flushes
@@ -184,14 +193,14 @@ class TestSummary:
         an already-warm server cost the user nothing and argues for nothing."""
         monkeypatch.setenv("KEEPWARM_HOURS_UTC", "10,11,12")
         tt.record("123", cold=False, now=_at(4))
-        s = tt.summarise(store.data)
+        s = tt.summarise(store.data, month=_MONTH)
         assert s["outside_window"] == 1 and s["outside_window_cold"] == 0
 
     def test_per_user_cold_window_activity_is_attributed(self, store, monkeypatch):
         monkeypatch.setenv("KEEPWARM_HOURS_UTC", "10")
         tt.record("night_owl", cold=True, now=_at(3))
         tt.record("day_user", cold=False, now=_at(10))
-        users = {u["chat_id"]: u for u in tt.summarise(store.data)["users"]}
+        users = {u["chat_id"]: u for u in tt.summarise(store.data, month=_MONTH)["users"]}
         assert users["night_owl"]["cold_window"] == 1
         assert users["day_user"]["cold_window"] == 0
 
@@ -202,7 +211,7 @@ class TestSummary:
 
     def test_unidentified_hits_still_count(self, store):
         tt.record(None, cold=True, now=_at(4))
-        s = tt.summarise(store.data)
+        s = tt.summarise(store.data, month=_MONTH)
         assert s["total"] == 1
         assert s["users"][0]["chat_id"] == "anon"
 
