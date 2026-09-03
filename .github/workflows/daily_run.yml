@@ -39,6 +39,10 @@ on:
         description: "true = bypass the once-per-day morning duplicate guard (recovery)"
         required: false
         default: "false"
+      owner_only:
+        description: "1 = deliver to the OWNER only (manual test triggers)"
+        required: false
+        default: ""
 
 jobs:
   run-agent:
@@ -130,6 +134,10 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           MOCK_DATA: ${{ github.event.inputs.mock_data || 'false' }}
           FORCE_MORNING: ${{ github.event.inputs.force || 'false' }}
+          # Carried through the relay: /trigger/<mode>?owner_only=1 used to set
+          # this via the local subprocess env. Without it here, a manual test
+          # trigger would broadcast to EVERY user instead of just the owner.
+          OWNER_ONLY: ${{ github.event.inputs.owner_only || '' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

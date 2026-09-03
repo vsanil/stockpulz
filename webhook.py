@@ -324,7 +324,8 @@ def trigger_morning():
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "vsanil/stockpulz")
 
 
-def _relay_to_github(mode: str, force: bool = False, tag: str = "") -> tuple:
+def _relay_to_github(mode: str, force: bool = False, tag: str = "",
+                     owner_only: bool = False, mock: bool = False) -> tuple:
     """Dispatch daily_run.yml on GitHub Actions instead of spawning agent.py here.
 
     🔴 The rule this enforces: any run that does screening, Claude analysis or
@@ -345,7 +346,13 @@ def _relay_to_github(mode: str, force: bool = False, tag: str = "") -> tuple:
             headers={"Authorization": f"Bearer {gh_token}",
                      "Accept": "application/vnd.github+json"},
             json={"ref": "main",
-                  "inputs": {"run_mode": mode, "force": "true" if force else "false"}},
+                  "inputs": {"run_mode": mode,
+                           "force": "true" if force else "false",
+                           # Carried so a manual ?owner_only=1 test trigger still
+                           # reaches ONLY the owner. Dropping it here would
+                           # broadcast a test run to every user.
+                           "owner_only": "1" if owner_only else "",
+                           "mock_data": "true" if mock else "false"}},
             timeout=10,
         )
         if resp.status_code == 204:
@@ -505,29 +512,21 @@ def trigger_mode(mode: str):
             print(f"[trigger/{mode}] Duplicate check failed (non-critical): {_e}")
 
     owner_only = request.args.get("owner_only", "").lower() in ("1", "true")
-    extra_env  = {"RUN_MODE": mode}
-    if owner_only:
-        extra_env["OWNER_ONLY"] = "1"
 
-    import subprocess, sys as _sys, signal as _signal
-    # Kill existing agent.py processes to prevent memory buildup from concurrent runs
-    try:
-        result = subprocess.run(["pgrep", "-f", "agent.py"], capture_output=True, text=True)
-        for pid in result.stdout.strip().split():
-            try:
-                os.kill(int(pid), _signal.SIGTERM)
-            except Exception:
-                pass
-    except Exception:
-        pass
-    subprocess.Popen(
-        [_sys.executable, "agent.py"],
-        env={**os.environ, **extra_env},
-        cwd=os.path.dirname(os.path.abspath(__file__)),
-        start_new_session=True,   # detach from gunicorn worker process group
-    )
-    print(f"[trigger/{mode}] Spawned (owner_only={owner_only}).")
-    return jsonify({"ok": True, "triggered": True, "mode": mode, "owner_only": owner_only}), 200
+    # 🔴 RELAY, never spawn. This route used to `subprocess.Popen(agent.py)` ON
+    # RENDER for every mode except morning/weekly/prescreener — 16 of 19. That
+    # is the documented OOM class: importing agent.py alone costs ~121 MB
+    # (it pulls screener/ai_analyzer/etf_screener/chart_generator, and with them
+    # pandas, numpy, yfinance, matplotlib) on top of gunicorn's own copy of
+    # pandas, before the mode does a single unit of work. Render OOM-kills the
+    # run mid-flight, which sets cron_last_<mode> while never delivering, and
+    # the per-day guard above then blocks the retry — a silent miss.
+    #
+    # The rule this completes: any run doing screening, Claude analysis or ETF
+    # work executes on GH Actions (7GB); Render only relays and serves the web
+    # API. morning (Jul 2026) and weekly (Aug 2026) were converted after exactly
+    # this failure; the other 16 modes were left behind and kept OOM-ing.
+    return _relay_to_github(mode, tag=f"trigger/{mode}", owner_only=owner_only)
 
 
 # ── Telegram webhook receiver ─────────────────────────────────────────────────
@@ -2225,8 +2224,15 @@ def admin_broadcast():
 @app.route("/admin/run_agent", methods=["POST"])
 @_require_admin
 def admin_run_agent():
-    """Trigger any agent run mode on demand from the admin dashboard."""
-    import threading, subprocess, sys as _sys
+    """Trigger any agent run mode on demand from the admin dashboard.
+
+    🔴 RELAYS to GH Actions — it used to run `agent.py` in a THREAD on Render.
+    That is the same OOM class as the generic /trigger/<mode> route: importing
+    agent.py costs ~121 MB before any work, on a box already holding gunicorn's
+    pandas. Worse than the cron path, because this one fires whenever the owner
+    clicks a button on the dashboard, so an OOM here looks like "the dashboard
+    killed the service" with no cron entry to correlate against.
+    """
     body = request.get_json(silent=True) or {}
     mode = str(body.get("mode", "morning")).strip()
     mock = bool(body.get("mock", False))
@@ -2235,19 +2241,7 @@ def admin_run_agent():
              "vix_check","news_check","macro_alert","midday_check","watchdog"}
     if mode not in valid:
         return jsonify({"error": f"unknown mode: {mode}"}), 400
-    env = {**os.environ, "RUN_MODE": mode}
-    if mock:
-        env["MOCK_DATA"] = "true"
-    def _run():
-        try:
-            subprocess.run([_sys.executable, "agent.py"], env=env,
-                           cwd=os.path.dirname(os.path.abspath(__file__)),
-                           timeout=600)
-        except Exception as exc:
-            print(f"[admin_run_agent] {mode} error: {exc}")
-    threading.Thread(target=_run, daemon=True).start()
-    print(f"[admin_run_agent] Spawned mode={mode} mock={mock}")
-    return jsonify({"ok": True, "mode": mode, "mock": mock})
+    return _relay_to_github(mode, tag=f"admin_run_agent/{mode}", mock=mock)
 
 
 @app.route("/admin/fix_ticker", methods=["POST"])
