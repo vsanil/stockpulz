@@ -397,3 +397,62 @@ class TestFindingsAwaitingReminder:
         assert "read_strict" in src
         assert "get_finding_dispositions" not in src, \
             "that helper ends in `or {}` and hides an unreadable store"
+
+
+class TestDuplicateFixesAreNotReProposed:
+    """🔴 Branch names are `auto/self-heal-$(date +%s)` — unique by construction
+    — and nothing checked whether an unmerged branch already carried the same
+    fix. So a PERSISTENT failure produced one branch PER RUN: the deliberate
+    canary check made 6 in 5 days, and `synthetic_user` runs 8x a weekday, so a
+    stuck failure there compounds far faster.
+    """
+
+    def _ship(self):
+        wf = WF.read_text()
+        i = wf.index("- name: Ship")
+        return wf[i:wf.index("- name: Post-deploy health check", i)]
+
+    def test_it_compares_the_FULL_diff_not_just_filenames(self):
+        """Measured on the 6 real branches: four had a byte-identical diff, and
+        the two that differed genuinely did MORE — one added a CLAUDE.md note,
+        one fixed a second real bug. Matching on filenames would have swallowed
+        both. Only an exact repeat may be suppressed."""
+        b = self._ship()
+        assert "git hash-object --stdin" in b
+        assert b.count("git hash-object --stdin") >= 2, "must hash ours AND theirs"
+
+    def test_both_sides_are_measured_from_their_merge_base(self):
+        """main moves under old branches; a two-dot diff against current main
+        would include unrelated drift and never match."""
+        b = self._ship()
+        assert b.count("git merge-base origin/main") >= 2
+
+    def test_the_check_runs_BEFORE_the_branch_is_pushed(self):
+        """A duplicate must create no branch at all — detecting it after the
+        push would leave exactly the litter this removes."""
+        b = self._ship()
+        assert "outcome=duplicate" in b and 'git push -u origin "$BR"' in b
+        assert b.index("outcome=duplicate") < b.index('git push -u origin "$BR"')
+
+    def test_it_does_not_match_the_branch_against_itself(self):
+        b = self._ship()
+        assert '[ "$R" = "$BR" ] && continue' in b
+
+    def test_a_duplicate_sends_NO_telegram_message(self):
+        """Otherwise dedup just moves the spam from branches to Telegram."""
+        wf = WF.read_text()
+        i = wf.index("- name: Notify admin — result")
+        notify = wf[i:]
+        assert "duplicate)" in notify
+        assert 'MSG="" ;;' in notify
+
+    def test_an_empty_message_is_never_curled(self):
+        wf = WF.read_text()
+        i = wf.index("- name: Notify admin — result")
+        notify = wf[i:]
+        assert 'if [ -z "$MSG" ]; then' in notify
+        assert notify.index('if [ -z "$MSG" ]; then') < notify.index("sendMessage")
+
+    def test_the_workflow_is_still_valid_yaml(self):
+        import yaml
+        assert yaml.safe_load(WF.read_text())

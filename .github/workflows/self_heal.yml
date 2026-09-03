@@ -171,6 +171,33 @@ jobs:
           fi
           NF=$(git diff --name-only origin/main HEAD | tr '\n' ' ')
           echo "files=$NF" >> "$GITHUB_OUTPUT"
+          # 🔴 DEDUP. Branch names are `auto/self-heal-$(date +%s)`, unique by
+          # construction, and nothing used to check whether an unmerged branch
+          # already carried this exact fix. So a PERSISTENT failure produced one
+          # branch PER RUN: the canary demo check made 6 in 5 days, and
+          # synthetic_user runs 8x a weekday, so a stuck failure there compounds
+          # far faster. Measured on those 6 real branches: four had a
+          # byte-identical diff, and the two that differed genuinely did MORE
+          # (one added a CLAUDE.md note, one fixed a second real bug). So compare
+          # the FULL diff and suppress only exact repeats — a fix that does
+          # something new must never be swallowed.
+          MBO=$(git merge-base origin/main HEAD)
+          OURS=$(git diff "$MBO..HEAD" | git hash-object --stdin)
+          DUP=""
+          for R in $(git ls-remote --heads origin 'refs/heads/auto/self-heal-*' 2>/dev/null \
+                     | awk '{print $2}' | sed 's|refs/heads/||'); do
+            [ "$R" = "$BR" ] && continue
+            git fetch origin "refs/heads/$R:refs/remotes/origin/$R" -q 2>/dev/null || continue
+            MBT=$(git merge-base origin/main "origin/$R" 2>/dev/null) || continue
+            THEIRS=$(git diff "$MBT..origin/$R" | git hash-object --stdin)
+            if [ "$OURS" = "$THEIRS" ]; then DUP="$R"; break; fi
+          done
+          if [ -n "$DUP" ]; then
+            echo "::notice::identical fix already awaiting review on $DUP — no new branch, no DM"
+            echo "dup=$DUP" >> "$GITHUB_OUTPUT"
+            echo "outcome=duplicate" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # 🔴 PR-GATED since 2026-08-23 (owner's call). NOTHING self-heal writes
           # reaches main or production without a human. Previously a green test
           # run pushed straight to main and Render deployed it, so an LLM's
@@ -277,6 +304,12 @@ jobs:
                 MSG="⚠️ Self-heal produced a fix for $M but tests are RED — pushed to $BR, NOT proposed for merge. Needs you: ${URL}"
               fi ;;
             testfix) MSG="🧪 Self-heal TEST run for *$M*: fix on \`$BR\` (files: ${FILES}), tests green — no PR (manual run)." ;;
+            duplicate)
+              # 🔴 SILENT ON PURPOSE. The identical fix is already on a branch the
+              # owner was ALREADY DM'd about, and canary.check_selfheal_unmerged
+              # reminds daily. A message per run would just move the spam from
+              # branches to Telegram — synthetic_user alone runs 8x a weekday.
+              MSG="" ;;
             nofix)   MSG="⚠️ Couldn't confidently auto-fix *$M* — needs you. Failed run: ${URL}" ;;
             *)       MSG="⚠️ Self-heal for *$M* ended without a result / errored — check the Actions log: ${URL}" ;;
           esac
@@ -284,6 +317,10 @@ jobs:
           # number of underscores makes Telegram reject the whole message with a
           # 400 — silently, when the response is discarded. Plain text always
           # delivers, and delivery matters more than bold text.
+          if [ -z "$MSG" ]; then
+            echo "[self-heal] duplicate of ${{ steps.ship.outputs.dup }} — no DM sent (by design)"
+            exit 0
+          fi
           RESP=$(curl -s -w '\n%{http_code}' "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=${MSG}") || true
           CODE=$(printf '%s' "$RESP" | tail -1)
