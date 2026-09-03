@@ -25,3 +25,10 @@ scripts/.sec_facts.pkl
 .claude/settings.local.json
 .claude/settings.deny-draft.json
 .claude/*.bak-*
+
+# Claude Code skill installs — machine-local tooling, not project code.
+# Swept in by a careless `git add -A` in d579cb7 (no secrets, just 2.6k lines
+# of noise in a public repo). Stage the files a change touches, not -A.
+.agents/
+.claude/skills/
+skills-lock.json
