@@ -148,3 +148,60 @@ class TestTheWorkflowGate:
         wf = pathlib.Path(".github/workflows/daily_run.yml").read_text()
         line = next(l for l in wf.splitlines() if "from run_modes import check" in l)
         assert line.count("python3 -c") == 1 and line.rstrip().endswith("; then")
+
+
+class TestOnlyOneEntryPointToTheAgent:
+    """🔑 Exactly one workflow may set RUN_MODE.
+
+    Every protection a run gets lives in daily_run.yml: the run_mode allow-list
+    check, the per-mode `concurrency` group, and the full env — above all
+    OWNER_ONLY, without which a manual trigger broadcasts to EVERY user. A
+    second workflow invoking agent.py silently opts out of all three.
+
+    🔴 price_alerts.yml was exactly that until 2026-09-05. It had no schedule
+    and nothing dispatched it (daily_run.yml's own header still claimed price
+    alerts lived there), and it ran the same agent with EIGHT env vars missing —
+    OWNER_ONLY and APP_URL among them. Pressing its "Run workflow" button would
+    have messaged every user with no containment and no mode validation.
+
+    ⚠️ Adding a workflow that runs a mode? Do not. Dispatch daily_run.yml:
+        gh workflow run daily_run.yml -f run_mode=<mode> -f owner_only=1
+    """
+
+    def _workflows_setting_run_mode(self):
+        import pathlib
+        return sorted(p.name for p in pathlib.Path(".github/workflows").glob("*.yml")
+                      if "RUN_MODE" in p.read_text())
+
+    def test_daily_run_is_the_only_workflow_that_sets_RUN_MODE(self):
+        got = self._workflows_setting_run_mode()
+        assert got == ["daily_run.yml"], (
+            f"a second entry point to agent.py bypasses the run_mode allow-list, "
+            f"the concurrency group and OWNER_ONLY containment: {got}")
+
+    def test_no_workflow_points_at_the_removed_price_alerts_workflow(self):
+        """A pointer to a workflow that does not exist is worse than no comment:
+        it sends the next reader looking for the wrong file, which is exactly
+        what daily_run.yml's header did for weeks after the move to cron-job.org.
+
+        ⚠️ The exemption is LINE-level, not file-level. A first version excluded
+        any file containing the word "deleted" — and this file's own explanatory
+        comment contains it, so the whole file was exempt and re-adding the stale
+        line still passed. Mutation-checking caught that; keep the scope tight.
+        """
+        import pathlib
+        stale = []
+        for p in pathlib.Path(".github/workflows").glob("*.yml"):
+            for n, line in enumerate(p.read_text().splitlines(), 1):
+                if "price_alerts.yml" not in line:
+                    continue
+                # Only a line that says the file is gone may mention it.
+                if any(w in line.lower() for w in ("removed", "deleted", "no longer")):
+                    continue
+                stale.append(f"{p.name}:{n} {line.strip()[:70]}")
+        assert not stale, f"dangling reference to the removed workflow: {stale}"
+
+    def test_the_surviving_entry_point_still_carries_its_guards(self):
+        wf = open(".github/workflows/daily_run.yml").read()
+        for guard in ("from run_modes import check", "concurrency:", "OWNER_ONLY:"):
+            assert guard in wf, f"daily_run.yml lost its {guard!r} protection"
