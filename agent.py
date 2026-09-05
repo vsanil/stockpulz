@@ -424,9 +424,16 @@ MOCK_PICKS = {
 
 def detect_run_mode(now_et: datetime) -> str:
     """Auto-detect run mode by ET hour/weekday. Override with RUN_MODE env var."""
-    forced = os.environ.get("RUN_MODE", "").lower()
-    if forced in ("morning", "confirmation", "weekly", "close_check", "eod_summary", "prescreener", "price_alerts", "week_ahead", "premarket", "digest", "friday_wrap", "macro_alert", "midday_check", "vix_check", "news_check", "pre_earnings", "monthly_commentary", "recap", "watchdog"):
-        return forced
+    from run_modes import check as _check_mode, normalise as _norm_mode
+    forced = _norm_mode(os.environ.get("RUN_MODE", ""))
+    if forced:
+        # 🚨 RAISE on an unknown mode; never fall through to the clock.
+        # Falling through is what turned `run_mode=typo` into a silent
+        # CONFIRMATION run that reported success (measured 2026-09-05) —
+        # and between 03:00-09:59 ET the clock says `morning`, which
+        # BROADCASTS TO EVERY USER. These modes are not idempotent, so a
+        # crash is strictly safer than a guess.
+        return _check_mode(forced)
     if now_et.weekday() == 6 and now_et.hour < 14:   # Sunday morning → week ahead briefing
         return "week_ahead"
     if now_et.weekday() == 5 and now_et.hour < 10:   # Saturday morning

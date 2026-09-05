@@ -477,14 +477,10 @@ def trigger_mode(mode: str):
     ?owner_only=true  — send only to admin (for testing)
     ?secret=XXX       — required
     """
-    _VALID_MODES = {
-        "confirmation", "weekly", "close_check", "eod_summary",
-        "week_ahead", "premarket", "digest", "friday_wrap",
-        "macro_alert", "midday_check", "vix_check", "news_check",
-        "pre_earnings", "monthly_commentary", "watchdog", "tax_harvest",
-        "morning", "prescreener",   # kept for completeness; dedicated endpoints take priority
-        "price_alerts",             # runs every 30 min during market hours
-    }
+    # Single source of truth — see run_modes.py. This list used to be
+    # written out here AND in agent.detect_run_mode, and they drifted:
+    # tax_harvest was allowed here and rejected there.
+    from run_modes import VALID_MODES as _VALID_MODES
     if mode not in _VALID_MODES:
         return jsonify({"error": f"unknown mode: {mode}"}), 400
 
