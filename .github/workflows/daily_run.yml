@@ -44,6 +44,37 @@ on:
         required: false
         default: ""
 
+# 🚨 Partial replacement for a guard that was LOST on 2026-09-05, when the 17
+# cron-job.org jobs stopped calling Render's /trigger/<mode> and began POSTing
+# to GitHub's dispatch API directly. That endpoint (webhook.py `trigger_mode`)
+# held a per-mode same-day marker, `cron_last_<mode>`, and returned
+# {"skipped": true, "reason": "already ran today"} on a repeat. Dispatching
+# straight to GitHub walks past it, and for modes that message users a repeat
+# means duplicate Telegram messages.
+#
+# ⚠️ Be honest about what this does and does not restore. Concurrency
+# SERIALISES, it does not SKIP: a duplicate that arrives after the first run
+# has finished still runs in full. What it does buy:
+#   - two runs of the same mode can never overlap (the harmful case: two
+#     deliveries interleaving, or two writers racing on the same cache/state)
+#   - a burst coalesces — GitHub holds at most one running + one pending per
+#     group, and a third arrival cancels the pending one rather than queueing
+# A true same-day guard would have to live in agent.py. Add one only if a real
+# duplicate is observed; do not pre-emptively rebuild the marker here.
+#
+# 🔎 The `|| 'prescreener'` default is LOAD-BEARING, not defensive padding.
+# `github.event.inputs.run_mode` is empty on a `schedule` event, so a bare
+# expression would put scheduled runs in a "daily-run-" group of their own —
+# separate from the "daily-run-prescreener" group that cron-job.org's dispatch
+# lands in. Prescreener is the one mode with THREE redundant triggers (03:00
+# cron, 07:00 backup cron, plus cron-job.org), so that is precisely the mode
+# that must not be split across two groups. `prescreener` is also what the
+# "Set run mode" step below resolves both scheduled crons AND its
+# unknown-schedule fallback to — keep the two in step if either changes.
+concurrency:
+  group: daily-run-${{ github.event.inputs.run_mode || 'prescreener' }}
+  cancel-in-progress: false # never kill a run that may have already delivered
+
 jobs:
   run-agent:
     runs-on: ubuntu-latest
