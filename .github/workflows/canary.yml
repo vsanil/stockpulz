@@ -17,7 +17,8 @@ on:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15   # raised from 10 (2026-09-05): endpoint.health now WAKES
+                          # the free instance and can spend up to 4 min doing it.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -876,14 +876,111 @@ def check_storage_surfaces() -> None:
 
 
 def check_endpoints() -> None:
+    """Can the web service still boot and serve?
+
+    🚨 REWRITTEN 2026-09-05, because the old version had started failing every
+    single run BY DESIGN. It was `GET /health, timeout=25`, and it broke the
+    moment the 17 cron-job.org triggers stopped calling Render's
+    /trigger/<mode> and began POSTing to GitHub's dispatch API directly.
+    Nothing scheduled wakes the instance any more, so on the free tier it is
+    ASLEEP when the canary runs — and 25 s is shorter than this app's MEASURED
+    54.9 s cold start. The check was reporting "the app is down" for precisely
+    the state we deliberately engineered.
+    🔑 A check that fails by design is worse than no check: it trains you to
+    scroll past a red line, and the next red line is a real one.
+
+    What is still worth knowing now that nothing scheduled depends on the app:
+      · it is not SUSPENDED — that is unrecoverable without a human
+      · it still BOOTS and serves /health when a client waits long enough
+      · how long the cold start actually takes, recorded EVERY run
+
+    🔎 That third one is a free side effect worth having. Cold-start figures in
+    the ops notes have gone stale twice and were each time re-quoted as
+    measurements long after they stopped being true; this writes a fresh one
+    into the canary output daily, so the number never has to be trusted from a
+    document again.
+
+    ⚠️ This WAKES the instance on purpose — ~0.28 h per run (boot plus Render's
+    15-minute idle tail). At one canary run/day that is ~8.5 h/mo against the
+    750 h shared by four apps, about 1%. That cost is the point, not an
+    oversight. Do NOT "optimise" it back to a short timeout: a fast reply does
+    not measure the app's health, it measures whether something else happened
+    to be pinging it in the last 15 minutes.
+    """
+    import time
+
     base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
             or "https://stock-agent-enqx.onrender.com").rstrip("/")
-    try:
-        h = requests.get(base + "/health", timeout=25)
-        _check("endpoint.health", h.status_code == 200 and h.json().get("status") == "ok",
-               f"{h.status_code}")
-    except Exception as e:
-        _check("endpoint.health", False, str(e))
+    url = base + "/health"
+
+    def _hit(timeout: float):
+        """→ (response|None, seconds, error_label). Never raises."""
+        t0 = time.monotonic()
+        try:
+            return requests.get(url, timeout=timeout), time.monotonic() - t0, ""
+        except Exception as exc:
+            return None, time.monotonic() - t0, type(exc).__name__
+
+    def _healthy(resp) -> bool:
+        if resp is None or resp.status_code != 200:
+            return False
+        try:
+            return (resp.json() or {}).get("status") == "ok"
+        except Exception:
+            return False          # 200 with a non-JSON body is not health
+
+    # ── 1. Cheap probe ────────────────────────────────────────────────────────
+    # A warm instance answers in well under a second; a spun-down one is
+    # refused by Render's edge just as fast. Either way this costs nothing.
+    # It is also the ONLY place SUSPENDED is distinguishable from ASLEEP —
+    # the edge names the state in x-render-routing, and since a suspended
+    # service can never be woken, spending 120 s trying would turn a precise
+    # diagnosis into a generic timeout.
+    resp, secs, _err = _hit(10)
+    if _healthy(resp):
+        _check("endpoint.health", True, f"awake, answered in {secs:.1f}s")
+        return
+
+    routing = (resp.headers.get("x-render-routing", "") if resp is not None else "")
+    if "suspend" in routing.lower():
+        _check("endpoint.health", False, "",
+               fail_detail=(f"SUSPENDED (x-render-routing: {routing}) — the service "
+                            "is OFFLINE, not asleep. Visitors get Render's "
+                            "suspension page and no cold start will ever recover "
+                            "it; someone has to resume it in the dashboard."))
+        return
+
+    # ── 2. Asleep: wake it, and time the boot ─────────────────────────────────
+    # `requests` holds the connection open the way curl does, which is what
+    # actually gets through a cold start. (cron-job.org's client is refused in
+    # ~500 ms and never triggers a boot at all — do not generalise between
+    # clients here, that mistake has been made twice.)
+    #
+    # ⚠️ ATTEMPTS × TIMEOUT IS BOUNDED BY THE JOB, not by patience. canary.yml
+    # sets timeout-minutes: 15 for everything the canary does, and this is one
+    # check among dozens including the mutating round-trips. 2 × 120 s caps the
+    # worst case at 4 min. Raising either number without raising that job
+    # timeout risks the whole canary being killed mid-run — which loses EVERY
+    # result, a strictly worse outcome than one FAIL line here.
+    # 🔎 120 s against a MEASURED 54.9 s cold start is ~2.2×. The second attempt
+    # is the safety net for a boot that lands slow, not a routine expectation.
+    attempts, per_try = 2, 120
+    last = f"{_err or ('HTTP %s' % resp.status_code)} after {secs:.1f}s"
+    for attempt in range(1, attempts + 1):
+        resp, secs, err = _hit(per_try)
+        if _healthy(resp):
+            _check("endpoint.health", True,
+                   f"cold start {secs:.1f}s — was asleep, woke on attempt {attempt} "
+                   f"(expected on free tier; nothing scheduled needs it awake)")
+            return
+        last = f"{err or ('HTTP %s' % resp.status_code)} after {secs:.1f}s"
+
+    _check("endpoint.health", False, "",
+           fail_detail=(f"could not wake the web service in {attempts} attempts of "
+                        f"{per_try}s (last: {last}). Asleep is normal and fine; "
+                        f"UNWAKEABLE is not — check Render for a failed deploy or a "
+                        f"crash loop. Note the Telegram mini-app is served by this "
+                        f"same instance, so it is down for the owner too."))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
