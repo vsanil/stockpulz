@@ -88,10 +88,28 @@ class TestTheFourZerosAreDistinguishable:
         assert "1 paused/opted out" in out
         assert "DIGEST IS BROKEN" not in out
 
-    def test_an_empty_reply_is_a_problem_not_a_success(self, agent, monkeypatch, capsys):
+    def test_no_reply_at_all_is_a_problem(self, agent, monkeypatch, capsys):
+        """None means the handler did nothing — a genuine defect."""
         _wire(agent, monkeypatch, ["a"], open_map={"a": True}, reply_map={"a": None})
         out = _run(agent, capsys)
-        assert "1 empty reply" in out and "DIGEST IS BROKEN" in out
+        assert "1 no reply" in out and "DIGEST IS BROKEN" in out
+
+    def test_the_empty_string_sentinel_is_DELIVERY_not_a_defect(
+            self, agent, monkeypatch, capsys):
+        """🔴 The false alarm this file exists to prevent, caught on the FIRST
+        live run of the instrumentation.
+
+        When APP_URL is set the DIGEST handler sends the inline-keyboard
+        version ITSELF and returns "" — a sentinel meaning "already delivered".
+        Counting that falsy value as a defect reported a working digest as
+        broken. A warning that fires on a healthy run is worse than no warning,
+        because it is the reason people stop reading them."""
+        sent = _wire(agent, monkeypatch, ["a"], open_map={"a": True},
+                     reply_map={"a": ""})
+        out = _run(agent, capsys)
+        assert sent == [], "the handler already sent it; run_digest must not re-send"
+        assert "delivered to 1 of 1" in out and "1 sent by the handler" in out
+        assert "DIGEST IS BROKEN" not in out
 
     def test_an_exception_is_counted(self, agent, monkeypatch, capsys):
         _wire(agent, monkeypatch, ["a"], open_map={"a": True},
@@ -104,8 +122,36 @@ class TestTheFourZerosAreDistinguishable:
                      reply_map={"a": "your digest"})
         out = _run(agent, capsys)
         assert sent == ["a"]
-        assert "sent to 1 of 1" in out
+        assert "delivered to 1 of 1" in out and "1 sent here" in out
         assert "DIGEST IS BROKEN" not in out
+
+
+class TestContainment:
+    """🔴 run_digest called get_allowed_users() directly, so OWNER_ONLY=1 did
+    NOT contain it — a manual test trigger broadcast a real digest to every
+    user. Found while testing on 2026-09-05, after `-f owner_only=1` had
+    correctly contained every other mode.
+
+    🔑 Containment is PER-MODE. Any new broadcast path must route through
+    _all_recipients() or it is untestable without spamming real users."""
+
+    def test_owner_only_contains_the_digest(self, agent, monkeypatch, capsys):
+        monkeypatch.setenv("OWNER_ONLY", "1")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "owner")
+        seen = []
+        import config_manager, bot_commands, telegram_api
+        monkeypatch.setattr(config_manager, "get_allowed_users",
+                            lambda: ["owner", "stranger1", "stranger2"])
+        monkeypatch.setattr(config_manager, "get_user_config", lambda uid: {})
+        monkeypatch.setattr(config_manager, "load_user_trade_log",
+                            lambda uid: {"open": ["X"]})
+        monkeypatch.setattr(bot_commands, "_parse_and_execute",
+                            lambda c, original=None, chat_id=None: seen.append(chat_id) or "d")
+        monkeypatch.setattr(telegram_api, "send_message",
+                            lambda text, chat_id=None, **k: True)
+        monkeypatch.setattr(agent, "_log_cron_run", lambda mode: None)
+        agent.run_digest()
+        assert seen == ["owner"], f"OWNER_ONLY must contain the digest, reached {seen}"
 
 
 class TestOneUserFailingDoesNotAbortTheRest:
@@ -119,4 +165,31 @@ class TestOneUserFailingDoesNotAbortTheRest:
                      reply_map={"bad": RuntimeError("boom"), "good": "ok"})
         out = _run(agent, capsys)
         assert sent == ["good"]
-        assert "sent to 1 of 2" in out and "1 exception" in out
+        assert "delivered to 1 of 2" in out and "1 exception" in out
+
+
+class TestNoBroadcastPathBypassesContainment:
+    """🔑 Pins the CLASS. run_digest and run_recap BOTH called
+    get_allowed_users() directly, so OWNER_ONLY=1 silently did not contain
+    them. Only `_all_recipients()` honours it, and a fan-out that skips it is
+    untestable without messaging real users.
+
+    Allowed: `_all_recipients()` itself, which is where the env var is read."""
+
+    def test_only_all_recipients_reads_the_user_list(self):
+        import ast
+        import pathlib
+        src = pathlib.Path("agent.py").read_text()
+        tree = ast.parse(src)
+        offenders = []
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef) or fn.name == "_all_recipients":
+                continue
+            for n in ast.walk(fn):
+                if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                        and n.func.id == "get_allowed_users"):
+                    offenders.append(f"{fn.name}() calls get_allowed_users() "
+                                     f"at line {n.lineno}")
+        assert not offenders, (
+            "use _all_recipients() so OWNER_ONLY=1 contains the run:\n  "
+            + "\n  ".join(offenders))
