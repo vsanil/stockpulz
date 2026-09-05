@@ -155,6 +155,27 @@ jobs:
             MODE="prescreener"
           fi
 
+          # 🚨 VALIDATE before running. GitHub accepts ANY string for
+          # inputs.run_mode, and until 2026-09-05 the only gate was
+          # webhook.trigger_mode returning 400 for an unknown mode — which the
+          # move to direct API dispatch removed. Without this, a typo in one of
+          # the 17 cron-job.org bodies reaches agent.py, fails to match, and
+          # falls back to CLOCK-BASED detection: measured, `typo_not_a_real_mode`
+          # silently ran CONFIRMATION and reported success. Between 03:00-09:59
+          # ET the clock says `morning`, which broadcasts to every user.
+          # 🔎 Checked here as well as inside agent.py so the run stops BEFORE
+          # "Run agent" — the step that screens, calls Claude and messages
+          # users — and so the error names the valid modes in the job log where
+          # the operator is already looking. (This step runs after pip install,
+          # so it does not save that; it saves the expensive, user-visible part.)
+          # ⚠️ Keep the python on ONE line. Inside `run: |` every line carries
+          # the block's indentation, and indented source in `python3 -c` is an
+          # IndentationError — which would fail every run, valid or not.
+          if ! python3 -c "import sys; sys.path.insert(0, '.'); from run_modes import check; print('validated run mode:', check('$MODE'))"; then
+            echo "::error::Unknown run_mode '$MODE' — refusing to run. An unvalidated mode silently becomes a DIFFERENT job (clock fallback), and between 03:00-09:59 ET that is 'morning', which broadcasts to every user."
+            exit 1
+          fi
+
           echo "RUN_MODE=$MODE" >> $GITHUB_ENV
           echo "Resolved RUN_MODE=$MODE"
 
