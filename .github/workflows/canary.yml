@@ -37,6 +37,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
+          # Automatic workflow token — has actions:read, which GH_GIST_TOKEN
+          # (a gist-scoped PAT) does not. check_silent_failures needs it to
+          # read the LOGS of successful runs; without it that check reports
+          # CANNOT VERIFY rather than passing.
+          GH_ACTIONS_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
           # Storage backend. Must match Render, or GH Actions writes to the Gist
           # while the web service writes to Supabase — the split-brain of 2026-08-19.
           SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}

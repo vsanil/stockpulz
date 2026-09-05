@@ -529,7 +529,15 @@ def check_weekly_relay() -> None:
     except Exception:
         on_gh = None
     if on_gh is None:
-        _check("weekly.on_github", True, "NOT VERIFIED — GitHub API unreachable")
+        # ⚠️ Was `True` with a "NOT VERIFIED" note — the same green-while-blind
+        # shape fixed in storage.surfaces on 2026-09-05, still live two checks
+        # away. A PASS with an excuse attached lands in the "Passed:" list and
+        # exits 0.
+        _check("weekly.on_github", False, "",
+               fail_detail="CANNOT VERIFY — GitHub API unreachable, so whether the "
+                           "weekly run reached Actions is UNKNOWN. Unknown is not fine: "
+                           "the Aug-15 failure this check exists for looked exactly like "
+                           "a quiet week.")
     else:
         _check("weekly.on_github", on_gh,
                "weekly ran on GitHub Actions (relay working)",
@@ -926,6 +934,138 @@ def check_storage_surfaces() -> None:
                         f"stores with different contents, and neither is complete"))
 
 
+
+# ── "ran but did nothing" ─────────────────────────────────────────────────────
+
+# Phrases that mean a run REPORTED SUCCESS while something failed silently.
+# 🔑 Curated deliberately narrow. Every one of these was observed in a real
+# green run on 2026-09-05; none of them fires on a legitimate quiet day.
+_SILENT_FAILURE_MARKERS = (
+    "traceback (most recent call last)",   # an exception was printed and swallowed
+    "fetch failed",                        # vix_check's break, on every run for weeks
+    "handler errored for",                 # digest's break, suppressed by design.
+    #   🚨 "handler errored FOR" — the trailing word is load-bearing. The
+    #   HEALTHY run_digest summary line reads "problems: 0 handler errored,
+    #   0 no reply, 0 exception", so the bare phrase matched its own
+    #   instrumentation and would have fired on every good day. Caught by
+    #   TestItDoesNotCryWolf before this ever shipped.
+    #   🔑 Generalise: a log scanner must not match the words a SUMMARY uses
+    #   to report zero of that thing.
+    "digest is broken",                    # the explicit alarm run_digest now prints
+    "not verified",                        # a check that could not check
+    "unboundlocalerror",
+)
+
+# ⚠️ NOT markers, and this list is the load-bearing half. These are legitimate
+# no-ops, and a check that flags them would fire on healthy days — which is
+# exactly how a warning stops being read. Every one was seen green and correct:
+#   "No picks for today"        weekend / pre-open
+#   "skipping — not Mon–Thu"    macro_alert's own schedule guard
+#   "no relevant news found"    news_check with a quiet tape
+#   "Non-trading day"           watchdog on a weekend
+#   "no open positions"         digest with nothing to digest
+# The author's own "(non-critical)" suffix is honoured as a tolerated failure.
+_TOLERATED = ("non-critical", "(expected")
+
+
+def check_silent_failures() -> None:
+    """🔴 Did any run SUCCEED while doing nothing, or while quietly failing?
+
+    This is the generalisation of the two bugs found on 2026-09-05, and of two
+    more found the same day in this very file. All four looked healthy:
+
+        vix_check          "VIX fetch failed: ... not 'Series'"  -> exit 0, green
+        digest             "handler errored -- suppressed"       -> exit 0, green
+        storage.surfaces   "NOT VERIFIED this run"               -> PASS
+        endpoint.health    failing by design every run           -> FAIL, ignored
+
+    Every one had been reporting fine for weeks or months. Nothing watched for
+    the shape they share: **a green result with a failure printed inside it.**
+
+    🔑 So this checks the LOGS of successful runs, not their exit codes. An exit
+    code is what the job claims; the log is what happened.
+
+    ⚠️ Bounded on purpose: successful `daily_run.yml` runs from the last 26 h,
+    capped at 20, ~58 KB of log each. canary.yml allows 15 min for everything.
+    """
+    import datetime as _d
+
+    repo = os.environ.get("GITHUB_REPOSITORY") or "vsanil/stockpulz"
+    tok = (os.environ.get("GH_ACTIONS_TOKEN") or os.environ.get("GITHUB_TOKEN")
+           or os.environ.get("GH_GIST_TOKEN") or "")
+    hdr = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}
+    since = (_d.datetime.now(_d.timezone.utc) - _d.timedelta(hours=26)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if not tok:
+        _check("runs.silent_failures", False, "",
+               fail_detail="CANNOT VERIFY — no GitHub token available to read run logs. "
+                           "Green-because-unchecked is the exact failure this check exists "
+                           "to catch, so it reports red rather than passing.")
+        return
+
+    try:
+        r = requests.get(
+            f"https://api.github.com/repos/{repo}/actions/workflows/daily_run.yml/runs"
+            f"?status=success&created=>={since}&per_page=20",
+            headers=hdr, timeout=30)
+        if r.status_code != 200:
+            raise RuntimeError(f"HTTP {r.status_code}")
+        runs = (r.json().get("workflow_runs") or [])[:20]
+    except Exception as exc:
+        _check("runs.silent_failures", False, "",
+               fail_detail=f"CANNOT VERIFY — could not list runs ({type(exc).__name__}: {exc}). "
+                           f"Not a pass: an unchecked run is indistinguishable from a healthy one.")
+        return
+
+    if not runs:
+        _check("runs.silent_failures", True,
+               "no successful daily_run runs in the last 26h to inspect")
+        return
+
+    hits, scanned, unreadable = [], 0, 0
+    for run in runs:
+        try:
+            jr = requests.get(f"https://api.github.com/repos/{repo}/actions/runs/{run['id']}/jobs",
+                              headers=hdr, timeout=20)
+            jobs = (jr.json().get("jobs") or []) if jr.status_code == 200 else []
+            for job in jobs:
+                lg = requests.get(
+                    f"https://api.github.com/repos/{repo}/actions/jobs/{job['id']}/logs",
+                    headers=hdr, timeout=30, allow_redirects=True)
+                if lg.status_code != 200:
+                    unreadable += 1
+                    continue
+                scanned += 1
+                lines = lg.text.splitlines()
+                for i, raw in enumerate(lines):
+                    low = raw.lower()
+                    if not any(m in low for m in _SILENT_FAILURE_MARKERS):
+                        continue
+                    # Honour the author's own "tolerated failure" markers, in
+                    # this line or the two before it (a Traceback's explanatory
+                    # print comes first).
+                    window = " ".join(lines[max(0, i - 2):i + 1]).lower()
+                    if any(t in window for t in _TOLERATED):
+                        continue
+                    hits.append(f"run {run['id']}: {raw.strip()[-110:]}")
+                    break          # one finding per job is enough to act on
+        except Exception:
+            unreadable += 1
+
+    if unreadable and not scanned:
+        _check("runs.silent_failures", False, "",
+               fail_detail=f"CANNOT VERIFY — {unreadable} run log(s) unreadable and none "
+                           f"scanned. Likely a token without actions:read.")
+        return
+
+    note_tail = f" ({unreadable} log(s) unreadable)" if unreadable else ""
+    _check("runs.silent_failures", not hits,
+           f"{scanned} successful run(s) scanned, none hiding a failure{note_tail}",
+           fail_detail=(f"{len(hits)} run(s) EXITED 0 WHILE FAILING{note_tail} — a green job "
+                        f"that did nothing is how vix_check and digest stayed broken for "
+                        f"weeks:\n    " + "\n    ".join(hits[:6])))
+
+
 def check_endpoints() -> None:
     """Can the web service still boot and serve?
 
@@ -1302,6 +1442,7 @@ def main() -> int:
                # is `pytest tests/ -q`, and a red main downgrades its fixes to
                # "pushed to branch (tests red)".
                check_findings_awaiting,
+               check_silent_failures,
                ):
         try:
             fn()
