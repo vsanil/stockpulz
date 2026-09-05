@@ -640,11 +640,80 @@ Rules:
   🔑 **The `|| 'prescreener'` default is load-bearing, not padding.** `inputs.run_mode` is EMPTY on a `schedule` event, so the obvious bare expression strands the two scheduled prescreener crons in a `daily-run-` group of their own — separate from the `daily-run-prescreener` group cron-job.org's dispatch lands in. Prescreener is the ONE mode with three redundant triggers, i.e. exactly the mode a naive group would fail to protect. It also matches what "Set run mode" resolves both crons AND its unknown-schedule fallback to; keep the two in step.
   ⚠️ **Be honest about what this restored: concurrency SERIALISES, it does not SKIP.** A duplicate arriving after the first run finishes still runs in full. It prevents overlap (interleaved deliveries, racing writers) and coalesces bursts (GitHub holds at most one running + one pending per group). The per-mode same-day marker is genuinely gone; a true guard would have to live in `agent.py`. **Do not pre-emptively rebuild it — wait for an observed duplicate.**
   🔎 `price_alerts` is unaffected: it was always in `webhook._MULTI_RUN_MODES`, exempt from the daily guard, so its 14 fires/day were never deduped anyway.
-  ⚠️ It RAISES Render hours (~+128 h/mo): `daily_run.yml` curls the app during its run, and after cutover it fires ~17x/day instead of ~2.
+  ⚠️ **CORRECTED 2026-09-05 — an earlier version of this line said it RAISES Render hours ~+128 h/mo because "`daily_run.yml` curls the app during its run". That is WRONG.** Verified by reading the code: nothing in `daily_run.yml` or `agent.py` makes an HTTP request to the app. Every `APP_URL` reference builds a Telegram `web_app` BUTTON url, and `full_sweep` uses an in-process `app.test_client()`. **The migration costs ZERO Render hours, not +128.**
+  🔑 Actual StockPulz Render draw now: the canary's deliberate wake (~8.5 h/mo), plus ~0.28 h per deploy (this is the only service with Auto-Deploy `On Commit`), plus real Telegram traffic. Scheduling draws nothing.
+  🚨 **But the app is NOT free to let sleep.** The bot runs on a WEBHOOK to `<render>/webhook`, so every user interaction hits Render. Scheduling is off the critical path; *interactive* use is not. A first tap on a cold instance still waits ~55 s or gets dropped.
 - **🚨 AN OPEN BROWSER TAB ON `/admin` PINS THIS SERVICE AWAKE 24/7.** Caught live 2026-09-04: `/admin` polls `/admin/data` every **60 s**, well inside the 15-min idle timer, so one forgotten tab costs **~720 h/mo**. In the log it is indistinguishable from a third-party monitor except by the `Referer`. **It also MASKS every sleep bug** — while it was open the service never slept, so all 17 cron jobs would have gone green and this whole outage would have looked fixed.
 - **⚠️ This is the ONLY one of the four services with Auto-Deploy `On Commit`.** Every deploy wakes the instance ~0.28 h (five deploys on 2026-09-03). With the triggers migrated off the app, deploys become the largest controllable line in its bill.
 - **⚠️ Free's 512 MB bit again:** "Instance failed — Ran out of memory (used over 512MB)", 2026-09-03. A second consequence of the downgrade, distinct from the scheduling breakage.
 - **🔎 Two supported modes nothing ever triggers:** `monthly_commentary` and `tax_harvest` (both in `_VALID_MODES`, neither has a cron job). `tax_harvest` is seasonal and year-end is close.
+  ⚠️ **`tax_harvest` was ALSO unreachable in code until 2026-09-05** — `detect_run_mode` rejected it, so wiring a cron job alone would not have worked. It is reachable now; `recap` still is not (absent from `webhook._VALID_MODES`).
+- **🔎 Dead scheduling config, verified 2026-09-05:** `price_alerts.yml` is an ORPHAN (no schedule, nothing dispatches it; its own comment says it moved to cron-job.org — while `daily_run.yml`'s header still claims price alerts live there, which is now FALSE). Plus 6 Suspended Render cron jobs and the Inactive `StockPulz-keepalive`.
+- **🔎 A ZERO IS NOT A RESULT UNTIL YOU CAN SAY WHICH ZERO IT IS.** `run_digest` printed `sent to 0 user(s)` for four different situations — nobody had positions, everyone paused, the handler crashed, the handler returned nothing. Three are fine and one is an outage. That ambiguity is precisely why the broken `/digest` ran unnoticed. It now counts every outcome and says `⚠️ DIGEST IS BROKEN for N of M` when any problem bucket is non-zero.
+  🚨 **And the instrumentation cried wolf on its FIRST live run.** The handler sends the inline-keyboard version itself when `APP_URL` is set and returns `""` — a SENTINEL meaning "already delivered". Counting that falsy value as a defect reported a working digest as broken. **A warning that fires on a healthy run is why people stop reading warnings.** Only `None` is a defect now.
+
+### 🔬 ALL 17 MODES WERE RUN FOR REAL (2026-09-05) — two were silently broken
+
+Nothing else in this repo had ever executed every mode. Doing it found two production
+bugs that every monitor, test and green workflow had missed, because **both exited 0**.
+
+    vix_check   "VIX fetch failed: float() argument must be ... not 'Series'"
+    digest      "handler errored -- suppressed" -> "sent to 0 user(s)", exit 0
+
+- **`vix_check`: yfinance ≥0.2.51 returns MULTI-LEVEL columns even for ONE ticker**, so
+  `float(yf.download("^VIX")["Close"].iloc[-1])` gets a Series. A bare `except Exception`
+  printed and returned, so the VIX alert had **never fired**. Fixed via new **`yf_utils.py`**
+  (`close_series`/`latest_close`), applied at all **four** single-ticker download sites.
+  ⚠️ `Ticker().history()` sites are deliberately NOT converted — `history()` returns FLAT
+  columns, so those are genuine scalars. An over-broad first pass flagged them and would
+  have rewritten working code.
+- **`digest`: `UnboundLocalError`.** `cmd_market.py` re-imported `send_inline_keyboard`
+  locally at line 635 inside an `if`, which binds the name local to ALL of `_cmd_market`
+  (lines 36-1389) — so line 1385 failed on every path that skipped 635. Two more genuine
+  sites of the same class were found and fixed: `run_price_alerts` (14 runs/weekday) and
+  `_cmd_paper`.
+- 🚨 **`tests/test_no_shadow_imports.py` did NOT catch it, while claiming to.** Its predicate
+  is `use_line < import_line` — a SUBSET. The digest bug had the use at 1385 and the import
+  at 635; it broke on REACHABILITY, not line order. The file said it "catches the whole
+  class ... keep it at zero" and had reported zero since July with a live instance in the
+  tree. Now has a second, reachability-based scan. **Generalise: when a guard claims a
+  CLASS, mutation-check it against a real instance — a subset guard's zero is believed.**
+
+### 🚨 TESTING A MODE: `DRY_RUN` DOES NOT CONTAIN IT. `OWNER_ONLY=1` does.
+
+`agent.py`'s own header says `DRY_RUN=true → print message, don't send`. **It does not.**
+`_fanout` → `broadcast_all` is the primary per-user delivery path (20+ call sites:
+confirmation, eod_summary, vix_check, macro_alert, pre_earnings, weekly, week_ahead …) and
+**never checks `DRY_RUN`**; `telegram_api.py` contains no reference to it at all. It gates
+only `_alert()` and the morning outbox.
+
+    gh workflow run daily_run.yml -f run_mode=<mode> -f owner_only=1
+
+⚠️ **Containment is PER-MODE and I proved that the hard way.** `owner_only=1` contained 16
+of 17; `run_digest` and `run_recap` called `get_allowed_users()` directly instead of
+`_all_recipients()`, so real digests went to all 3 users during testing. Both fixed, and an
+AST test now bans any other function from reading the user list directly.
+🚨 **Do NOT test `morning` (or `weekly`, which calls `run_morning` internally).** `save_picks()`
+is NOT `DRY_RUN`-guarded, so `mock_data=true` writes MOCK PICKS to production storage, and a
+real run spends Claude credits. `weekly` took 8m42s and did exactly that.
+⚠️ Every mode stamps `cron_last_<mode>` unguarded, so test runs pollute what the canary reads.
+
+### 🚨 An unknown `run_mode` silently became a DIFFERENT job (2026-09-05)
+
+    run_mode=typo_not_a_real_mode  ->  Starting [CONFIRMATION]  ->  success
+
+`detect_run_mode` treated an unrecognised value as "not forced" and fell back to CLOCK-based
+detection. **Between 03:00-09:59 ET that fallback is `morning`, which broadcasts to every
+user.** The gate was lost in the trigger migration: `webhook.trigger_mode` used to return
+400, and GitHub accepts any string for a workflow input.
+🔑 **Root cause was DRIFT, and it had already bitten.** The mode list existed THREE times —
+`detect_run_mode`'s tuple, `main()`'s elif chain, `webhook._VALID_MODES` — and disagreed:
+**`tax_harvest` was dispatched and allowed but NOT accepted, so that mode was unreachable
+and ran something else.** Fixed by **`run_modes.py`** as the single source of truth for all
+three, `check()` raising with a near-miss hint, and `daily_run.yml` validating before
+`Run agent`. A test fails if the three ever disagree again.
+⚠️ Behaviour change: a typo is now a HARD job failure. Deliberate — these modes are not
+idempotent, so a crash beats a guess that messages users.
 
 ### 🚨 The migration broke TWO canary checks, and both failed in the QUIET direction (2026-09-05)
 
