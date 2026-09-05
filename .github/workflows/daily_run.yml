@@ -34,6 +34,16 @@ on:
   schedule:
     - cron: "0 3 * * 1-5"   # prescreener — primary (11 PM ET)
     - cron: "0 7 * * 1-5"   # prescreener — backup  (3 AM ET)
+    # 🔎 Added 2026-09-05. Both modes existed in agent.py AND in the "Set run
+    # mode" resolver below, and neither had a trigger anywhere — the wiring was
+    # half-done, which is why they had never once run. (tax_harvest was doubly
+    # unreachable: detect_run_mode rejected it until run_modes.py landed today.)
+    # ⚠️ These live on GitHub's scheduler rather than cron-job.org ON PURPOSE:
+    # GH fires 1.6-6 h late, which is fatal for a market-timed job and
+    # irrelevant for a monthly commentary or a seasonal tax review. Putting them
+    # here costs no cron-job.org job and no PAT.
+    - cron: "0 13 1 * *"          # monthly_commentary — 1st of the month
+    - cron: "0 14 1,15 11,12 *"   # tax_harvest — 1st & 15th, Nov + Dec only
   workflow_dispatch:
     inputs:
       run_mode:
@@ -75,17 +85,27 @@ on:
 # A true same-day guard would have to live in agent.py. Add one only if a real
 # duplicate is observed; do not pre-emptively rebuild the marker here.
 #
-# 🔎 The `|| 'prescreener'` default is LOAD-BEARING, not defensive padding.
-# `github.event.inputs.run_mode` is empty on a `schedule` event, so a bare
-# expression would put scheduled runs in a "daily-run-" group of their own —
-# separate from the "daily-run-prescreener" group that cron-job.org's dispatch
-# lands in. Prescreener is the one mode with THREE redundant triggers (03:00
-# cron, 07:00 backup cron, plus cron-job.org), so that is precisely the mode
-# that must not be split across two groups. `prescreener` is also what the
-# "Set run mode" step below resolves both scheduled crons AND its
-# unknown-schedule fallback to — keep the two in step if either changes.
+# 🔎 `inputs.run_mode` is empty on a `schedule` event, so the fallbacks matter.
+# ⚠️ REVISED 2026-09-05, and this supersedes an earlier comment here that said
+# the `|| 'prescreener'` default was load-bearing. It WAS, while prescreener was
+# the only scheduled mode. Adding the monthly_commentary and tax_harvest crons
+# broke that premise and turned the default into a hazard:
+#
+#   every scheduled run resolved to the SAME group, "daily-run-prescreener".
+#   GitHub keeps at most one running + one PENDING per group and CANCELS the
+#   pending one when a third arrives — so a scheduled monthly_commentary could
+#   be silently dropped behind two prescreener runs. A monthly job that never
+#   runs and says nothing is exactly the silent-skip class fixed elsewhere today.
+#
+# `github.event.schedule` gives each cron its own group, which removes that.
+# 🔑 The cost, stated plainly: the three prescreener triggers (03:00 cron, 07:00
+# cron, cron-job.org dispatch) no longer share one group, so concurrency no
+# longer serialises them. That is acceptable because they cannot overlap — they
+# are 4+ hours apart and the job times out at 30 min — whereas the cancellation
+# above could really happen. Do not "restore" the shared group without checking
+# that arithmetic again.
 concurrency:
-  group: daily-run-${{ github.event.inputs.run_mode || 'prescreener' }}
+  group: daily-run-${{ github.event.inputs.run_mode || github.event.schedule || 'prescreener' }}
   cancel-in-progress: false # never kill a run that may have already delivered
 
 jobs:

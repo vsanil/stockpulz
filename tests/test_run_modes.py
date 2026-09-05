@@ -205,3 +205,68 @@ class TestOnlyOneEntryPointToTheAgent:
         wf = open(".github/workflows/daily_run.yml").read()
         for guard in ("from run_modes import check", "concurrency:", "OWNER_ONLY:"):
             assert guard in wf, f"daily_run.yml lost its {guard!r} protection"
+
+
+class TestEveryDeclaredScheduleResolvesToItsMode:
+    """🔴 A declared cron with no mapping in "Set run mode" falls through to the
+    `else:` and silently runs PRESCREENER instead — a scheduled job that appears
+    to work while doing someone else's work.
+
+    The inverse bit us for months: monthly_commentary and tax_harvest had
+    resolver mappings and NO cron entries, so both were "supported" and had
+    never once run. Half-wiring is invisible from either end alone; this test
+    checks both ends against each other.
+    """
+
+    def _wf(self):
+        import pathlib
+        return pathlib.Path(".github/workflows/daily_run.yml").read_text()
+
+    def _declared_crons(self):
+        import re
+        import yaml
+        d = yaml.safe_load(self._wf())
+        on = d.get(True, d.get("on"))
+        return [c["cron"] for c in on["schedule"]]
+
+    def _resolver_crons(self):
+        import re
+        return set(re.findall(r'\$SCHEDULE" == "([^"]+)"', self._wf()))
+
+    def test_every_declared_cron_has_a_mode_mapping(self):
+        missing = [c for c in self._declared_crons() if c not in self._resolver_crons()]
+        assert not missing, (
+            f"cron(s) {missing} are scheduled but unmapped — they hit the `else:` "
+            f"and would silently run prescreener at the wrong hour")
+
+    def test_the_two_newly_wired_modes_are_actually_scheduled(self):
+        """They existed in agent.py and in the resolver for months with no
+        trigger. Nothing else would have noticed."""
+        crons = self._declared_crons()
+        assert "0 13 1 * *" in crons, "monthly_commentary has no schedule"
+        assert "0 14 1,15 11,12 *" in crons, "tax_harvest has no schedule"
+
+    def test_each_scheduled_cron_gets_its_own_concurrency_group(self):
+        """⚠️ With a bare `|| 'prescreener'` every scheduled run shared one
+        group, and GitHub cancels the PENDING run when a third arrives — so a
+        monthly job could be silently dropped behind two prescreener runs.
+
+        ⚠️ Asserts it on the GROUP LINE, not anywhere in the file. A first
+        version searched the whole text and passed with the fix reverted,
+        because the "Set run mode" step also contains
+        `SCHEDULE="${{ github.event.schedule }}"`. Third substring test today to
+        match something other than what it meant to check."""
+        group = next(l for l in self._wf().splitlines() if l.strip().startswith("group:"))
+        assert "github.event.schedule" in group, (
+            f"the concurrency group must distinguish schedules, or a scheduled "
+            f"mode can be cancelled as a duplicate of prescreener: {group.strip()}")
+
+    def test_no_scheduled_mode_is_rejected_by_run_modes(self):
+        import re
+        wf = self._wf()
+        for cron in self._declared_crons():
+            m = re.search(r'\$SCHEDULE" == "%s" \]\];? then\s*\n\s*MODE="([a-z_]+)"'
+                          % re.escape(cron), wf)
+            assert m, f"could not read the mode for cron {cron!r}"
+            assert m.group(1) in VALID_MODES, \
+                f"cron {cron!r} resolves to {m.group(1)!r}, which run_modes rejects"
