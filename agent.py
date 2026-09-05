@@ -4249,29 +4249,53 @@ def run_digest():
             print("[agent] run_digest: no allowed users")
             return
 
-        sent = 0
+        # 🔑 Count every OUTCOME, not just successes. "sent to 0 user(s)" was
+        # printed identically whether nobody had positions to digest or the
+        # handler was crashing for everyone — and that ambiguity is the whole
+        # reason a broken /digest ran unnoticed for weeks (an UnboundLocalError
+        # in cmd_market._cmd_market, measured 2026-09-05, suppressed here by
+        # design and reported as a green run).
+        # ⚠️ A zero is not a result until you can say WHICH zero it is.
+        sent = paused = no_positions = errored = failed = empty_reply = 0
         for chat_id in users:
             try:
                 cfg = get_user_config(chat_id)
                 if cfg.get("paused") or cfg.get("skip_digest"):
+                    paused += 1
                     continue
                 log = load_user_trade_log(chat_id)
                 if not log.get("open"):
+                    no_positions += 1
                     continue
                 reply = _parse_and_execute("DIGEST", original="/digest", chat_id=chat_id)
                 # Background job: never surface failures to users. The command
                 # layer's catch-all returns a "Something went wrong" reply —
                 # swallow it here (admin sees the log), users see nothing.
                 if reply and "Something went wrong" in reply:
+                    errored += 1
                     print(f"[agent] run_digest: handler errored for {chat_id} — suppressed.")
                     continue
                 if reply:
                     send_message(reply, chat_id=chat_id)
                     sent += 1
+                else:
+                    # A handler that returns nothing is not a success either.
+                    empty_reply += 1
             except Exception as exc:
+                failed += 1
                 print(f"[agent] run_digest: failed for {chat_id}: {exc}")
 
-        print(f"[agent] run_digest: sent to {sent} user(s).")
+        print(f"[agent] run_digest: sent to {sent} of {len(users)} user(s) "
+              f"(skipped: {no_positions} no open positions, {paused} paused/opted out; "
+              f"problems: {errored} handler errored, {empty_reply} empty reply, "
+              f"{failed} exception)")
+        # 🚨 Errors here are INVISIBLE to users by design, so the only way they
+        # ever surface is this line. Say it in one unmissable sentence rather
+        # than leaving it to be inferred from a zero.
+        if errored or failed or empty_reply:
+            print(f"[agent] run_digest: ⚠️ DIGEST IS BROKEN for "
+                  f"{errored + failed + empty_reply} of {len(users)} user(s) — "
+                  f"this is a defect, not a quiet day.")
     except Exception as e:
         print(f"[agent] run_digest error: {e}")
 
