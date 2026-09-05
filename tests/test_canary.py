@@ -360,12 +360,26 @@ class TestWeeklyRelayCheck:
         assert r["weekly.on_github"][0] is False
         assert "spawning on Render" in r["weekly.on_github"][1]
 
-    def test_an_unreachable_api_says_NOT_VERIFIED_rather_than_passing_clean(self, monkeypatch):
+    def test_an_unreachable_api_FAILS_rather_than_passing_with_an_excuse(self, monkeypatch):
+        """🔴 Updated 2026-09-05. This asserted `is True` while being NAMED
+        "rather than passing clean" — the name stated the rule and the assertion
+        did the opposite, so an unverifiable run landed in the report's
+        "Passed:" list and exited 0.
+
+        That is the THIRD instance of this exact inversion found in this repo in
+        one day (storage.surfaces, an unusable-answer test, and this one). The
+        shape to watch for: a test whose NAME describes a failure and whose body
+        asserts success.
+
+        🔑 "I could not check" and "I checked and it is fine" must not render
+        identically. The Aug-15 relay failure this check exists for looked
+        exactly like a quiet week."""
         self._wire(monkeypatch, api_ok=False,
                    alerts={"111": [{"auto": True, "set_at": "2026-08-22T12:05:00Z"}], "222": []})
         canary.check_weekly_relay()
         r = self._res()
-        assert r["weekly.on_github"][0] is True and "NOT VERIFIED" in r["weekly.on_github"][1]
+        assert r["weekly.on_github"][0] is False
+        assert "CANNOT VERIFY" in r["weekly.on_github"][1]
 
 
 class TestSyntheticUserCheck:
