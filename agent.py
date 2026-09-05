@@ -4244,7 +4244,14 @@ def run_digest():
         from telegram_api import send_message
         from bot_commands import _parse_and_execute
 
-        users = get_allowed_users()
+        # ⚠️ _all_recipients(), NOT get_allowed_users(). This mode used to call
+        # get_allowed_users() directly, which IGNORES OWNER_ONLY=1 — so a manual
+        # test trigger broadcast a real digest to EVERY user. Found the hard way
+        # 2026-09-05 while testing: `-f owner_only=1` contained every other mode
+        # and silently did not contain this one.
+        # 🔑 Containment is per-mode, not global. Any new broadcast path must go
+        # through _all_recipients() or it is untestable without spamming users.
+        users = _all_recipients()
         if not users:
             print("[agent] run_digest: no allowed users")
             return
@@ -4256,7 +4263,8 @@ def run_digest():
         # in cmd_market._cmd_market, measured 2026-09-05, suppressed here by
         # design and reported as a green run).
         # ⚠️ A zero is not a result until you can say WHICH zero it is.
-        sent = paused = no_positions = errored = failed = empty_reply = 0
+        sent = paused = no_positions = errored = failed = 0
+        handler_sent = no_reply = 0
         for chat_id in users:
             try:
                 cfg = get_user_config(chat_id)
@@ -4275,26 +4283,36 @@ def run_digest():
                     errored += 1
                     print(f"[agent] run_digest: handler errored for {chat_id} — suppressed.")
                     continue
-                if reply:
+                elif reply:
                     send_message(reply, chat_id=chat_id)
                     sent += 1
+                elif reply == "":
+                    # 🔑 "" is a SENTINEL, not an empty message. When APP_URL is
+                    # set the DIGEST handler sends the inline-keyboard version
+                    # ITSELF and returns "" to say "already delivered, nothing
+                    # left for you to send". Treating that falsy value as a
+                    # defect made this counter cry wolf on its very first live
+                    # run — the exact false alarm this instrumentation exists to
+                    # avoid. Only None means nothing happened.
+                    handler_sent += 1
                 else:
-                    # A handler that returns nothing is not a success either.
-                    empty_reply += 1
+                    no_reply += 1
             except Exception as exc:
                 failed += 1
                 print(f"[agent] run_digest: failed for {chat_id}: {exc}")
 
-        print(f"[agent] run_digest: sent to {sent} of {len(users)} user(s) "
-              f"(skipped: {no_positions} no open positions, {paused} paused/opted out; "
-              f"problems: {errored} handler errored, {empty_reply} empty reply, "
+        delivered = sent + handler_sent
+        print(f"[agent] run_digest: delivered to {delivered} of {len(users)} user(s) "
+              f"({sent} sent here, {handler_sent} sent by the handler; "
+              f"skipped: {no_positions} no open positions, {paused} paused/opted out; "
+              f"problems: {errored} handler errored, {no_reply} no reply, "
               f"{failed} exception)")
         # 🚨 Errors here are INVISIBLE to users by design, so the only way they
         # ever surface is this line. Say it in one unmissable sentence rather
         # than leaving it to be inferred from a zero.
-        if errored or failed or empty_reply:
+        if errored or failed or no_reply:
             print(f"[agent] run_digest: ⚠️ DIGEST IS BROKEN for "
-                  f"{errored + failed + empty_reply} of {len(users)} user(s) — "
+                  f"{errored + failed + no_reply} of {len(users)} user(s) — "
                   f"this is a defect, not a quiet day.")
     except Exception as e:
         print(f"[agent] run_digest error: {e}")
@@ -4312,7 +4330,13 @@ def run_recap():
         from telegram_api import send_message
         from bot_commands import _parse_and_execute
 
-        users = get_allowed_users()
+        # ⚠️ _all_recipients(), NOT get_allowed_users() — same containment
+        # gap as run_digest had: get_allowed_users() ignores OWNER_ONLY=1,
+        # so a manual test trigger would broadcast to every user. `recap`
+        # is not in webhook._VALID_MODES today, so nothing can reach it —
+        # fixed anyway, because "unreachable" is a property of the CURRENT
+        # trigger list, not of this function.
+        users = _all_recipients()
         if not users:
             print("[agent] run_recap: no allowed users")
             return
