@@ -1294,7 +1294,15 @@ def main() -> int:
                # weeks reporting "NOT VERIFIED" — on a green line.)
                check_endpoints,
                check_storage_surfaces, check_selfheal_unmerged,
-               check_findings_awaiting):
+               # ⚠️ Keep the trailing comma. `test_selfheal_visibility.py::
+               # TestFindingsAwaitingReminder::test_it_is_registered` asserts the
+               # literal string "check_findings_awaiting," is present, so making
+               # this the last element without one turns a registered check into
+               # a RED test — which matters here because self_heal's merge gate
+               # is `pytest tests/ -q`, and a red main downgrades its fixes to
+               # "pushed to branch (tests red)".
+               check_findings_awaiting,
+               ):
         try:
             fn()
         except Exception as e:

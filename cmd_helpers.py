@@ -126,9 +126,10 @@ def _fetch_live_price(ticker: str) -> float | None:
         pass
     # Fallback: 1-min history
     try:
+        from yf_utils import latest_close
         data = _yf.download(yf_symbol, period="1d", interval="1m",
                             progress=False, auto_adjust=True)
-        return float(data["Close"].dropna().iloc[-1])
+        return latest_close(data)
     except Exception:
         return None
 
