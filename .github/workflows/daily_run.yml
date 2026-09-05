@@ -1,7 +1,20 @@
 name: StockPulz Scheduled Runs
 
-# All weekday + weekend cron jobs live here.
-# Price alerts (every 30 min during market hours) are in price_alerts.yml.
+# All weekday + weekend cron jobs live here, price alerts included.
+#
+# 🔑 THIS IS THE ONLY WORKFLOW THAT MAY SET RUN_MODE, and that is a rule, not an
+# accident. Everything protecting a run lives in this file: the run_mode
+# allow-list check, the per-mode `concurrency` group, and the full env — most
+# importantly OWNER_ONLY, without which a manual trigger broadcasts to EVERY
+# user. A second entry point silently opts out of all three.
+# ⚠️ A workflow named price-alerts WAS exactly that, and was removed 2026-09-05.
+# It had no schedule and nothing dispatched it, this header still pointed at it,
+# and it ran the same `agent.py` with RUN_MODE=price_alerts and EIGHT env vars
+# missing — OWNER_ONLY and APP_URL among them. Anyone pressing its
+# "Run workflow" button would have messaged every user with no containment.
+# 🔎 The manual case it was kept for is fully served by:
+#     gh workflow run daily_run.yml -f run_mode=price_alerts -f owner_only=1
+# Pinned by tests/test_run_modes.py::TestOnlyOneEntryPointToTheAgent.
 #
 # Each schedule maps to a RUN_MODE — resolved in the "Set run mode" step.
 # Render cron jobs have been retired; only the webhook web service stays on Render.
