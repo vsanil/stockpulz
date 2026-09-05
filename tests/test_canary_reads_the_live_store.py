@@ -170,39 +170,84 @@ class TestSurfaceAgreement:
     before, in Aug 19's d11a1c9, and it reopened because no monitor stood
     behind the configuration."""
 
-    def _run(self, m, mine, health, monkeypatch):
+    # 🚨 REWRITTEN 2026-09-05. Two tests here previously asserted that an
+    # unverifiable run PASSES. One of them was named
+    # `test_an_unusable_answer_is_NOT_VERIFIED_not_a_pass` and its body read
+    # `assert ok` — the name states the rule and the assertion does the exact
+    # opposite. That inversion is not a curiosity: it is the same mistake as
+    # the bug it was guarding, written twice, and it kept the real defect
+    # green for weeks (`timeout=25` against a 54.9 s cold start meant the
+    # check reported "NOT VERIFIED this run — ReadTimeout" on EVERY run while
+    # showing as passed).
+    #
+    # The old `does_not_cry_wolf` test encoded a real intent — don't fail on a
+    # transient blip. That intent is now served differently and better:
+    # check_endpoints WAKES the instance first, so "unreachable" no longer
+    # means "asleep", it means "cannot be woken at all". That is a wolf.
+
+    def _run(self, m, mine, health, health_error="unreachable"):
+        """`health` is the /health body check_endpoints would have published;
+        None means the service could not be reached at all."""
         m._store = lambda: type("B", (), {"name": staticmethod(lambda: mine)})()
-        monkeypatch.setattr(m.requests, "get",
-                            lambda *a, **k: type("R", (), {"json": staticmethod(lambda: health)})())
+        m._HEALTH_BODY = health
+        m._HEALTH_ERROR = health_error
         m.RESULTS.clear()
         m.check_storage_surfaces()
         return dict((n, (ok, note)) for n, ok, note in m.RESULTS)["storage.surfaces"]
 
-    def test_agreement_passes(self, monkeypatch):
-        ok, _ = self._run(_canary(), "supabase", {"storage": "supabase"}, monkeypatch)
+    def test_agreement_passes(self):
+        ok, _ = self._run(_canary(), "supabase", {"storage": "supabase"})
         assert ok
 
-    def test_the_exact_aug_23_split_fails(self, monkeypatch):
-        m = _canary()
-        ok, note = self._run(m, "supabase", {"storage": "gist"}, monkeypatch)
+    def test_the_exact_aug_23_split_fails(self):
+        ok, note = self._run(_canary(), "supabase", {"storage": "gist"})
         assert not ok and "SPLIT BRAIN" in note
 
     @pytest.mark.parametrize("health", [{}, {"storage": "unavailable"}])
-    def test_an_unusable_answer_is_NOT_VERIFIED_not_a_pass(self, health, monkeypatch):
-        ok, note = self._run(_canary(), "supabase", health, monkeypatch)
-        assert ok and "NOT VERIFIED" in note, \
+    def test_an_unusable_answer_FAILS_rather_than_passing_with_an_excuse(self, health):
+        ok, note = self._run(_canary(), "supabase", health)
+        assert not ok and "CANNOT VERIFY" in note, \
             "a green line must never imply a check that could not run"
 
-    def test_an_unreachable_service_does_not_cry_wolf(self, monkeypatch):
+    def test_an_unreachable_service_FAILS(self):
+        ok, note = self._run(_canary(), "gist", None, health_error="unwakeable")
+        assert not ok and "CANNOT VERIFY" in note, \
+            ("'I could not check' and 'I checked and it is fine' must not render "
+             "identically — that equivalence hid the Aug-23 split for four days")
+        assert "unwakeable" in note, "the note must name WHY it could not verify"
+
+    def test_an_unresolvable_local_backend_FAILS(self):
         m = _canary()
-        m._store = lambda: type("B", (), {"name": staticmethod(lambda: "gist")})()
-        def _boom(*a, **k): raise OSError("down")
-        monkeypatch.setattr(m.requests, "get", _boom)
+        def _boom(): raise RuntimeError("no backend configured")
+        m._store = _boom
+        m._HEALTH_BODY = {"storage": "supabase"}
         m.RESULTS.clear()
         m.check_storage_surfaces()
         ok, note = [(o, n) for k, o, n in m.RESULTS if k == "storage.surfaces"][0]
-        assert ok and "NOT VERIFIED" in note
+        assert not ok and "CANNOT VERIFY" in note
 
     def test_it_is_registered_in_the_run(self):
         assert "check_storage_surfaces," in SRC.read_text(), \
             "the check exists but nothing calls it"
+
+    def test_endpoints_runs_BEFORE_storage_surfaces(self):
+        """🔑 Load-bearing ordering, not style.
+
+        check_endpoints is what wakes the sleeping free instance and publishes
+        the /health body into _HEALTH_BODY. If it runs after, storage.surfaces
+        finds an empty cache and fails every single run — which is how this
+        check silently stopped working in the first place (it was LAST in the
+        tuple, after check_endpoints, and paid its own 25 s timeout).
+        """
+        tree = ast.parse(SRC.read_text())
+        main = next(n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        order = next(
+            [e.id for e in n.elts if isinstance(e, ast.Name)]
+            for n in ast.walk(main)
+            if isinstance(n, ast.Tuple)
+            and any(isinstance(e, ast.Name) and e.id == "check_endpoints"
+                    for e in n.elts))
+        assert order.index("check_endpoints") < order.index("check_storage_surfaces"), \
+            "check_endpoints must precede check_storage_surfaces — it is what " \
+            "wakes the instance and fills _HEALTH_BODY"

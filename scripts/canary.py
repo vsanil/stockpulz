@@ -30,6 +30,21 @@ import requests
 
 RESULTS: list[tuple[str, bool, str]] = []
 
+# ── /health, fetched ONCE per run ─────────────────────────────────────────────
+# Published by check_endpoints(), consumed by check_storage_surfaces().
+#
+# 🔑 Why a cache rather than two independent fetches: check_endpoints WAKES a
+# spun-down free instance and that costs ~55 s of cold start. Two callers each
+# doing their own wake-capable GET would either double that, or — the bug this
+# replaces — one of them would keep a short timeout, never survive the cold
+# start, and quietly report "NOT VERIFIED" on every single run.
+#
+# ⚠️ check_endpoints MUST therefore run BEFORE check_storage_surfaces in main().
+# Reversing them does not crash; it silently turns storage.surfaces back into a
+# check that can never verify anything. The ordering is load-bearing.
+_HEALTH_BODY: dict | None = None          # None = the service could not be reached
+_HEALTH_ERROR: str = "endpoint.health did not run"
+
 
 def _check(name: str, ok: bool, detail: str = "", fail_detail: str = "") -> None:
     """`detail` is the note shown when the check PASSES (state the fact observed);
@@ -848,26 +863,62 @@ def check_storage_surfaces() -> None:
 
     Compares the backend THIS job resolves to against what the web service
     reports at /health. They must agree — one store, or writes land in two.
+
+    🚨 FIXED 2026-09-05 — this check had been GREEN AND BLIND for weeks.
+
+    It stated the right rule in a comment — "a green line must never imply a
+    check that could not run" — and then broke it three times over: every
+    unverifiable path called _check(..., True, ...) with a "NOT VERIFIED" note.
+    A PASS with an excuse attached is still a PASS. It lands in the report's
+    "Passed:" list, it does not appear under "🔴 FAILED", and it exits 0.
+
+    It was not hypothetical. The old fetch used `timeout=25` against an app
+    whose MEASURED cold start is 54.9 s, so from the moment the cron triggers
+    moved off Render (2026-09-05) and the instance began sleeping, this check
+    timed out EVERY run and reported "NOT VERIFIED this run — ReadTimeout" —
+    while showing green. The one monitor standing between us and a repeat of
+    the 2026-08-23 split brain had silently stopped monitoring, and said so in
+    a passing note that nobody reads.
+
+    🔑 Unverifiable is now a FAILURE, not a pass. "I could not check" and "I
+    checked and it is fine" must never render identically — that equivalence
+    is precisely what let the original split brain run undetected for four
+    days.
+
+    ⚠️ This does NOT make the check fail whenever the app sleeps. It reads the
+    /health body that check_endpoints already woke the instance to fetch, so
+    the ordinary asleep case verifies normally. That is why the ordering in
+    main() is load-bearing — see the _HEALTH_BODY comment at the top.
     """
-    base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
-            or "https://stock-agent-enqx.onrender.com").rstrip("/")
     try:
         mine = _store().name()
     except Exception as exc:
-        _check("storage.surfaces", True,
-               f"NOT VERIFIED this run — local backend unresolvable ({exc})")
+        _check("storage.surfaces", False, "",
+               fail_detail=(f"CANNOT VERIFY — this job cannot resolve its OWN backend "
+                            f"({type(exc).__name__}: {exc}). Split brain is undetectable "
+                            f"from here, and a canary that cannot name its own store "
+                            f"cannot be trusted about anything else it read either."))
         return
-    try:
-        theirs = (requests.get(base + "/health", timeout=25).json() or {}).get("storage")
-    except Exception as exc:
-        _check("storage.surfaces", True,
-               f"NOT VERIFIED this run — {type(exc).__name__}")
+
+    if _HEALTH_BODY is None:
+        _check("storage.surfaces", False, "",
+               fail_detail=(f"CANNOT VERIFY — the web service was unreachable this run "
+                            f"({_HEALTH_ERROR}); see endpoint.health for the cause. This "
+                            f"job resolves to {mine}; whether the web service agrees is "
+                            f"UNKNOWN. Unknown is the state the 2026-08-23 split brain "
+                            f"hid in for four days, so it is reported red, not green."))
         return
-    # A green line must never imply a check that could not run.
+
+    theirs = _HEALTH_BODY.get("storage")
     if not theirs or theirs == "unavailable":
-        _check("storage.surfaces", True,
-               f"NOT VERIFIED — the web service reports storage={theirs!r}")
+        _check("storage.surfaces", False, "",
+               fail_detail=(f"CANNOT VERIFY — the web service answered but reports "
+                            f"storage={theirs!r}, i.e. IT cannot name its own backend. "
+                            f"This job resolves to {mine}. A service that has lost track "
+                            f"of its store is the precondition for a split brain, not a "
+                            f"reason to skip the check."))
         return
+
     _check("storage.surfaces", mine == theirs,
            f"both surfaces agree on {theirs}",
            fail_detail=(f"SPLIT BRAIN: this job writes to {mine}, the web service "
@@ -908,10 +959,20 @@ def check_endpoints() -> None:
     to be pinging it in the last 15 minutes.
     """
     import time
+    global _HEALTH_BODY, _HEALTH_ERROR
 
     base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL")
             or "https://stock-agent-enqx.onrender.com").rstrip("/")
     url = base + "/health"
+
+    def _publish(resp) -> None:
+        """Hand the parsed body to check_storage_surfaces so it need not refetch."""
+        global _HEALTH_BODY
+        try:
+            body = resp.json()
+            _HEALTH_BODY = body if isinstance(body, dict) else None
+        except Exception:
+            _HEALTH_BODY = None
 
     def _hit(timeout: float):
         """→ (response|None, seconds, error_label). Never raises."""
@@ -938,11 +999,13 @@ def check_endpoints() -> None:
     # diagnosis into a generic timeout.
     resp, secs, _err = _hit(10)
     if _healthy(resp):
+        _publish(resp)
         _check("endpoint.health", True, f"awake, answered in {secs:.1f}s")
         return
 
     routing = (resp.headers.get("x-render-routing", "") if resp is not None else "")
     if "suspend" in routing.lower():
+        _HEALTH_ERROR = f"service SUSPENDED (x-render-routing: {routing})"
         _check("endpoint.health", False, "",
                fail_detail=(f"SUSPENDED (x-render-routing: {routing}) — the service "
                             "is OFFLINE, not asleep. Visitors get Render's "
@@ -969,12 +1032,14 @@ def check_endpoints() -> None:
     for attempt in range(1, attempts + 1):
         resp, secs, err = _hit(per_try)
         if _healthy(resp):
+            _publish(resp)
             _check("endpoint.health", True,
                    f"cold start {secs:.1f}s — was asleep, woke on attempt {attempt} "
                    f"(expected on free tier; nothing scheduled needs it awake)")
             return
         last = f"{err or ('HTTP %s' % resp.status_code)} after {secs:.1f}s"
 
+    _HEALTH_ERROR = f"unwakeable after {attempts}x{per_try}s (last: {last})"
     _check("endpoint.health", False, "",
            fail_detail=(f"could not wake the web service in {attempts} attempts of "
                         f"{per_try}s (last: {last}). Asleep is normal and fine; "
@@ -1219,9 +1284,17 @@ def main() -> int:
                check_weekly_relay,
                check_synthetic_user,
                check_position_integrity,
+               # ⚠️ ORDER IS LOAD-BEARING: check_endpoints must precede
+               # check_storage_surfaces. It is the one that WAKES the sleeping
+               # free instance and publishes the /health body into _HEALTH_BODY;
+               # storage.surfaces then reads that instead of paying a second
+               # ~55 s cold start. Move it back after and storage.surfaces finds
+               # an empty cache and fails every run. (It was last in the tuple
+               # until 2026-09-05, which is exactly why storage.surfaces spent
+               # weeks reporting "NOT VERIFIED" — on a green line.)
+               check_endpoints,
                check_storage_surfaces, check_selfheal_unmerged,
-               check_findings_awaiting,
-               check_endpoints):
+               check_findings_awaiting):
         try:
             fn()
         except Exception as e:
