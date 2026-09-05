@@ -65,6 +65,73 @@ def _scan_file(path):
     return bugs
 
 
+def _scan_conditional(path):
+    """The OTHER half of the class: a local import nested inside a branch.
+
+    🔴 MEASURED 2026-09-05. `_scan_file` above only catches a use whose LINE
+    NUMBER precedes the local import. That is a subset, and the rest of the
+    class is just as live: `cmd_market.py` imported `send_inline_keyboard`
+    locally at line 635 inside an `if`, and used it at line 1385. 1385 > 635, so
+    the line-order check said "clean" — but 635 never executed on the `/digest`
+    path, so line 1385 raised
+    `UnboundLocalError: cannot access local variable 'send_inline_keyboard'`.
+    The daily digest caught it, printed "handler errored — suppressed", reported
+    "sent to 0 user(s)" and exited 0. Green job, zero delivery, for weeks.
+
+    🔑 The lesson is about THIS FILE, not that bug. Its docstring said it
+    "catches the whole class ... keep it at zero", and it had reported zero ever
+    since finding 8 bugs in July — while an instance of the same class sat in
+    the tree. A guard that covers a subset while claiming the class is worse
+    than no guard, because the zero is believed.
+
+    Predicate here is REACHABILITY, not line order: an import nested inside a
+    branch binds the name for the whole function, so ANY use outside that
+    branch's own block can hit the unbound local.
+    """
+    with open(path) as fh:
+        tree = ast.parse(fh.read(), path)
+    module_names = _module_imported_names(tree)
+    bugs = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        own = list(_own_scope_nodes(fn))
+        params = {a.arg for a in list(fn.args.args) + list(fn.args.kwonlyargs)}
+        top_level = {id(s) for s in fn.body}
+        for stmt in fn.body:                      # each top-level block of fn
+            lo, hi = stmt.lineno, getattr(stmt, "end_lineno", stmt.lineno)
+            for n in ast.walk(stmt):
+                if not isinstance(n, (ast.Import, ast.ImportFrom)):
+                    continue
+                if id(n) in top_level:            # unconditional — always runs
+                    continue
+                for a in n.names:
+                    nm = a.asname or a.name.split(".")[0]
+                    if nm not in module_names or nm in params:
+                        continue
+                    outside = sorted({u.lineno for u in own
+                                      if isinstance(u, ast.Name)
+                                      and isinstance(u.ctx, ast.Load)
+                                      and u.id == nm
+                                      and not (lo <= u.lineno <= hi)})
+                    if outside:
+                        bugs.append((fn.name, nm, n.lineno, outside[:4]))
+    return bugs
+
+
+def test_no_conditional_shadow_imports():
+    """Companion to test_no_shadow_before_use_imports — see _scan_conditional."""
+    offenders = []
+    for path in glob.glob(os.path.join(_ROOT, "*.py")) + \
+            glob.glob(os.path.join(_ROOT, "scripts", "*.py")):
+        for fn, name, imp_ln, uses in _scan_conditional(path):
+            offenders.append(
+                f"{os.path.basename(path)}:{fn}() imports '{name}' locally at line "
+                f"{imp_ln} inside a BRANCH, but uses it outside that branch at "
+                f"{uses} → UnboundLocalError when the branch does not run")
+    assert not offenders, "conditional shadow-import bugs:\n  " + "\n  ".join(offenders)
+
+
 def test_no_shadow_before_use_imports():
     offenders = []
     for path in glob.glob(os.path.join(_ROOT, "*.py")) + \

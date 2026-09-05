@@ -1596,8 +1596,9 @@ def run_friday_wrap():
             # SPY weekly return
             spy_week_str = ""
             try:
-                spy_data = yf.download("SPY", period="5d", progress=False)["Close"]
-                if not spy_data.empty and len(spy_data) >= 2:
+                from yf_utils import close_series
+                spy_data = close_series(yf.download("SPY", period="5d", progress=False))
+                if spy_data is not None and len(spy_data) >= 2:
                     spy_week = float((spy_data.iloc[-1] / spy_data.iloc[0] - 1) * 100)
                     spy_week_str = f"\n<b>vs Market:</b> SPY this week: {spy_week:+.1f}%"
             except Exception as _spy_exc:
@@ -2057,11 +2058,15 @@ def run_vix_check():
     print("[agent] Running VIX check...")
     try:
         import yfinance as yf
-        vix_data = yf.download("^VIX", period="1d", progress=False)["Close"]
-        if vix_data.empty:
+        # ⚠️ Shape-normalised on purpose — see yf_utils. yf.download returns
+        # MULTI-LEVEL columns even for one ticker, so the old
+        # `float(raw["Close"].iloc[-1])` raised "float() argument must be ...
+        # not 'Series'" on EVERY run and this check silently never fired.
+        from yf_utils import latest_close
+        vix = latest_close(yf.download("^VIX", period="1d", progress=False))
+        if vix is None:
             print("[agent] vix_check: no VIX data returned.")
             return
-        vix = float(vix_data.iloc[-1])
         print(f"[agent] vix_check: VIX = {vix:.1f}")
     except Exception as exc:
         print(f"[agent] vix_check: VIX fetch failed: {exc}")
@@ -4037,7 +4042,6 @@ def run_price_alerts():
                 gap_pct = (float(target) - float(current)) / float(current) * 100
                 if 0 < gap_pct <= 5:
                     alert_key = f"target_approach_{uid}_{ticker}_{et_today().isoformat()}"
-                    from cache_layer import cache_get, cache_set
                     if not cache_get(alert_key):
                         cache_set(alert_key, "1", ttl_seconds=86400)
                         out.append({
@@ -4056,7 +4060,6 @@ def run_price_alerts():
 
     # ── Watchlist big-move alerts (>3% intraday) ─────────────────────────────
     try:
-        from cache_layer import cache_get, cache_set
         from datetime import date as _date
         def _watch_move_msgs(uid):
                 out = []

@@ -118,7 +118,6 @@ def _cmd_paper(text: str, original: str, chat_id: str) -> "str | None":
         return ""
 
     if text in ("PAPER SELL",):
-        from config_manager import load_user_paper
         positions = load_user_paper(chat_id).get("positions", [])
         if not positions:
             return "📭 No open paper positions to sell."
@@ -263,7 +262,6 @@ def _cmd_paper(text: str, original: str, chat_id: str) -> "str | None":
             parsed = _nl_parse_trade("paper_reset", raw)
             amount = parsed.get("price")   # reuse price field for the cash amount
         # Always confirm before wiping — show current portfolio value
-        from config_manager import load_user_paper
         current   = load_user_paper(chat_id)
         cash      = current.get("cash", 0)
         positions = current.get("positions", [])

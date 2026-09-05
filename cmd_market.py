@@ -221,8 +221,13 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                             date_strs.append(str(_ds)[:10])
                     if date_strs:
                         first_trade_date = min(date_strs)
-                        spy_data = yf.download("SPY", start=first_trade_date, progress=False)["Close"]
-                        if not spy_data.empty and len(spy_data) >= 2:
+                        # ⚠️ SINGLE-ticker download → yfinance returns MULTI-LEVEL
+                        # columns, so `["Close"]` is a one-column DataFrame and
+                        # `float(df.iloc[-1] / df.iloc[0] ...)` raises on a Series.
+                        # Same class as the vix_check break measured 2026-09-05.
+                        from yf_utils import close_series
+                        spy_data = close_series(yf.download("SPY", start=first_trade_date, progress=False))
+                        if spy_data is not None and len(spy_data) >= 2:
                             spy_return = float((spy_data.iloc[-1] / spy_data.iloc[0] - 1) * 100)
                             # User total return: sum pnl_usd / sum invested
                             closed_spy = log_spy.get("closed", [])
@@ -632,7 +637,17 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
             streak_str = ""
             if stats.get("hot_streak_users", 0) > 0:
                 streak_str = f"\n🔥 {stats['hot_streak_users']} user(s) on a 3+ win streak!"
-            from telegram_api import send_inline_keyboard
+            # 🔴 DO NOT re-import send_inline_keyboard here. It is already
+            # imported at module scope (line 10), and a function-local import
+            # binds the name LOCAL TO THE WHOLE OF `_cmd_market` (lines 36-1389)
+            # — so every OTHER use of it in this function raises
+            # `UnboundLocalError: cannot access local variable
+            # 'send_inline_keyboard' where it is not associated with a value`
+            # on any path that does not run this branch first.
+            # MEASURED 2026-09-05: that is exactly what broke `/digest`. The
+            # daily digest job caught the error, printed "handler errored —
+            # suppressed", reported "sent to 0 user(s)" and exited 0, so the
+            # job was GREEN while every user got nothing.
             community_msg = (
                 f"🌍 <b>StockPulz Community</b>\n\n"
                 f"<b>Users tracked:</b>  {stats['total_users']}\n"
