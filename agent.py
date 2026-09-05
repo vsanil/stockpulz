@@ -8,9 +8,25 @@ Three run modes (auto-detected by ET time, or forced via RUN_MODE env var):
   week_ahead   → Sunday 8 AM  — standalone Week Ahead brief (earnings + regime)
 
 Env vars:
-  DRY_RUN=true    → print message, don't send
-  MOCK_DATA=true  → skip live screeners (fast test)
-  RUN_MODE=morning|confirmation|weekly → override auto-detection
+  DRY_RUN=true    → print message, don't send. ENFORCED IN telegram_api ITSELF
+                    (send_message / send_inline_keyboard / send_photo /
+                    broadcast_all / send_typing_action all short-circuit), so it
+                    holds no matter which path a mode delivers through.
+                    🔴 It did NOT until 2026-09-05: the checks lived at 13 call
+                    sites here and telegram_api had no reference to the flag, so
+                    `_fanout` → `broadcast_all` — the path most modes use —
+                    ignored it entirely and a "dry" run messaged real users.
+                    ⚠️ It suppresses SENDS, not side effects: `_log_cron_run`
+                    still stamps and morning's `save_picks()` still writes.
+  OWNER_ONLY=1    → deliver to the OWNER only. A different guarantee from
+                    DRY_RUN (narrows the recipient list rather than stopping
+                    sends), and the one to use when you want a mode to really
+                    run but reach nobody else.
+  MOCK_DATA=true  → skip live screeners (fast test).
+                    🚨 NOT SAFE for `morning`/`weekly`: `save_picks()` is not
+                    DRY_RUN-guarded, so mock picks land in PRODUCTION storage.
+  RUN_MODE=<mode> → override auto-detection. Validated against run_modes.py; an
+                    unknown value RAISES rather than falling back to the clock.
 """
 from __future__ import annotations
 
