@@ -82,6 +82,32 @@ def _skip_test_user(chat_id) -> bool:
         return False
 
 
+def _dry_run() -> bool:
+    """True when DRY_RUN is set — suppress every outbound message.
+
+    🔴 WHY THIS LIVES HERE AND NOT IN THE CALLERS. agent.py's header documents
+    `DRY_RUN=true → print message, don't send`, and it checked the flag at 13
+    call sites — but NOT in the one path that does most of the delivering.
+    `agent._fanout` → `broadcast_all` never consulted it, and this module had no
+    reference to DRY_RUN at all. So the documented safety was real for `_alert()`
+    and the morning outbox and FICTION for confirmation, eod_summary, vix_check,
+    macro_alert, pre_earnings, weekly, week_ahead and the rest.
+
+    MEASURED 2026-09-05: testing a mode with `dry_run=true` would have messaged
+    every real user. The only thing that actually contained the test runs was
+    `OWNER_ONLY=1`, which narrows the RECIPIENT LIST rather than stopping sends.
+
+    🔑 A flag whose guarantee depends on every caller remembering it is not a
+    guarantee. Gate the choke point — then "did I remember to check DRY_RUN?"
+    stops being a question anyone has to get right.
+
+    ⚠️ Read at CALL time, not import time. agent.py binds its own module-level
+    DRY_RUN at import; reading here on every send means a value set later (tests,
+    a wrapper, a re-exec) is still honoured.
+    """
+    return os.environ.get("DRY_RUN", "").strip().lower() in ("1", "true", "yes")
+
+
 # ── Send helpers ──────────────────────────────────────────────────────────────
 
 def send_message(text: str, chat_id: str | None = None) -> bool:
@@ -92,6 +118,9 @@ def send_message(text: str, chat_id: str | None = None) -> bool:
     token   = _bot_token()
     chat_id = chat_id or _chat_id()
     if _skip_test_user(chat_id):
+        return True
+    if _dry_run():
+        print(f"[telegram] DRY_RUN — suppressed message to {chat_id}")
         return True
     url     = TELEGRAM_API.format(token=token, method="sendMessage")
 
@@ -177,6 +206,9 @@ def send_inline_keyboard(text: str, buttons: list[list[dict]],
     chat_id = chat_id or _chat_id()
     if _skip_test_user(chat_id):
         return True
+    if _dry_run():
+        print(f"[telegram] DRY_RUN — suppressed keyboard message to {chat_id}")
+        return True
     url     = TELEGRAM_API.format(token=token, method="sendMessage")
     payload = {
         "chat_id":      chat_id,
@@ -213,6 +245,8 @@ def send_typing_action(chat_id: str | None = None) -> None:
     """Send a single 'typing...' action (lasts ~5 s in Telegram UI). Fire-and-forget."""
     token   = _bot_token()
     chat_id = chat_id or _chat_id()
+    if _dry_run():
+        return
     url     = TELEGRAM_API.format(token=token, method="sendChatAction")
     try:
         requests.post(url, json={"chat_id": chat_id, "action": "typing"}, timeout=5)
@@ -258,6 +292,9 @@ def send_photo(photo_bytes: bytes, caption: str = "", chat_id: str | None = None
     token   = _bot_token()
     chat_id = chat_id or _chat_id()
     if _skip_test_user(chat_id):
+        return True
+    if _dry_run():
+        print(f"[telegram] DRY_RUN — suppressed photo to {chat_id}")
         return True
     url     = TELEGRAM_API.format(token=token, method="sendPhoto")
     for attempt in range(1, MAX_RETRIES + 1):
@@ -357,6 +394,10 @@ def broadcast_all(payloads: list[dict]) -> dict[str, bool]:
 
     if not payloads:
         return {}
+    if _dry_run():
+        # 🔑 THE path this flag used to miss entirely — _fanout sends here.
+        print(f"[telegram] DRY_RUN — suppressed broadcast to {len(payloads)} recipient(s)")
+        return {str(p.get("chat_id")): True for p in payloads}
 
     try:
         import aiohttp
