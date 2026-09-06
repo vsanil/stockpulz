@@ -863,11 +863,28 @@ Rules:
   available "fix" would be to loosen the threshold, i.e. delete the signal.
   🔎 Below 5 recorded mornings it reports the count and passes — no rate exists yet. Same
   reasoning as `since=` in `_MODE_SCHEDULE`, not an excuse.
-  ⚠️ **Unfixed, noticed in passing:** `_screener_cache_with_retry` retries 3x with 4 s sleeps, but
-  `load_screener_cache()` returns None for BOTH a transient Gist failure AND a genuinely stale
-  cache — which cannot change between attempts. So every real miss burns 3 Gist reads and 8 s for
-  a foregone conclusion (visible as the triple "too stale" line in any miss log). Small, real,
-  and left alone deliberately: it sits on the morning delivery path.
+  ✅ **FIXED 2026-09-06 — the retry now retries only what a retry can fix.**
+  `_screener_cache_with_retry` looped 3x with 4 s sleeps on ANY empty result, because
+  `load_screener_cache()` returned a bare `None` for a failed FETCH and for a cache that was
+  simply 16 h old. Staleness cannot change between attempts, so a genuine miss slept 8 s **on the
+  morning delivery path** to re-derive a foregone conclusion — the triple "too stale" line in any
+  miss log. `config_manager.load_screener_cache_verdict()` now returns `(data, reason)`; only
+  `CACHE_UNAVAILABLE` is retried.
+  🚨 **CORRECTION to what this note said an hour earlier: "burns 3 Gist reads" was WRONG.**
+  `_load_gist_file` memoises for `GIST_CACHE_TTL` (20 s) and the whole retry finishes in 8 s, so
+  attempts 2-3 were served from MEMORY. The cost was 8 s of latency and three log lines, **not**
+  three API calls. Measured from the constants, not assumed — and it is the fourth time today a
+  figure got stated more confidently than its evidence.
+  ⚠️ **`CACHE_UNAVAILABLE` deliberately covers BOTH a transient fetch failure and a genuinely
+  absent file.** `_load_gist_file` swallows its exception and returns None for both, so that layer
+  cannot distinguish them. Retrying an absent file is cheap; NOT retrying a flaky fetch costs
+  users their picks. **Do not "tighten" this without first making the storage layer report
+  transience.** Pinned by `test_an_unfetchable_cache_IS_retryable`.
+  🔎 `load_screener_cache()` keeps its exact signature — `webhook.py` and `cmd_market.py` call it
+  and only want the data.
+  🔎 One existing test (`test_returns_none_when_all_attempts_fail`) had been passing for the WRONG
+  REASON: it patched a `None` return, which under the new code fails to unpack, is caught by the
+  broad `except Exception`, and retries anyway. Now patches a real verdict.
   ⏳ **NOT YET OBSERVABLE: the cron-job.org prescreener dispatch.** Before the 2026-09-05 cutover
   it relayed through a sleeping Render and 503'd; after it, the first weekday chance is **Monday
   2026-09-07**. cron-job.org is punctual to the second, so if it fires it is strictly the best of

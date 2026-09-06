@@ -690,3 +690,73 @@ class TestLongTermHoldingPeriod:
                 if pat in code.replace(" ", ""):
                     offenders.append(f"{f.name}:{pat}")
         assert not offenders, f"the holding-period rule re-forked at {offenders}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestScreenerCacheVerdict:
+    """🔴 `load_screener_cache()` returned a bare `None` for a failed FETCH and
+    for a cache that was simply 16 h old. `agent._screener_cache_with_retry`
+    could not tell them apart, so a genuine staleness miss slept 8 s on the
+    morning delivery path re-deriving a verdict that cannot change.
+
+    🔑 Only `CACHE_UNAVAILABLE` is worth retrying: every other verdict is
+    computed from data that WAS successfully fetched.
+    """
+
+    def _cache(self, monkeypatch, payload):
+        monkeypatch.setattr(config_manager, "_load_gist_file", lambda f: payload)
+
+    def test_a_fresh_cache_is_a_hit(self, monkeypatch):
+        from datetime import datetime, timezone
+        self._cache(monkeypatch, {
+            "schema_version": config_manager.SCREENER_CACHE_SCHEMA_VERSION,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "stocks": {}, "crypto": {}})
+        data, reason = config_manager.load_screener_cache_verdict()
+        assert data and reason == config_manager.CACHE_HIT
+
+    def test_a_stale_cache_is_DEFINITIVE(self, monkeypatch):
+        from datetime import datetime, timezone, timedelta
+        old = datetime.now(timezone.utc) - timedelta(
+            hours=config_manager.SCREENER_CACHE_MAX_AGE_HOURS + 6)
+        self._cache(monkeypatch, {
+            "schema_version": config_manager.SCREENER_CACHE_SCHEMA_VERSION,
+            "cached_at": old.isoformat(), "stocks": {}, "crypto": {}})
+        data, reason = config_manager.load_screener_cache_verdict()
+        assert data is None and reason == config_manager.CACHE_STALE
+        assert reason != config_manager.CACHE_UNAVAILABLE, "must not be retried"
+
+    def test_a_schema_mismatch_is_DEFINITIVE(self, monkeypatch):
+        from datetime import datetime, timezone
+        self._cache(monkeypatch, {
+            "schema_version": config_manager.SCREENER_CACHE_SCHEMA_VERSION + 99,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "stocks": {}, "crypto": {}})
+        assert config_manager.load_screener_cache_verdict()[1] == config_manager.CACHE_SCHEMA
+
+    def test_an_unparseable_cache_is_DEFINITIVE(self, monkeypatch):
+        self._cache(monkeypatch, {
+            "schema_version": config_manager.SCREENER_CACHE_SCHEMA_VERSION,
+            "cached_at": "not-a-date", "stocks": {}, "crypto": {}})
+        assert config_manager.load_screener_cache_verdict()[1] == config_manager.CACHE_INVALID
+
+    def test_an_unfetchable_cache_IS_retryable(self, monkeypatch):
+        """⚠️ Covers a transient failure AND a genuinely absent file — the
+        storage layer swallows its exception and returns None for both, so this
+        layer cannot distinguish them. Retrying an absent file is cheap;
+        NOT retrying a flaky fetch costs users their picks."""
+        self._cache(monkeypatch, None)
+        data, reason = config_manager.load_screener_cache_verdict()
+        assert data is None and reason == config_manager.CACHE_UNAVAILABLE
+
+    def test_the_plain_wrapper_still_returns_just_the_data(self, monkeypatch):
+        """webhook.py and cmd_market.py call this; the signature must not move."""
+        from datetime import datetime, timezone
+        self._cache(monkeypatch, {
+            "schema_version": config_manager.SCREENER_CACHE_SCHEMA_VERSION,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "stocks": {"short_term": []}, "crypto": {}})
+        got = config_manager.load_screener_cache()
+        assert isinstance(got, dict) and "stocks" in got
+        self._cache(monkeypatch, None)
+        assert config_manager.load_screener_cache() is None
