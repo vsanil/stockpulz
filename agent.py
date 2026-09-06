@@ -72,7 +72,8 @@ from config_manager import (
     get_config, update_config, save_picks, load_picks, save_weekly_pick,
     get_dynamic_pick_counts, get_user_config, update_user_config,
     load_user_trade_log,
-    save_screener_cache, load_screener_cache, et_today,
+    save_screener_cache, load_screener_cache, load_screener_cache_verdict,
+    CACHE_UNAVAILABLE, et_today,
 )
 # 🔴 Both of these were CALLED but never imported — a NameError swallowed by the
 # surrounding catch-all, so the feature silently did nothing. update_user_config
@@ -611,15 +612,32 @@ def run_prescreener(config: dict):
 # ── Morning run ───────────────────────────────────────────────────────────────
 
 def _screener_cache_with_retry(attempts: int = 3, delay_s: int = 4) -> dict | None:
-    """
-    Load the midnight screener cache, retrying transient Gist failures.
-    A single flaky GitHub API call must never cost users their morning picks.
+    """Load the midnight screener cache, retrying only what a retry can fix.
+
+    A single flaky GitHub API call must never cost users their morning picks —
+    that is why the retry exists and it stays.
+
+    🔴 BUT IT USED TO RETRY EVERYTHING. `load_screener_cache()` returned a bare
+    `None` for a failed fetch AND for a cache that was simply 16 hours old, so a
+    genuine staleness miss slept 8 s on the MORNING DELIVERY PATH re-deriving a
+    conclusion that cannot change between attempts. `load_screener_cache_verdict`
+    now says which it was.
+    🔎 Precisely: 8 s and three log lines, NOT three API calls — `_load_gist_file`
+    memoises for 20 s and the whole retry finishes inside that window.
+    🔑 Only `CACHE_UNAVAILABLE` is retried. Every other verdict is computed from
+    data that WAS fetched, so a second attempt is guaranteed to agree with the
+    first. Retrying a deterministic answer is not caution, it is latency.
     """
     for i in range(attempts):
         try:
-            cache = load_screener_cache()
+            cache, reason = load_screener_cache_verdict()
             if cache:
                 return cache
+            if reason != CACHE_UNAVAILABLE:
+                print(f"[agent] Screener cache {reason} — a definitive verdict, "
+                      f"not retrying (would sleep {delay_s * (attempts - 1)}s for "
+                      f"the same answer).")
+                return None
         except Exception as exc:
             print(f"[agent] Screener cache load attempt {i + 1}/{attempts} failed: {exc}")
         if i < attempts - 1:

@@ -778,16 +778,41 @@ def save_screener_cache(stock_results: dict, crypto_results: dict) -> None:
     print("[config_manager] Screener cache saved to Gist.")
 
 
-def load_screener_cache() -> dict | None:
-    """
-    Load the midnight screener cache if it exists, is fresh (< 10h old),
-    and matches the current schema version.  Returns the cache dict
-    {schema_version, cached_at, stocks, crypto} or None if invalid.
+# Why a screener-cache read came back empty. ONLY `CACHE_UNAVAILABLE` is worth
+# retrying — every other verdict is computed from data we successfully fetched,
+# so a second attempt is guaranteed to reach the same conclusion.
+CACHE_HIT         = "hit"
+CACHE_UNAVAILABLE = "unavailable"      # could not be fetched — a retry may help
+CACHE_STALE       = "stale"            # fetched, older than the TTL
+CACHE_SCHEMA      = "schema-mismatch"  # fetched, written by an older screener
+CACHE_INVALID     = "invalid"          # fetched, unparseable
+
+
+def load_screener_cache_verdict() -> tuple[dict | None, str]:
+    """Load the midnight screener cache and say WHY if it is unusable.
+
+    🔴 WHY THE REASON EXISTS. `agent._screener_cache_with_retry` retried three
+    times with 4 s sleeps on ANY empty result, because a bare `None` could not
+    tell "the Gist call failed" from "the cache is 16 hours old". Staleness
+    cannot change between attempts, so a genuine miss slept 8 s on the MORNING
+    DELIVERY PATH to re-derive a foregone conclusion — visible as the triple
+    "too stale" line in any cache-miss log.
+    🔎 It was 8 s and log noise, NOT three API calls: `_load_gist_file` memoises
+    for `GIST_CACHE_TTL` (20 s) and the retry finishes inside that window, so
+    attempts 2-3 were served from memory. Stated precisely because an earlier
+    note here said "3 Gist reads", which was wrong.
+
+    ⚠️ `CACHE_UNAVAILABLE` deliberately covers BOTH a transient fetch failure and
+    a genuinely absent file. `_load_gist_file` swallows its exception and returns
+    None for both, so this layer CANNOT distinguish them — and retrying an absent
+    file is cheap and harmless, while not retrying a flaky fetch costs users
+    their picks. Do not "tighten" this without first making the storage layer
+    report transience.
     """
     from datetime import datetime, timedelta, timezone
     data = _load_gist_file(SCREENER_CACHE_FILE)
     if not data:
-        return None
+        return None, CACHE_UNAVAILABLE
     try:
         # Reject caches written by an older screener version — they may be
         # missing quality-gate fields (avg_dollar_vol, dynamic_sector_pe, etc.)
@@ -797,18 +822,28 @@ def load_screener_cache() -> dict | None:
                 f"[config_manager] Screener cache schema v{cached_version} != "
                 f"current v{SCREENER_CACHE_SCHEMA_VERSION} — discarding."
             )
-            return None
+            return None, CACHE_SCHEMA
 
         cached_at = datetime.fromisoformat(data["cached_at"])
         age = datetime.now(timezone.utc) - cached_at
         if age > timedelta(hours=SCREENER_CACHE_MAX_AGE_HOURS):
             print(f"[config_manager] Screener cache is {age} old — too stale, ignoring.")
-            return None
+            return None, CACHE_STALE
         print(f"[config_manager] Screener cache hit — schema v{cached_version}, {age} old.")
-        return data
+        return data, CACHE_HIT
     except Exception as exc:
         print(f"[config_manager] Screener cache invalid ({exc}).")
-        return None
+        return None, CACHE_INVALID
+
+
+def load_screener_cache() -> dict | None:
+    """The midnight screener cache if it is fresh (< 10h) and schema-current.
+
+    Unchanged signature for callers that only need the data (webhook.py,
+    cmd_market.py). Anything deciding whether to RETRY must use
+    `load_screener_cache_verdict()` instead.
+    """
+    return load_screener_cache_verdict()[0]
 
 
 # ── Backtest trades (simulated track record seed) ───────────────────────────

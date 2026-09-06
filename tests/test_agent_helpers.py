@@ -25,6 +25,7 @@ if ROOT not in sys.path:
 from unittest.mock import MagicMock
 sys.modules.setdefault("requests", MagicMock())
 
+import config_manager as cm
 import agent as ag
 from agent import (
     is_market_holiday, get_holiday_name,
@@ -606,14 +607,25 @@ class TestBuildPremarketGapWarnings:
 
 # ─────────────────────────────────────────────────────────────────────────────
 class TestScreenerCacheWithRetry:
-    """_screener_cache_with_retry — transient Gist failures must not cost picks."""
+    """_screener_cache_with_retry — retry what a retry can fix, and only that.
+
+    🔴 It used to retry EVERYTHING. `load_screener_cache()` returned a bare
+    `None` for a failed fetch AND for a cache that was simply 16 h old, so a
+    genuine staleness miss slept 8 s on the MORNING DELIVERY PATH to re-derive a
+    verdict that cannot change between attempts.
+    """
+
+    _HIT = ({"stocks": {}}, cm.CACHE_HIT)
 
     def test_returns_cache_first_try(self):
-        with patch.object(ag, "load_screener_cache", return_value={"stocks": {}}):
+        with patch.object(ag, "load_screener_cache_verdict", return_value=self._HIT):
             assert ag._screener_cache_with_retry() == {"stocks": {}}
 
     def test_recovers_after_transient_failures(self):
-        calls = iter([ConnectionError("gist down"), None, {"stocks": {}}])
+        """The reason the retry exists: one flaky Gist call must not cost picks."""
+        calls = iter([ConnectionError("gist down"),
+                      (None, cm.CACHE_UNAVAILABLE),
+                      ({"stocks": {}}, cm.CACHE_HIT)])
 
         def _flaky():
             v = next(calls)
@@ -621,20 +633,33 @@ class TestScreenerCacheWithRetry:
                 raise v
             return v
 
-        with patch.object(ag, "load_screener_cache", side_effect=_flaky), \
+        with patch.object(ag, "load_screener_cache_verdict", side_effect=_flaky), \
              patch.object(ag.time, "sleep"):
             assert ag._screener_cache_with_retry(attempts=3) == {"stocks": {}}
 
     def test_returns_none_when_all_attempts_fail(self):
-        with patch.object(ag, "load_screener_cache", return_value=None), \
+        with patch.object(ag, "load_screener_cache_verdict",
+                          return_value=(None, cm.CACHE_UNAVAILABLE)), \
              patch.object(ag.time, "sleep") as mock_sleep:
             assert ag._screener_cache_with_retry(attempts=3) is None
             assert mock_sleep.call_count == 2   # no sleep after final attempt
 
     def test_returns_none_when_all_attempts_raise(self):
-        with patch.object(ag, "load_screener_cache", side_effect=RuntimeError("boom")), \
+        with patch.object(ag, "load_screener_cache_verdict", side_effect=RuntimeError("boom")), \
              patch.object(ag.time, "sleep"):
             assert ag._screener_cache_with_retry(attempts=3) is None
+
+    @pytest.mark.parametrize("reason", [cm.CACHE_STALE, cm.CACHE_SCHEMA, cm.CACHE_INVALID])
+    def test_a_DEFINITIVE_verdict_returns_at_once_without_sleeping(self, reason):
+        """🔑 The fix. These verdicts are computed from data that WAS fetched, so
+        a second attempt is guaranteed to agree. Retrying them is not caution,
+        it is 8 s of latency on the morning delivery path."""
+        with patch.object(ag, "load_screener_cache_verdict",
+                          return_value=(None, reason)) as mock_load, \
+             patch.object(ag.time, "sleep") as mock_sleep:
+            assert ag._screener_cache_with_retry(attempts=3) is None
+            assert mock_sleep.call_count == 0, "a definitive verdict must not sleep"
+            assert mock_load.call_count == 1, "and must not be re-asked"
 
 
 class TestCanRunLiveScreener:
