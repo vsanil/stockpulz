@@ -823,10 +823,40 @@ Rules:
   `f"news_{sym}_{hash(title)}_{et_today()}"` gated by `_is_alerted`, so the afternoon run
   **cannot** resend a morning story — it only delivers news that did not exist at 08:30.
   Removing it drops real alerts. Pinned by `test_the_dedup_key_is_scoped_to_the_day_not_the_run`.
-  ✅ **Still open and still valid**: one of **`prescreener`'s three triggers** (03:00 UTC GH cron
-  + 07:00 UTC GH backup + the cron-job.org dispatch — each a full 600-ticker screen; the
-  redundancy dates from when the transport could not be trusted, which it now can). That one was
-  derived from workflow files, not docstrings, which is why it survived.
+  🔎 **`prescreener`'s three triggers — MEASURED 2026-09-06, and the answer is the OPPOSITE of
+  the recommendation.** "Drop one of the three" was wrong: the two GitHub crons are the weak
+  pair, and the cron-job.org one is the strong trigger. Do not cut it.
+  🔑 **The two GH crons are NOT independent backups — their lateness is CORRELATED**, because
+  they share one scheduler queue. Observed starts against nominal 03:00/07:00 UTC:
+
+        Aug 24  03:53 / 08:00     punctual        Aug 31  09:23 / 14:59   +6.4h / +8.0h
+        Aug 25  03:48 / 07:49     punctual        Sep 01  08:20 / 12:30   +5.3h / +5.5h
+        Aug 26  03:52 / 07:51     punctual        Sep 02  07:40 / 12:02   +4.7h / +5.0h
+        Aug 27  13:50 / 18:12   +10.8h/+11.2h     Sep 03  07:49 / 12:02   +4.8h / +5.0h
+        Aug 28  14:56 / 19:22   +11.9h/+12.4h     Sep 04  07:44 / 12:04   +4.7h / +5.1h
+
+  **A backup that fails for the same reason as the primary is not a backup.** On the two bad days
+  BOTH landed after the 11:00 UTC morning run they exist to serve.
+  🔎 **Whichever lands last BEFORE 11:00 UTC wins** (the cache is overwritten, 10 h TTL). On
+  punctual days that is the SECOND cron; at +5h it is the FIRST; at +11h neither. So the second
+  cron is not dead weight — it is simply not a *backup*, it is a second lottery ticket in the
+  same draw.
+  📉 **Measured cost of a miss — 2 of 6 sampled mornings had no usable cache:**
+
+        cache hit  (Sep 3, 3:02 old)      11:00:37 -> 11:02:54   2m17s
+        cache MISS (Aug 28, 16:39 old)    11:00:37 -> 11:13:09  12m32s   full live 600-ticker screen
+
+  The fallback WORKS — picks still went out, which is why this never surfaced as a failure. It
+  costs ~10 min of delay on the morning briefing and a full extra screen against Yahoo/Finnhub.
+  ⚠️ **Nothing tracks the cache-miss rate.** 33% of the sample ran a live screen and no monitor
+  says so. Same family as the `cron.all_modes_firing` blind spot — a silent degradation with a
+  working fallback in front of it.
+  ⏳ **NOT YET OBSERVABLE: the cron-job.org prescreener dispatch.** Before the 2026-09-05 cutover
+  it relayed through a sleeping Render and 503'd; after it, the first weekday chance is **Monday
+  2026-09-07**. cron-job.org is punctual to the second, so if it fires it is strictly the best of
+  the three and should become PRIMARY — at which point ONE GH cron can go.
+  🚨 **Decide on Monday's data, not on this note.** Cutting a GH cron today would remove the only
+  trigger proven to have served a morning run.
   🔎 **Monitoring outnumbers the product on GitHub**: `synthetic_user` 8×/weekday + `full_sweep` 3×
   + `canary` + `evaluate_picks` + `analyze_engine` = **14 monitor runs per weekday for 3 users**.
   Minutes are free on a public repo so this costs nothing — but every one is a thing that can rot
