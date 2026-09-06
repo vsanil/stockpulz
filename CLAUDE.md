@@ -736,6 +736,36 @@ Rules:
   code (every mode stamps its own name as its first statement) and against 13 modes triggered by
   hand on 2026-09-05/06. **If the first canary run reports a mode as NEVER, the table is wrong,
   not the trigger** — it names the mode, so it is a one-line fix.
+- **🔎 ARCHITECTURE REVIEW 2026-09-06 — what was found and NOT fixed.** Three defects were fixed
+  (see the entry above). The rest are product calls, recorded so they are decided rather than
+  re-derived every few weeks. **None is a bug; do not "fix" them unprompted.**
+  🔑 **The structural observation: the jobs are organised by CLOCK, not by QUESTION.** Six modes —
+  `premarket`, `digest`, `confirmation`, `midday_check`, `close_check`, `eod_summary` — all answer
+  *"how are my positions doing?"*, differing only in the hour. That is why the mode count keeps
+  growing: a new hour looks like a new feature.
+  🔎 **Notification load per user, per weekday: 4 guaranteed + up to 9 conditional.** Guaranteed
+  (gated only on "you have picks/positions", not on anything having HAPPENED): `morning` 7:00,
+  `digest` 9:30, `confirmation` ~11:00, `eod_summary` 16:15. Conditional: `news_check` ×2,
+  `premarket`, `vix_check`, `midday_check`, `price_alerts`, `close_check`, `pre_earnings`,
+  `macro_alert`. Plus Friday wrap, Saturday `weekly`, Sunday `week_ahead`. **At 3 users nobody
+  has complained; this is the thing to look at FIRST if anyone ever does.**
+  🔎 Candidates if the list is ever trimmed, weakest first: **`confirmation`** (it is `digest` two
+  hours later, and it is also `main()`'s `else:` fallback, i.e. what an unrecognised mode
+  BECOMES); the **second `news_check`**; one of **`prescreener`'s three triggers** (03:00 UTC GH
+  cron + 07:00 UTC GH backup + the cron-job.org dispatch — each a full 600-ticker screen; the
+  redundancy dates from when the transport could not be trusted, which it now can).
+  🔎 **Monitoring outnumbers the product on GitHub**: `synthetic_user` 8×/weekday + `full_sweep` 3×
+  + `canary` + `evaluate_picks` + `analyze_engine` = **14 monitor runs per weekday for 3 users**.
+  Minutes are free on a public repo so this costs nothing — but every one is a thing that can rot
+  unobserved, which is the failure mode this project keeps hitting.
+  ✅ **The trigger PAT does NOT expire** (owner, 2026-09-06). An earlier review ranked "all 17
+  triggers 401 in December" as the top risk, reading `2026-12-04` from `docs/TRIGGER-MIGRATION.md`
+  — where it was an **EXAMPLE of how to label a job**, not a recorded fact. Corrected at the
+  source. **Same error class as every other derived-value-reported-as-measured in this repo: the
+  tell is a figure that was ILLUSTRATIVE being written down in the vocabulary of MEASUREMENT.**
+  ⚠️ The real trade it carries instead: a permanent credential in 18 places (17 cron-job.org jobs
+  + the Render env) with nothing to force a rotation. Owner's call, made knowingly. Revoking it
+  is 17 edits — budget for that rather than being surprised by it.
 - **🔴 CORRECTION: "All 17 trigger jobs are now at `requestTimeout=120`" — that is IMPOSSIBLE and the note above is wrong.** cron-job.org's timeout field is `min=1 max=30`; verified in the UI 2026-09-05, `StockPulz-morning` reads `value=30 max=30`. No job can wait longer than 30 s. **A future session reading that line would think the cold-start problem was solved. It never was.**
 - **🔴 The cold start is 54.9 s** (measured after 22 min of verified silence; PiQValet 59.0 s, PriceDrop 43.0 s on the same account). Nothing cron-job.org can do reaches that — **and tuning the timeout cannot help, because the requests are not timing out.** They are REFUSED by Render's edge in ~500 ms: 342 / 489 / 519 / 531 / 564 / 811 ms observed across the 13 failing jobs. Only `midday_check` ever showed a true 30 s hold.
 - **⚠️ A `curl --max-time 30` DOES boot the instance — REPRODUCED 2/2 — and it is still irrelevant.** Trials 2026-09-05 01:40 and 03:28: curl held the full 30 s (`http=000`), and the app answered 90 s later in 3.6 s / 3.9 s. A third trial was invalid — an Auto-Deploy triggered by a docs-only push had woken the service first, which is its own lesson about `On Commit`. **The curl result was never WRONG, it was IRRELEVANT**, and that is the trap: two clients, the same 30 s budget, opposite outcomes.
@@ -949,6 +979,23 @@ Both had `timeout=25` against a **54.9 s** cold start. The instant nothing sched
 
 - **⚠️ `keepwarm.yml` is NOT what actually keeps Render warm.** Measured over 13 consecutive runs its real cadence is **~53 min** (GitHub throttles `*/10` hard; gaps ranged 37–76 min) against Render's ~15 min idle timeout — it cannot hold the service up, it just wakes it periodically. The clean 15-min ticks visible in the Render log are the **cron-job.org `/health` job**. So narrowing the GH workflow alone does NOT fix the bill: **the cron-job.org keep-warm job must be narrowed to the same window**, or it keeps the service hot through the cold hours regardless.
 - Window boundaries are load-bearing: it starts a full hour before the **11:00 UTC morning relay** (`/trigger/morning` must not hit a cold server — delivery is not idempotent, so a dropped relay means no picks). The 07:00 UTC `/trigger/prescreener` relay falls in the cold window deliberately — it is the redundant THIRD trigger; `daily_run.yml` runs the prescreener natively on GH Actions and needs no Render.
+- 🚨🚨 **EVERYTHING IN THE NEXT FEW BULLETS ABOUT PLANS IS SUPERSEDED — StockPulz HAS BEEN ON
+  RENDER FREE SINCE 2026-09-02 22:04** (its own service event log). The lines below that say
+  "StockPulz is on STARTER", "it NEVER spins down", "draws NOTHING from the 750 h pool" and
+  "there is no budget pressure" were true in August and are **FALSE now**. They are kept, not
+  deleted, because the MEASUREMENTS in them (cold starts, the ~53 min keepwarm cadence, the
+  per-account pool rule) are still valid — only the PLAN they assume changed.
+  🔑 **This exact stale belief is what made the Sept 5 outage unreadable.** "stock-agent is paid,
+  its 18 cron jobs are irrelevant to the budget" had a hidden `while paid` on it; the downgrade
+  invalidated both halves at once and nobody re-read what had been dismissed *because* of the old
+  plan. **On any tier change, re-read what was excluded, not just what was counted.**
+  ⚠️ **DO NOT restore the keep-alive** per the "To restore after a downgrade to Free" line below.
+  That advice predates the downgrade it describes: `keepwarm.yml`'s own comment says a 24/7 warm
+  costs ~744 h/mo = 99% of the 750 h ACCOUNT cap, shared with three other apps. StockPulz is
+  meant to sleep now — the whole point of moving the 17 triggers to GitHub's API was to take the
+  app off the critical path so sleeping is FREE. Account total is ~390 h/mo ≈ 52% of cap.
+  🔎 `.env.example`'s `KEEPALIVE_ENABLED` note carried the same false "on STARTER, never idles"
+  line and was corrected 2026-09-06.
 - **🔴 KEEP-ALIVE IS FULLY DISABLED for StockPulz (Aug 11) — all THREE mechanisms, disabled not deleted.** On Starter the service never spins down, so every ping woke something already awake.
   1. `webhook._keep_alive_loop` — gated by **`KEEPALIVE_ENABLED`** (default OFF); the loop returns before issuing any request. Guard: `test_the_loop_returns_without_pinging` asserts NO request is made, not merely that a flag is False.
   2. `.github/workflows/keepwarm.yml` — `schedule:` commented out, `workflow_dispatch` kept. It was firing ~27×/day and cluttering the Actions history enough to help hide a failing `Tests` run.
