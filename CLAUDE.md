@@ -618,9 +618,12 @@ Rules:
 - **Keep-warm runs on a WINDOW, not 24/7.** The REAL window lives on cron-job.org job `7746621`: **6 AM–6 PM ET, ET-anchored** (`America/New_York`, hours 6–17, `:00/:15/:30/:45`). ET-anchored on purpose — a UTC window drifts an hour against the 7 AM ET morning relay at every DST change. `keepwarm.yml` (`*/10 11-17 * * *`) is a UTC-only **safe subset** that sits inside that window under both EDT and EST; **if the cron-job.org window moves, move this too or it silently reinflates the bill** (the old 10:00–03:59 UTC schedule would have fired ~6×/day outside the paid window, ~46 h/mo for nothing). Render free tier spins down after ~15 min idle → a cold server makes the first `/start`/button wait ~30-60s, or drops the reply mid-boot ("bot not working"), which bit NEW users worst on a share-link click.
 - **🔴 The reasoning that made it 24/7 was wrong, and the error is worth remembering: "the repo is PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free" conflated two different budgets.** GH minutes are free; **Render instance-hours are not** — the free plan gives **750 h/month** and every ping wakes the service for ~15 min. Warming 24/7 costs **~744 h/month = 99% of the cap**, and exceeding it SUSPENDS the service until the next cycle. The window is now ~379 h. **Rule: when a scheduler is free, check whether the thing it pokes is also free.**
 - **✅ MIGRATED 2026-09-05 — all 17 cron-job.org jobs now POST to GitHub's API, not to this app.** The outage below is fixed at the configuration level. Verified job-by-job from a fresh page load: method POST, the dispatch URL, `Accept`/`Content-Type`/`Authorization`, the right `run_mode` in each body, and every original schedule + timezone untouched. Audit result: `github=17 render=0`.
-  ✅ **TRANSPORT PROVEN TEN TIMES (2026-09-05/06), NINE of them from cron-job.org's OWN
-  client** — which is the half an agent cannot test for itself. Every one matched the response
-  `Date` to the run's `createdAt` to the second.
+  ✅ **TRANSPORT PROVEN FOR 13 OF THE 17 JOBS (2026-09-05/06), twelve of them from
+  cron-job.org's OWN client** — which is the half an agent cannot test for itself. Every one
+  matched the response `Date` to the run's `createdAt` to the second. Testing stopped
+  deliberately at 13; the untested four (`eod_summary`, `pre_earnings`, `week_ahead`, and
+  `morning` on a fresh day) share the same token hash, URL, headers and body shape and differ
+  only in a `run_mode` string already validated against `run_modes.py`.
   ⚠️ **Deliberately NOT enumerated any more.** An earlier version listed each run and the count
   went stale three times in one evening as more were added — twice leaving contradictory
   numbers inside the same block. **A hand-maintained tally in prose is a defect waiting to
