@@ -59,6 +59,60 @@ class StorageBackend(ABC):
     def supports_rows(self) -> bool:
         return False
 
+    # ── Transient-connection retry, READS ONLY ────────────────────────────────
+    # 🔴 MEASURED 2026-09-04..06: 4 of 6 `full_sweep` runs logged
+    # "Server disconnected" on `read_user`/`read_all_users` — and ZERO canary runs
+    # did. That asymmetry IS the diagnosis: full_sweep is the long job that walks
+    # every endpoint, so a pooled keep-alive connection sits idle long enough for
+    # the server to drop it, and the next request on that dead socket fails. It is
+    # not a Supabase outage; a fresh connection works immediately.
+    #
+    # 🔑 SAFE TO RETRY BECAUSE THESE ARE READS. Writes are NOT retried here:
+    # `write_user` is a compare-and-swap and its caller already owns the retry
+    # loop. Re-driving a write from this layer would be a second writer.
+    # ⚠️ IT STILL RAISES once attempts are exhausted. The raise is load-bearing —
+    # `_row_mutate` reads a version, then writes with it, so a read that returned
+    # None instead of raising would write over another user's data with a stale
+    # version. Do not "improve" this into a `return None`.
+    _TRANSIENT_MARKERS = (
+        "server disconnected",      # httpx.RemoteProtocolError — the observed one
+        "connection reset",
+        "connection aborted",
+        "remotedisconnected",
+        "timed out",
+        "temporarily unavailable",
+    )
+
+    @classmethod
+    def _is_transient(cls, exc: Exception) -> bool:
+        """A connection-layer failure a fresh socket would survive.
+
+        ⚠️ Matches on the MESSAGE, which is a heuristic — supabase-py wraps httpx
+        and does not expose a stable error taxonomy. It is deliberately a
+        WHITELIST: anything unrecognised (RLS 42501, auth, schema) is treated as
+        permanent and raised at once, because retrying a permission error just
+        turns a clear failure into a slow one.
+        """
+        return any(m in f"{type(exc).__name__} {exc}".lower()
+                   for m in cls._TRANSIENT_MARKERS)
+
+    def _read_with_retry(self, what: str, fn, attempts: int = 3, delay_s: float = 0.5):
+        last = None
+        for i in range(attempts):
+            try:
+                return fn()
+            except Exception as exc:
+                last = exc
+                if not self._is_transient(exc):
+                    print(f"[storage/supabase] {what} failed (permanent): {exc}")
+                    raise
+                print(f"[storage/supabase] {what} transient on attempt "
+                      f"{i + 1}/{attempts}: {exc}")
+                if i < attempts - 1:
+                    time.sleep(delay_s * (i + 1))   # 0.5s, 1.0s
+        print(f"[storage/supabase] {what} failed after {attempts} attempts: {last}")
+        raise last
+
     def read_user(self, filename: str, chat_id: str) -> tuple:
         """Return (content, version). version is opaque; pass it back to write_user."""
         raise NotImplementedError
@@ -351,17 +405,15 @@ class SupabaseBackend(StorageBackend):
         return True
 
     def read_user(self, filename: str, chat_id: str) -> tuple:
-        try:
+        def _do():
             resp = (self._client.table("user_records")
                     .select("content,version")
                     .eq("filename", filename).eq("chat_id", str(chat_id))
                     .maybe_single().execute())
             if resp is not None and resp.data:
                 return resp.data["content"], resp.data["version"]
-        except Exception as exc:
-            print(f"[storage/supabase] read_user({filename},{chat_id}) failed: {exc}")
-            raise
-        return None, None
+            return None, None
+        return self._read_with_retry(f"read_user({filename},{chat_id})", _do)
 
     def write_user(self, filename: str, chat_id: str, content, expected_version):
         """Atomic CAS via the upsert_user_record() SQL function.
@@ -383,16 +435,14 @@ class SupabaseBackend(StorageBackend):
         return True
 
     def read_all_users(self, filename: str) -> dict:
-        out: dict = {}
-        try:
+        def _do():
+            out: dict = {}
             resp = (self._client.table("user_records")
                     .select("chat_id,content").eq("filename", filename).execute())
             for row in (resp.data or []):
                 out[row["chat_id"]] = row["content"]
-        except Exception as exc:
-            print(f"[storage/supabase] read_all_users({filename}) failed: {exc}")
-            raise
-        return out
+            return out
+        return self._read_with_retry(f"read_all_users({filename})", _do)
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────

@@ -741,6 +741,30 @@ Rules:
   the three "not yet due" are exactly the three carrying a `since=`. The cadence table matches
   the real `cron_last_*` values — which is the half that could not be checked locally, since
   there is no `.env` in this repo.
+- **🔴 SUPABASE "Server disconnected" ON READS — diagnosed and fixed 2026-09-06.**
+  🔎 **The diagnosis came from an ASYMMETRY, not from the error text.** Across six recent runs
+  each: `full_sweep` logged it in **4 of 6** (2-4 times per run), `canary` in **0 of 6**.
+  full_sweep is the long job that walks every endpoint, so a pooled keep-alive connection sits
+  idle long enough for the server to drop it and the next request on that dead socket fails.
+  **Not a Supabase outage** — a fresh connection works immediately, which is why the sweep still
+  passed every time. Two workflows disagreeing is worth more than either one's log.
+  ✅ `SupabaseBackend._read_with_retry` — 3 attempts, 0.5s/1.0s backoff, on READS ONLY.
+  ⚠️ **WRITES ARE DELIBERATELY NOT RETRIED HERE.** `write_user` is a compare-and-swap and its
+  caller (`_row_mutate`) already owns the retry loop; re-driving a write from the storage layer
+  would be a second writer racing the first. Pinned by
+  `test_write_user_does_not_go_through_the_read_retry`.
+  🚨 **IT STILL RAISES once attempts are exhausted, and that is load-bearing.** `_row_mutate`
+  reads a version then writes with it, so a read returning `None` instead of raising would
+  overwrite another user's row with a stale version. **Do not "improve" this into a soft
+  return** — that mutation was tested and fails two tests.
+  ⚠️ **Transience is decided by a MESSAGE WHITELIST, and that is a heuristic** — supabase-py
+  wraps httpx and exposes no stable error taxonomy. Anything unrecognised (RLS `42501`, auth,
+  schema) is treated as PERMANENT and raised at once: retrying a permission error only turns a
+  clear failure into a slow one. The Aug 20/21 RLS outage is exactly the case that must stay
+  loud. Markers: `server disconnected`, `connection reset`, `connection aborted`,
+  `remotedisconnected`, `timed out`, `temporarily unavailable`.
+  🔎 18 tests, 6 of 6 mutations caught.
+
 - **🔴 SELF-HEAL FEEDBACK LOOP — found and closed 2026-09-06, `owner_only_checks.py`.**
   `canary.check_selfheal_health` reports on the SELF-HEALER, and its own docstring already
   promised the right behaviour — *"this reports to the OWNER, not to self-heal. Asking a broken
