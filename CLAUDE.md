@@ -640,13 +640,14 @@ Rules:
 
   ⏹️ **Six is enough — stop here.** Every remaining job is identical in every verifiable
   respect (same token hash, same URL, same headers, same body shape) and differs only in a
-  `run_mode` string already validated against `run_modes.py`. A sixth TEST RUN adds no
+  `run_mode` string already validated against `run_modes.py`. A SEVENTH TEST RUN adds no
   information and IS a live production trigger.
 
-  🔎 `macro_alert` is the best of the four: it stopped on its OWN schedule guard
-  ("skipping — not Mon–Thu"), so it proves the transport AND shows a mode declining to act for
-  a stated reason — where `midday_check` and `price_alerts` were quiet only because the market
-  was closed. Prefer a mode with a self-guard when picking a safe test.
+  🔎 **`macro_alert` is the safest of the six to REPEAT** — it stopped on its OWN schedule
+  guard ("skipping — not Mon–Thu"), so it declines to act for a stated reason rather than by
+  luck. `midday_check`, `price_alerts` and `close_check` were quiet only because the market was
+  closed, and `close_check` on a weekday fans out trade closes to every user. **When you need a
+  safe TEST RUN, pick a mode with a self-guard** (`macro_alert`, or `watchdog` on a weekend).
   🔎 `X-RateLimit-Used` climbed 53 -> 65 -> 78 across three of them against a 5000/hr
   authenticated budget — successive real calls, nowhere near a constraint. ⚠️ It then read 12
   again on `close_check`: that is the HOURLY WINDOW ROLLING OVER (`X-RateLimit-Reset` changed
