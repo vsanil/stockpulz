@@ -618,12 +618,20 @@ Rules:
 - **Keep-warm runs on a WINDOW, not 24/7.** The REAL window lives on cron-job.org job `7746621`: **6 AM–6 PM ET, ET-anchored** (`America/New_York`, hours 6–17, `:00/:15/:30/:45`). ET-anchored on purpose — a UTC window drifts an hour against the 7 AM ET morning relay at every DST change. `keepwarm.yml` (`*/10 11-17 * * *`) is a UTC-only **safe subset** that sits inside that window under both EDT and EST; **if the cron-job.org window moves, move this too or it silently reinflates the bill** (the old 10:00–03:59 UTC schedule would have fired ~6×/day outside the paid window, ~46 h/mo for nothing). Render free tier spins down after ~15 min idle → a cold server makes the first `/start`/button wait ~30-60s, or drops the reply mid-boot ("bot not working"), which bit NEW users worst on a share-link click.
 - **🔴 The reasoning that made it 24/7 was wrong, and the error is worth remembering: "the repo is PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free" conflated two different budgets.** GH minutes are free; **Render instance-hours are not** — the free plan gives **750 h/month** and every ping wakes the service for ~15 min. Warming 24/7 costs **~744 h/month = 99% of the cap**, and exceeding it SUSPENDS the service until the next cycle. The window is now ~379 h. **Rule: when a scheduler is free, check whether the thing it pokes is also free.**
 - **✅ MIGRATED 2026-09-05 — all 17 cron-job.org jobs now POST to GitHub's API, not to this app.** The outage below is fixed at the configuration level. Verified job-by-job from a fresh page load: method POST, the dispatch URL, `Accept`/`Content-Type`/`Authorization`, the right `run_mode` in each body, and every original schedule + timezone untouched. Audit result: `github=17 render=0`.
-  ✅ **TRANSPORT PROVEN THREE TIMES (2026-09-05/06), twice from cron-job.org's OWN client** —
-  which is the half an agent cannot test for itself:
+  ✅ **TRANSPORT PROVEN FOUR TIMES (2026-09-05/06), THREE of them from cron-job.org's OWN
+  client** — which is the half an agent cannot test for itself:
 
         watchdog       my GitHub dispatch    204 -> run -> run-agent: success
         midday_check   owner's TEST RUN      Date 00:38:57 GMT == run created 00:38:57Z
         price_alerts   owner's TEST RUN      Date 00:44:15 GMT == run created 00:44:14Z
+        macro_alert    owner's TEST RUN      Date 00:46:04 GMT == run created 00:46:04Z
+
+  🔎 `macro_alert` is the best of the four: it stopped on its OWN schedule guard
+  ("skipping — not Mon–Thu"), so it proves the transport AND shows a mode declining to act for
+  a stated reason — where `midday_check` and `price_alerts` were quiet only because the market
+  was closed. Prefer a mode with a self-guard when picking a safe test.
+  🔎 `X-RateLimit-Used` climbed 53 -> 65 -> 78 across them against a 5000/hr authenticated
+  budget — successive real calls, and nowhere near a constraint.
 
   🔑 **The response Date matching the run's `createdAt` to the second is the proof**, not the
   headers. `X-RateLimit-Limit: 5000` does show the request was AUTHENTICATED (anonymous is 60)
