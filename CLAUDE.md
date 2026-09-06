@@ -618,8 +618,47 @@ Rules:
 - **Keep-warm runs on a WINDOW, not 24/7.** The REAL window lives on cron-job.org job `7746621`: **6 AM–6 PM ET, ET-anchored** (`America/New_York`, hours 6–17, `:00/:15/:30/:45`). ET-anchored on purpose — a UTC window drifts an hour against the 7 AM ET morning relay at every DST change. `keepwarm.yml` (`*/10 11-17 * * *`) is a UTC-only **safe subset** that sits inside that window under both EDT and EST; **if the cron-job.org window moves, move this too or it silently reinflates the bill** (the old 10:00–03:59 UTC schedule would have fired ~6×/day outside the paid window, ~46 h/mo for nothing). Render free tier spins down after ~15 min idle → a cold server makes the first `/start`/button wait ~30-60s, or drops the reply mid-boot ("bot not working"), which bit NEW users worst on a share-link click.
 - **🔴 The reasoning that made it 24/7 was wrong, and the error is worth remembering: "the repo is PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free" conflated two different budgets.** GH minutes are free; **Render instance-hours are not** — the free plan gives **750 h/month** and every ping wakes the service for ~15 min. Warming 24/7 costs **~744 h/month = 99% of the cap**, and exceeding it SUSPENDS the service until the next cycle. The window is now ~379 h. **Rule: when a scheduler is free, check whether the thing it pokes is also free.**
 - **✅ MIGRATED 2026-09-05 — all 17 cron-job.org jobs now POST to GitHub's API, not to this app.** The outage below is fixed at the configuration level. Verified job-by-job from a fresh page load: method POST, the dispatch URL, `Accept`/`Content-Type`/`Authorization`, the right `run_mode` in each body, and every original schedule + timezone untouched. Audit result: `github=17 render=0`.
-  ⚠️ **Only `watchdog` is proven END-TO-END so far** — TEST RUN → `204` → `daily_run.yml` ran `2026-09-05T05:55:17Z`, `workflow_dispatch`, `run-agent: success`. The other 16 carry a token verified only by FINGERPRINT (exactly 100 chars, `Bearer ` prefix, no placeholder), not by a live fire. **First real proof is `week_ahead`, Sunday 12:00 UTC.** Do not write "the migration works" here until a scheduled job has actually dispatched.
-  ⚠️ **cron-job.org's TEST RUN is gated behind a bot check** — "Sorry, we couldn't verify your test run request", with `START TEST RUN` disabled, when the browser is being driven programmatically. A human clicking it is fine. So an agent cannot self-serve this proof; wait for the schedule or ask the owner to click.
+  ✅ **TRANSPORT PROVEN THREE TIMES (2026-09-05/06), twice from cron-job.org's OWN client** —
+  which is the half an agent cannot test for itself:
+
+        watchdog       my GitHub dispatch    204 -> run -> run-agent: success
+        midday_check   owner's TEST RUN      Date 00:38:57 GMT == run created 00:38:57Z
+        price_alerts   owner's TEST RUN      Date 00:44:15 GMT == run created 00:44:14Z
+
+  🔑 **The response Date matching the run's `createdAt` to the second is the proof**, not the
+  headers. `X-RateLimit-Limit: 5000` does show the request was AUTHENTICATED (anonymous is 60)
+  and `x-accepted-github-permissions: actions=write` shows GitHub accepted the scope — but
+  headers can look healthy on a request that creates nothing. Always match the timestamp to a
+  real run.
+  ✅ **All 17 tokens are BYTE-IDENTICAL to the proven one** — hash `ac812138b966c98a`, length
+  100, every job. Verified by hashing each value IN-PAGE and comparing, so the token was never
+  read. **That is strictly stronger than the old fingerprint check** (length + `Bearer ` prefix
+  would pass a subtly wrong character); combined with the config audit, nothing distinguishes
+  the other 16 from a job that demonstrably works except the `run_mode` string, and those were
+  separately validated against `run_modes.py`.
+  ⏳ Still unproven: that cron-job.org's SCHEDULER fires them unattended. `week_ahead`
+  (Sun 12:00 UTC) is that test. Manual TEST RUNs exercise the request path, not the clock.
+  🚨🚨 **A cron-job.org TEST RUN IS A REAL PRODUCTION RUN — `owner_only` is EMPTY in every
+  body.** It is not a dry run and there is no containment. `TEST RUN` on `morning` sends the
+  briefing to EVERY user immediately, and delivery is not idempotent, so they get a duplicate
+  at the wrong hour. `weekly` additionally spends Claude credits and overwrites `picks.json`.
+  ⚠️ **Both jobs tested on 2026-09-05 sent nothing only because the MARKET WAS CLOSED**
+  (`midday_check`: "price fetch returned empty"; `price_alerts`: "No price alerts triggered").
+  That was the calendar, not a safeguard. The same two clicks on a weekday reach every user.
+  🔎 **Safe to TEST RUN on a weekend:** `watchdog` (returns immediately on a non-trading day)
+  and `macro_alert` (self-skips outside Mon-Thu). Everything else can deliver.
+  🔎 **To test a MODE safely, do not use TEST RUN at all** — dispatch on GitHub instead:
+  `gh workflow run daily_run.yml -f run_mode=<mode> -f owner_only=1`. Two different layers:
+  TEST RUN exercises the TRANSPORT (and reaches users); the GitHub dispatch exercises the
+  MODE (and is contained).
+  ⚠️ **cron-job.org's TEST RUN is bot-gated for automation** — `START TEST RUN` reads
+  `disabled: true` and stays that way (checked at 5 s and 10 s), when the browser is driven
+  programmatically. A human clicking it works. **An agent cannot self-serve this proof.**
+  🔎 **The dashboard's red count is HISTORICAL and decays per-job.** After the migration it
+  read "15 failed / 6 successful", and every red predated the token paste — the newest was
+  `weekly` at 07:00:49 returning **401 Unauthorized**, i.e. it reached GitHub with no valid
+  token. **A job stays red until it NEXT fires**, so the count clears one job at a time over a
+  week, not all at once. Do not read a stale red as current breakage.
 - **🔴🔴 SEPT 2026 (the outage this fixed): THE SERVICE WENT ON FREE AND ~13 OF 17 TRIGGER JOBS FAILED EVERY DAY.** Measured 2026-09-04/05. The app produced **no picks and no morning delivery from 2026-09-03** — its own canary said so (`picks.fresh`, `delivery.morning`, `delivery.picks_saved` all FAIL). Red cron jobs were the symptom; a dead pipeline was the actual damage.
 - **🔴 CORRECTION: "All 17 trigger jobs are now at `requestTimeout=120`" — that is IMPOSSIBLE and the note above is wrong.** cron-job.org's timeout field is `min=1 max=30`; verified in the UI 2026-09-05, `StockPulz-morning` reads `value=30 max=30`. No job can wait longer than 30 s. **A future session reading that line would think the cold-start problem was solved. It never was.**
 - **🔴 The cold start is 54.9 s** (measured after 22 min of verified silence; PiQValet 59.0 s, PriceDrop 43.0 s on the same account). Nothing cron-job.org can do reaches that — **and tuning the timeout cannot help, because the requests are not timing out.** They are REFUSED by Render's edge in ~500 ms: 342 / 489 / 519 / 531 / 564 / 811 ms observed across the 13 failing jobs. Only `midday_check` ever showed a true 30 s hold.
