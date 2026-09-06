@@ -57,8 +57,12 @@ VALID_MODES: frozenset[str] = frozenset({
     "friday_wrap",
     "monthly_commentary",
     "tax_harvest",
-    "recap",
 })
+# 🔎 `recap` was here until 2026-09-05 and is deliberately GONE. It had a
+# function and a dispatch branch in agent.py but was never in
+# webhook._VALID_MODES, so nothing could ever trigger it — dead code that still
+# had to be reasoned about every time this list was read. Removed on the owner's
+# call rather than wired up. Do not re-add without a trigger to go with it.
 
 
 def normalise(mode: str | None) -> str | None:

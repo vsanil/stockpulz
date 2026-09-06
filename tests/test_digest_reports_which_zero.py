@@ -169,7 +169,7 @@ class TestOneUserFailingDoesNotAbortTheRest:
 
 
 class TestNoBroadcastPathBypassesContainment:
-    """🔑 Pins the CLASS. run_digest and run_recap BOTH called
+    """🔑 Pins the CLASS. run_digest and the since-deleted run_recap BOTH called
     get_allowed_users() directly, so OWNER_ONLY=1 silently did not contain
     them. Only `_all_recipients()` honours it, and a fan-out that skips it is
     untestable without messaging real users.
