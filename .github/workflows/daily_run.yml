@@ -82,8 +82,13 @@ on:
 #     deliveries interleaving, or two writers racing on the same cache/state)
 #   - a burst coalesces — GitHub holds at most one running + one pending per
 #     group, and a third arrival cancels the pending one rather than queueing
-# A true same-day guard would have to live in agent.py. Add one only if a real
-# duplicate is observed; do not pre-emptively rebuild the marker here.
+# ✅ CORRECTED 2026-09-06: `morning` ALREADY has its own same-day guard inside
+# agent.py's main() — it reads cron_last_morning and skips when it is already
+# today. Proven live: a morning TEST RUN at 01:57 skipped as a duplicate of the
+# weekly run at 01:28 (weekly calls run_morning internally). So the highest-stakes
+# mode is protected at the POINT OF USE, independent of the transport, which is
+# where such a guard belongs. The other 18 modes have no equivalent -- add one
+# only if a real duplicate is observed; do not pre-emptively rebuild the marker.
 #
 # 🔎 `inputs.run_mode` is empty on a `schedule` event, so the fallbacks matter.
 # ⚠️ REVISED 2026-09-05, and this supersedes an earlier comment here that said

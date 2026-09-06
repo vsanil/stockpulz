@@ -700,7 +700,18 @@ Rules:
   ✅ **DONE 2026-09-05** (`e58c254`): `daily_run.yml` now carries
   `concurrency: group: daily-run-${{ github.event.inputs.run_mode || 'prescreener' }}`, `cancel-in-progress: false`.
   🔑 **The `|| 'prescreener'` default is load-bearing, not padding.** `inputs.run_mode` is EMPTY on a `schedule` event, so the obvious bare expression strands the two scheduled prescreener crons in a `daily-run-` group of their own — separate from the `daily-run-prescreener` group cron-job.org's dispatch lands in. Prescreener is the ONE mode with three redundant triggers, i.e. exactly the mode a naive group would fail to protect. It also matches what "Set run mode" resolves both crons AND its unknown-schedule fallback to; keep the two in step.
-  ⚠️ **Be honest about what this restored: concurrency SERIALISES, it does not SKIP.** A duplicate arriving after the first run finishes still runs in full. It prevents overlap (interleaved deliveries, racing writers) and coalesces bursts (GitHub holds at most one running + one pending per group). The per-mode same-day marker is genuinely gone; a true guard would have to live in `agent.py`. **Do not pre-emptively rebuild it — wait for an observed duplicate.**
+  ⚠️ **Be honest about what this restored: concurrency SERIALISES, it does not SKIP.** A duplicate arriving after the first run finishes still runs in full. It prevents overlap (interleaved deliveries, racing writers) and coalesces bursts (GitHub holds at most one running + one pending per group). The `webhook.trigger_mode` marker is bypassed for 18 of the 19 modes.
+  ✅ **CORRECTED 2026-09-06 — `morning` ALREADY HAS ITS OWN GUARD IN `agent.py`, and it fired.**
+  An earlier version of this line said the same-day marker was "genuinely gone". It is not, for
+  the mode that matters most: `main()` reads `cron_last_morning` and skips when it is already
+  today (unless `MOCK_DATA` or `FORCE_MORNING`). **Proven live** — a `morning` TEST RUN at
+  01:57 hit `Morning already ran today (2026-09-06T01:28) — skipping duplicate`, because the
+  `weekly` run at 01:28 calls `run_morning` internally and stamped it. No Claude spend, no
+  `save_picks()` overwrite, no broadcast.
+  🔑 So the guard that survived the migration is **defence in depth at the point of use**,
+  independent of the transport — which is exactly where a guard should live. The 18 other modes
+  have no such check, but only `morning` both broadcasts picks AND costs money per run.
+  **Do not pre-emptively rebuild the rest — wait for an observed duplicate.**
   🔎 `price_alerts` is unaffected: it was always in `webhook._MULTI_RUN_MODES`, exempt from the daily guard, so its 14 fires/day were never deduped anyway.
   ⚠️ **CORRECTED 2026-09-05 — an earlier version of this line said it RAISES Render hours ~+128 h/mo because "`daily_run.yml` curls the app during its run". That is WRONG.** Verified by reading the code: nothing in `daily_run.yml` or `agent.py` makes an HTTP request to the app. Every `APP_URL` reference builds a Telegram `web_app` BUTTON url, and `full_sweep` uses an in-process `app.test_client()`. **The migration costs ZERO Render hours, not +128.**
   🔑 Actual StockPulz Render draw now: the canary's deliberate wake (~8.5 h/mo), plus ~0.28 h per deploy (this is the only service with Auto-Deploy `On Commit`), plus real Telegram traffic. Scheduling draws nothing.
