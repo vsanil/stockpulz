@@ -1079,7 +1079,32 @@ def _broadcast_trade_closes(current_prices: dict) -> None:
 # ── Confirmation run ──────────────────────────────────────────────────────────
 
 def run_confirmation():
-    """Load morning picks, fetch live prices, send comparison message."""
+    """Midday sweep. FOUR independent fan-outs — the name covers only the last.
+
+        trailing_stops     trailing-stop alerts on open positions
+        earnings_warning   earnings within 3 days on an open position
+        watchlist_signal   entry signals on watchlisted tickers
+        confirmation       today's picks vs live price (the one it is named for)
+
+    🔴 THE ONE-LINE DOCSTRING THIS REPLACES — "Load morning picks, fetch live
+    prices, send comparison message" — described 1 of those 4, and on 2026-09-06
+    an architecture review read it, concluded this mode was redundant with
+    `digest`, and recommended DELETING it. Acting on that would have silently
+    removed three unrelated user-facing features. The mistake was caught only by
+    reading the body before deleting.
+
+    🔑 Generalise: a function whose docstring names ONE of its jobs reads as
+    dead weight to anyone who does not open it. That is not a documentation
+    nicety — it is what makes a feature deletable by accident.
+    ⚠️ It is also `main()`'s `else:` branch, so this is what an unrecognised mode
+    would BECOME. `run_modes.check()` raises before that can happen now, and
+    `tests/test_run_modes.py` pins every mode to an explicit `elif` — but that is
+    two guards standing between a typo and four live fan-outs. Keep them.
+
+    🔎 NOT redundant with `digest`: this is about the day's PICKS and about
+    position/watchlist SIGNALS; `digest` is a personalised summary of a user's
+    OWN OPEN POSITIONS. Different subjects, different data, different senders.
+    """
     _log_cron_run("confirmation")
     print("[agent] Loading morning picks from Gist...")
     picks = load_picks()
