@@ -35,8 +35,76 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  self-heal:
+  # ── Can self-heal actually ACT on what failed? ────────────────────────────
+  # 🔴 A real feedback loop, observed 2026-09-06. `canary.check_selfheal_health`
+  # reports on the SELF-HEALER; a red there made the canary exit non-zero, which
+  # triggers this workflow — so the broken healer was asked to heal itself. Its
+  # look-back is SEVEN DAYS, so the red outlives the cause by a week, and every
+  # canary run in that week re-armed a path ending in an auto-merge to main and
+  # a Render deploy. It spent freshly-added Claude credits diagnosing findings
+  # that were already fixed.
+  # 🔑 A monitor that reports on the repair system must not be able to trigger
+  # the repair system. The list lives in owner_only_checks.py — ONE definition,
+  # shared with the canary, same idiom as run_modes.py.
+  # ⚠️ SEPARATE JOB on purpose. A step-level `if:` would have to be repeated on
+  # every step below, and the next step someone adds would silently bypass it.
+  # `needs:` cannot be forgotten.
+  triage:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      actionable: ${{ steps.gate.outputs.actionable }}
+      failed:     ${{ steps.gate.outputs.failed }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TG_CHAT:  ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+
+      - name: Decide whether self-heal should run
+        id: gate
+        run: |
+          set -uo pipefail
+          # A MANUAL dispatch always proceeds — it is how the loop gets tested.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "actionable=true" >> "$GITHUB_OUTPUT"
+            echo "failed=(manual dispatch)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RID="${{ github.event.workflow_run.id }}"
+          gh run view "$RID" --log > /tmp/triage.log 2>&1 || true
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import re, pathlib
+          from owner_only_checks import all_owner_only, OWNER_ONLY_CHECKS
+          log = pathlib.Path("/tmp/triage.log").read_text(errors="replace")
+          # Matches canary._check's exact print format: f"FAIL  {name}  ..."
+          # ⚠️ If that format ever changes this finds nothing -> FAIL OPEN ->
+          # self-heal runs, i.e. today's behaviour. Pinned by
+          # tests/test_selfheal_triage.py::test_the_regex_matches_the_real_format.
+          failed = set(re.findall(r"FAIL {2}([a-z][a-z0-9_.]*)", log))
+          skip = all_owner_only(failed)
+          print(f"actionable={'false' if skip else 'true'}")
+          print(f"failed={','.join(sorted(failed)) or '(none parsed)'}")
+          EOF
+          cat "$GITHUB_OUTPUT"
+
+      - name: Tell the owner when self-heal is deliberately standing down
+        if: ${{ steps.gate.outputs.actionable == 'false' }}
+        run: |
+          # 🔑 A skip must be VISIBLE. Silently not running the healer is exactly
+          # how "the net is down and nobody knows" happens — the failure this
+          # whole workflow exists to prevent.
+          curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "text=🩺 Canary is red, but self-heal is standing down on purpose. Failing: ${{ steps.gate.outputs.failed }} — these report to YOU, not to the healer (a broken self-healer cannot heal itself; a dead cron trigger is a config fix, not a code fix). Nothing was diagnosed and no credits were spent. ${{ github.event.workflow_run.html_url }}" \
+            >/dev/null || true
+
+  self-heal:
+    needs: triage
+    if: ${{ needs.triage.outputs.actionable == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

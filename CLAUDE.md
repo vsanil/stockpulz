@@ -736,6 +736,44 @@ Rules:
   code (every mode stamps its own name as its first statement) and against 13 modes triggered by
   hand on 2026-09-05/06. **If the first canary run reports a mode as NEVER, the table is wrong,
   not the trigger** — it names the mode, so it is a one-line fix.
+- **🔴 SELF-HEAL FEEDBACK LOOP — found and closed 2026-09-06, `owner_only_checks.py`.**
+  `canary.check_selfheal_health` reports on the SELF-HEALER, and its own docstring already
+  promised the right behaviour — *"this reports to the OWNER, not to self-heal. Asking a broken
+  self-healer to heal itself is not a plan."* **Nothing enforced it.** A red check makes the
+  canary exit non-zero; `self_heal.yml` triggers on `workflow_run.conclusion == 'failure'`; so
+  the healer was summoned to fix a report that it was broken.
+  🚨 **The look-back is SEVEN DAYS, so the red outlives its cause by a week** — and every canary
+  run in that week re-armed a path ending in an auto-merge to `main` and a Render deploy.
+  Measured: Anthropic credit ran out 22:08 UTC 09-05, five self-heal runs failed, and the loop
+  was still live at 05:13 UTC on 09-06 — hours after the credit was restored — spending the
+  newly-added credits diagnosing findings that were already fixed. Run `34013454459` was
+  cancelled by hand; it had written nothing.
+  🔑 **The rule, worth generalising: a monitor that reports on the REPAIR SYSTEM must not be able
+  to trigger the repair system.** Same shape as everything else in this file — a comment
+  asserting a property that no code checks.
+  🔎 **Two names are owner-only, each for its own reason.** `selfheal.healthy` is
+  self-referential. `cron.all_modes_firing` because a dead trigger is a cron-job.org/PAT/schedule
+  problem — self-heal edits CODE, so it cannot fix one, **but it CAN "fix" the symptom by
+  loosening the check that reports it**, which would delete the monitoring outright. That is the
+  worst available outcome.
+  ⚠️ **IT FAILS OPEN, deliberately.** `all_owner_only()` is True only when the failing set is
+  NON-EMPTY and every member is listed. An empty or unparseable set means "run self-heal", i.e.
+  the old behaviour. Reversing that would silently disable the auto-fix net — strictly worse than
+  the loop. Pinned by `test_an_EMPTY_set_FAILS_OPEN`.
+  ⚠️ **`triage` is a SEPARATE JOB, and that is the load-bearing part.** A step-level `if:` would
+  have to be repeated on every step in a 19 KB workflow, and the next step someone adds would
+  silently bypass it. `needs:` cannot be forgotten. A manual `workflow_dispatch` always proceeds —
+  it is the only safe way to exercise the healer without waiting for an outage.
+  ⚠️ **A stand-down is ANNOUNCED, never silent** — it DMs the owner naming the failing checks.
+  Silently not running the healer is precisely the "the net is down and nobody knows" failure the
+  whole workflow exists to prevent.
+  🔎 The triage regex is read OUT OF the workflow by the test and run against real
+  `canary._check` output, so gate and test cannot drift. **Mutation note, stated honestly: 5 of 6
+  mutations were caught; loosening `FAIL {2}` to `FAIL\s*` was NOT — it extracts the same names
+  from real output, and both regex directions fail OPEN. Behaviour-preserving, not an escape.**
+  ⏳ Two canary checks stay red on history whose cause is fixed: `runs.silent_failures` (26 h
+  window, clears ~02:00 UTC 09-07) and `selfheal.healthy` (7-day, clears ~09-12). **Do not chase
+  either.** They no longer summon self-heal.
 - **🔎 ARCHITECTURE REVIEW 2026-09-06 — what was found and NOT fixed.** Three defects were fixed
   (see the entry above). The rest are product calls, recorded so they are decided rather than
   re-derived every few weeks. **None is a bug; do not "fix" them unprompted.**
