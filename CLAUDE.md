@@ -652,6 +652,89 @@ Rules:
 - **🔎 A ZERO IS NOT A RESULT UNTIL YOU CAN SAY WHICH ZERO IT IS.** `run_digest` printed `sent to 0 user(s)` for four different situations — nobody had positions, everyone paused, the handler crashed, the handler returned nothing. Three are fine and one is an outage. That ambiguity is precisely why the broken `/digest` ran unnoticed. It now counts every outcome and says `⚠️ DIGEST IS BROKEN for N of M` when any problem bucket is non-zero.
   🚨 **And the instrumentation cried wolf on its FIRST live run.** The handler sends the inline-keyboard version itself when `APP_URL` is set and returns `""` — a SENTINEL meaning "already delivered". Counting that falsy value as a defect reported a working digest as broken. **A warning that fires on a healthy run is why people stop reading warnings.** Only `None` is a defect now.
 
+### 🚨🚨 THE ANTHROPIC API CREDIT IS EXHAUSTED (found 2026-09-05) — CHECK THIS FIRST
+
+    Error code: 400 — invalid_request_error
+    'Your credit balance is too low to access the Anthropic API.'
+
+🔑 **This is bigger than any code bug in this file, because Claude IS the product here.**
+`ai_analyzer.analyze_with_claude` selects the morning picks and has **no fallback**: it
+retries with Haiku and then `raise RuntimeError(...)`. An exhausted balance is not a degraded
+feature, it is **no picks**. Natural-language bot commands go the same way.
+⚠️ It is a PAID API, entirely separate from the Render free tier this file spends so much
+space protecting. Topping it up is an owner action; no code change helps.
+🔎 **How it surfaced is the lesson.** Wiring up `monthly_commentary` made it run for the first
+time ever, and it happens to be the ONE Claude path with a template fallback — so it degraded
+LOUDLY (`Claude call failed, using template: …`) instead of failing. Every other path would
+have failed silently at 06:00 CT the next weekday. **A feature with a fallback is where an
+outage becomes visible; a feature without one is where it becomes damage.**
+
+### ✅ Job-layer audit closed 2026-09-05 — what the trigger surface looks like now
+
+    17 cron-job.org jobs  -> GitHub dispatch API (schedules unchanged)
+    19 modes              -> run_modes.py is the SINGLE source of truth
+    2 GitHub schedules    -> monthly_commentary (0 13 1 * *),
+                             tax_harvest (0 14 1,15 11,12 *)
+    deleted               -> price_alerts.yml (orphan), `recap` (unreachable)
+
+- **🔑 ONLY `daily_run.yml` MAY SET `RUN_MODE`.** Every protection lives there: the run_mode
+  allow-list, the per-mode `concurrency` group, and the full env — above all `OWNER_ONLY`.
+  A second entry point silently opts out of all three. `price_alerts.yml` WAS exactly that:
+  no schedule, nothing dispatched it, `daily_run.yml`'s header still pointed at it, and it ran
+  the same agent with **eight env vars missing** including `OWNER_ONLY` — so its "Run workflow"
+  button would have messaged every user with no containment. Deleted; pinned by a test.
+- **⚠️ `monthly_commentary` and `tax_harvest` were HALF-WIRED** — both had modes in `agent.py`
+  AND mappings in the "Set run mode" resolver, and neither had a `cron:` entry, so neither had
+  ever run. **Half-wiring is invisible from either end**; only comparing the resolver against
+  the schedule block reveals it, which is now a test. They sit on GitHub's scheduler on purpose:
+  GH fires 1.6-6 h late, fatal for a market-timed job and irrelevant for a monthly commentary.
+- **⚠️ The concurrency group is keyed on `github.event.schedule`, and the earlier
+  `|| 'prescreener'` default is SUPERSEDED.** That default was load-bearing while prescreener
+  was the only scheduled mode; adding these two crons turned it into a hazard, because every
+  scheduled run then shared one group and **GitHub cancels the PENDING run when a third
+  arrives** — a monthly job could be silently dropped behind two prescreener runs. Cost of the
+  fix, stated plainly: the three prescreener triggers no longer share a group, acceptable only
+  because they are 4+ h apart with a 30-min timeout and cannot overlap.
+- **🔎 `recap` deleted** — it had a function and a dispatch branch but was never in
+  `webhook._VALID_MODES`, so nothing could trigger it. Do not re-add without a trigger.
+
+### 🔬 METHOD: what actually found eight bugs in one day
+
+Every one of these was invisible to reading the code, and several were invisible to a passing
+test suite. Worth copying, because the same four moves found all of them.
+
+1. **RUN THE THING.** All 17 modes were executed for real (`owner_only=1`). Nothing in this
+   repo had ever done that, and it immediately surfaced two production bugs that every monitor,
+   test and green workflow had missed.
+2. **MUTATION-CHECK EVERY GUARD.** A guard that has never been seen to fail is not known to
+   work. This caught, in one day: a shadow-import detector that reported 0 on UNFIXED code; a
+   call-site test that passed with the fix reverted; a `DRY_RUN` test asserting only a return
+   value while the send still happened; a concurrency assertion matching the resolver instead
+   of the group line; and a marker that was never pinned at all.
+   🚨 **And verify the mutation APPLIED.** Three times a `.replace()` or `git checkout` silently
+   changed the wrong line or nothing at all — **"did not apply" and "not pinned" look
+   identical**, both report zero failures.
+3. **A GUARD THAT CLAIMS A CLASS MUST BE CHECKED AGAINST A REAL INSTANCE.**
+   `test_no_shadow_imports.py` said it caught "the whole class … keep it at zero" and had
+   reported zero since July while a live instance sat in the tree — its predicate was line
+   order, the bug was reachability.
+4. **WATCH FOR THE TEST WHOSE NAME CONTRADICTS ITS BODY.** Three found today, all named for a
+   failure and all asserting success (`..._is_NOT_VERIFIED_not_a_pass` with `assert ok`,
+   `..._rather_than_passing_clean` with `is True`, and the unusable-answer case). The name is
+   the author's intent; the assertion is what ships.
+
+🔑 **The recurring defect class, stated once:** *a success with a failure printed inside it.*
+`vix_check` (exit 0, alert never fired), `digest` (exit 0, zero delivery), `storage.surfaces`
+(PASS while blind), `endpoint.health` (FAIL by design), `DRY_RUN` (documented, unenforced),
+`weekly.on_github` (PASS with an excuse). All had been reporting healthy for weeks or months.
+✅ **`canary.check_silent_failures` now watches for exactly this** — it reads the LOGS of
+SUCCESSFUL `daily_run` runs, because an exit code is what a job CLAIMS and the log is what
+happened. First live run caught 2 real failures with 0 false alarms.
+⚠️ **Its hard half is NOT crying wolf.** The first version flagged the HEALTHY digest line,
+because that summary reads `problems: 0 handler errored, …` and the bare marker matched its own
+instrumentation. **A log scanner must not match the words a SUMMARY uses to report zero of that
+thing.** Half its tests pin real green output that must stay silent.
+
 ### 🔬 ALL 17 MODES WERE RUN FOR REAL (2026-09-05) — two were silently broken
 
 Nothing else in this repo had ever executed every mode. Doing it found two production
@@ -679,15 +762,25 @@ bugs that every monitor, test and green workflow had missed, because **both exit
   tree. Now has a second, reachability-based scan. **Generalise: when a guard claims a
   CLASS, mutation-check it against a real instance — a subset guard's zero is believed.**
 
-### 🚨 TESTING A MODE: `DRY_RUN` DOES NOT CONTAIN IT. `OWNER_ONLY=1` does.
-
-`agent.py`'s own header says `DRY_RUN=true → print message, don't send`. **It does not.**
-`_fanout` → `broadcast_all` is the primary per-user delivery path (20+ call sites:
-confirmation, eod_summary, vix_check, macro_alert, pre_earnings, weekly, week_ahead …) and
-**never checks `DRY_RUN`**; `telegram_api.py` contains no reference to it at all. It gates
-only `_alert()` and the morning outbox.
+### 🧪 TESTING A MODE — the two containment flags, and what each actually promises
 
     gh workflow run daily_run.yml -f run_mode=<mode> -f owner_only=1
+
+    DRY_RUN=true    no message leaves the process. ENFORCED IN telegram_api
+                    (send_message / send_inline_keyboard / send_photo /
+                    broadcast_all / send_typing_action all short-circuit).
+    OWNER_ONLY=1    the recipient list narrows to the owner. Sends still HAPPEN.
+
+🔴 **`DRY_RUN` was a lie until 2026-09-05 and the shape is worth remembering.** `agent.py`'s
+header documented `print message, don't send`, and it checked the flag at 13 call sites — but
+NOT in `_fanout` → `broadcast_all`, the primary per-user delivery path (20+ call sites:
+confirmation, eod_summary, vix_check, macro_alert, pre_earnings, weekly, week_ahead …), and
+`telegram_api.py` contained no reference to it at all. A "dry" run would have messaged every
+real user. **A flag whose guarantee depends on every caller remembering it is not a
+guarantee** — it is now gated at the choke point, read at CALL time so a value set later is
+still honoured.
+⚠️ Neither flag suppresses SIDE EFFECTS: `_log_cron_run` still stamps `cron_last_<mode>` (so
+test runs pollute what the canary reads), and `morning`'s `save_picks()` still writes.
 
 ⚠️ **Containment is PER-MODE and I proved that the hard way.** `owner_only=1` contained 16
 of 17; `run_digest` and `run_recap` called `get_allowed_users()` directly instead of
