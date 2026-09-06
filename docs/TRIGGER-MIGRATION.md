@@ -74,15 +74,23 @@ Resource owner : vsanil
 Repository     : ONLY vsanil/stockpulz          <- not "all repositories"
 Permissions    : Actions            → Read and write
                  Metadata           → Read-only  (mandatory, added automatically)
-Expiration     : 90 days
+Expiration     : NEVER (owner's choice, confirmed 2026-09-06)
 ```
 
 Nothing else. `actions:write` permits dispatching workflow runs — it does **not** allow pushing
 code.
 
-⚠️ **Set a reminder for the expiry.** When it lapses every job starts returning 401 and the
-symptom looks exactly like today's outage. Put the expiry date in the job title if that helps
-— e.g. `StockPulz-morning (PAT exp 2026-12-04)`.
+✅ **THE LIVE TOKEN DOES NOT EXPIRE** — owner confirmed 2026-09-06. So there is no expiry
+cliff and no reminder to set; the "90 days" above describes GitHub's default, not what was
+created.
+🚨 **Do NOT read `2026-12-04` anywhere as a fact about this token.** An earlier version of this
+section used it as an EXAMPLE of how to label a job, and a later session read that illustration
+as a recorded expiry date and ranked "the PAT lapses in December" as the system's top risk. It
+was never true. Same error class as every other derived-value-reported-as-measured in this repo.
+⚠️ The real trade, stated once and not re-litigated: a non-expiring token removes the scheduled
+outage and replaces it with a permanent credential in two places (17 cron-job.org jobs + the
+Render env) that nothing will ever force you to rotate. Owner's call, made knowingly. If it ever
+needs revoking, that is 17 edits, so budget for it rather than being surprised by it.
 
 ℹ️ Storing this in cron-job.org is a real exposure, and worth weighing honestly: anyone with
 that token can trigger workflow runs in the repo. It is **not** a new class of secret — the app
