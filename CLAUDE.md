@@ -804,11 +804,29 @@ Rules:
   `premarket`, `vix_check`, `midday_check`, `price_alerts`, `close_check`, `pre_earnings`,
   `macro_alert`. Plus Friday wrap, Saturday `weekly`, Sunday `week_ahead`. **At 3 users nobody
   has complained; this is the thing to look at FIRST if anyone ever does.**
-  🔎 Candidates if the list is ever trimmed, weakest first: **`confirmation`** (it is `digest` two
-  hours later, and it is also `main()`'s `else:` fallback, i.e. what an unrecognised mode
-  BECOMES); the **second `news_check`**; one of **`prescreener`'s three triggers** (03:00 UTC GH
-  cron + 07:00 UTC GH backup + the cron-job.org dispatch — each a full 600-ticker screen; the
-  redundancy dates from when the transport could not be trusted, which it now can).
+  🚨🚨 **TWO OF THE THREE TRIM CANDIDATES WERE WRONG AND ARE WITHDRAWN (2026-09-06). Do not
+  re-propose them.** The owner asked for both to be actioned; reading the bodies before deleting
+  is what stopped it.
+  ❌ **`confirmation` is NOT "digest two hours later".** It is 177 lines running **FOUR**
+  independent fan-outs — `trailing_stops`, `earnings_warning`, `watchlist_signal`, and
+  `confirmation`. Deleting the mode would have silently removed three unrelated user-facing
+  features, and the only symptom would have been an ABSENCE. It is also a different SUBJECT from
+  `digest`: picks and watchlist signals vs. a user's own open positions.
+  🔑 **How the error happened, because it generalises: its docstring named 1 of its 4 jobs.**
+  ("Load morning picks, fetch live prices, send comparison message.") The review was conducted
+  from docstrings and schedules — the right altitude for finding *shapes*, the wrong one for
+  concluding something is *redundant*. **A redundancy claim requires reading both bodies.**
+  ✅ Docstring rewritten to name all four; `tests/test_confirmation_is_not_redundant.py` pins the
+  four fan-out tags AND that the docstring mentions the three non-obvious ones, so the next
+  reader — or a self-heal agent told to "simplify" — cannot make the same deletion.
+  ❌ **The second `news_check` (13:00 ET) is NOT redundant.** Stories dedupe on
+  `f"news_{sym}_{hash(title)}_{et_today()}"` gated by `_is_alerted`, so the afternoon run
+  **cannot** resend a morning story — it only delivers news that did not exist at 08:30.
+  Removing it drops real alerts. Pinned by `test_the_dedup_key_is_scoped_to_the_day_not_the_run`.
+  ✅ **Still open and still valid**: one of **`prescreener`'s three triggers** (03:00 UTC GH cron
+  + 07:00 UTC GH backup + the cron-job.org dispatch — each a full 600-ticker screen; the
+  redundancy dates from when the transport could not be trusted, which it now can). That one was
+  derived from workflow files, not docstrings, which is why it survived.
   🔎 **Monitoring outnumbers the product on GitHub**: `synthetic_user` 8×/weekday + `full_sweep` 3×
   + `canary` + `evaluate_picks` + `analyze_engine` = **14 monitor runs per weekday for 3 users**.
   Minutes are free on a public repo so this costs nothing — but every one is a thing that can rot
