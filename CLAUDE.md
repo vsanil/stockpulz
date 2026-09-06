@@ -731,11 +731,16 @@ Rules:
   ✅ 47 new tests, **all seven mutations checked** (empty gate set, guard removed, stamp removed,
   zero-tolerance, mode dropped from the table, `since` removed, weekend branch disabled) — each
   failed the expected tests. Full suite **1996 passed / 8 skipped**.
-  ⏳ **NOT verified against production data.** There is no `.env` in this repo, so the live
-  `cron_last_*` values could not be read locally; the cadence table was validated against the
-  code (every mode stamps its own name as its first statement) and against 13 modes triggered by
-  hand on 2026-09-05/06. **If the first canary run reports a mode as NEVER, the table is wrong,
-  not the trigger** — it names the mode, so it is a one-line fix.
+  ✅ **VERIFIED AGAINST PRODUCTION 2026-09-06 05:11 UTC** (canary run `34013357924`, dispatched
+  by hand on `b9c7f25`):
+
+        PASS  cron.all_modes_firing · 16/19 modes firing on schedule;
+                                      3 not yet due (monthly_commentary, tax_harvest, watchdog)
+
+  All 16 due modes read `ok last=2026-09-05`. **Zero false alarms on the first live run**, and
+  the three "not yet due" are exactly the three carrying a `since=`. The cadence table matches
+  the real `cron_last_*` values — which is the half that could not be checked locally, since
+  there is no `.env` in this repo.
 - **🔴 SELF-HEAL FEEDBACK LOOP — found and closed 2026-09-06, `owner_only_checks.py`.**
   `canary.check_selfheal_health` reports on the SELF-HEALER, and its own docstring already
   promised the right behaviour — *"this reports to the OWNER, not to self-heal. Asking a broken
@@ -772,8 +777,20 @@ Rules:
   mutations were caught; loosening `FAIL {2}` to `FAIL\s*` was NOT — it extracts the same names
   from real output, and both regex directions fail OPEN. Behaviour-preserving, not an escape.**
   ⏳ Two canary checks stay red on history whose cause is fixed: `runs.silent_failures` (26 h
-  window, clears ~02:00 UTC 09-07) and `selfheal.healthy` (7-day, clears ~09-12). **Do not chase
-  either.** They no longer summon self-heal.
+  window, clears ~01:58 UTC 09-07) and `selfheal.healthy` (7-day, clears ~09-12). **Do not chase
+  either.**
+  🚨 **CORRECTION, same day: an earlier version of this line said "they no longer summon
+  self-heal." That is FALSE for `runs.silent_failures`, which is NOT owner-only** — a run exiting
+  0 while failing is usually a real code bug, exactly what self-heal is for. So the loop does not
+  close until that 26 h window expires and `selfheal.healthy` is the only red left. Simulated
+  against the real 554-line log of run `34013357924`:
+
+        parsed failures : ['runs.silent_failures', 'selfheal.healthy']  -> self-heal RUNS
+        after 01:58 UTC : ['selfheal.healthy']                          -> self-heal STANDS DOWN
+
+  🔑 **DO NOT add `runs.silent_failures` to `OWNER_ONLY_CHECKS` to make the red go away.** That
+  would gate a genuine bug detector in order to green a status line — the same move the gate was
+  built to stop self-heal from making. The list earns entries by ARGUMENT, not by convenience.
 - **🔎 ARCHITECTURE REVIEW 2026-09-06 — what was found and NOT fixed.** Three defects were fixed
   (see the entry above). The rest are product calls, recorded so they are decided rather than
   re-derived every few weeks. **None is a bug; do not "fix" them unprompted.**
