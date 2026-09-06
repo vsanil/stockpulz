@@ -686,6 +686,56 @@ Rules:
   token. **A job stays red until it NEXT fires**, so the count clears one job at a time over a
   week, not all at once. Do not read a stale red as current breakage.
 - **🔴🔴 SEPT 2026 (the outage this fixed): THE SERVICE WENT ON FREE AND ~13 OF 17 TRIGGER JOBS FAILED EVERY DAY.** Measured 2026-09-04/05. The app produced **no picks and no morning delivery from 2026-09-03** — its own canary said so (`picks.fresh`, `delivery.morning`, `delivery.picks_saved` all FAIL). Red cron jobs were the symptom; a dead pipeline was the actual damage.
+- **✅ THREE ARCHITECTURE DEFECTS FIXED 2026-09-06** (found by an inventory review of all 19
+  modes + 14 workflows, not by a failure). All three are the same shape: **a SCHEDULE was doing
+  the job of a GUARD.** A cron is a convention; every manual trigger, relay and backup path
+  walks straight past it.
+  🔑 **1. `cron.all_modes_firing` — the 17-mode monitoring blind spot is closed.** Every mode
+  already stamped `cron_last_<mode>` as its FIRST statement; the canary read exactly TWO of them
+  (`delivery.morning`, `cron_last_weekly`). That is why `vix_check` and `digest` stayed broken
+  for WEEKS behind green workflows. `scripts/canary.py::check_cron_freshness` now walks
+  `_MODE_SCHEDULE` — a per-mode `(pred, done_by, since)` cadence table — and reports every mode.
+  ⚠️ **It measures DISPATCH, not delivery, and the name says so.** `delivery.morning` still
+  answers the stronger "did users get it" for the one mode worth a second check. Do not merge them.
+  ⚠️ **Tolerance is ONE missed run, not zero** — deliberate. GitHub runs 1.6-6 h late,
+  cron-job.org 503s, and a holiday legitimately skips the six session-bound modes. Two
+  consecutive misses is a dead trigger; **two consecutive US market holidays do not exist**, so
+  the holiday case can never reach the failing branch on its own. A check that cries wolf is
+  worse than no check.
+  🔎 `since=` on `watchdog`/`monthly_commentary`/`tax_harvest` is a fact about when the trigger
+  was created, NOT a tolerance — before that date there is genuinely nothing to have missed, so
+  the expected set is EMPTY rather than a pass-with-an-excuse.
+  🚨 **A mode added to `run_modes.py` without an entry here is dispatched and never monitored.**
+  Pinned: `test_the_schedule_table_covers_exactly_the_valid_modes`.
+  🔑 **2. Trading-calendar gate at the DISPATCH layer** (`agent.SESSION_BOUND_MODES` +
+  `_calendar_block_reason`). Only 3 of 19 modes knew about holidays. The rest ran against a shut
+  market, and it is **not** harmless: `run_morning` still calls `save_picks()` for crypto on a
+  holiday, so `load_picks()` is non-empty and `eod_summary`/`confirmation` send a full stock
+  wrap-up about prices that never moved; `vix_check` reads the stale prior close and can
+  re-alert. **Thanksgiving Nov 26 and Christmas Dec 25 are both weekdays.**
+  ⚠️ **The set is SIX modes and must stay narrow** — only those whose own docstring defines them
+  by the session ("45 min before market open", "after market close", "during market hours").
+  **Crypto trades 24/7**, so `price_alerts`, `news_check`, `digest` and `morning` must keep
+  running; widening this silently turns features OFF. Pinned by name in
+  `test_non_session_modes_are_never_calendar_blocked`.
+  🔎 It gates WEEKENDS too. None of the six has a weekend cron, so that costs nothing scheduled —
+  it exists because a cron-job.org TEST RUN is a real production run, and on 2026-09-06 several
+  were fired on a Saturday and sent nothing only because the market happened to be closed.
+  🔑 **3. `friday_wrap` now checks that it is Friday**, and `run_watchdog` now stamps
+  `cron_last_watchdog` — it was the ONE mode that never did, so the job that watches the morning
+  run was itself the only unwatchable job in the system. The stamp is written BEFORE both
+  guards: it records DISPATCH, and returning on a non-Friday/non-trading day is a legitimate
+  outcome, not a missed run.
+  🔎 Escape hatch is `FORCE_CALENDAR_RUN=1`, deliberately NOT `FORCE_MORNING` (which means
+  "bypass the duplicate guard"). One flag meaning two things is how guards get bypassed by accident.
+  ✅ 47 new tests, **all seven mutations checked** (empty gate set, guard removed, stamp removed,
+  zero-tolerance, mode dropped from the table, `since` removed, weekend branch disabled) — each
+  failed the expected tests. Full suite **1996 passed / 8 skipped**.
+  ⏳ **NOT verified against production data.** There is no `.env` in this repo, so the live
+  `cron_last_*` values could not be read locally; the cadence table was validated against the
+  code (every mode stamps its own name as its first statement) and against 13 modes triggered by
+  hand on 2026-09-05/06. **If the first canary run reports a mode as NEVER, the table is wrong,
+  not the trigger** — it names the mode, so it is a one-line fix.
 - **🔴 CORRECTION: "All 17 trigger jobs are now at `requestTimeout=120`" — that is IMPOSSIBLE and the note above is wrong.** cron-job.org's timeout field is `min=1 max=30`; verified in the UI 2026-09-05, `StockPulz-morning` reads `value=30 max=30`. No job can wait longer than 30 s. **A future session reading that line would think the cold-start problem was solved. It never was.**
 - **🔴 The cold start is 54.9 s** (measured after 22 min of verified silence; PiQValet 59.0 s, PriceDrop 43.0 s on the same account). Nothing cron-job.org can do reaches that — **and tuning the timeout cannot help, because the requests are not timing out.** They are REFUSED by Render's edge in ~500 ms: 342 / 489 / 519 / 531 / 564 / 811 ms observed across the 13 failing jobs. Only `midday_check` ever showed a true 30 s hold.
 - **⚠️ A `curl --max-time 30` DOES boot the instance — REPRODUCED 2/2 — and it is still irrelevant.** Trials 2026-09-05 01:40 and 03:28: curl held the full 30 s (`http=000`), and the app answered 90 s later in 3.6 s / 3.9 s. A third trial was invalid — an Auto-Deploy triggered by a docs-only push had woken the service first, which is its own lesson about `On Commit`. **The curl result was never WRONG, it was IRRELEVANT**, and that is the trap: two clients, the same 30 s budget, opposite outcomes.
