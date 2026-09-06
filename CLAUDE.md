@@ -1,3 +1,19 @@
+## 📋 OPEN ITEMS — read first, tell the owner what is due
+
+> Kept per the workspace rule. `due · what · waiting on · resolves how`.
+> **Delete an item the moment it is done** — a stale list is worse than none.
+
+| due | what | waiting on | resolves |
+|---|---|---|---|
+| **2026-09-09** | **Did Tue 09-08 run UNATTENDED?** First normal trading day since the 09-05 trigger migration. `daily_run.yml` has not fired on its own schedule since **2026-09-04**. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` reports |
+| 2026-09-09 | **Evaluator report — the product question.** 17 matured picks, trailing SPY 0.80%/pick, 95% CI 26-69%. Not "bad" — *unknown*, and ~13 picks from knowable. | OWNER | more matured picks |
+| 2026-09-07 | Prescreener triggers: does cron-job.org's dispatch fire punctually? **Decide nothing before this data** — the two GH crons are correlated-late, so cutting one today removes the only trigger proven to serve a morning. | WATCH | Monday's run history |
+| ~2026-09-12 | `selfheal.healthy` red on frozen history (7-day window; cause fixed 09-06). | WATCH | **DO NOT CHASE** — self-clears |
+| ~2026-09-14 | `morning.cache_hit_rate` needs 5 trading days before it reports a rate. | WATCH | says "building baseline" until then |
+| open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
+
+---
+
 ## Self-evolving rules
 
 - After every session, if a new bug pattern, recurring mistake, or important constraint was discovered, add it to this file
