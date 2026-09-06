@@ -70,6 +70,8 @@ QUIET_BUT_HEALTHY = [
     "skipped: 0 no open positions, 0 paused/opted out; problems: 0 handler errored, "
     "0 no reply, 0 exception)",
     "[agent] Pre-screener: 5 ST, 5 LT candidates cached.",
+    "[agent] monthly_commentary: sent for September 2026 to 1 user(s).",
+    "[agent] Running monthly P&L digest for August 2026...",
     "[agent] vix_check: VIX = 14.5\n[agent] vix_check: VIX below 20 — no alert needed.",
 ]
 
@@ -83,6 +85,23 @@ class TestItCatchesTheRealSilentFailures:
         ("[agent] run_digest: ⚠️ DIGEST IS BROKEN for 1 of 3 user(s)", "the explicit alarm"),
         ("Traceback (most recent call last):\n  File x\nUnboundLocalError: nope", "a swallowed traceback"),
         ("PASS  storage.surfaces  · NOT VERIFIED this run — ReadTimeout", "a check that could not check"),
+        # 🔴 The real 2026-09-05 monthly_commentary output. Its first ever run.
+        ("[agent] monthly_commentary: Claude call failed, using template: Error code: 400 - "
+         "{'type': 'error', 'error': {'message': 'Your credit balance is too low to access "
+         "the Anthropic API.'}}", "a paid upstream API out of credit"),
+        ("[earnings_checker] Finnhub call failed (timeout). Skipping earnings check.",
+         "an upstream API dying and the mode carrying on"),
+        # ⚠️ CONSTRUCTED, not observed — and labelled so nobody mistakes it for
+        # a real log line. "credit balance" is kept as DEFENSIVE BREADTH: every
+        # observed instance also prints "call failed", so this marker adds
+        # nothing today. It earns its place because the billing error is
+        # high-severity (Claude backs pick selection, which has NO fallback —
+        # analyze_with_claude retries with Haiku then raises) and any future
+        # code path that surfaces it with different wording should still trip
+        # the alarm. Mutation-checking showed the marker was unpinned without
+        # this case, which is exactly how a redundant marker rots unnoticed.
+        ("[llm] request rejected: Your credit balance is too low to access the "
+         "Anthropic API.", "the billing error phrased WITHOUT 'call failed'"),
     ])
     def test_a_green_run_hiding_a_failure_is_caught(self, canary, monkeypatch, log, label):
         _wire(canary, monkeypatch, log)

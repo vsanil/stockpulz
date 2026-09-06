@@ -943,6 +943,20 @@ def check_storage_surfaces() -> None:
 _SILENT_FAILURE_MARKERS = (
     "traceback (most recent call last)",   # an exception was printed and swallowed
     "fetch failed",                        # vix_check's break, on every run for weeks
+    "call failed",                         # an UPSTREAM API died and the mode carried on
+    #   🔴 Added 2026-09-05 after monthly_commentary's first ever run printed
+    #   "Claude call failed, using template: ... Your credit balance is too low
+    #   to access the Anthropic API" and reported SUCCESS. The original marker
+    #   list matched "fetch failed" and not "call failed", so a Claude outage
+    #   degrading every AI path would have passed this check silently — a gap in
+    #   the very check built to find gaps, found two hours after building it.
+    #   🔎 Also catches earnings_checker's "Finnhub call failed ... Skipping
+    #   earnings check", which is a real silent skip.
+    "credit balance",                      # the paid-API-exhausted string itself
+    #   ⚠️ Deliberately separate from "call failed". Claude backs PICK SELECTION
+    #   (ai_analyzer.analyze_with_claude), which has no fallback — it retries
+    #   with Haiku then raises. A billing outage there is not a degraded feature,
+    #   it is no picks. Worth naming in its own right so the report says WHY.
     "handler errored for",                 # digest's break, suppressed by design.
     #   🚨 "handler errored FOR" — the trailing word is load-bearing. The
     #   HEALTHY run_digest summary line reads "problems: 0 handler errored,
