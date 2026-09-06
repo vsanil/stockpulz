@@ -742,12 +742,31 @@ Rules:
   the real `cron_last_*` values — which is the half that could not be checked locally, since
   there is no `.env` in this repo.
 - **🔴 SUPABASE "Server disconnected" ON READS — diagnosed and fixed 2026-09-06.**
-  🔎 **The diagnosis came from an ASYMMETRY, not from the error text.** Across six recent runs
-  each: `full_sweep` logged it in **4 of 6** (2-4 times per run), `canary` in **0 of 6**.
-  full_sweep is the long job that walks every endpoint, so a pooled keep-alive connection sits
-  idle long enough for the server to drop it and the next request on that dead socket fails.
-  **Not a Supabase outage** — a fresh connection works immediately, which is why the sweep still
-  passed every time. Two workflows disagreeing is worth more than either one's log.
+  🔎 **What is ESTABLISHED:** across recent runs, `full_sweep` logged it in **4 of 6** and
+  `canary` in **0 of 6**; the sweep passed every time regardless. So it is intermittent, confined
+  to the heaviest storage consumer, and non-fatal. Two workflows disagreeing is worth more than
+  either one's log.
+  🚨 **WHAT IS NOT ESTABLISHED — and an earlier version of this entry asserted it as fact.** It
+  said full_sweep is "the long job", so "a pooled keep-alive connection sits idle long enough for
+  the server to drop it". **Tested the same day and FALSIFIED**: disconnects do not correlate
+  with run duration at all —
+
+        93s -> 0     109s -> 2      72s -> 2
+        73s -> 4      95s -> 0      70s -> 3
+        67s -> 0                    72s -> 1
+
+  The longest run had 2 and the second-longest had 0. **The mechanism is UNKNOWN.** The most that
+  survives is "more storage operations, more chances to hit it" — which is a restatement of the
+  asymmetry, not an explanation of it.
+  🔑 **The retry is still correct, but as DEFENCE, not as a cure.** It is safe (reads only),
+  preserves the raise, and costs nothing on the happy path — all true whatever the cause. Do not
+  read it as "the disconnect problem is solved."
+  ⏳ **NOT CONFIRMED BY THE FIRST RUN ON THE FIX** (`34047114598`, 2026-09-06, 60/60 paths OK):
+  it logged ZERO disconnects and ZERO retries — but **5 of the 8 prior runs had >=1 disconnect,
+  so a clean run happens ~38% of the time with no fix at all.** One quiet run is what chance
+  predicts, not evidence. **The confirming observation is `transient on attempt 1/3` appearing in
+  a log while the run still passes** — that shows the retry actually caught one. Until then this
+  is untested in production.
   ✅ `SupabaseBackend._read_with_retry` — 3 attempts, 0.5s/1.0s backoff, on READS ONLY.
   ⚠️ **WRITES ARE DELIBERATELY NOT RETRIED HERE.** `write_user` is a compare-and-swap and its
   caller (`_row_mutate`) already owns the retry loop; re-driving a write from the storage layer
