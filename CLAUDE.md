@@ -618,43 +618,22 @@ Rules:
 - **Keep-warm runs on a WINDOW, not 24/7.** The REAL window lives on cron-job.org job `7746621`: **6 AM–6 PM ET, ET-anchored** (`America/New_York`, hours 6–17, `:00/:15/:30/:45`). ET-anchored on purpose — a UTC window drifts an hour against the 7 AM ET morning relay at every DST change. `keepwarm.yml` (`*/10 11-17 * * *`) is a UTC-only **safe subset** that sits inside that window under both EDT and EST; **if the cron-job.org window moves, move this too or it silently reinflates the bill** (the old 10:00–03:59 UTC schedule would have fired ~6×/day outside the paid window, ~46 h/mo for nothing). Render free tier spins down after ~15 min idle → a cold server makes the first `/start`/button wait ~30-60s, or drops the reply mid-boot ("bot not working"), which bit NEW users worst on a share-link click.
 - **🔴 The reasoning that made it 24/7 was wrong, and the error is worth remembering: "the repo is PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free" conflated two different budgets.** GH minutes are free; **Render instance-hours are not** — the free plan gives **750 h/month** and every ping wakes the service for ~15 min. Warming 24/7 costs **~744 h/month = 99% of the cap**, and exceeding it SUSPENDS the service until the next cycle. The window is now ~379 h. **Rule: when a scheduler is free, check whether the thing it pokes is also free.**
 - **✅ MIGRATED 2026-09-05 — all 17 cron-job.org jobs now POST to GitHub's API, not to this app.** The outage below is fixed at the configuration level. Verified job-by-job from a fresh page load: method POST, the dispatch URL, `Accept`/`Content-Type`/`Authorization`, the right `run_mode` in each body, and every original schedule + timezone untouched. Audit result: `github=17 render=0`.
-  ✅ **TRANSPORT PROVEN SIX TIMES (2026-09-05/06), FIVE of them from cron-job.org's OWN
-  client** — which is the half an agent cannot test for itself:
+  ✅ **TRANSPORT PROVEN TEN TIMES (2026-09-05/06), NINE of them from cron-job.org's OWN
+  client** — which is the half an agent cannot test for itself. Every one matched the response
+  `Date` to the run's `createdAt` to the second.
+  ⚠️ **Deliberately NOT enumerated any more.** An earlier version listed each run and the count
+  went stale three times in one evening as more were added — twice leaving contradictory
+  numbers inside the same block. **A hand-maintained tally in prose is a defect waiting to
+  happen; record the claim and the method, not the roster.**
+  🔎 The three worth remembering:
 
-        watchdog       my GitHub dispatch    204 -> run -> run-agent: success
-        midday_check   owner's TEST RUN      Date 00:38:57 GMT == run created 00:38:57Z
-        price_alerts   owner's TEST RUN      Date 00:44:15 GMT == run created 00:44:14Z
-        macro_alert    owner's TEST RUN      Date 00:46:04 GMT == run created 00:46:04Z
-        close_check    owner's TEST RUN      Date 01:18:40 GMT == run created 01:18:40Z
-        vix_check      owner's TEST RUN      Date 01:24:48 GMT == run created 01:24:48Z
-
-  🔑 **`vix_check` is the one that proves the most**, because it was BROKEN this morning. It
-  closes every layer at once — cron-job.org's client → GitHub API → dispatch → workflow → the
-  fixed `yf_utils` path → a real reading → a correct decision:
-
-        before   vix_check: VIX fetch failed: float() argument must be ... not 'Series'
-        after    vix_check: VIX = 14.5   ·   VIX below 20 — no alert needed
-
-  It also confirms `check_silent_failures` stays quiet here for the right reason: the marker it
-  matches (`fetch failed`) is genuinely ABSENT, not suppressed.
-
-  ⏹️ **Six is enough — stop here.** Every remaining job is identical in every verifiable
-  respect (same token hash, same URL, same headers, same body shape) and differs only in a
-  `run_mode` string already validated against `run_modes.py`. A SEVENTH TEST RUN adds no
-  information and IS a live production trigger.
-
-  🔎 **`macro_alert` is the safest of the six to REPEAT** — it stopped on its OWN schedule
-  guard ("skipping — not Mon–Thu"), so it declines to act for a stated reason rather than by
-  luck. `midday_check`, `price_alerts` and `close_check` were quiet only because the market was
-  closed, and `close_check` on a weekday fans out trade closes to every user. **When you need a
-  safe TEST RUN, pick a mode with a self-guard** (`macro_alert`, or `watchdog` on a weekend).
-  🔎 `X-RateLimit-Used` climbed 53 -> 65 -> 78 across three of them against a 5000/hr
-  authenticated budget — successive real calls, nowhere near a constraint. ⚠️ It then read 12
-  again on `close_check`: that is the HOURLY WINDOW ROLLING OVER (`X-RateLimit-Reset` changed
-  too), not a different credential. Do not read a reset counter as a different token.
-  ⚠️ `close_check` was safe only by CALENDAR — on a weekday with open positions it fans out
-  trade closes and stop alerts to every user, because `owner_only` is empty. It is on the
-  do-not-TEST-RUN list and stays there.
+        vix_check     PROVES THE MOST — it was broken that morning, so one run closes every
+                      layer: cron-job.org client -> GitHub API -> dispatch -> workflow ->
+                      the fixed yf_utils path -> "VIX = 14.5" -> correctly no alert.
+        digest        the other morning breakage, verified on an UNCONTAINED fan-out:
+                      "delivered to 1 of 2 user(s) ... 0 handler errored, 0 no reply".
+        macro_alert   SAFEST TO REPEAT — declines on its own schedule guard ("not Mon-Thu"),
+                      not by luck. Prefer a self-guarding mode when you need a safe test.
 
   🔑 **The response Date matching the run's `createdAt` to the second is the proof**, not the
   headers. `X-RateLimit-Limit: 5000` does show the request was AUTHENTICATED (anonymous is 60)
@@ -673,11 +652,24 @@ Rules:
   body.** It is not a dry run and there is no containment. `TEST RUN` on `morning` sends the
   briefing to EVERY user immediately, and delivery is not idempotent, so they get a duplicate
   at the wrong hour. `weekly` additionally spends Claude credits and overwrites `picks.json`.
-  ⚠️ **Both jobs tested on 2026-09-05 sent nothing only because the MARKET WAS CLOSED**
-  (`midday_check`: "price fetch returned empty"; `price_alerts`: "No price alerts triggered").
-  That was the calendar, not a safeguard. The same two clicks on a weekday reach every user.
-  🔎 **Safe to TEST RUN on a weekend:** `watchdog` (returns immediately on a non-trading day)
-  and `macro_alert` (self-skips outside Mon-Thu). Everything else can deliver.
+  🚨 **WHAT THE UNCONTAINED TEST RUNS ACTUALLY COST on 2026-09-06 — this is not theoretical.**
+  `weekly` ran the FULL morning pipeline: real Claude analysis, `save_picks()` overwriting
+  production picks, a morning briefing AND weekly recap to 3 users, and **9 auto-set price
+  alerts** — at 8:30 PM on a Saturday. `confirmation` and `friday_wrap` also fanned out.
+  ⚠️ The early ones (`midday_check`, `price_alerts`, `close_check`) sent nothing only because
+  the MARKET WAS CLOSED — the calendar, not a safeguard. The same clicks on a weekday reach
+  every user.
+  ⚠️ **`friday_wrap` has NO weekday guard at all.** It relies entirely on its cron
+  (`0 23 * * 5`) to fire only on Fridays, so a manual trigger sends a "Friday evening wrap-up"
+  on any day. It did, on a Saturday.
+  🔎 **Safe to TEST RUN on a weekend:** only modes with a SELF-guard — `watchdog` (returns on a
+  non-trading day) and `macro_alert` (self-skips outside Mon-Thu). Everything else either
+  delivers or is quiet by luck.
+  ⏹️ **TEN confirmations is past enough — stop.** Every remaining job is identical in every
+  verifiable respect (same token hash, same URL, same headers, same body shape) and differs
+  only in a `run_mode` string already validated. Another TEST RUN adds NO information and IS a
+  live production trigger. `morning` is the worst of the untested ones: it broadcasts picks to
+  everyone, spends Claude credits, and overwrites `picks.json`.
   🔎 **To test a MODE safely, do not use TEST RUN at all** — dispatch on GitHub instead:
   `gh workflow run daily_run.yml -f run_mode=<mode> -f owner_only=1`. Two different layers:
   TEST RUN exercises the TRANSPORT (and reaches users); the GitHub dispatch exercises the
@@ -1020,9 +1012,14 @@ Both had `timeout=25` against a **54.9 s** cold start. The instant nothing sched
         gh workflow run daily_run.yml -f run_mode=vix_check -f owner_only=1
         # then grep the log for  'allowed_users': [...]   — and check the line EXISTS
 
-  🔎 **Open thread:** the 2026-09-06 `weekly` run said "Sending … to **3 user(s)**" while
-  `allowed_users` held two. With the removal it holds one. If a future fan-out still reports 3,
-  recipients are coming from somewhere other than `allowed_users` — pull that thread then.
+  ✅ **RESOLVED, and it was correct behaviour.** Recipient counts read one HIGHER than
+  `allowed_users` (3 vs 2, then 2 vs 1) because **`get_allowed_users()` always prepends
+  `TELEGRAM_CHAT_ID`** if it is not already in the list:
+
+        if owner and owner not in users: users.insert(0, owner)
+
+  So the owner is a SEPARATE chat_id from the `8602468968` entry in the allowlist. Nothing to
+  fix — but worth knowing before anyone reads "2 user(s)" against a one-entry list as a leak.
 - **`telegram_api._skip_test_user()` short-circuits every send** (send_message / send_inline_keyboard / send_photo) to a test id. Required: a dead chat_id returns HTTP 400 "chat not found", which misses the 429/parse-entity branches and burns ~10s of retries **per send** across 37 per-user sites plus every fired alert — and would log "chat not found" forever, masking a REAL user who blocked the bot. `config_manager.is_test_user()` is the one definition (env+constant, no Gist read, safe on the hot path).
 - **🔴 The state file MUST stay per-account** (`_state_file()` → `synthetic_state_{chat_id}.json`). Before the split there was ONE global `synthetic_state.json`; reusing it across accounts makes `manage` look up account A's tickers in account B's log, not find them, and **silently erase them from state — permanently orphaning real positions that then never sell at target or stop** (12 real + 20 paper were live when this was caught). The owner's legacy `synthetic_state.json` is **wound down, never added to**: `phase_manage` manages the test account AND the legacy owner state, so the switch can't orphan them. Guard: `TestTestAccountSeparation`.
 - **`open` paper-buys EVERY pick** (`_MAX_PAPER=20`) + up to 4 real. Paper is free and each pick is one independent sample — that is what makes the evaluation reach a meaningful N.
