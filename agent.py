@@ -627,6 +627,48 @@ def _screener_cache_with_retry(attempts: int = 3, delay_s: int = 4) -> dict | No
     return None
 
 
+# How many mornings of cache outcomes to keep. 20 covers a month of trading
+# days, which is enough for a rate without turning the config blob into a log.
+CACHE_HISTORY_MAX = 20
+
+
+def _record_morning_cache_outcome(cache: dict | None, now_et: datetime) -> None:
+    """Record whether the morning run found a usable screener cache.
+
+    🔴 WHY. MEASURED 2026-09-06 over six sampled mornings: TWO ran the full live
+    600-ticker screen because the cache was stale, turning a 2m17s morning into
+    12m32s. Picks still went out — the fallback works — so nothing ever reported
+    it. **A silent degradation behind a working fallback is invisible by
+    construction**, which is the same shape as the vix_check and digest outages.
+
+    🔑 Stamped here rather than parsed out of GitHub logs: the log line
+    ("Screener cache is ... too stale") is printed by config_manager and would
+    tie a monitor to a log format nobody owns. A stamp is data.
+    ⚠️ Keyed by ET DATE and overwritten, not appended, so a forced re-run of the
+    morning cannot double-count one day into the rate.
+    ⚠️ Never raises. A monitoring write must not be able to cost users their
+    picks — same contract as `_log_cron_run`.
+    """
+    try:
+        entry = {"date": now_et.date().isoformat(), "hit": bool(cache)}
+        if cache:
+            try:
+                from datetime import datetime as _dtc
+                age = (datetime.now(timezone.utc)
+                       - _dtc.fromisoformat(cache["cached_at"]))
+                entry["age_h"] = round(age.total_seconds() / 3600, 2)
+            except Exception:
+                pass
+        hist = [h for h in (get_config().get("morning_cache_history") or [])
+                if isinstance(h, dict) and h.get("date") != entry["date"]]
+        hist.append(entry)
+        update_config("morning_cache_history", hist[-CACHE_HISTORY_MAX:])
+        print(f"[agent] Screener cache outcome recorded: "
+              f"{'HIT' if entry['hit'] else 'MISS'} for {entry['date']}.")
+    except Exception as exc:
+        print(f"[agent] Could not record screener cache outcome: {exc}")
+
+
 def _can_run_live_screener() -> bool:
     """
     The full 600-ticker screener needs more RAM than Render's 512MB instance
@@ -721,6 +763,7 @@ def run_morning(config: dict, now_et: datetime):
 
             # ── Stock screener: use midnight cache if fresh, else run live ────
             cache = _screener_cache_with_retry()
+            _record_morning_cache_outcome(cache, now_et)
 
             if cache:
                 print("[agent] Using midnight screener cache — skipping live screener.")

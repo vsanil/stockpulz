@@ -848,9 +848,26 @@ Rules:
 
   The fallback WORKS — picks still went out, which is why this never surfaced as a failure. It
   costs ~10 min of delay on the morning briefing and a full extra screen against Yahoo/Finnhub.
-  ⚠️ **Nothing tracks the cache-miss rate.** 33% of the sample ran a live screen and no monitor
-  says so. Same family as the `cron.all_modes_firing` blind spot — a silent degradation with a
-  working fallback in front of it.
+  ✅ **NOW MONITORED (2026-09-06): `morning.cache_hit_rate`.** `run_morning` stamps each trading
+  day's outcome into `morning_cache_history` (ET-date keyed, overwritten not appended so a
+  `force=true` re-run cannot double-count; capped at 20; never raises — a monitoring write must
+  not cost users their picks). The canary turns it into a rate.
+  ⚠️ **THE THRESHOLD IS 50% MISS, NOT 0%, AND THAT IS THE DESIGN.** The observed ~33% is GitHub
+  Actions scheduler lateness, correlated across both crons because they share one queue — **no
+  code change fixes it**, so a check that reddens on it would be permanently red and therefore
+  permanently ignored. What earns an alert is the cache failing MOST mornings, i.e. the
+  prescreener pipeline itself has broken. Pinned by `test_the_observed_33pc_miss_rate_PASSES`.
+  🔑 **The rate prints on the PASS line too — that is most of the value.** Failing is the smaller
+  half; making a silent degradation VISIBLE is the point.
+  🔎 Owner-only (`owner_only_checks.py`): self-heal cannot fix GitHub's scheduler, and its only
+  available "fix" would be to loosen the threshold, i.e. delete the signal.
+  🔎 Below 5 recorded mornings it reports the count and passes — no rate exists yet. Same
+  reasoning as `since=` in `_MODE_SCHEDULE`, not an excuse.
+  ⚠️ **Unfixed, noticed in passing:** `_screener_cache_with_retry` retries 3x with 4 s sleeps, but
+  `load_screener_cache()` returns None for BOTH a transient Gist failure AND a genuinely stale
+  cache — which cannot change between attempts. So every real miss burns 3 Gist reads and 8 s for
+  a foregone conclusion (visible as the triple "too stale" line in any miss log). Small, real,
+  and left alone deliberately: it sits on the morning delivery path.
   ⏳ **NOT YET OBSERVABLE: the cron-job.org prescreener dispatch.** Before the 2026-09-05 cutover
   it relayed through a sleeping Render and 503'd; after it, the first weekday chance is **Monday
   2026-09-07**. cron-job.org is punctual to the second, so if it fires it is strictly the best of
