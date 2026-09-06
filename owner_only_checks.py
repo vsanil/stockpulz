@@ -43,6 +43,11 @@ OWNER_ONLY_CHECKS: frozenset[str] = frozenset({
     # this was built to provide. That is the worst available outcome, so this
     # one goes to the owner too.
     "cron.all_modes_firing",
+
+    # The cause is GitHub Actions scheduler lateness, which no code change can
+    # fix — and self-heal's only available "fix" would be to loosen the
+    # threshold, i.e. delete the signal. Same argument as cron.all_modes_firing.
+    "morning.cache_hit_rate",
 })
 
 

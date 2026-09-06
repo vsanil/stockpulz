@@ -552,6 +552,67 @@ def check_cron_freshness() -> None:
                                     + stale)))
 
 
+# Below this many recorded mornings the rate is not a number yet.
+_CACHE_MIN_SAMPLES = 5
+# Alert only when the cache is failing to serve the morning MOST of the time.
+_CACHE_MAX_MISS_RATE = 0.50
+
+
+def check_morning_cache_hit_rate() -> None:
+    """Is the midnight prescreener actually serving the morning run?
+
+    🔴 MEASURED 2026-09-06: 2 of 6 sampled mornings ran the full live
+    600-ticker screen because the cache was stale — 12m32s instead of 2m17s,
+    plus a second pass against Yahoo/Finnhub. **Picks still went out**, so the
+    workflow was green, the users were served, and nothing anywhere reported the
+    degradation. That is the same silent-failure shape as vix_check and digest.
+
+    ⚠️ THE THRESHOLD IS 50%, NOT 0%, AND THAT IS THE WHOLE DESIGN. The observed
+    ~33% miss rate is caused by GitHub Actions running its scheduled prescreener
+    1.6-12 h late, and lateness is CORRELATED across both crons because they
+    share one queue. **No code change fixes that**, so a check that reddens on it
+    would be permanently red and permanently ignored. What IS worth an alert is
+    the cache failing to serve the morning MOST of the time, which means the
+    prescreener pipeline itself has broken — the case that would otherwise show
+    up only as "the morning briefing got slower and nobody noticed".
+    🔑 The number is printed on the PASS line too. Making a silent degradation
+    VISIBLE is most of the value here; failing on it is the smaller half.
+    🔎 Below `_CACHE_MIN_SAMPLES` mornings there is genuinely no rate to judge,
+    so it reports the count and passes — an empty set, not an excuse. Same
+    reasoning as `since=` in `_MODE_SCHEDULE`.
+    """
+    from config_manager import get_config
+    try:
+        hist = [h for h in (get_config().get("morning_cache_history") or [])
+                if isinstance(h, dict) and "hit" in h]
+    except Exception as exc:
+        _check("morning.cache_hit_rate", False, f"could not read config: {exc}")
+        return
+
+    if len(hist) < _CACHE_MIN_SAMPLES:
+        _check("morning.cache_hit_rate", True,
+               f"building baseline — {len(hist)}/{_CACHE_MIN_SAMPLES} mornings recorded "
+               f"(instrumented 2026-09-06)")
+        return
+
+    window = hist[-10:]
+    hits = [h for h in window if h.get("hit")]
+    rate = len(hits) / len(window)
+    misses = [h.get("date", "?") for h in window if not h.get("hit")]
+    ages = [h["age_h"] for h in hits if isinstance(h.get("age_h"), (int, float))]
+    avg = f", avg cache age {sum(ages)/len(ages):.1f}h" if ages else ""
+    ok = (1 - rate) <= _CACHE_MAX_MISS_RATE
+    _check("morning.cache_hit_rate", ok,
+           f"cache served {len(hits)}/{len(window)} recent mornings "
+           f"({rate*100:.0f}%){avg}"
+           + (f"; missed {', '.join(misses)}" if misses else ""),
+           fail_detail=(f"PRESCREENER IS NOT SERVING THE MORNING — only "
+                        f"{len(hits)}/{len(window)} mornings hit the cache. Each miss "
+                        f"runs the full 600-ticker screen live (~10 min slower, extra "
+                        f"Yahoo/Finnhub load). Check the prescreener actually ran and "
+                        f"landed before 11:00 UTC; missed {', '.join(misses)}."))
+
+
 def check_synthetic_user() -> None:
     """Did the synthetic-user bot actually OPEN positions today?
 
@@ -1570,7 +1631,7 @@ def main() -> int:
 
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
                check_backtest_math, check_price_guard, check_storage_headroom,
-               check_cron_delivery, check_cron_freshness,
+               check_cron_delivery, check_cron_freshness, check_morning_cache_hit_rate,
                check_selfheal_health, check_data_completeness,
                check_weekly_relay,
                check_synthetic_user,
