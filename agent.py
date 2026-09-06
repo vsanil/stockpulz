@@ -4243,8 +4243,6 @@ def main():
     elif mode == "monthly_commentary":
         run_monthly_commentary()
         run_monthly_pnl_digest()
-    elif mode == "recap":
-        run_recap()
     elif mode == "watchdog":
         run_watchdog()
     else:
@@ -4340,46 +4338,6 @@ def run_digest():
     except Exception as e:
         print(f"[agent] run_digest error: {e}")
 
-
-def run_recap():
-    """
-    4:30 PM ET weekday — send each user a /recap-style position check-in via Telegram.
-    Broadcasts to all allowed users who have open positions.
-    """
-    _log_cron_run("recap")
-    print("[agent] run_recap: starting")
-    try:
-        from config_manager import get_allowed_users, load_user_trade_log
-        from telegram_api import send_message
-        from bot_commands import _parse_and_execute
-
-        # ⚠️ _all_recipients(), NOT get_allowed_users() — same containment
-        # gap as run_digest had: get_allowed_users() ignores OWNER_ONLY=1,
-        # so a manual test trigger would broadcast to every user. `recap`
-        # is not in webhook._VALID_MODES today, so nothing can reach it —
-        # fixed anyway, because "unreachable" is a property of the CURRENT
-        # trigger list, not of this function.
-        users = _all_recipients()
-        if not users:
-            print("[agent] run_recap: no allowed users")
-            return
-
-        sent = 0
-        for chat_id in users:
-            try:
-                log = load_user_trade_log(chat_id)
-                if not log.get("open"):
-                    continue
-                reply = _parse_and_execute("RECAP", original="/recap", chat_id=chat_id)
-                if reply:
-                    send_message(reply, chat_id=chat_id)
-                    sent += 1
-            except Exception as exc:
-                print(f"[agent] run_recap: failed for {chat_id}: {exc}")
-
-        print(f"[agent] run_recap: sent to {sent} user(s).")
-    except Exception as e:
-        print(f"[agent] run_recap error: {e}")
 
 
 def compute_pick_streaks(weekly_picks: dict) -> dict:
