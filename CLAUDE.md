@@ -992,6 +992,37 @@ Both had `timeout=25` against a **54.9 s** cold start. The instant nothing sched
 ### Test-account split + pick evaluation (Jul 29, 2026 — owner's decision)
 - **The synthetic bot trades on a VIRTUAL test account**, not the owner's: `_TRADE_ID = SYNTHETIC_CHAT_ID or config_manager.DEFAULT_TEST_CHAT_ID ("900000001")`. Reports still DM `_OWNER_ID = TELEGRAM_CHAT_ID`. The id is a storage identity only — no real Telegram user behind it.
 - **The test id is deliberately NOT in `allowed_users`.** That single fact gives the exclusions for free: no broadcasts, and it's excluded from `build_community_stats` / `get_performance_context` (both iterate allowed users) — so **a robot's mechanical fills can never steer real users' picks or inflate the community numbers they see.** Do not "helpfully" add it to the allowlist.
+- **🔴 A PHANTOM ID SAT IN `allowed_users` FOR AN UNKNOWN TIME AND BROKE EVERY FAN-OUT
+  (found + removed 2026-09-06).** `999888777` was in the allowlist and is **not** a test id —
+  `get_test_users()` returns only `{900000001, 900000010, 900000011}` (DEFAULT_TEST_CHAT_ID +
+  ARM_CHAT_IDS + `$SYNTHETIC_CHAT_ID`, and that env var is **not passed to `daily_run.yml`**).
+  So `is_test_user("999888777")` was False, `_skip_test_user` did not skip it, and **every
+  broadcast attempted a real Telegram send to a dead chat_id**:
+
+        confirmation:  1 user(s) had a failed send: ['999888777']
+        weekly_recap:  1 user(s) had a failed send: ['999888777']
+        friday_wrap:   1 user(s) had a failed send: ['999888777']
+
+  🔑 **The hazard is the one the `_skip_test_user` docstring already names** — a permanent
+  "chat not found" in the logs **masks a REAL user who blocked the bot**. The guard existed and
+  simply did not cover this id, because the rule below is written about the SYNTHETIC id while
+  nothing watched for a stale or mistyped one.
+  ✅ Fixed with the purpose-built `/removeuser 999888777` (admin-gated, owner-protected, and it
+  touches `allowed_users` ONLY — trades and paper data are untouched, so it is reversible with
+  `/adduser`). Verified: `'allowed_users': ['8602468968']`.
+  ⚠️ **HOW TO VERIFY THIS, because two obvious checks are both wrong.**
+  `owner_only=1` NARROWS the recipient list, so the "failed send" line cannot appear whether or
+  not the id was removed — that check passes for the wrong reason. And a mode that writes no
+  config (e.g. `watchdog` on a weekend) prints **no config dump at all**, so grepping for the
+  id returns 0 because nothing was printed. **Use a mode that stamps `cron_last_*`** (e.g.
+  `vix_check`) and assert the dump IS present before reading the list:
+
+        gh workflow run daily_run.yml -f run_mode=vix_check -f owner_only=1
+        # then grep the log for  'allowed_users': [...]   — and check the line EXISTS
+
+  🔎 **Open thread:** the 2026-09-06 `weekly` run said "Sending … to **3 user(s)**" while
+  `allowed_users` held two. With the removal it holds one. If a future fan-out still reports 3,
+  recipients are coming from somewhere other than `allowed_users` — pull that thread then.
 - **`telegram_api._skip_test_user()` short-circuits every send** (send_message / send_inline_keyboard / send_photo) to a test id. Required: a dead chat_id returns HTTP 400 "chat not found", which misses the 429/parse-entity branches and burns ~10s of retries **per send** across 37 per-user sites plus every fired alert — and would log "chat not found" forever, masking a REAL user who blocked the bot. `config_manager.is_test_user()` is the one definition (env+constant, no Gist read, safe on the hot path).
 - **🔴 The state file MUST stay per-account** (`_state_file()` → `synthetic_state_{chat_id}.json`). Before the split there was ONE global `synthetic_state.json`; reusing it across accounts makes `manage` look up account A's tickers in account B's log, not find them, and **silently erase them from state — permanently orphaning real positions that then never sell at target or stop** (12 real + 20 paper were live when this was caught). The owner's legacy `synthetic_state.json` is **wound down, never added to**: `phase_manage` manages the test account AND the legacy owner state, so the switch can't orphan them. Guard: `TestTestAccountSeparation`.
 - **`open` paper-buys EVERY pick** (`_MAX_PAPER=20`) + up to 4 real. Paper is free and each pick is one independent sample — that is what makes the evaluation reach a meaningful N.
