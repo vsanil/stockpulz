@@ -416,6 +416,142 @@ def check_cron_delivery() -> None:
            f"picks._saved_date={_saved} (expected ≥{exp})")
 
 
+# ── Every mode's expected cadence, in ET ──────────────────────────────────────
+# 🔴 WHY THIS EXISTS. Every one of the 19 modes calls `agent._log_cron_run(mode)`
+# as its FIRST statement, writing `cron_last_<mode>`. The data to prove each
+# trigger still fires has existed all along — and the canary read exactly TWO of
+# them (`delivery.morning`, `cron_last_weekly`). So when `vix_check` and `digest`
+# broke, both stayed broken for WEEKS behind green workflows, and the Sept 5
+# transport outage silently took all 17 triggers down at once.
+#
+# 🔑 What this measures is DISPATCH, not delivery — deliberately, and the name
+# says so. `cron_last_*` is stamped before any early return, so it answers "did
+# the trigger reach the agent", which is precisely the failure that happened.
+# `delivery.morning` still answers the stronger "did users get it" question for
+# the one mode where that is worth a separate check. Do not conflate them.
+#
+#   pred     — does this ET date have a scheduled run?
+#   done_by  — (hour, minute) ET by which that day's run should have finished
+#   since    — ISO date the trigger began existing; earlier dates are not misses
+_MODE_SCHEDULE: dict[str, dict] = {
+    # weekday session modes, in the order they fire
+    "prescreener":  dict(pred=lambda d: d.weekday() < 5, done_by=(10, 0)),
+    "morning":      dict(pred=lambda d: d.weekday() < 5, done_by=(7, 45)),
+    "news_check":   dict(pred=lambda d: d.weekday() < 5, done_by=(13, 30)),
+    "premarket":    dict(pred=lambda d: d.weekday() < 5, done_by=(9, 0)),
+    # 🔎 `since` because run_watchdog never stamped cron_last_* until 2026-09-06.
+    # Without it this check would FAIL on its first run for a mode that is
+    # working perfectly — the exact cry-wolf failure it is built to avoid.
+    "watchdog":     dict(pred=lambda d: d.weekday() < 5, done_by=(9, 30),
+                         since="2026-09-07"),
+    "digest":       dict(pred=lambda d: d.weekday() < 5, done_by=(9, 45)),
+    "vix_check":    dict(pred=lambda d: d.weekday() < 5, done_by=(10, 15)),
+    "confirmation": dict(pred=lambda d: d.weekday() < 5, done_by=(11, 30)),
+    "midday_check": dict(pred=lambda d: d.weekday() < 5, done_by=(12, 45)),
+    "price_alerts": dict(pred=lambda d: d.weekday() < 5, done_by=(15, 30)),
+    "close_check":  dict(pred=lambda d: d.weekday() < 5, done_by=(15, 45)),
+    "pre_earnings": dict(pred=lambda d: d.weekday() < 5, done_by=(16, 15)),
+    "eod_summary":  dict(pred=lambda d: d.weekday() < 5, done_by=(16, 45)),
+    "macro_alert":  dict(pred=lambda d: d.weekday() < 4, done_by=(17, 30)),
+    "friday_wrap":  dict(pred=lambda d: d.weekday() == 4, done_by=(19, 30)),
+    "weekly":       dict(pred=lambda d: d.weekday() == 5, done_by=(10, 0)),
+    "week_ahead":   dict(pred=lambda d: d.weekday() == 6, done_by=(14, 0)),
+    # 🔎 Both of these were wired up on 2026-09-05 and had NEVER run — the modes
+    # and the dispatch existed, the triggers did not. `since` is what keeps that
+    # from reading as a failure before their first scheduled fire; it is a fact
+    # about when the cron was created, NOT a tolerance.
+    "monthly_commentary": dict(pred=lambda d: d.day == 1,
+                               done_by=(10, 0), since="2026-09-05"),
+    "tax_harvest":        dict(pred=lambda d: d.day in (1, 15) and d.month in (11, 12),
+                               done_by=(11, 0), since="2026-09-05"),
+}
+
+
+def _expected_run_dates(spec: dict, now_et, back: int = 2) -> list:
+    """The last `back` dates this mode should have COMPLETED by `now_et`.
+
+    Walks backwards day by day. Today counts only once `done_by` has passed;
+    every earlier matching date counts outright. Bounded at 800 days so a
+    never-scheduled predicate terminates instead of spinning."""
+    import datetime as dt
+    pred, (dh, dm) = spec["pred"], spec["done_by"]
+    floor = spec.get("since")
+    out, d, today = [], now_et.date(), now_et.date()
+    for _ in range(800):
+        if len(out) >= back:
+            break
+        if pred(d) and (d < today or (now_et.hour, now_et.minute) >= (dh, dm)):
+            if floor and d.isoformat() < floor:
+                break          # before this trigger existed — not a miss
+            out.append(d)
+        d -= dt.timedelta(days=1)
+    return out
+
+
+def check_cron_freshness() -> None:
+    """Is EVERY mode's trigger still firing? — the 17-mode blind spot, closed.
+
+    ⚠️ TOLERANCE IS ONE MISSED RUN, NOT ZERO, and that is a deliberate trade.
+    A single miss is jitter: GitHub Actions runs 1.6-6 h late, a cron-job.org
+    request can 503, and a market holiday legitimately skips the six
+    session-bound modes. TWO consecutive misses is a broken trigger — and two
+    consecutive US market holidays do not exist, so the holiday case can never
+    reach the failing branch on its own.
+
+    🔑 The alternative (fail on one miss) was rejected because a check that
+    cries wolf is worse than no check: it is the reason people stop reading
+    them. That is the same call made for the `""` digest sentinel."""
+    import datetime as dt
+    import pytz
+    from config_manager import get_config
+
+    now_et = dt.datetime.now(pytz.timezone("America/New_York"))
+    et = pytz.timezone("America/New_York")
+    try:
+        cfg = get_config()
+    except Exception as exc:
+        _check("cron.all_modes_firing", False, f"could not read config: {exc}")
+        return
+
+    stale, never, ok_n, pending = [], [], 0, []
+    for mode, spec in sorted(_MODE_SCHEDULE.items()):
+        expected = _expected_run_dates(spec, now_et, back=2)
+        if not expected:
+            pending.append(mode)          # trigger exists but has not been due yet
+            print(f"      cron.{mode}: no scheduled run due yet "
+                  f"(since {spec.get('since')})")
+            continue
+        raw = str(cfg.get(f"cron_last_{mode}") or "")
+        if not raw:
+            never.append(mode)
+            print(f"      cron.{mode}: NEVER — expected ≥{expected[-1]}")
+            continue
+        try:
+            stamp = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = pytz.utc.localize(stamp)
+            seen = stamp.astimezone(et).date()
+        except Exception:
+            stale.append(f"{mode} (unparseable stamp {raw!r})")
+            continue
+        # `expected[-1]` is the SECOND-most-recent due date: one miss tolerated.
+        floor = expected[-1]
+        if seen < floor:
+            stale.append(f"{mode} last={seen} expected≥{expected[0]}")
+            print(f"      cron.{mode}: STALE last={seen} expected≥{expected[0]}")
+        else:
+            ok_n += 1
+            print(f"      cron.{mode}: ok last={seen}")
+
+    bad = never + stale
+    detail = (f"{ok_n}/{len(_MODE_SCHEDULE)} modes firing on schedule"
+              + (f"; {len(pending)} not yet due ({', '.join(pending)})" if pending else ""))
+    _check("cron.all_modes_firing", not bad, detail,
+           fail_detail=("TRIGGER(S) DEAD — "
+                        + "; ".join((["never ran: " + ", ".join(never)] if never else [])
+                                    + stale)))
+
+
 def check_synthetic_user() -> None:
     """Did the synthetic-user bot actually OPEN positions today?
 
@@ -1434,7 +1570,8 @@ def main() -> int:
 
     for fn in (check_picks_integrity, check_live_prices, check_sizing,
                check_backtest_math, check_price_guard, check_storage_headroom,
-               check_cron_delivery, check_selfheal_health, check_data_completeness,
+               check_cron_delivery, check_cron_freshness,
+               check_selfheal_health, check_data_completeness,
                check_weekly_relay,
                check_synthetic_user,
                check_position_integrity,

@@ -260,6 +260,64 @@ def _log_cron_run(mode: str) -> None:
     except Exception as exc:
         print(f"[agent] cron log failed for {mode}: {exc}")
 
+# ── Modes that are DEFINED BY the stock trading session ───────────────────────
+# 🔴 Only 3 of the 19 modes knew about market holidays (`prescreener`, `morning`,
+# `watchdog`). The other 16 ran against a closed market, and that is NOT harmless:
+# `run_morning` still calls `save_picks()` for crypto on a holiday, so
+# `load_picks()` is non-empty and `eod_summary`/`confirmation` send a full
+# wrap-up about stock prices that never moved. `vix_check` reads the stale prior
+# close and can re-alert on it. Thanksgiving and Christmas are both WEEKDAYS.
+#
+# 🔑 The set is deliberately NARROW: a mode belongs here only if its own
+# docstring defines it by the session ("45 min before market open", "after
+# market close", "during market hours"). Everything else stays ON — news,
+# macro events, earnings and price alerts are all still real on a holiday, and
+# CRYPTO TRADES 24/7, so `price_alerts`, `news_check`, `digest` and `morning`
+# must keep running. Widening this set silently turns off features.
+#
+# ⚠️ The gate covers WEEKENDS as well as holidays. None of these modes has a
+# weekend cron, so that costs nothing scheduled — but a cron-job.org TEST RUN is
+# a real production run with no containment, and on 2026-09-06 several of these
+# were fired on a Saturday and sent nothing only because the market happened to
+# be closed. That was the calendar, not a safeguard. Now it is a safeguard.
+SESSION_BOUND_MODES = frozenset({
+    "premarket",      # "fires 45 min before market open"
+    "confirmation",   # compares live prices against the morning entry
+    "midday_check",   # "catch big moves during market hours"
+    "close_check",    # "3:30 PM run"
+    "eod_summary",    # "after market close"
+    "vix_check",      # VIX does not update; a stale >20 can re-alert
+})
+
+
+def _calendar_block_reason(mode: str, now_et: datetime) -> str:
+    """Why `mode` must not run right now, or "" to proceed.
+
+    🔑 Split out of main() so it is testable on an ARBITRARY date. Inlined, the
+    weekend branch could only ever be exercised on the day the suite happened to
+    run — a test that passes on Sunday and proves nothing on Monday.
+    """
+    if mode not in SESSION_BOUND_MODES:
+        return ""
+    if MOCK_DATA or _force_calendar_run():
+        return ""
+    d = now_et.date()
+    if d.weekday() >= 5:
+        return "weekend"
+    if is_market_holiday(d):
+        return get_holiday_name(d) or "US holiday"
+    return ""
+
+
+def _force_calendar_run() -> bool:
+    """Escape hatch for the calendar gates (holiday/weekend and friday_wrap).
+
+    Deliberately its OWN variable rather than reusing FORCE_MORNING, which
+    means something different (bypass the once-per-day duplicate guard).
+    """
+    return os.environ.get("FORCE_CALENDAR_RUN", "").strip().lower() in ("1", "true", "yes")
+
+
 CRYPTO_RETRY_DELAYS = [15, 30, 60, 120]   # seconds between retries (4 attempts after first)
 
 VIX_ALERT_THRESHOLD = 25   # warn when VIX exceeds this level
@@ -1522,6 +1580,22 @@ def run_friday_wrap():
     with unrealised P&L if live prices are available.
     """
     _log_cron_run("friday_wrap")
+
+    # 🔴 friday_wrap had NO weekday guard at all — it relied entirely on its cron
+    # (`0 23 * * 5`) firing only on Fridays. A cron-job.org TEST RUN is a REAL
+    # production run with no containment, so on 2026-09-06 this sent every user
+    # a "Friday evening wrap-up" on a SATURDAY.
+    # 🔑 A mode that names a day inside its own MESSAGE must check that day
+    # itself. A schedule is a convention, not a guard: every manual trigger,
+    # relay and backup path walks straight past it.
+    # 🔎 Logged BEFORE the guard on purpose — `cron_last_friday_wrap` must record
+    # that the mode was dispatched, which is what `cron.all_modes_firing` in the
+    # canary reads. Guarding first would make a working trigger look dead.
+    if datetime.now(ET).weekday() != 4 and not MOCK_DATA and not _force_calendar_run():
+        print("[agent] Not Friday — skipping friday_wrap "
+              "(set FORCE_CALENDAR_RUN=1 to override).")
+        return
+
     print("[agent] Running Friday evening wrap-up...")
 
     now_et = datetime.now(ET)
@@ -4153,6 +4227,11 @@ def run_watchdog():
     Checks whether the morning run was logged today. If it wasn't, and today is
     a trading day, sends an admin-only alert so the owner knows picks were missed.
     """
+    # 🔴 This was the ONE mode that never stamped `cron_last_*` — so the job that
+    # watches the morning run was itself the only unwatchable job in the system.
+    # It must be the FIRST statement: the stamp records DISPATCH, and the
+    # non-trading-day return below is a legitimate outcome, not a missed run.
+    _log_cron_run("watchdog")
     now_et = datetime.now(ET)
     today  = now_et.date()
 
@@ -4197,6 +4276,16 @@ def main():
     config = get_config()
     if not config.get("enabled", True):
         print("[agent] Agent is paused. Skipping.")
+        return
+
+    # ── Trading-calendar gate (see SESSION_BOUND_MODES) ───────────────────────
+    # One gate at the DISPATCH layer rather than sixteen per-mode guards: the
+    # modes below are meaningless when the US stock market is shut, and three of
+    # them (confirmation, eod_summary, digest-adjacent) send unconditionally.
+    _closed = _calendar_block_reason(mode, now_et)
+    if _closed:
+        print(f"[agent] US market closed ({_closed}) — skipping [{mode.upper()}], "
+              f"a session-bound mode. Set FORCE_CALENDAR_RUN=1 to override.")
         return
 
     if mode == "prescreener":
