@@ -20,3 +20,9 @@ httpcore>=1.0,<2
 sentry-sdk[flask]>=2.0.0
 finnhub-python>=2.4.0
 curl_cffi>=0.7.0
+# Needed by tests that parse .github/workflows/*.yml (e.g. test_selfheal_triage.py).
+# Without this pinned, pytest's collection of that module fails at import time,
+# which aborts the ENTIRE `pytest tests/ -q` run (no --continue-on-collection-errors) —
+# so a missing test-only dependency silently breaks the whole suite, including
+# self_heal.yml's merge gate.
+pyyaml>=6.0
