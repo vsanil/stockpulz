@@ -1,15 +1,15 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-09-05 23:42 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-09-06 23:41 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 4 finding(s) needing a decision
 
 | id | what | age | fix in |
 |---|---|---|---|
-| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 8d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 7d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/NOW/2026-08-31` | NOW filled 2.68% outside the published entry window | 4d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/MMED/2026-09-02` | MMED filled 5.74% outside the published entry window | 3d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 9d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 8d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/NOW/2026-08-31` | NOW filled 2.68% outside the published entry window | 5d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/MMED/2026-09-02` | MMED filled 5.74% outside the published entry window | 4d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
 
 ### Decided, still present (3)
 
@@ -31,7 +31,7 @@
 
 ### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=84)*
 
-`entry_window/NVDA/2026-08-27` · **open**, open 8d
+`entry_window/NVDA/2026-08-27` · **open**, open 9d
 
 NVDA was bought 8.98% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -47,7 +47,7 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 ### [ACT] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=84)*
 
-`entry_window/AMZN/2026-08-28` · **open**, open 7d
+`entry_window/AMZN/2026-08-28` · **open**, open 8d
 
 AMZN was bought 4.0% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -63,7 +63,7 @@ AMZN was bought 4.0% above the price the morning message told people not to go p
 
 ### [ACT] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=84)*
 
-`entry_window/NOW/2026-08-31` · **open**, open 4d
+`entry_window/NOW/2026-08-31` · **open**, open 5d
 
 NOW was bought 2.68% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -79,7 +79,7 @@ NOW was bought 2.68% above the price the morning message told people not to go p
 
 ### [ACT] [TECHNICAL BUG] MMED filled 5.74% outside the published entry window  *(n=84)*
 
-`entry_window/MMED/2026-09-02` · **open**, open 3d
+`entry_window/MMED/2026-09-02` · **open**, open 4d
 
 MMED was bought 5.74% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -95,7 +95,7 @@ MMED was bought 5.74% above the price the morning message told people not to go 
 
 ### [ACT] [TECHNICAL BUG] ANET filled 2.43% outside the published entry window  *(n=84)*
 
-`entry_window/ANET/2026-08-05` · **acknowledged**, open 13d
+`entry_window/ANET/2026-08-05` · **acknowledged**, open 14d
 
 > Predates the fix. acf2db4 (2026-08-08) collapsed the entry-window promise to formatters.entry_window_pct and made the gap check warn on gap > window; these fills are 2026-08-05/06. Verified against today's code: a 2.43% and a 2.15% gap both exceed the 2.0% short-term window and WOULD now warn. Historical evidence, not a live defect.
 
@@ -113,7 +113,7 @@ ANET was bought 2.43% above the price the morning message told people not to go 
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **acknowledged**, open 13d
+`integrity/638eb7bc69ed` · **acknowledged**, open 14d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -131,7 +131,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **acknowledged**, open 13d
+`integrity/425fd0b45bd0` · **acknowledged**, open 14d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -169,9 +169,9 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 **Fix:** No action while R:R stays near 1.9:1. If it drifts materially below, the stops are tightening relative to targets and will manufacture stop-outs — route any change through scripts/backtest_compare.py first.
 
-### [HOLD] [METRIC] Engine win-rate questions are not yet answerable  *(n=17)*
+### [HOLD] [METRIC] Engine win-rate questions are not yet answerable  *(n=23)*
 
-**Evidence:** 17 matured picks against a gate of 30. The synthetic bot's own record is deliberately excluded — mechanical fills, and feeding them back steers real recommendations.
+**Evidence:** 23 matured picks against a gate of 30. The synthetic bot's own record is deliberately excluded — mechanical fills, and feeding them back steers real recommendations.
 
 **Fix:** Do not tune selection weights below the gate. The findings above are safe to act on; win rate is not.
 
