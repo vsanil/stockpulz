@@ -633,6 +633,23 @@ Rules:
 - **The comment on that thread said "keeps the process warm at zero extra cost"** — the same false premise as the GH workflow's "Actions minutes are unlimited so warming is free". **A free scheduler does not make a paid target free.** That premise appeared in three separate places in this repo.
 - **Keep-warm runs on a WINDOW, not 24/7.** The REAL window lives on cron-job.org job `7746621`: **6 AM–6 PM ET, ET-anchored** (`America/New_York`, hours 6–17, `:00/:15/:30/:45`). ET-anchored on purpose — a UTC window drifts an hour against the 7 AM ET morning relay at every DST change. `keepwarm.yml` (`*/10 11-17 * * *`) is a UTC-only **safe subset** that sits inside that window under both EDT and EST; **if the cron-job.org window moves, move this too or it silently reinflates the bill** (the old 10:00–03:59 UTC schedule would have fired ~6×/day outside the paid window, ~46 h/mo for nothing). Render free tier spins down after ~15 min idle → a cold server makes the first `/start`/button wait ~30-60s, or drops the reply mid-boot ("bot not working"), which bit NEW users worst on a share-link click.
 - **🔴 The reasoning that made it 24/7 was wrong, and the error is worth remembering: "the repo is PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free" conflated two different budgets.** GH minutes are free; **Render instance-hours are not** — the free plan gives **750 h/month** and every ping wakes the service for ~15 min. Warming 24/7 costs **~744 h/month = 99% of the cap**, and exceeding it SUSPENDS the service until the next cycle. The window is now ~379 h. **Rule: when a scheduler is free, check whether the thing it pokes is also free.**
+- **✅ GITHUB ACTIONS COSTS THIS ACCOUNT NOTHING — measured 2026-09-06 from the billing page.**
+  Plan **GitHub Free**; **billed amount $0 on every day Sep 1-7**. Gross metered usage $4.21 for
+  September, included-usage discount $4.21, next payment due "-".
+
+        stockpulz  $3.29 gross      paywise  $0.88      pricedrop  $0.04
+
+  🔑 **`stockpulz` is PUBLIC, so its Actions minutes are unlimited at source** — which is why the
+  heaviest repo on the account by a wide margin costs zero. 13 workflows, ~200 runs on a busy
+  day, still $0. Gross figures on that page are list-price valuations, fully discounted; read the
+  **billed** column, not the gross one.
+  🚨 **The single thing that would end this: making `stockpulz` private.** `daily_run.yml`'s own
+  header estimates these jobs at **~1,400 min/month** against the 2,000-min private allowance —
+  70% of the cap before the monitoring workflows are counted. Do not flip that switch casually.
+  ⚠️ The billing REST endpoints (`/users/{u}/settings/billing/actions`, `/user/settings/...`) all
+  404 for `gh` — they need a token with `user` scope, which the CLI token lacks. The billing page
+  in a browser is the readable surface.
+
 - **✅✅ THE SCHEDULER IS PROVEN — cron-job.org fires UNATTENDED and creates a real run (2026-09-06).**
   This was the one link 13 manual TEST RUNs could not close, and it is now closed by a clock, not
   a click:
