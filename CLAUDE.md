@@ -5,7 +5,6 @@
 
 | due | what | waiting on | resolves |
 |---|---|---|---|
-| **2026-09-07** | **GitHub's OWN `schedule:` crons have not fired since 2026-09-04 12:04 UTC** — the two prescreener runs (`0 3`/`0 7 * * 1-5`) skipped Friday 09-05 entirely, and my workflow edits that evening came AFTER those windows so they are not the cause. GitHub drops scheduled runs under load; whether it resumes is Monday's answer. ⚠️ This is SEPARATE from cron-job.org, which is proven (below). | WATCH | Monday's run list |
 | 2026-09-09 | Tue 09-08 is the first full weekday chain since the migration. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` |
 | 2026-09-09 | **Evaluator report — the product question.** 17 matured picks, trailing SPY 0.80%/pick, 95% CI 26-69%. Not "bad" — *unknown*, and ~13 picks from knowable. | OWNER | more matured picks |
 | 2026-09-07 | Prescreener triggers: does cron-job.org's dispatch fire punctually? **Decide nothing before this data** — the two GH crons are correlated-late, so cutting one today removes the only trigger proven to serve a morning. | WATCH | Monday's run history |
@@ -652,17 +651,20 @@ Rules:
   PRE-migration**, and are the old sub-second Render-edge 503 against a sleeping instance
   (332-881 ms observed). They are history, not a live fault. Post-migration executions succeed.
   Do not read that list as "13 jobs are broken" without checking the DATE on each row.
-  ⚠️ **Still open, and genuinely different: GitHub's OWN `schedule:` crons.** `daily_run.yml`'s
-  `0 3`/`0 7 * * 1-5` prescreener runs last fired 09-04 12:04 UTC and skipped Friday 09-05
-  entirely. Workflow edits that evening came after those windows, so they are not the cause —
-  cron-job.org is punctual; GitHub's scheduler is not.
-  🔑 **And it is WORKFLOW-SPECIFIC, which is the useful part.** GitHub's scheduler fired normally
-  for `canary`, `full_sweep`, `evaluate_picks` and `analyze_engine` on the same days — only
-  `daily_run.yml`'s crons went quiet. So "GitHub drops runs under load" does not explain it on
-  its own. ⚠️ My own edits to that file are NOT the cause: they landed 09-05 evening, hours after
-  the 03:00/07:00 UTC windows it missed. **Unexplained. Watch Monday, do not guess.**
-  🔎 The prescreener has three triggers precisely so one silent scheduler is survivable — the
-  cron-job.org dispatch still fires. This is a redundancy earning its keep, not an outage.
+  ✅ **GitHub's own `schedule:` crons are FINE — there was never an issue.** They last fired
+  **Friday 2026-09-04** at 07:44 and 12:04 UTC and were **not due** after that: the prescreener
+  crons are `0 3`/`0 7 * * 1-5`, and **2026-09-05 was a SATURDAY**, 09-06 a Sunday. Server-side
+  `?event=schedule` says 297 runs historically with the newest on 09-04. Nothing was missed.
+  🚨 **AN EARLIER VERSION OF THIS SECTION CLAIMED "the crons skipped Friday 09-05 entirely" AND
+  MADE IT A WATCH ITEM.** It was wrong: 09-05 was Saturday. **I had the disconfirming evidence in
+  hand and reasoned past it** — the same cron-job.org page showed `weekly` (Saturday-only) running
+  "Yesterday" and `week_ahead` (Sunday-only) running "Today", which I used to reason about those
+  two jobs and then contradicted three sentences later.
+  🔑 **Before calling a schedule missed, print the weekday.** `1-5` means the calendar decides
+  whether an absence is a fault, and "last Friday" in a UI is not a date. An absence is the
+  hardest claim to make: it needs the schedule, the calendar, and a server-side query — a
+  client-side listing plus an assumption produces a phantom outage, which is what this was.
+
 
 - **✅ MIGRATED 2026-09-05 — all 17 cron-job.org jobs now POST to GitHub's API, not to this app.** The outage below is fixed at the configuration level. Verified job-by-job from a fresh page load: method POST, the dispatch URL, `Accept`/`Content-Type`/`Authorization`, the right `run_mode` in each body, and every original schedule + timezone untouched. Audit result: `github=17 render=0`.
   ✅ **TRANSPORT PROVEN FOR 13 OF THE 17 JOBS (2026-09-05/06), twelve of them from
