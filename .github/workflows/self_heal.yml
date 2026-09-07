@@ -193,9 +193,20 @@ jobs:
 
           STEP 5 — commit all changes (nothing left staged) with a clear message: what failed, the root cause, and the fix. Do NOT push.
           PROMPT
+          # 🔴 CUT 30 -> 15 on 2026-09-07, on cost evidence, not taste.
+          # `stock-agent` spent $12.59 of a $12.83 7-day Anthropic bill and this
+          # step is its largest discretionary line: 9 headless agents in 7 days.
+          # 🔑 THE DECIDING FACT: 2 of the 4 most recent runs EXHAUSTED all 30
+          # turns. Hitting the ceiling means the agent did not finish — so those
+          # runs paid the full 30 turns and produced NO fix. The budget was not
+          # buying 30 turns of work, it was buying 30 turns of abandonment.
+          # ⚠️ This makes hard fixes fail SOONER, not more often: a fix needing
+          # >15 turns was already failing at 30. If a genuinely useful fix ever
+          # gets truncated here, raise it back — but check the log says the
+          # limit was reached before assuming that is why it failed.
           claude -p "$(cat /tmp/prompt.txt)" \
             --model claude-sonnet-5 \
-            --max-turns 30 \
+            --max-turns 15 \
             --dangerously-skip-permissions \
             2>&1 | tail -60 || echo "[self-heal] claude exited non-zero: $? (downstream steps will report no-fix)"
 
