@@ -5,7 +5,8 @@
 
 | due | what | waiting on | resolves |
 |---|---|---|---|
-| **2026-09-09** | **Did Tue 09-08 run UNATTENDED?** First normal trading day since the 09-05 trigger migration. `daily_run.yml` has not fired on its own schedule since **2026-09-04**. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` reports |
+| **2026-09-07** | **GitHub's OWN `schedule:` crons have not fired since 2026-09-04 12:04 UTC** — the two prescreener runs (`0 3`/`0 7 * * 1-5`) skipped Friday 09-05 entirely, and my workflow edits that evening came AFTER those windows so they are not the cause. GitHub drops scheduled runs under load; whether it resumes is Monday's answer. ⚠️ This is SEPARATE from cron-job.org, which is proven (below). | WATCH | Monday's run list |
+| 2026-09-09 | Tue 09-08 is the first full weekday chain since the migration. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` |
 | 2026-09-09 | **Evaluator report — the product question.** 17 matured picks, trailing SPY 0.80%/pick, 95% CI 26-69%. Not "bad" — *unknown*, and ~13 picks from knowable. | OWNER | more matured picks |
 | 2026-09-07 | Prescreener triggers: does cron-job.org's dispatch fire punctually? **Decide nothing before this data** — the two GH crons are correlated-late, so cutting one today removes the only trigger proven to serve a morning. | WATCH | Monday's run history |
 | ~2026-09-12 | `selfheal.healthy` red on frozen history (7-day window; cause fixed 09-06). | WATCH | **DO NOT CHASE** — self-clears |
@@ -633,6 +634,36 @@ Rules:
 - **The comment on that thread said "keeps the process warm at zero extra cost"** — the same false premise as the GH workflow's "Actions minutes are unlimited so warming is free". **A free scheduler does not make a paid target free.** That premise appeared in three separate places in this repo.
 - **Keep-warm runs on a WINDOW, not 24/7.** The REAL window lives on cron-job.org job `7746621`: **6 AM–6 PM ET, ET-anchored** (`America/New_York`, hours 6–17, `:00/:15/:30/:45`). ET-anchored on purpose — a UTC window drifts an hour against the 7 AM ET morning relay at every DST change. `keepwarm.yml` (`*/10 11-17 * * *`) is a UTC-only **safe subset** that sits inside that window under both EDT and EST; **if the cron-job.org window moves, move this too or it silently reinflates the bill** (the old 10:00–03:59 UTC schedule would have fired ~6×/day outside the paid window, ~46 h/mo for nothing). Render free tier spins down after ~15 min idle → a cold server makes the first `/start`/button wait ~30-60s, or drops the reply mid-boot ("bot not working"), which bit NEW users worst on a share-link click.
 - **🔴 The reasoning that made it 24/7 was wrong, and the error is worth remembering: "the repo is PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free" conflated two different budgets.** GH minutes are free; **Render instance-hours are not** — the free plan gives **750 h/month** and every ping wakes the service for ~15 min. Warming 24/7 costs **~744 h/month = 99% of the cap**, and exceeding it SUSPENDS the service until the next cycle. The window is now ~379 h. **Rule: when a scheduler is free, check whether the thing it pokes is also free.**
+- **✅✅ THE SCHEDULER IS PROVEN — cron-job.org fires UNATTENDED and creates a real run (2026-09-06).**
+  This was the one link 13 manual TEST RUNs could not close, and it is now closed by a clock, not
+  a click:
+
+        cron-job.org  StockPulz-week_ahead   12:00:50 UTC   Successful (1.55 s)
+        GitHub        run 34031857890        12:00:51 UTC   workflow_dispatch  success
+
+  **One second apart** — the timestamp match this file demands, because headers can look healthy
+  on a request that creates nothing. `watchdog` (the pilot conversion) also fires unattended.
+  🚨 **CORRECTION: an earlier session today asserted "zero unattended runs since 09-04", twice,
+  and built a scheduled task on it.** That came from a run list truncated with `head -40` — the
+  12:00 dispatch was below the cut. **A `head` on an unsorted listing is not a query.** Re-check
+  with a targeted filter before concluding an absence; absence is the hardest claim to make and
+  the easiest to fake by truncation.
+  🔎 **The "Failed (HTTP error)" rows in the cron-job.org list are all dated Friday 2026-09-04 —
+  PRE-migration**, and are the old sub-second Render-edge 503 against a sleeping instance
+  (332-881 ms observed). They are history, not a live fault. Post-migration executions succeed.
+  Do not read that list as "13 jobs are broken" without checking the DATE on each row.
+  ⚠️ **Still open, and genuinely different: GitHub's OWN `schedule:` crons.** `daily_run.yml`'s
+  `0 3`/`0 7 * * 1-5` prescreener runs last fired 09-04 12:04 UTC and skipped Friday 09-05
+  entirely. Workflow edits that evening came after those windows, so they are not the cause —
+  cron-job.org is punctual; GitHub's scheduler is not.
+  🔑 **And it is WORKFLOW-SPECIFIC, which is the useful part.** GitHub's scheduler fired normally
+  for `canary`, `full_sweep`, `evaluate_picks` and `analyze_engine` on the same days — only
+  `daily_run.yml`'s crons went quiet. So "GitHub drops runs under load" does not explain it on
+  its own. ⚠️ My own edits to that file are NOT the cause: they landed 09-05 evening, hours after
+  the 03:00/07:00 UTC windows it missed. **Unexplained. Watch Monday, do not guess.**
+  🔎 The prescreener has three triggers precisely so one silent scheduler is survivable — the
+  cron-job.org dispatch still fires. This is a redundancy earning its keep, not an outage.
+
 - **✅ MIGRATED 2026-09-05 — all 17 cron-job.org jobs now POST to GitHub's API, not to this app.** The outage below is fixed at the configuration level. Verified job-by-job from a fresh page load: method POST, the dispatch URL, `Accept`/`Content-Type`/`Authorization`, the right `run_mode` in each body, and every original schedule + timezone untouched. Audit result: `github=17 render=0`.
   ✅ **TRANSPORT PROVEN FOR 13 OF THE 17 JOBS (2026-09-05/06), twelve of them from
   cron-job.org's OWN client** — which is the half an agent cannot test for itself. Every one
