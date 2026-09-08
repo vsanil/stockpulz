@@ -8,6 +8,7 @@
 | 2026-09-09 | Tue 09-08 is the first full weekday chain since the migration. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` |
 | 2026-09-09 | **Evaluator report — the product question.** 17 matured picks, trailing SPY 0.80%/pick, 95% CI 26-69%. Not "bad" — *unknown*, and ~13 picks from knowable. | OWNER | more matured picks |
 | 2026-09-07 | Prescreener triggers: does cron-job.org's dispatch fire punctually? **Decide nothing before this data** — the two GH crons are correlated-late, so cutting one today removes the only trigger proven to serve a morning. | WATCH | Monday's run history |
+| ✅ done | ~~Holiday gate never executed~~ — **RAN ON LABOR DAY 2026-09-07 AND WORKED.** See below. | — | closed |
 | ~2026-09-12 | `selfheal.healthy` red on frozen history (7-day window; cause fixed 09-06). | WATCH | **DO NOT CHASE** — self-clears |
 | ~2026-09-14 | `morning.cache_hit_rate` needs 5 trading days before it reports a rate. | WATCH | says "building baseline" until then |
 | open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
@@ -668,6 +669,9 @@ Rules:
   PRE-migration**, and are the old sub-second Render-edge 503 against a sleeping instance
   (332-881 ms observed). They are history, not a live fault. Post-migration executions succeed.
   Do not read that list as "13 jobs are broken" without checking the DATE on each row.
+  ✅✅ **SETTLED 2026-09-07: GitHub's own `schedule:` crons fired on Monday** — two `schedule`
+  events at 07:58 and 13:26 UTC (the `0 3`/`0 7` prescreener pair, 4.9 h and 6.4 h late, which is
+  this repo's normal). Nothing was ever wrong.
   ✅ **GitHub's own `schedule:` crons are FINE — there was never an issue.** They last fired
   **Friday 2026-09-04** at 07:44 and 12:04 UTC and were **not due** after that: the prescreener
   crons are `0 3`/`0 7 * * 1-5`, and **2026-09-05 was a SATURDAY**, 09-06 a Sunday. Server-side
@@ -773,6 +777,23 @@ Rules:
   the expected set is EMPTY rather than a pass-with-an-excuse.
   🚨 **A mode added to `run_modes.py` without an entry here is dispatched and never monitored.**
   Pinned: `test_the_schedule_table_covers_exactly_the_valid_modes`.
+  ✅ **VERIFIED LIVE ON LABOR DAY, MONDAY 2026-09-07 — its first real trading holiday, one day
+  after shipping.** Four of the six session-bound modes skipped, each naming the holiday:
+
+        12:45 UTC  premarket     US market closed (Labor Day) — skipping [PREMARKET]
+        14:00 UTC  vix_check     US market closed (Labor Day) — skipping [VIX_CHECK]
+        19:30 UTC  close_check   US market closed (Labor Day) — skipping [CLOSE_CHECK]
+        20:15 UTC  eod_summary   US market closed (Labor Day) — skipping [EOD_SUMMARY]
+
+  ✅ **And the narrowness held — everything outside the set ran normally:** `morning` 11:00 (took
+  its own market-closed path, crypto picks), `price_alerts` every 30 min 13:30-19:00 (crypto
+  trades 24/7), `macro_alert` 21:00 (tomorrow's events are still real). That is the whole design
+  in one day's log: gate the session, leave the rest alone.
+  🔎 **What it prevented, concretely:** an end-of-day wrap-up about stock prices that never moved,
+  and a VIX alert computed from a stale Friday close. Both would have been delivered.
+  🔎 `confirmation` and `midday_check` were not caught in the sample but share the identical code
+  path as the four above.
+
   🔑 **2. Trading-calendar gate at the DISPATCH layer** (`agent.SESSION_BOUND_MODES` +
   `_calendar_block_reason`). Only 3 of 19 modes knew about holidays. The rest ran against a shut
   market, and it is **not** harmless: `run_morning` still calls `save_picks()` for crypto on a
