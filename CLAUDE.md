@@ -6,6 +6,7 @@
 | due | what | waiting on | resolves |
 |---|---|---|---|
 | 2026-09-09 | Tue 09-08 is the first full weekday chain since the migration. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` |
+| ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. It ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
 | 2026-09-09 | **Evaluator report — the product question.** 17 matured picks, trailing SPY 0.80%/pick, 95% CI 26-69%. Not "bad" — *unknown*, and ~13 picks from knowable. | OWNER | more matured picks |
 | 2026-09-07 | Prescreener triggers: does cron-job.org's dispatch fire punctually? **Decide nothing before this data** — the two GH crons are correlated-late, so cutting one today removes the only trigger proven to serve a morning. | WATCH | Monday's run history |
 | ✅ done | ~~Holiday gate never executed~~ — **RAN ON LABOR DAY 2026-09-07 AND WORKED.** See below. | — | closed |
@@ -634,6 +635,34 @@ Rules:
 - **The comment on that thread said "keeps the process warm at zero extra cost"** — the same false premise as the GH workflow's "Actions minutes are unlimited so warming is free". **A free scheduler does not make a paid target free.** That premise appeared in three separate places in this repo.
 - **Keep-warm runs on a WINDOW, not 24/7.** The REAL window lives on cron-job.org job `7746621`: **6 AM–6 PM ET, ET-anchored** (`America/New_York`, hours 6–17, `:00/:15/:30/:45`). ET-anchored on purpose — a UTC window drifts an hour against the 7 AM ET morning relay at every DST change. `keepwarm.yml` (`*/10 11-17 * * *`) is a UTC-only **safe subset** that sits inside that window under both EDT and EST; **if the cron-job.org window moves, move this too or it silently reinflates the bill** (the old 10:00–03:59 UTC schedule would have fired ~6×/day outside the paid window, ~46 h/mo for nothing). Render free tier spins down after ~15 min idle → a cold server makes the first `/start`/button wait ~30-60s, or drops the reply mid-boot ("bot not working"), which bit NEW users worst on a share-link click.
 - **🔴 The reasoning that made it 24/7 was wrong, and the error is worth remembering: "the repo is PUBLIC → GitHub Actions minutes are unlimited, so round-the-clock warming is free" conflated two different budgets.** GH minutes are free; **Render instance-hours are not** — the free plan gives **750 h/month** and every ping wakes the service for ~15 min. Warming 24/7 costs **~744 h/month = 99% of the cap**, and exceeding it SUSPENDS the service until the next cycle. The window is now ~379 h. **Rule: when a scheduler is free, check whether the thing it pokes is also free.**
+- **💵 ANTHROPIC IS THE ONLY GENUINELY PAID DEPENDENCY, AND THE ONLY ONE THAT HAS CAUSED AN
+  OUTAGE.** Render/GitHub/Vercel are all inside free tiers with margin; this is not.
+  🔎 **Measured 2026-09-07, 7-day window: $12.83 total, of which `stock-agent` is $12.59 — 98%.**
+  (`paywise` $0.24.) Models in use are Sonnet 5 / Sonnet 4.6 / Haiku 4.5. **Claude Code sessions
+  do NOT hit this key** — they run on the owner's subscription, so a long working session costs
+  the API balance nothing. Do not blame conversation for API spend.
+  🚨 **`self_heal.yml` is the largest DISCRETIONARY line: 9 headless Claude Code agents in 7 days.**
+  Cut `--max-turns` 30 → 15 on 09-07, and the reason is not frugality: **2 of the 4 most recent
+  runs EXHAUSTED all 30 turns**, meaning they never finished and paid full price for no fix. The
+  budget was buying abandonment, not work. A fix needing >15 turns was already failing at 30.
+  🚨 **Do not TEST with `weekly` or `morning`.** `weekly` runs the entire morning pipeline
+  including a real Claude analysis; triggering it twice during the 09-05/06 testing is a large
+  part of why the balance ran dry. **`macro_alert` and `watchdog` self-guard and cost nothing** —
+  use those when you need a safe live trigger.
+  ⚠️ **The test runs also spend money INDIRECTLY, which is easy to miss.** A test run that exits 0
+  while logging an error becomes a `runs.silent_failures` finding → reddens the canary → summons
+  self-heal → another headless agent. Testing paid twice.
+  ✅ **ALERTS SET 2026-09-07: email to all admins when monthly spend reaches $20 and $35**
+  (Console → Billing → Email notifications). Two thresholds on purpose: one point tells you a
+  number, two tell you whether the month is normal.
+  🚨 **THEY WATCH SPEND, NOT BALANCE — the gap is real and deliberate.** Spend $8 with $2 left and
+  NO email fires. **Auto-reload is OFF** (owner's call; it charges the card automatically), so the
+  actual failure — balance hitting zero mid-week and `morning` silently producing nothing — can
+  still happen between thresholds. It ran dry twice in two days. Only auto-reload closes this.
+  ⚠️ **The $200,000 monthly spend LIMIT was deliberately left alone.** Set too low it BLOCKS the
+  API rather than warning — a worse failure than the one being solved. Do not "tighten" it as a
+  safety measure.
+
 - **✅ GITHUB ACTIONS COSTS THIS ACCOUNT NOTHING — measured 2026-09-06 from the billing page.**
   Plan **GitHub Free**; **billed amount $0 on every day Sep 1-7**. Gross metered usage $4.21 for
   September, included-usage discount $4.21, next payment due "-".
