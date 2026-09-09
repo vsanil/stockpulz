@@ -1,16 +1,16 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-09-08 23:58 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-09-09 23:59 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 5 finding(s) needing a decision
 
 | id | what | age | fix in |
 |---|---|---|---|
-| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 11d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 10d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/NOW/2026-08-31` | NOW filled 2.68% outside the published entry window | 7d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/MMED/2026-09-02` | MMED filled 5.74% outside the published entry window | 6d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/DOT/2026-09-08` | DOT filled 11.22% outside the published entry window | 0d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 12d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 11d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/NOW/2026-08-31` | NOW filled 2.68% outside the published entry window | 8d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/MMED/2026-09-02` | MMED filled 5.74% outside the published entry window | 7d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/DOT/2026-09-08` | DOT filled 11.22% outside the published entry window | 1d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
 
 ### Decided, still present (2)
 
@@ -29,9 +29,9 @@
 
 ## Findings
 
-### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=89)*
+### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=93)*
 
-`entry_window/NVDA/2026-08-27` · **open**, open 11d
+`entry_window/NVDA/2026-08-27` · **open**, open 12d
 
 NVDA was bought 8.98% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -39,15 +39,15 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 8 of 89 observations breach (9.0%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 9 of 93 observations breach (9.7%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=89)*
+### [ACT] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=93)*
 
-`entry_window/AMZN/2026-08-28` · **open**, open 10d
+`entry_window/AMZN/2026-08-28` · **open**, open 11d
 
 AMZN was bought 4.0% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -55,15 +55,15 @@ AMZN was bought 4.0% above the price the morning message told people not to go p
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". AMZN filled 4.0% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 8 of 89 observations breach (9.0%).
+**Evidence:** The morning message promises "enter within X% — skip if above". AMZN filled 4.0% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 9 of 93 observations breach (9.7%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=89)*
+### [ACT] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=93)*
 
-`entry_window/NOW/2026-08-31` · **open**, open 7d
+`entry_window/NOW/2026-08-31` · **open**, open 8d
 
 NOW was bought 2.68% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -71,15 +71,15 @@ NOW was bought 2.68% above the price the morning message told people not to go p
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NOW filled 2.68% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 8 of 89 observations breach (9.0%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NOW filled 2.68% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 9 of 93 observations breach (9.7%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] MMED filled 5.74% outside the published entry window  *(n=89)*
+### [ACT] [TECHNICAL BUG] MMED filled 5.74% outside the published entry window  *(n=93)*
 
-`entry_window/MMED/2026-09-02` · **open**, open 6d
+`entry_window/MMED/2026-09-02` · **open**, open 7d
 
 MMED was bought 5.74% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -87,15 +87,15 @@ MMED was bought 5.74% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". MMED filled 5.74% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 8 of 89 observations breach (9.0%).
+**Evidence:** The morning message promises "enter within X% — skip if above". MMED filled 5.74% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 9 of 93 observations breach (9.7%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
 </details>
 
-### [ACT] [TECHNICAL BUG] DOT filled 11.22% outside the published entry window  *(n=89)*
+### [ACT] [TECHNICAL BUG] DOT filled 11.22% outside the published entry window  *(n=93)*
 
-`entry_window/DOT/2026-09-08` · **open**
+`entry_window/DOT/2026-09-08` · **open**, open 1d
 
 DOT was bought 11.22% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -103,7 +103,7 @@ DOT was bought 11.22% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". DOT filled 11.22% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 8 of 89 observations breach (9.0%).
+**Evidence:** The morning message promises "enter within X% — skip if above". DOT filled 11.22% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 9 of 93 observations breach (9.7%).
 
 **Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
 
@@ -111,7 +111,7 @@ DOT was bought 11.22% above the price the morning message told people not to go 
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **acknowledged**, open 16d
+`integrity/638eb7bc69ed` · **acknowledged**, open 17d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -129,7 +129,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **acknowledged**, open 16d
+`integrity/425fd0b45bd0` · **acknowledged**, open 17d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -149,15 +149,15 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ## Metrics (ongoing — never 'complete')
 
-### [MEASURE] [METRIC] Stop distance distribution  *(n=110)*
+### [MEASURE] [METRIC] Stop distance distribution  *(n=114)*
 
-**Evidence:** median 5.0% across 110 positions; 0 below the 3.0% threshold.
+**Evidence:** median 5.0% across 114 positions; 0 below the 3.0% threshold.
 
 **Fix:** Context for the geometry metric — no action on its own.
 
 ### [MEASURE] [METRIC] Exit-reason mix  *(n=29)*
 
-**Evidence:** {'manual': 5, 'stop': 20, 'target': 4} — stops hit 5.0x as often as targets.  By levels source — pick: 27 · unrecorded: 33. Only `pick` speaks to the ENGINE's levels.
+**Evidence:** {'manual': 5, 'stop': 20, 'target': 4} — stops hit 5.0x as often as targets.  By levels source — pick: 27 · stop: 1 · unrecorded: 33. Only `pick` speaks to the ENGINE's levels.
 
 **Fix:** Judge the published levels on the `pick` slice ALONE. A high stop:target ratio there means stops are too tight; the same ratio in the fallback slice means the pick's levels did not bracket the fill — levels drifting from the live price by delivery time, which is a different fix.
 
@@ -167,9 +167,9 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 **Fix:** No action while R:R stays near 1.9:1. If it drifts materially below, the stops are tightening relative to targets and will manufacture stop-outs — route any change through scripts/backtest_compare.py first.
 
-### [HOLD] [METRIC] Engine win-rate questions are not yet answerable  *(n=24)*
+### [HOLD] [METRIC] Engine win-rate questions are not yet answerable  *(n=29)*
 
-**Evidence:** 24 matured picks against a gate of 30. The synthetic bot's own record is deliberately excluded — mechanical fills, and feeding them back steers real recommendations.
+**Evidence:** 29 matured picks against a gate of 30. The synthetic bot's own record is deliberately excluded — mechanical fills, and feeding them back steers real recommendations.
 
 **Fix:** Do not tune selection weights below the gate. The findings above are safe to act on; win rate is not.
 
