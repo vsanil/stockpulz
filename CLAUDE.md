@@ -8,8 +8,6 @@
 | 2026-09-09 | Tue 09-08 is the first full weekday chain since the migration. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` |
 | ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. It ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
 | 2026-09-09 | **Evaluator report — the product question.** 17 matured picks, trailing SPY 0.80%/pick, 95% CI 26-69%. Not "bad" — *unknown*, and ~13 picks from knowable. | OWNER | more matured picks |
-| 2026-09-07 | Prescreener triggers: does cron-job.org's dispatch fire punctually? **Decide nothing before this data** — the two GH crons are correlated-late, so cutting one today removes the only trigger proven to serve a morning. | WATCH | Monday's run history |
-| ✅ done | ~~Holiday gate never executed~~ — **RAN ON LABOR DAY 2026-09-07 AND WORKED.** See below. | — | closed |
 | ~2026-09-12 | `selfheal.healthy` red on frozen history (7-day window; cause fixed 09-06). | WATCH | **DO NOT CHASE** — self-clears |
 | ~2026-09-14 | `morning.cache_hit_rate` needs 5 trading days before it reports a rate. | WATCH | says "building baseline" until then |
 | open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
