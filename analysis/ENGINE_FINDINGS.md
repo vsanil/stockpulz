@@ -1,6 +1,6 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-09-12 00:02 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-09-12 23:53 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 5 finding(s) needing a decision
 
