@@ -1,16 +1,16 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-09-12 23:53 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-09-14 00:01 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 5 finding(s) needing a decision
 
 | id | what | age | fix in |
 |---|---|---|---|
-| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 15d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 14d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/NOW/2026-08-31` | NOW filled 2.68% outside the published entry window | 11d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/MMED/2026-09-02` | MMED filled 5.74% outside the published entry window | 10d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
-| `entry_window/DOT/2026-09-08` | DOT filled 11.22% outside the published entry window | 4d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/NVDA/2026-08-27` | NVDA filled 8.98% outside the published entry window | 17d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/AMZN/2026-08-28` | AMZN filled 4.0% outside the published entry window | 16d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/NOW/2026-08-31` | NOW filled 2.68% outside the published entry window | 13d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/MMED/2026-09-02` | MMED filled 5.74% outside the published entry window | 12d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
+| `entry_window/DOT/2026-09-08` | DOT filled 11.22% outside the published entry window | 6d | formatters.entry_window_pct / agent._build_premarket_gap_warnings |
 
 ### Decided, still present (2)
 
@@ -31,7 +31,7 @@
 
 ### [ACT] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=98)*
 
-`entry_window/NVDA/2026-08-27` · **open**, open 15d
+`entry_window/NVDA/2026-08-27` · **open**, open 17d
 
 NVDA was bought 8.98% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -47,7 +47,7 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 ### [ACT] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=98)*
 
-`entry_window/AMZN/2026-08-28` · **open**, open 14d
+`entry_window/AMZN/2026-08-28` · **open**, open 16d
 
 AMZN was bought 4.0% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -63,7 +63,7 @@ AMZN was bought 4.0% above the price the morning message told people not to go p
 
 ### [ACT] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=98)*
 
-`entry_window/NOW/2026-08-31` · **open**, open 11d
+`entry_window/NOW/2026-08-31` · **open**, open 13d
 
 NOW was bought 2.68% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -79,7 +79,7 @@ NOW was bought 2.68% above the price the morning message told people not to go p
 
 ### [ACT] [TECHNICAL BUG] MMED filled 5.74% outside the published entry window  *(n=98)*
 
-`entry_window/MMED/2026-09-02` · **open**, open 10d
+`entry_window/MMED/2026-09-02` · **open**, open 12d
 
 MMED was bought 5.74% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -95,7 +95,7 @@ MMED was bought 5.74% above the price the morning message told people not to go 
 
 ### [ACT] [TECHNICAL BUG] DOT filled 11.22% outside the published entry window  *(n=98)*
 
-`entry_window/DOT/2026-09-08` · **open**, open 4d
+`entry_window/DOT/2026-09-08` · **open**, open 6d
 
 DOT was bought 11.22% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -111,7 +111,7 @@ DOT was bought 11.22% above the price the morning message told people not to go 
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **acknowledged**, open 20d
+`integrity/638eb7bc69ed` · **acknowledged**, open 22d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -129,7 +129,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [MEASURE] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **acknowledged**, open 20d
+`integrity/425fd0b45bd0` · **acknowledged**, open 22d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -167,8 +167,8 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 **Fix:** No action while R:R stays near 1.9:1. If it drifts materially below, the stops are tightening relative to targets and will manufacture stop-outs — route any change through scripts/backtest_compare.py first.
 
-### [MEASURE] [METRIC] Pick ledger has cleared the honesty gate  *(n=40)*
+### [MEASURE] [METRIC] Pick ledger has cleared the honesty gate  *(n=48)*
 
-**Evidence:** 40 matured picks (gate 30).
+**Evidence:** 48 matured picks (gate 30).
 
 **Fix:** Run scripts/evaluate_picks.py and read the picked-vs-control edge — the first evidence that can speak to SELECTION quality.
