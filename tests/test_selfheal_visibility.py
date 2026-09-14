@@ -456,3 +456,76 @@ class TestDuplicateFixesAreNotReProposed:
     def test_the_workflow_is_still_valid_yaml(self):
         import yaml
         assert yaml.safe_load(WF.read_text())
+
+
+class TestDocsOnlyCommitsDoNotRedeploy:
+    """The daily engine-analysis commit changes ONLY analysis/ENGINE_FINDINGS.md —
+    regenerated output the web service never reads. Without `[skip render]`,
+    Render rebuilt and RESTARTED the live service every night at ~00:00 UTC for
+    a markdown change. Found 2026-09-13 while chasing "why is /admin cold"."""
+
+    def test_the_analysis_commit_skips_render(self):
+        wf = pathlib.Path(".github/workflows/analyze_engine.yml").read_text()
+        line = next(l for l in wf.splitlines() if "git commit" in l and "-m" in l)
+        assert "[skip render]" in line, \
+            "a docs-only commit must not restart the production web service"
+
+    def test_it_does_NOT_skip_ci(self):
+        """`[skip ci]` would also silence the test workflow on that push;
+        only Render's redeploy is the waste."""
+        wf = pathlib.Path(".github/workflows/analyze_engine.yml").read_text()
+        assert "[skip ci]" not in wf
+
+
+class TestAdminDataPrefetchesConcurrently:
+    """/admin/data reads ~10 distinct storage files. They used to run SERIALLY,
+    ~100 ms each from Render, on every open after the 20 s cache expired —
+    that was the whole "not warmed up" feeling (the server was warm). Now they
+    are prefetched in parallel so the builders hit a warm cache."""
+
+    def _admin(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        return client
+
+    def test_every_file_admin_data_reads_is_in_the_prefetch_set(self, client, monkeypatch):
+        """The guard that matters: a new builder that reads a new file must
+        fail here, or it silently reintroduces one serial round trip."""
+        import config_manager as cm, webhook
+        seen = set()
+        real = cm._load_gist_file          # conftest's in-memory store
+        monkeypatch.setattr(cm, "_load_gist_file",
+                            lambda fn, *a, **k: (seen.add(fn), real(fn, *a, **k))[1])
+        assert self._admin(client).get("/admin/data").status_code == 200
+        missing = seen - set(webhook._ADMIN_PREFETCH)
+        assert not missing, f"/admin/data reads files the prefetch does not cover: {missing}"
+
+    def test_it_runs_after_the_feedback_write_and_before_the_first_builder(self):
+        """mark_feedback_read() WRITES feedback.json and invalidates its cache
+        entry. Prefetching before it would cache the pre-write copy."""
+        src = WEB.read_text()
+        body = src[src.index("def admin_data():"):src.index("@app.route", src.index("def admin_data():"))]
+        i_write = body.index("mark_feedback_read()")
+        i_pre   = body.index("_prefetch_admin_reads()")
+        i_build = body.index("_build_audit_findings()")
+        assert i_write < i_pre < i_build
+
+    def test_it_is_actually_concurrent(self):
+        """A prefetch that loops serially saves nothing — the serial I/O IS the bug."""
+        import ast
+        tree = ast.parse(WEB.read_text())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_prefetch_admin_reads")
+        names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)} | \
+                {n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute)}
+        assert "ThreadPoolExecutor" in names
+
+    def test_a_failing_file_cannot_take_the_dashboard_down(self, client, monkeypatch):
+        import config_manager as cm
+        real = cm._load_gist_file
+        def _boom(fn, *a, **k):
+            if fn == "traffic_hours.json":
+                raise RuntimeError("supabase down")
+            return real(fn, *a, **k)
+        monkeypatch.setattr(cm, "_load_gist_file", _boom)
+        assert self._admin(client).get("/admin/data").status_code == 200
