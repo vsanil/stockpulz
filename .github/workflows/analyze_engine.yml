@@ -38,7 +38,13 @@ jobs:
             echo "findings unchanged — nothing to commit"
           else
             git add analysis/
-            git commit -m "analysis: refresh engine findings"
+            # [skip render] — this commit touches ONLY analysis/ENGINE_FINDINGS.md,
+            # regenerated output the web service never reads (decisions live in
+            # Supabase). Without the tag Render rebuilt and RESTARTED the service
+            # every night at ~00:00 UTC for a markdown change — a daily cold
+            # process (module imports + backend re-verification) for nothing.
+            # Render-specific: GitHub Actions still run on this push.
+            git commit -m "analysis: refresh engine findings [skip render]"
             git pull --rebase --autostash origin main
             git push origin HEAD:main
           fi

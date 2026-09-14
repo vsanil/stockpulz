@@ -1954,6 +1954,48 @@ def admin_selfheal_action(branch, action):
         return jsonify({"error": f"GitHub unreachable: {exc}"}), 502
 
 
+# Every storage file /admin/data touches. Kept as a tuple the guard can
+# diff against real reads, so a new builder that reads a new file fails a
+# test instead of silently reintroducing a serial round trip.
+_ADMIN_PREFETCH = (
+    "user_trades.json", "user_paper.json", "user_configs.json", "feedback.json",
+    "audit_dispositions.json", "pick_ledger.json", "pick_ledger_2026.json",
+    "pending_users.json", "engine_findings_state.json", "traffic_hours.json",
+)
+
+
+def _prefetch_admin_reads(files=_ADMIN_PREFETCH) -> None:
+    """Warm config_manager's 20s read cache for every file /admin/data reads —
+    CONCURRENTLY — so the builders below hit memory instead of each paying a
+    serial Supabase round trip.
+
+    Why this and not a per-request memo: the memo already exists
+    (`_gist_read_cache`, 20s, invalidated by every write path). Duplicate
+    reads within one request were never the cost. The cost is that ~10
+    DISTINCT files were fetched one after another, ~100 ms each from Render's
+    region, on every open after 20 s idle. Measured 2026-09-13: the server was
+    warm the whole time (unsandboxed /health 0.12-0.23 s) — the "not warmed
+    up" feeling was this endpoint's own serial I/O.
+
+    Must run AFTER mark_feedback_read(): that write invalidates feedback.json,
+    and prefetching first would cache the pre-write copy.
+
+    Each fetch is isolated — a failing file must not take the dashboard down,
+    and _load_gist_file already swallows its own errors; this guards the pool.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from config_manager import _load_gist_file
+
+    def _one(fn):
+        try:
+            _load_gist_file(fn)
+        except Exception as exc:                       # never break /admin
+            print(f"[admin] prefetch {fn} failed (non-critical): {exc}")
+
+    with ThreadPoolExecutor(max_workers=len(files)) as ex:
+        list(ex.map(_one, files))
+
+
 @app.route("/admin/data")
 @_require_admin
 def admin_data():
@@ -1969,6 +2011,7 @@ def admin_data():
     except Exception:
         pass
 
+    _prefetch_admin_reads()      # warm the read cache concurrently; see docstring
     cfg     = get_config()
     owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
     audit   = _build_audit_findings()
