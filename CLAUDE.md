@@ -1979,6 +1979,44 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
 
+### ✅ ACCOUNT-WIDE FREE HOURS RE-MEASURED — ~150 h/mo of 750, 20% (Sep 14)
+
+**All four web services are on FREE**, so all four draw on the shared 750 h/month pool. Every
+instance-hour figure earlier in this file is from August, when three of them were on Starter, and
+describes an account that no longer exists. **Re-read plans from `GET /v1/services` before doing
+this arithmetic; do not trust a number in a doc.**
+
+    service      wakes/7d   billed h/7d   h/month   note
+    Paywise           46        14.1          60
+    PriceDrop         21        11.4          49
+    QuizMania          1         0.3           1    4 log lines all week
+    stock-agent       11         9.4          40    TYPICAL days only (see below)
+    ------------------------------------------------------------------
+    ACCOUNT                                  ~150   of 750 (20%), ~600 h headroom
+
+- **🔴 METHOD — "hours containing a log line" OVERSTATES by 3-4x and I published that first.**
+  A 2-minute wake inside an hour counts as a full hour, so stock-agent read **31 h/168 → 133 h/mo**
+  on the first pass and **22 h → 94 h/mo** when re-done properly. Render bills wall-clock RUNNING
+  time, so the honest unit is the **wake EPISODE**: cluster log timestamps, split on a gap > 15 min
+  (the spin-down threshold), bill each episode as `span + 15 min idle + ~45 s boot`.
+  ⚠️ It still UNDERCOUNTS an instance awake but logging nothing. gunicorn logs every request, so
+  the error is small — but say "estimate", never "usage".
+- **🚨 THE 750 h METER ITSELF IS NOT READABLE FROM A SESSION** — it is dashboard-only, as this file
+  already records. Everything above is a MODEL of it built from logs. **Never present it as a
+  reading**; ask the owner for the real `X / 750`.
+- **🔴 Sep 14 was 13.3 h on its own — MY OWN SESSION, against 1.0-1.9 h on every other day.**
+  Six deploys, health polling, and an open `/admin` tab whose 60 s poll held the instance awake in
+  just **2 wake episodes** all day. That is the poll defect measuring itself: a normal day wakes
+  2-4 times for about an hour total. **An agent session is itself a load on the free pool — do not
+  fold a working day into a baseline.** The typical-day rate is what the table quotes.
+- **QuizMania draws ~nothing now** (4 log lines in 7 days, `autoDeploy: no`). It was suspended and
+  resumed within 25 minutes on 2026-09-04 (`service_suspended` 20:00:34 → `service_resumed`
+  20:25:04). It exhausted the pool in August; it is not the pressure today. **Do not assume the
+  August story still holds.**
+- **Consequence: there is no budget pressure, and the keep-alive still should NOT be restored.**
+  600 h of headroom is not permission — a 24/7 warm instance is ~744 h/mo by itself, which
+  exceeds the ENTIRE remaining pool for one service. Sleeping stays correct.
+
 ### ✅ RENDER LOGS ARE READABLE NOW — and they held three live defects (Sep 14)
 
 - **`RENDER_API_KEY` + `RENDER_SERVICE_ID` + `RENDER_OWNER_ID` are in `.env`.** Three places in
