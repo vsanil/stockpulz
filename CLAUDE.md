@@ -1987,6 +1987,54 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
 
+### 🔴 MONDAY NEVER HAD A PUNCTUAL PRESCREENER — an ET weekday lands on a UTC day (Sep 14)
+
+`StockPulz-prescreener` (cron-job.org job **7727066**) was `23:00 America/New_York,
+wdays Mon-Fri`. **cron-job.org evaluates the weekday in the JOB'S OWN timezone**, so those five
+local nights land at 03:00 UTC on **Tue-Sat**:
+
+    Sun 23:00 ET -> Mon 03:00 UTC    NEVER FIRED (Sunday is not in Mon-Fri)
+    Fri 23:00 ET -> Sat 03:00 UTC    fired, and Saturday screens no stocks
+
+**Measured across 8 consecutive Mondays (2026-07-27 → 09-14): ZERO 03:00 dispatches.** Every
+Monday's screener cache came only from GitHub's own cron, which runs 1.6-6 h late — and twice
+(07-27, 08-03) it landed at **10:49 against the 11:00 UTC morning run, an 11-minute margin** on
+the path this file calls the highest-risk in the app. A slightly later GitHub queue and Monday
+does a full live 600-ticker screen, ~10 min of delay on delivery.
+- **Fix: `wdays [1,2,3,4,5]` → `[0,1,2,3,4]`** (Sun-Thu ET), verified by READ-BACK, not by the
+  `HTTP 200`. Now lands Mon-Fri UTC; the wasted Saturday run is gone. First Monday coverage in
+  the job's history is 2026-09-21.
+- **DST-safe, and that is why it stays ET-anchored**: 23:00 ET is 03:00 UTC under EDT and 04:00
+  under EST — always the NEXT calendar day, so the weekday mapping holds year-round.
+- **🚨 DO NOT CUT A GITHUB PRESCREENER CRON.** That was the plan I proposed before measuring, and
+  it was exactly backwards: the GH crons are the ONLY reason Monday ever had a cache. They become
+  a genuine backup now rather than the sole Monday cover. Revisit only after
+  `morning.cache_hit_rate` shows a stable rate across several Mondays — it had **4/5** mornings
+  recorded on 09-14, so it cannot yet judge anything.
+- **⚠️ The ~33% cache-miss figure quoted elsewhere in this file is PRE-MIGRATION** (Aug 27-Sep 4)
+  and does not describe the current trigger set. Do not cite it as current.
+
+**Guard: `scripts/audit_cron_schedules.py` + `tests/test_cron_schedule_audit.py` (10 tests).**
+- It checks a SELF-MAINTAINING property — *does a job's local weekday set differ from the UTC set
+  it lands on* — rather than a hand-written map of what all 19 jobs are for, which would rot the
+  first time a schedule moved. Deliberate shifts go in `ACKNOWLEDGED` with a **≥120-char reason**,
+  the reasoned-allowlist pattern from `test_canary_reads_the_live_store.py`.
+- Silent on UTC-scheduled jobs (17 of them) and on `morning` (07:00 ET → 11:00 UTC, same day), so
+  it does not cry wolf on a healthy fleet.
+- Manual, like `input_audit.py` — it needs `CRONJOB_API_KEY`, which is not a CI secret.
+- 3 mutations verified failing: no acknowledgement (live audit exits 1 naming the job), a token
+  reason (2 tests + the audit), and a broken tz replay (6 tests).
+
+**🔴 METHOD — my first scan produced FOUR FALSE POSITIVES and I nearly acted on them.** It flagged
+`eod_summary`, `pre_earnings`, `macro_alert` and `friday_wrap` by assuming every job was
+ET-scheduled and testing `hour >= 20`. **They are scheduled in UTC**, so nothing shifts. The tell
+was `eod_summary`'s `lastExecution` at 20:15 UTC, which is impossible for a 20:00 **ET** job.
+**Read each job's OWN timezone, and VALIDATE the prediction against `lastExecution` before
+believing a scan.** Only one job was ever affected.
+🔎 Two mutations of this guard also reported success while actually producing a **SyntaxError** —
+a broken file exits non-zero for free. **A mutation must PARSE, or it proves nothing**; the
+harness now `ast.parse`s and imports the mutant before running anything.
+
 ### ✅ ACCOUNT-WIDE FREE HOURS RE-MEASURED — ~150 h/mo of 750, 20% (Sep 14)
 
 **All four web services are on FREE**, so all four draw on the shared 750 h/month pool. Every
