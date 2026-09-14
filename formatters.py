@@ -395,7 +395,15 @@ def format_daily_message(picks: dict, config: dict,
         _s         = lambda x: "+" if x >= 0 else ""
         _ret_val   = t.get("median_return", t["avg_return"])
         _ret_label = "median" if "median_return" in t else "avg"
-        perf = f"📊 <i>{t['wins']}W/{t['losses']}L · {t['win_rate']}% · {_ret_label} {_s(_ret_val)}{_ret_val}%"
+        # 🔴 The RATE is dropped below the conclusive-n gate; the RECORD stays.
+        # "3W/2L", the median and the SPY line are facts. A percentage off a
+        # handful of trades is an invitation to infer skill that the sample
+        # cannot support — measured 2026-09-13, the 95% CI at n=46 was
+        # 30.2-57.8%. Showing the counts and hiding the rate is the honest
+        # split; blanking the whole bar would read as "no data" when there is
+        # some. Gate lives in performance_tracker._MIN_WIN_RATE_N.
+        _rate = f" · {t['win_rate']}%" if t.get("win_rate_conclusive") else ""
+        perf = f"📊 <i>{t['wins']}W/{t['losses']}L{_rate} · {_ret_label} {_s(_ret_val)}{_ret_val}%"
         if spy is not None:
             perf += f" · vs SPY {_s(spy)}{spy}%"
         perf += f"  ({recent_stats['days']}d)</i>"

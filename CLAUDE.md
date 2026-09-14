@@ -2044,3 +2044,17 @@ The pick ledger cleared the honesty gate (n=48 matured; 46 picked vs 41 runners-
 - **Results render in-page too (`_shMsg`), never `alert()`** — a suppressed alert would hide a GitHub 403 exactly as silently as the suppressed confirm hid the action. A failure re-enables the button and prints the status in red; a disabled button with no message is indistinguishable from success.
 - **Rule: never gate an irreversible action on a browser dialog alone.** `confirm`/`alert` are suppressible; if the ONLY branch that stops the action is a dialog, its suppression is indistinguishable from a click that never happened.
 - **⚠️ The self-flagging scan trap, ELEVENTH occurrence** — banning `confirm(` tripped on the comment explaining its removal, in the same file that warns about this. `_code()` now strips whole `//` comment lines before scanning (a `//` inside a string literal survives). Re-verified both mutations are still caught AFTER stripping — a laxer scan that no longer detects the offender is worse than the false positive.
+
+### A win RATE is gated at n=30; the RECORD is not (Sep 13)
+- **Prompted by the product-claim review, and the audit's first finding was that the app barely over-claims.** Onboarding is mechanical ("entry price, position size, stop-loss and target already calculated"), and **both surfaces already render the benchmark** — the morning bar shows `vs SPY` inline and the mini-app shows alpha. There was no "beat the market" copy to remove.
+- **The real defect was the floor.** `_MIN_RECENT_TRADES = 5` gated the morning bar, so a percentage computed from FIVE closed trades was shown to every user every day as a track record. Measured 2026-09-13: the 95% CI on the pick win rate at **n=46 was 30.2-57.8%** — ±14 points, unable to separate a good engine from a coin flip. At n=5 it is noise presented as fact. The community panel's floor was 10, and a "community track record" is MORE claim-shaped than a personal one.
+- **`performance_tracker._MIN_WIN_RATE_N = 30` — the SAME bar this repo already uses for "conclusive"** (`evaluate_picks._MIN_N`, `performance_context._MIN_DIRECTIVE_N`). The display layer was the outlier; a test pins the three together, so raising one without the others fails.
+- **🔑 The split that matters: counts, median and SPY are FACTS and always render; only the derived PERCENTAGE is gated.** Blanking the bar would read as "no data" when there is some — the opposite error. Rendered proof:
+
+      n=6   📊 3W/3L · median +1.2% · vs SPY +0.8%  (30d)
+      n=40  📊 20W/20L · 50.0% · median +1.2% · vs SPY +0.8%  (30d)
+
+- **`win_rate` is still COMPUTED and returned; a `win_rate_conclusive` flag decides rendering.** Removing the key would `KeyError` two live call sites and every admin view — the flag is additive, so no consumer breaks.
+- **Applied at BOTH render sites** (`formatters` morning bar, `cmd_market` community line) — the scope rule: a fix goes everywhere the defect is, not just where it was noticed.
+- Guards: `tests/test_win_rate_honesty_gate.py` (11). **The bar tests RENDER the real message rather than scanning source** — a source scan is how a page once 500'd for 40 minutes with every test green. 4 mutations verified failing, incl. hiding the facts along with the rate.
+- **⚠️ What was deliberately NOT changed: conviction stars.** ★3 won 50%, ★4 36%, ★5 50% — but ★5 is **n=6**. That is no evidence they work AND no evidence they do not. Removing them would be tuning below the gate, which this file forbids. Revisit when the ledger supports it.

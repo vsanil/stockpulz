@@ -14,7 +14,24 @@ from config_manager import human_trades,  load_weekly_picks
 
 # Honesty floors — a percentage off a handful of trades is noise, not a record.
 _MIN_COMMUNITY_TRADES = 10   # public "community track record"
-_MIN_RECENT_TRADES    = 5    # morning perf bar
+_MIN_RECENT_TRADES    = 5    # morning perf bar: show the RECORD below this many
+
+# 🔴 The bar at which a win RATE is worth printing at all. Measured 2026-09-13:
+# at n=46 the 95% CI on the pick win rate was 30.2-57.8% — a ±14-point interval,
+# i.e. a number that cannot distinguish a good engine from a coin flip. At n=5
+# it is pure noise, and the morning bar was printing exactly that to every user
+# every day as "60%".
+#
+# 30 is not arbitrary: it is the SAME bar this repo already uses everywhere else
+# for "conclusive" (evaluate_picks._MIN_N, performance_context._MIN_DIRECTIVE_N).
+# The perf bar was the outlier.
+#
+# 🔑 Below it we do NOT hide the record — "3W/2L", the median and the SPY
+# comparison are all FACTS and stay. Only the derived PERCENTAGE goes, because
+# a rate invites an inference about skill that five trades cannot support.
+# Removing the facts would be the opposite error: an empty bar reads as "no
+# data" when we have some.
+_MIN_WIN_RATE_N = 30
 
 COINGECKO_SIMPLE = "https://api.coingecko.com/api/v3/simple/price"
 
@@ -195,7 +212,11 @@ def get_recent_stats(trade_logs: list[dict], days: int = 30) -> dict | None:
     Compute performance stats from closed trades in the last N days across all users.
     Used for the morning message performance bar and /stats command.
 
-    Returns None if fewer than 3 closed trades in the window (not enough to be meaningful).
+    Returns None below _MIN_RECENT_TRADES closed trades in the window.
+
+    `win_rate` is always present, but `win_rate_conclusive` says whether it is
+    worth SHOWING (n >= _MIN_WIN_RATE_N). Callers must honour that flag — the
+    percentage is the part that over-claims, not the counts.
     """
     from datetime import date, timedelta
     cutoff = (date.today() - timedelta(days=days)).isoformat()
@@ -230,6 +251,9 @@ def get_recent_stats(trade_logs: list[dict], days: int = 30) -> dict | None:
             "wins":          len(wins),
             "losses":        len(losses),
             "win_rate":      round(win_rate * 100, 1),
+            # Kept as a key so no existing consumer breaks; the FLAG is what
+            # decides whether it may be rendered.
+            "win_rate_conclusive": len(returns) >= _MIN_WIN_RATE_N,
             "avg_return":    round(sum(returns) / len(returns), 1),
             "median_return": round(median, 1),
             "avg_gain":      round(avg_gain, 1),
@@ -326,6 +350,10 @@ def build_community_stats(user_trade_logs: list[dict]) -> dict | None:
         "total_users":      len(user_trade_logs),
         "total_trades":     len(all_closed),
         "win_rate":         win_rate,
+        # Same gate as the personal bar. A "community track record" is MORE
+        # claim-shaped than a personal one, and its floor was 10 — a rate that
+        # cannot tell a good engine from a coin flip.
+        "win_rate_conclusive": len(all_closed) >= _MIN_WIN_RATE_N,
         "avg_return":       avg_ret,
         "total_wins":       len(wins),
         "total_losses":     len(losses),
