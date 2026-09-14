@@ -200,7 +200,11 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
                     spy_str = f"  ·  SPY {_s(spy)}%" if spy is not None else ""
                     msg += (
                         f"\n\n<b>📈 Community — last 30d</b>\n"
-                        f"{t['wins']}W/{t['losses']}L ({t['win_rate']}%)  ·  "
+                        # Rate only above the conclusive gate — see
+                        # performance_tracker._MIN_WIN_RATE_N.
+                        f"{t['wins']}W/{t['losses']}L"
+                        + (f" ({t['win_rate']}%)" if t.get("win_rate_conclusive") else "")
+                        + "  ·  "
                         f"avg {_s(t['avg_return'])}%  ·  "
                         f"exp {_s(t['expectancy'])}%/trade{spy_str}"
                     )
