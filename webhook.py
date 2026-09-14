@@ -1411,8 +1411,8 @@ function selfhealCard(rows){
         +x.url+'">Open on GitHub &rarr;</a></div>'
       +'</details>'
       +'<div style="margin-top:8px">'
-        +'<button class="btn-success" onclick="selfhealAct(\\''+x.branch+'\\',\\'merge\\')">Merge &amp; deploy</button> '
-        +'<button class="btn-sm" onclick="selfhealAct(\\''+x.branch+'\\',\\'discard\\')">Discard</button>'
+        +'<button class="btn-success" onclick="selfhealAct(this,\\''+x.branch+'\\',\\'merge\\')">Merge &amp; deploy</button> '
+        +'<button class="btn-sm" onclick="selfhealAct(this,\\''+x.branch+'\\',\\'discard\\')">Discard</button>'
       +'</div>'
       +'</div>';
   }).join('');
@@ -1438,24 +1438,62 @@ function diffHtml(p){
   }).join('');
 }
 
-async function selfhealAct(branch,action){
-  var msg = action==='merge'
-    ? 'Merge '+branch+' into main?'+String.fromCharCode(10)+String.fromCharCode(10)
-      +'This DEPLOYS to production in about 2 minutes.'
-    : 'Delete branch '+branch+'?'+String.fromCharCode(10)+String.fromCharCode(10)
-      +'The response records the SHA so it can be restored.';
-  if(!confirm(msg)) return;
+function _shMsg(el, text, bad){
+  // IN-PAGE result, not alert(). A suppressed alert would hide a GitHub 403
+  // just as silently as the suppressed confirm hid the whole action.
+  var box = el.parentNode.querySelector('.shmsg');
+  if(!box){ box = document.createElement('div'); box.className = 'shmsg fb-meta';
+            box.style.marginTop = '6px'; el.parentNode.appendChild(box); }
+  box.textContent = text;
+  box.style.color = bad ? 'var(--loss, #f85149)' : '';
+}
+
+function _shDisarm(el){
+  if(el._t){ clearTimeout(el._t); el._t = null; }
+  if(el.dataset.armed === '1'){
+    el.dataset.armed = '0';
+    if(el.dataset.label) el.innerHTML = el.dataset.label;
+  }
+}
+
+async function selfhealAct(el, branch, action){
+  // 🔴 TWO-STEP IN-PAGE CONFIRMATION, never confirm().
+  // The original gate was `if(!confirm(msg)) return;` — a SILENT failure
+  // path. A browser that suppresses dialogs (Chrome offers exactly that after
+  // repeated ones) or Telegram's in-app browser, where confirm is blocked
+  // outright, makes it return false, so the handler returned with no fetch,
+  // no error and no trace. On 2026-09-13 the owner clicked Merge and NOTHING
+  // happened: main unchanged, branch still there, merge provably clean. The
+  // acknowledge path worked the same evening precisely because it has no
+  // confirm. Arming in the page cannot be suppressed by the browser.
+  if(el.dataset.armed !== '1'){
+    el.dataset.armed = '1';
+    el.dataset.label = el.innerHTML;
+    el.innerHTML = (action === 'merge') ? 'Confirm &mdash; deploys now' : 'Confirm delete';
+    _shMsg(el, action === 'merge'
+      ? 'Click again to merge ' + branch + ' into main. Render deploys it to real users.'
+      : 'Click again to delete ' + branch + '. The SHA is recorded so it can be restored.');
+    el._t = setTimeout(function(){ _shDisarm(el); _shMsg(el, ''); }, 8000);
+    return;
+  }
+  _shDisarm(el);
+  el.disabled = true;
+  _shMsg(el, action === 'merge' ? 'Merging…' : 'Deleting…');
   try{
-    var r=await fetch('/admin/selfheal/'+branch+'/'+action,{method:'POST'});
-    var j={};
-    try{ j=await r.json(); }catch(e){}
+    var r = await fetch('/admin/selfheal/' + branch + '/' + action, {method:'POST'});
+    var j = {};
+    try{ j = await r.json(); }catch(e){}
     // A 403 from GitHub must be LOUD. The token dispatches workflows, which
     // implies merge scope but does not prove it — a silent no-op here would
     // read as success and the branch would sit unmerged.
-    if(!r.ok){ alert('Failed (HTTP '+r.status+'): '+(j.error||'')+String.fromCharCode(10)+(j.detail||'')); return; }
-    alert(j.note||'Done.');
+    if(!r.ok){
+      el.disabled = false;
+      _shMsg(el, 'FAILED (HTTP ' + r.status + '): ' + (j.error || '') + ' ' + (j.detail || ''), true);
+      return;
+    }
+    _shMsg(el, j.note || 'Done.');
     load();
-  }catch(e){ alert('Network error'); }
+  }catch(e){ el.disabled = false; _shMsg(el, 'Network error: ' + e, true); }
 }
 
 function age_(iso){ return age(iso); }
