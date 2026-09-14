@@ -9,6 +9,8 @@
 | ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. Ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
 | open | **The product claim.** Measurement is now COMPLETE: all four engine stages measured, none showing a detectable edge (ST −1.6 n=510, LT −2.2 n=90, pool vs SPY −3.6, selection −4.74 n=46/41 CI [−12.89,+3.41]). Supported: *"daily picks with real entry/stop/target levels, position sizing, and alerts that fire — measured against SPY."* NOT supported: any claim about beating the market. | OWNER | choose the wording |
 | ~2026-09-21 | **Prescreener fix — does Monday now get a 03:00 dispatch?** The ET-weekday bug is FIXED (job 7727066, wdays Sun-Thu ET). Tonight's fire only proves nothing broke; **Mon 2026-09-21 03:00 UTC is the first run the old schedule could not produce**. Cutting a GitHub prescreener cron stays DEFERRED — they were Monday's only cover. | WATCH | a 03:00 dispatch on 09-21 |
+| **after launch** | **🟡 TURN THE LAUNCH KEEP-WARM OFF.** cron-job.org job `7746621` is ENABLED at 7am-7pm ET (~360 h/mo, account at 63% of cap). It is a launch measure, not a steady state — leaving it on burns headroom the other three apps may need. Disable with `{"job":{"enabled":false}}`. | OWNER | disable the job |
+| 2026-09-15 | **Does the keep-warm ESTABLISH warmth or only MAINTAIN it?** cron-job.org's client is documented as refused in ~500 ms by a SLEEPING Render edge. Check the 07:00-07:30 ET Render log: a `/health` 200 before any user traffic = it establishes. | CLAUDE | read tomorrow's log |
 | ~2026-09-15 | `morning.cache_hit_rate` — **4/5 mornings recorded** as of the 09-14 canary; one more trading day before it reports a rate. | WATCH | says "building baseline" until then |
 | open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
 
@@ -1986,6 +1988,49 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **Both routes now `_relay_to_github(...)`**: the generic `/trigger/<mode>` and `webhook.admin_run_agent`. The admin button was the worse of the two — it fires whenever the owner clicks it, so an OOM there looks like "the dashboard killed the service" with no cron entry to correlate against.
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
+
+### 🟡 LAUNCH KEEP-WARM IS ON — 7am-7pm ET, and it MUST be turned off after (Sep 14)
+
+Owner's call for the friends/group launch. The service is on Render FREE and sleeps, so the
+**first person to tap a share link after an idle gap waits ~45 s or gets no reply** — the bot
+webhook and the mini-app both land on Render. That is the single worst thing a new user can meet.
+
+**What was changed — cron-job.org job `7746621` (`StockPulz-keepalive`, GET /health):**
+
+    enabled : false -> TRUE
+    schedule: hours [-1] (EVERY HOUR, 24/7)  ->  [7..18] America/New_York
+              minutes :00/:15/:30/:45, every day
+    cost    : 12 h/day -> 360 h/mo for stock-agent
+    account : 60 Paywise + 49 PriceDrop + 1 QuizMania + 360 = ~470 h/mo
+              63% of the 750 h cap, ~280 h headroom
+
+- **🚨 NARROWING AND ENABLING MUST BE ONE PATCH.** The job was still on `hours: [-1]` from its
+  24/7 era, so flipping `enabled` alone would have cost **~744 h/mo — 99% of the cap shared with
+  three other apps**, which is the exact trap this file lists under "three re-enable instructions
+  are now live and all three are traps". Verified by READ-BACK, not by the HTTP 200.
+- **The in-process `KEEPALIVE_ENABLED` was deliberately NOT touched.** `KEEPWARM_HOURS_ET`
+  defaults to ALL 24 HOURS, so setting the flag without also narrowing it is the same disaster by
+  another route — and the two live on separate lines, which is how a hurried reader takes only the
+  first. The external pinger is sufficient and is the one that measurably works.
+- **ET-anchored on purpose** so the window cannot drift against the 7 AM ET morning delivery at a
+  DST change. Safe here despite today's prescreener bug: that was a WEEKDAY shift, and this job
+  runs every day (`wdays: [-1]`), so there is no weekday to shift.
+- **`/health` is in `_TRAFFIC_SKIP_PREFIXES`**, so 48 pings/day cannot pollute the traffic-by-hour
+  measurement. Do not remove that exclusion while this is running.
+
+**✅ VERIFIED REACHING THE APP**: `18:45:09 UTC  ua=Mozilla/4.0 (compatible; cron-job.org; ...)`
+in the Render access log, inside the window.
+
+**⚠️ WHAT IS NOT YET VERIFIED, and it is the load-bearing half.** This file records that
+cron-job.org's client gets REFUSED by Render's edge in ~500 ms against a SLEEPING instance
+(dozens of observations, Sept 4-5), while a `curl -m 30` boots it 2/2. If that still holds, the
+window can **MAINTAIN** warmth but cannot **ESTABLISH** it — so the 07:00 ET ping would bounce and
+the service would stay cold until a real user wakes it. The service was already warm when the
+ping above landed, so that observation proves maintenance only.
+🔎 **The test is tomorrow's 07:00-07:30 ET window**: if `/health` 200s appear before any user
+traffic, it establishes; if the first hit of the day is a user or the canary, it does not.
+Even in the bad case the window is still worth it — ONE user eats a cold start per day instead of
+one per idle gap — but **do not describe it as "no cold starts" until that is measured.**
 
 ### The win-rate gate is CORRECT and currently DORMANT — verified on the live store (Sep 14)
 
