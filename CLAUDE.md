@@ -43,7 +43,7 @@ Rules:
 - **`_can_run_live_screener()` guard in agent.py**: morning run NEVER falls back to the live screener when RENDER env var is set (Render sets it automatically). Cache miss → admin-only alert + crypto/ETF picks continue; users see normal "no stock setups today" rendering.
 - **Morning DELIVERY also relays to GitHub Actions (FIXED Jul 1, 2026).** The old belief "morning run WITH cache is light, well under 512MB" was FALSIFIED — even with the cache, run_morning (ETF screen + Claude analysis w/ per-ticker sentiment + signal cache + personalised send) OOMs Render's 512MB. Symptom: `cron_last_morning` updates daily (process starts, sets it) but `last_morning_run` + `picks._saved_date` freeze (killed mid-run, before save_picks), and the per-day guard then blocks retries → users silently get NO morning picks for days. Render logged "Ran out of memory (used over 512MB)" at 11:01 UTC. Fix: `webhook.trigger_morning` now RELAYS to GH Actions (dispatches daily_run.yml `run_mode=morning`, mirrors /trigger/prescreener) instead of `subprocess.Popen(agent.py)`. **Rule: any run that does screening/Claude/ETF work must execute on GH Actions (7GB), never spawn on Render — Render only relays + serves the web/API.** NOTE: deliberately did NOT add a GH `0 11 * * 1-5` schedule cron — that would race the cron-job.org relay and double-send (delivery isn't idempotent, unlike the prescreener cache). `force=true` propagates through the relay → daily_run.yml `force` input → `FORCE_MORNING` env for recovery.
 - **🔴 The SATURDAY path was never converted — fixed Aug 15, 2026.** `run_weekly_recap` opens with `run_morning(config, now_et)` ("Saturday: run crypto morning picks, then send a compact weekly recap"), so `/trigger/weekly` was running the FULL morning pipeline locally on Render through the generic `/trigger/<mode>` `subprocess.Popen` path — the exact thing the Jul 1 fix removed from the weekday path. It had run that way every Saturday since.
-  - **Symptom it produced, and how it hid: the run "succeeds" but sets ZERO auto alerts.** Sat 2026-08-15 generated and DELIVERED GLD + SLV, and neither real user got a single alert — while the identical code yields `GLD stop@381.41` + `SLV invalidation@49.71` when run anywhere else. `_auto_set_pick_alerts` catches per-ticker, so every failure logged and continued and `last_morning_run` stamped normally. Weekday mornings (GH Actions) alert correctly; only the Render-executed Saturday run did not. Prime suspect: `add_alert` → `_current_price` failing from Render's IP. **Confirming it needs Render logs — there is still no `RENDER_API_KEY` in `.env`.**
+  - **Symptom it produced, and how it hid: the run "succeeds" but sets ZERO auto alerts.** Sat 2026-08-15 generated and DELIVERED GLD + SLV, and neither real user got a single alert — while the identical code yields `GLD stop@381.41` + `SLV invalidation@49.71` when run anywhere else. `_auto_set_pick_alerts` catches per-ticker, so every failure logged and continued and `last_morning_run` stamped normally. Weekday mornings (GH Actions) alert correctly; only the Render-executed Saturday run did not. Prime suspect: `add_alert` → `_current_price` failing from Render's IP. **Confirming it needs Render logs. ✅ `RENDER_API_KEY` EXISTS in `.env` as of 2026-09-14** (with `RENDER_SERVICE_ID` + `RENDER_OWNER_ID`) — logs are readable now, but retention is only ~7 days, so an Aug 15 confirmation is permanently out of reach.
   - Fix: dedicated `webhook.trigger_weekly` relaying via the new **`webhook._relay_to_github(mode, force, tag)`**, with its own `cron_last_weekly` guard and `?force=true` bypass. The static route wins over `/trigger/<mode>`, same as morning/prescreener. **`trigger_morning`/`trigger_prescreener` keep their inlined copies deliberately** — morning delivery is the highest-risk path in the app; migrate them only when there is another reason to touch them.
   - **Rule restated: grep `run_morning(` before assuming the weekday path is the only one.** There are exactly TWO callers (`mode == "morning"` and `run_weekly_recap`); `tests/test_api.py::TestOnlyWeeklyAndMorningReachRunMorning` fails if a third appears. Sunday's `run_week_ahead` is safe — "No new picks are generated" — asserted by test rather than assumed.
   - **Method lesson: I checked ONE execution surface (GitHub Actions), saw no `daily_run`, and reported "nothing ran today".** Render is a second surface. The `cron_last_*` / `last_morning_run` stamps in the config are the authoritative record of what actually executed across both — read those first.
@@ -269,7 +269,7 @@ Rules:
 - **Global JSON error handler**: `webhook.py @app.errorhandler(Exception)` returns JSON (HTTPException keeps its code; else 500 + logged) so the mini-app's `response.json()` never hits HTML. Rule: never let an endpoint return Flask's default HTML error.
 - **`nan` price guard at the SOURCE modules too**: `price_checker.py` (3 sites) + `market_data._yf_price` now use `if price and price > 0` (the `_is_pos` guard wasn't only an alert-layer concern). Any new `fast_info.last_price` read must do this — `nan` is truthy.
 - **`/health` returns `{"status","commit","branch"}` and NOTHING else** — it's unauthenticated; never serialize the config dict (allowlist/admin id) to it. The commit comes from `RENDER_GIT_COMMIT` (set automatically by Render) and is safe because the repo is public. **Verify a deploy with `curl -s https://stock-agent-enqx.onrender.com/health` and compare `commit` to `git rev-parse --short HEAD`** — without it, a service running today's code and one running last week's are indistinguishable, which is how the Aug 11 keep-warm gate was believed live for hours while the old self-ping was still serving. PiQValet's `preflight.py` is the same pattern, added after a duplicate service silently took over its auto-deploys and served hours-old code behind a healthy 200. Guard: `test_health_does_not_leak_config` asserts an ALLOWLIST of keys plus a banned-substring scan, not exact equality — the old `data == {"status":"ok"}` broke on any legitimate addition, which invites weakening the whole check.
-- **🔴 "Committed and pushed" is not "deployed", and until Aug 11 there was no way to tell them apart.** A green CI run and a pushed commit say nothing about what Render is serving. Check `/health`'s `commit` before claiming a fix is live. Related: there is no `RENDER_API_KEY` in `.env`, so deploy status and build logs cannot be read from a session — add one if that becomes load-bearing.
+- **🔴 "Committed and pushed" is not "deployed", and until Aug 11 there was no way to tell them apart.** A green CI run and a pushed commit say nothing about what Render is serving. Check `/health`'s `commit` before claiming a fix is live. Related: **`RENDER_API_KEY` IS NOW IN `.env` (2026-09-14)** alongside `RENDER_SERVICE_ID` and `RENDER_OWNER_ID`, so deploy status, events and build logs ARE readable from a session. Three places in this file used to say otherwise; they were corrected together.
 - **IDOR rule: mutating endpoints use the AUTHENTICATED chat_id, never a client-supplied `chat_id` body/param** (seed_backtest was overriding it). Same root cause as the auth gap below.
 - **Anthropic client**: `anthropic.Anthropic(timeout=60, max_retries=2)` — the SDK default (~600s×2) can hang the whole morning run.
 - **Cron-secret compares use `hmac.compare_digest`** (timing-safe).
@@ -1775,7 +1775,7 @@ Both had `timeout=25` against a **54.9 s** cold start. The instant nothing sched
 - Measured: every Supabase `cron_last_*` frozen at **2026-08-19** while the Gist's ran to that morning — `cron_last_week_ahead` was stamped 12:00:41 UTC on Aug 23 and **no GitHub Actions run existed at 12:00**, so Render wrote it, to the Gist. Meanwhile GH Actions wrote Supabase (`data_quality` 08-21, a `user_trades` position opened 08-22 present only there). Four days, two stores, no alert.
 - **This is the SAME split-brain as Aug 19 (`d11a1c9`), which was declared closed.** It reopened because closing it was a configuration act with **no monitor behind it**. The new check compares the backend the canary process resolves to against what `/health` reports; they must agree. Unreachable service or an unusable answer prints `NOT VERIFIED`, never a pass.
 - **Rule: when a fix is a configuration change, ask what would detect it silently reverting.** `/health` already exposed `storage` for exactly this and nothing was reading it.
-- **⚠️ The CAUSE of Render being on the Gist is UNCONFIRMED** — it needs the env or logs and there is still no `RENDER_API_KEY`. It could be the Aug 19 rollback vars not re-set until a restart, or a failed Supabase verification falling back silently. Do not write a cause into memory that was not measured.
+- **⚠️ The CAUSE of Render being on the Gist is UNCONFIRMED** — it needed the env or logs, and **`RENDER_API_KEY` now exists (2026-09-14)** — but Render retains only ~7 days, so this specific Aug-23 cause can never be confirmed. Leave it unconfirmed; do not write a cause that was not measured. It could be the Aug 19 rollback vars not re-set until a restart, or a failed Supabase verification falling back silently. Do not write a cause into memory that was not measured.
 - **A weekend `picks.json` is legitimately SMALL** — Saturday is crypto/commodities only (2222 B vs a weekday's 14935 B). That size gap is CONTENT, not truncation; do not read it as data loss. Saturday's SUI + GLD were ledgered correctly.
 
 ### 🔴 The PROPOSE half of the approval workflow had no Supabase surface (Aug 23)
@@ -1978,6 +1978,74 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **Both routes now `_relay_to_github(...)`**: the generic `/trigger/<mode>` and `webhook.admin_run_agent`. The admin button was the worse of the two — it fires whenever the owner clicks it, so an OOM there looks like "the dashboard killed the service" with no cron entry to correlate against.
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
+
+### ✅ RENDER LOGS ARE READABLE NOW — and they held three live defects (Sep 14)
+
+- **`RENDER_API_KEY` + `RENDER_SERVICE_ID` + `RENDER_OWNER_ID` are in `.env`.** Three places in
+  this file said "there is still no RENDER_API_KEY"; all corrected. `GET /v1/logs?ownerId=&resource=`
+  works, `/v1/services/<id>/events` shows deploys, `/v1/services` lists plans.
+  ⚠️ **Retention is ~7 days.** Anything older (the Aug-15 zero-alerts Saturday, the Aug-23 Gist
+  split-brain cause) is permanently unconfirmable. Do not reopen those hoping to settle them.
+  🔑 **A time-window query that returns zero can mean the parameter was rejected.** My first
+  sweep read "0 lines" for five straight days and I nearly reported an outage; a CONTROL probe on
+  a window known to hold data returned 42 lines and proved the zeros were real silence. **Always
+  run the control before reading an absence.** Same for the per-hour sweep: it hit rate limits and
+  printed errors that looked exactly like "asleep" until they were marked distinctly.
+
+**What the logs SAY, measured 2026-09-14:**
+
+    no OOM anywhere in 7 days      the Sep 3 conversion (d579cb7) holds
+    zero /trigger/* requests       CORRECT -- all 19 cron jobs POST GitHub directly now
+    awake 31 h of 168 (~133 h/mo)  2-3 short wakes on a quiet day; it sleeps as designed
+    cold start ~45 s               16:30:33 gunicorn start -> 16:31:18 first 200
+    4x commit_ignored              the skip-render tag works
+
+- 🚨 **ZERO `/trigger/*` TRAFFIC IS THE HEALTHY STATE — do not read it as a dead scheduler.**
+  `daily_run.yml`'s header still describes the old "cron-job.org -> Render /trigger/<mode>" relay,
+  which has been false since the Sep 5 migration. Verify against cron-job.org's job list (all 19
+  enabled, `lastStatus=1`), never against Render's access log.
+
+**🔴 Defect 1 — every boot printed a false plan and the WRONG instruction.**
+`webhook.py` logged *"Keep-alive DISABLED — Starter plan never idles… Set KEEPALIVE_ENABLED=1 if
+this service is ever moved to the Free plan."* It HAS been on Free since 2026-09-02, it DOES
+sleep (31 h/168 measured), and this file says explicitly **DO NOT restore the keep-alive**. So the
+operational log asserted a false fact and recommended the one action the decision forbids.
+`.env.example`'s copy of the same line was fixed 09-06; this one was missed.
+🔑 **A stale operational message is a defect, not cosmetics** — this exact belief is what this
+file already blames for making the Sept 5 outage unreadable. **When a plan/tier changes, grep for
+every place that ASSERTS it, including log strings — not just the code that branches on it.**
+
+**🔴 Defect 2 — the comment warning against backslash escapes CONTAINED one.**
+`/* …never a CSS \ escape… */` inside the admin HTML string emitted
+`DeprecationWarning: invalid escape sequence` on **every boot**. Harmless today; a **SyntaxError**
+in a future Python, i.e. the app stops importing. The self-flagging trap, now in production
+source rather than a test scan. Rewritten to carry no backslash at all.
+🔎 **Two guards were needed, and mutation is what proved it.** The compile-warning scan catches
+`\ ` but is BLIND to the historical `content:'\25B8'` bug — **`\25` is a perfectly VALID Python
+octal escape**, so it warns about nothing and silently renders the literal text `B8`. The second
+guard asserts **no control character survives into the parsed admin string**. A blanket backslash
+ban is wrong: 152 of them are the correct doubled `\\'` form.
+
+**🔴 Defect 3 — `/admin` polled `/admin/data` every 60 s unconditionally.**
+Visible in the log as unbroken 60 s ticks for as long as a tab was open. On Render Free that
+defeats the 15-min idle timer outright, so **one forgotten tab pins the instance awake ~744 h/mo
+against a 750 h ACCOUNT pool shared with three other apps** — and, worse, **it MASKS every sleep
+bug**, because nothing can go cold while it polls. This file already recorded the hazard on
+Sep 4; the poll was never changed.
+- Now `setInterval` runs `_tick`, which returns early on `document.hidden`.
+- **A paused poll must not become stale data**: `visibilitychange` refreshes immediately on
+  return, but only when the data is already older than one cycle — without that age check, every
+  alt-tab is a fetch, which is worse than the 60 s poll it replaced.
+- Guard: `tests/test_admin_poll_and_stale_plan.py` **DRIVES the served JS under node** with a
+  stubbed `document`/`setInterval`, rather than scanning for a string — a source scan is what let
+  the whole page 500 for 40 minutes with twenty green tests. 6 of 6 mutations verified failing.
+- ⚠️ **My mutation VERIFIER was wrong twice before the mutations were.** It asserted the search
+  string was gone, but two mutants legitimately KEEP it (prepending text). Both reported
+  "PATCH DID NOT LAND" on patches that had landed perfectly. **Assert the MUTANT is present, not
+  that the target is absent.**
+- ⚠️ The self-flagging trap AGAIN (twelfth): the scan for "Starter" in the keep-alive branch hit
+  the function's own docstring, which legitimately explains that "a service that never idles costs
+  ~744 h/month". Anchored on the branch BODY, never the prose around it.
 
 ### `/admin` was never cold — its data endpoint was SERIAL (Sep 13)
 - Owner: *"why this is not warmed up?"* **The server was warm the whole time** — Starter never idles, and unsandboxed `/health` answers in 0.12–0.23 s (DNS 4 ms, TLS 33 ms). The wait was `/admin/data`: ~10 distinct storage files fetched **one after another**, ~100 ms each from Render's region, on every open after the 20 s read cache expired. `/admin` itself is a static string; the JS fetch behind it is what you wait on.

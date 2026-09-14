@@ -176,17 +176,27 @@ def _save_admin_tokens(tokens: dict) -> None:
 # only one running INSIDE the process — which makes it the one that actually
 # decides the bill, because it cannot be throttled or lagged. If the
 # cron-job.org window moves, move this too.
-# 🔴 KEEP-ALIVE IS DISABLED. StockPulz runs on Render's STARTER plan: the
-# service never spins down, and paid instances draw nothing from the 750 h free
-# pool — so every ping woke something already awake. Proven Aug 11: StockPulz
-# stayed warm through 45 min of total silence while PiQValet and pricedrop
-# (both Free, same account) went cold in 20 min.
+# 🔴 KEEP-ALIVE IS DISABLED, AND ON THE CURRENT PLAN IT MUST STAY THAT WAY.
+# This comment used to say "StockPulz runs on STARTER, the service never spins
+# down, so a ping wakes something already awake". That was true in August and is
+# FALSE now — the service has been on Render FREE since 2026-09-02 22:04, and it
+# does sleep: measured 2026-09-14, awake 31 h of 168, waking 2-3 times a day.
+# Verify with `GET /v1/services` before quoting a plan; do not trust this line.
 #
-# DISABLED, NOT DELETED: a downgrade to Free brings the need straight back, and
-# a cold first /start is what makes the bot look broken to a new user.
-#   re-enable:  KEEPALIVE_ENABLED=1
-#   narrow it:  KEEPWARM_HOURS_ET=6,7,8,9,10,11,12,13   (must cover the 7 AM ET
-#               morning relay — delivery is not idempotent)
+# The conclusion survived the plan change, for a DIFFERENT reason. Sleeping is
+# now free of consequence: all 17 triggers POST to GitHub's API directly, so
+# nothing scheduled touches this service at all (measured: zero /trigger/*
+# requests in seven days of retained logs). A 24/7 warm instance costs ~744 h/mo
+# of a 750 h ACCOUNT pool shared with three other apps — 99% of the cap.
+#
+# DISABLED, NOT DELETED: the cost of sleeping is a ~45 s cold start on the first
+# interactive hit (the bot webhook and the mini-app DO land here), which is what
+# makes the bot look broken to a new user. That is the trade to re-open if the
+# account ever has the hours, and it is an OWNER decision with a budget attached
+# — not a switch to flip because a log line suggested it.
+#   would re-enable:  KEEPALIVE_ENABLED=1
+#   MUST narrow it:   KEEPWARM_HOURS_ET=6,7,8,9,10,11,12,13   (defaults to all
+#                     24 hours; must cover the 7 AM ET morning relay)
 _KEEPALIVE_ENABLED = (os.environ.get("KEEPALIVE_ENABLED", "").strip().lower()
                       in ("1", "true", "yes", "on"))
 
@@ -230,9 +240,11 @@ def _keep_alive_loop():
     Requires RENDER_EXTERNAL_URL (set automatically by Render).
     """
     if not _KEEPALIVE_ENABLED:
-        print("[webhook] Keep-alive DISABLED — Starter plan never idles, so a "
-              "self-ping wakes an already-running service. Set KEEPALIVE_ENABLED=1 "
-              "if this service is ever moved to the Free plan.")
+        print("[webhook] Keep-alive DISABLED — this service is MEANT to sleep. "
+              "Its 17 triggers dispatch GitHub directly, so nothing scheduled "
+              "needs a warm instance. A 24/7 self-ping costs ~744 h/mo of the "
+              "750 h ACCOUNT pool shared with three other services. Do not "
+              "re-enable without budgeting those hours.")
         return
     url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
     if not url:
@@ -845,9 +857,15 @@ a{color:var(--accent);text-decoration:none}
 .fdet{margin-top:8px}
 .fdet>summary{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;cursor:pointer;list-style:none;font-size:13px;font-weight:600;color:var(--muted);background:var(--card-hover);border:1px solid var(--border);border-radius:12px;user-select:none}
 .fdet>summary::-webkit-details-marker{display:none}
-/* The chevron is an HTML ENTITY in the markup, never a CSS \ escape: in a
-   Python triple-quoted string '\25B8' is read as an OCTAL escape (\25) and
-   renders the literal text 'B8'. Same family as the lone-surrogate trap. */
+/* The chevron is an HTML ENTITY in the markup, never a CSS backslash escape:
+   this whole page is a Python triple-quoted string, so Python eats the escape
+   first and a backslash-25 sequence is read as OCTAL, rendering the literal
+   text 'B8'. Same family as the lone-surrogate trap.
+   This comment carries NO backslash of its own, deliberately -- the version
+   that explained the rule with a literal one emitted an invalid-escape
+   DeprecationWarning on every boot, i.e. it committed the very error it
+   warns about. A future Python turns that into a SyntaxError, which would
+   take the whole app down at import. */
 .fchev{display:inline-block;transition:transform .15s}
 .fdet[open] .fchev{transform:rotate(90deg)}
 .fdet[open]>summary{border-color:var(--accent,#4ade80)}
@@ -1643,8 +1661,22 @@ async function load(){
   document.getElementById('ts').textContent='Updated '+new Date().toLocaleTimeString();
 }
 
+/* Poll ONLY while the tab is visible.
+   This service is on Render FREE and is meant to sleep (nothing scheduled
+   touches it any more). A 60s poll defeats the 15-min idle timer outright, so
+   ONE forgotten /admin tab pins the instance awake around the clock -- ~744
+   h/mo against a 750 h ACCOUNT pool shared with three other apps. It also
+   MASKS every sleep bug, because while it polls the service never goes cold.
+   A hidden tab is nobody looking, so it must not keep the dashboard warm.
+   Coming back refreshes at once when the data is already a cycle old, so the
+   card is never stale on return -- a paused poll must not become stale data. */
+var _lastLoad=Date.now();
+function _tick(){ if(document.hidden) return; _lastLoad=Date.now(); load(); }
 load();
-setInterval(load,60000);
+setInterval(_tick,60000);
+document.addEventListener('visibilitychange',function(){
+  if(!document.hidden && Date.now()-_lastLoad>60000) _tick();
+});
 </script>
 </body>
 </html>"""
