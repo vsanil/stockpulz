@@ -1987,6 +1987,37 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
 
+### The win-rate gate is CORRECT and currently DORMANT — verified on the live store (Sep 14)
+
+`_MIN_WIN_RATE_N = 30` was raised on 09-13 and verified against synthetic fixtures. Driving it
+against the REAL store (`scripts/show_perf_bar.py`, dispatched on CI so it resolves to
+**SupabaseBackend**, not the laptop's Gist) says it changes nothing today:
+
+    8602468968   0 closed trades
+    658547949    0 closed trades
+    get_recent_stats -> None   -> the morning message renders NO performance bar at all
+    build_community_stats -> None -> /community renders its empty state
+
+- **The binding floor is `_MIN_RECENT_TRADES = 5`, not the new 30.** Both real users have zero
+  closed trades, so the bar is absent rather than gated. The new floor only starts doing work once
+  a real user closes 5+ trades: counts, median and vs-SPY appear, and the PERCENTAGE stays hidden
+  until 30. **Do not describe the 30 floor as currently protecting anything.**
+- **⚠️ The leak assertion in that script did NOT run.** It lives in the branch that needs stats,
+  and there are none — so production has never exercised it. The synthetic-fixture tests
+  (`tests/test_win_rate_honesty_gate.py`, both n=6 and n=40 rendered) are the only coverage that
+  has actually executed. Say "dormant", not "verified in production".
+- **The `0 synthetic, excluded` column is NOT evidence `human_trades()` ran.** The synthetic
+  account is not in `get_allowed_users()`, so it never enters the recipient list at all — exactly
+  as `agent.py` does it. The filter is a second line of defence here, not the one doing the work.
+- **Consequence for a launch, stated plainly: a new user sees no track record, because there is
+  none.** That is honest and correct. It is also the thing a "how has this performed?" question
+  will hit first.
+- `scripts/show_perf_bar.py` + `.github/workflows/show_perf_bar.yml` are a MANUAL read-only
+  diagnostic (the `input_audit.py` family). It drives the REAL renderer rather than
+  re-implementing the bar — a re-implementation can agree with itself while disagreeing with
+  production — and it prints the backend it resolved to, because a laptop run reads the rollback
+  copy. `TELEGRAM_BOT_TOKEN` is deliberately not passed, so it cannot send even by accident.
+
 ### 🔴 MONDAY NEVER HAD A PUNCTUAL PRESCREENER — an ET weekday lands on a UTC day (Sep 14)
 
 `StockPulz-prescreener` (cron-job.org job **7727066**) was `23:00 America/New_York,
