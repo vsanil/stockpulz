@@ -36,6 +36,11 @@ OWNER_ONLY_CHECKS: frozenset[str] = frozenset({
     # A broken healer cannot heal itself, and trying burns Claude credits on a
     # diagnosis that is structurally guaranteed to be wrong.
     "selfheal.healthy",
+    # Approving a user is an OWNER decision about access to a live trading bot.
+    # No code change can make it pass, so summoning self-heal would burn credits
+    # diagnosing something uncodeable. Defence in depth: the check never fails
+    # today, so this can only matter if someone later makes it fail.
+    "users.pending",
 
     # A dead cron trigger is a cron-job.org / PAT / schedule problem. Self-heal
     # edits CODE, so it cannot fix one — but it CAN "fix" the symptom by

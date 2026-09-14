@@ -1053,6 +1053,68 @@ def check_findings_awaiting() -> None:
            + ", ".join(k for k, _ in waiting[:3]))
 
 
+def check_pending_approvals() -> None:
+    """Remind about people waiting for access approval.
+
+    🔴 MUST NEVER FAIL, for two reasons. A canary failure triggers self_heal,
+    which writes a branch — and self-heal cannot approve a user anyway, so it
+    would burn credits diagnosing something no code change can fix. It is
+    informational by construction and listed in owner_only_checks.
+
+    Why it exists: a real person requested access and waited TEN DAYS. The
+    notification WORKED — a DM with one-tap Approve/Reject fires at request
+    time — and then nothing mentioned it again. That is the same one-shot
+    failure as the unmerged self-heal branches and the awaiting findings, both
+    of which already have standing reminders here. This one is worse: the
+    requester is TOLD "usually within a few hours", so the cost lands on a
+    stranger trying the product, not on the owner.
+
+    Silent when nobody is waiting — a check that speaks every day trains you to
+    ignore it, which is how `weekly.on_github` and `data.completeness` became
+    noise.
+    """
+    import datetime as _dt
+    try:
+        # 🔴 read_strict, NOT get_pending_users(). That helper ends in `or {}`,
+        # so an UNREADABLE store would report a clean "nobody waiting" — the
+        # exact false pass check_findings_awaiting shipped with. read_strict
+        # raises on a transport error and returns None only when the file has
+        # genuinely never been written.
+        from config_manager import PENDING_USERS_FILE
+        from storage import get_storage_backend
+        raw = get_storage_backend().read_strict(PENDING_USERS_FILE) or {}
+    except Exception as exc:
+        _check("users.pending", True,
+               f"NOT VERIFIED this run — store unreadable ({type(exc).__name__})")
+        return
+
+    # Empty records are TOMBSTONES: on a row backend a removal writes an empty
+    # record rather than deleting the row, and a tombstone must never read back
+    # as somebody still waiting. Mirrors get_pending_users().
+    pending = {uid: rec for uid, rec in (raw or {}).items() if rec}
+    if not pending:
+        _check("users.pending", True, "nobody waiting for approval")
+        return
+
+    # Age in UTC, deliberately: add_pending_user stamps requested_at with
+    # datetime.now(timezone.utc). Read on the clock the WRITER used — an
+    # et_today() comparison here would be the mismatch, not the fix.
+    now = _dt.datetime.now(_dt.timezone.utc)
+    ages = []
+    for rec in pending.values():
+        try:
+            ages.append((now - _dt.datetime.fromisoformat(str(rec.get("requested_at")))).days)
+        except Exception:
+            pass
+    oldest = f", oldest {max(ages)}d" if ages else ""
+    names = [str(r.get("username") or r.get("first_name") or u)
+             for u, r in list(pending.items())[:3]]
+    # PASS on purpose — see the docstring. The note IS the reminder.
+    _check("users.pending", True,
+           f"⚠ {len(pending)} person(ppl) waiting for access approval on /admin{oldest}"
+           f" — they were told 'within a few hours': " + ", ".join(names))
+
+
 def check_storage_surfaces() -> None:
     """🔴 A surface silently on the WRONG backend is invisible for days.
 
@@ -1654,6 +1716,7 @@ def main() -> int:
                # is `pytest tests/ -q`, and a red main downgrades its fixes to
                # "pushed to branch (tests red)".
                check_findings_awaiting,
+               check_pending_approvals,
                check_silent_failures,
                ):
         try:
