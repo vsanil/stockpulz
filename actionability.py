@@ -78,7 +78,8 @@ def _fill_price(pos: dict):
     return _num(pos.get("entry_price") or pos.get("avg_price") or pos.get("buy_price"))
 
 
-def entry_slippage(ledger: dict, positions: list) -> tuple[list[dict], int]:
+def entry_slippage(ledger: dict, positions: list,
+                   skipped: list | None = None) -> tuple[list[dict], int]:
     """Fill price vs the entry price the user was shown.
 
     This is the check that matters most for trust: the message states a hard
@@ -124,6 +125,33 @@ def entry_slippage(ledger: dict, positions: list) -> tuple[list[dict], int]:
             # Only ABOVE the window breaks the promise — filling cheaper is fine.
             "outside_window": slip > window,
             "closed": bool(pos.get("closed_date") or pos.get("sell_price")),
+        })
+    # 🔴 Picks the bot DECLINED because they breached the window are
+    # observations, not absences. Without them this metric gets quieter every
+    # time the bot correctly obeys the rule, and the breach rate falls toward
+    # zero while nothing has improved — the same flattering-direction failure
+    # as a closed position erasing its own breach. A skip is also the BETTER
+    # evidence: it is what an obedient user actually experienced.
+    # `fill` is None because nothing was bought; `would_pay` is what it cost.
+    for r in skipped or []:
+        day = str(r.get("date") or "")
+        tkr = str(r.get("t") or r.get("ticker") or "").upper()
+        if not day or not tkr or (day, tkr) in seen:
+            continue
+        want, slip = _num(r.get("entry")), _num(r.get("slippage_pct"))
+        if not want or slip is None or want <= 0:
+            continue
+        seen.add((day, tkr))
+        pick = (ledger or {}).get((day, tkr)) or {}
+        out.append({
+            "ticker": tkr, "date": day,
+            "pick_entry": round(want, 4), "fill": None,
+            "would_pay": _num(r.get("would_pay")),
+            "slippage_pct": round(slip, 2),
+            "window_pct": ENTRY_WINDOW_PCT.get(pick.get("timeframe") or "",
+                                               _DEFAULT_WINDOW),
+            # Recorded only when it breached, so it is a breach by construction.
+            "outside_window": True, "skipped": True, "closed": False,
         })
     return out, undated
 
@@ -180,10 +208,11 @@ def outcome_mix(closed: list) -> dict:
     }
 
 
-def analyse(ledger_rows: list, positions: list, closed: list) -> dict:
+def analyse(ledger_rows: list, positions: list, closed: list,
+            skipped: list | None = None) -> dict:
     ledger = {(r["date"], (r.get("ticker") or "").upper()): r
               for r in (ledger_rows or []) if not r.get("control") and r.get("date")}
-    slip, undated = entry_slippage(ledger, positions)
+    slip, undated = entry_slippage(ledger, positions, skipped)
     stops = stop_distances(positions)
     outs = outcome_mix(closed)
 

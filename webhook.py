@@ -1816,7 +1816,13 @@ def _build_actionability() -> dict:
         # the pick; it does not stop being true when the trade ends.
         positions = (log.get("open") or []) + (log.get("closed") or []) \
                     + (paper.get("positions") or []) + (paper.get("history") or [])
-        return analyse(rows, positions, log.get("closed") or [])
+        # Picks the bot DECLINED because they breached the published window.
+        # Without these the metric gets quieter every time the bot correctly
+        # obeys the rule — see the note in actionability.entry_slippage.
+        # Read the TEST account's state file, matching the positions above.
+        skipped = (_load_gist_file(f"synthetic_state_{DEFAULT_TEST_CHAT_ID}.json")
+                   or {}).get("skipped") or []
+        return analyse(rows, positions, log.get("closed") or [], skipped)
     except Exception as exc:
         print(f"[admin] actionability build failed: {exc}")
         return {"error": str(exc)[:120]}
@@ -1954,6 +1960,8 @@ def admin_selfheal_action(branch, action):
         return jsonify({"error": f"GitHub unreachable: {exc}"}), 502
 
 
+from config_manager import DEFAULT_TEST_CHAT_ID as _TEST_CHAT_ID
+
 # Every storage file /admin/data touches. Kept as a tuple the guard can
 # diff against real reads, so a new builder that reads a new file fails a
 # test instead of silently reintroducing a serial round trip.
@@ -1961,6 +1969,10 @@ _ADMIN_PREFETCH = (
     "user_trades.json", "user_paper.json", "user_configs.json", "feedback.json",
     "audit_dispositions.json", "pick_ledger.json", "pick_ledger_2026.json",
     "pending_users.json", "engine_findings_state.json", "traffic_hours.json",
+    # Derived, never hardcoded — the account id has ONE definition. Carries the
+    # bot's recorded entry-window SKIPS, which actionability counts as
+    # observations (see actionability.entry_slippage).
+    f"synthetic_state_{_TEST_CHAT_ID}.json",
 )
 
 
