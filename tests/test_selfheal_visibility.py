@@ -23,6 +23,19 @@ class TestTheAdminCard:
         i = src.index("function selfhealCard(")
         return src[i:src.index("function age_(", i)]
 
+    def _code(self):
+        """The JS with `//` comment LINES stripped.
+
+        ⚠️ Any scan whose subject is also discussed in prose must strip
+        comments first. Banning `confirm(` tripped on the comment explaining
+        why confirm was removed — the ELEVENTH time that trap has appeared
+        here, and the second time inside the very file warning about it.
+        Only whole comment lines are dropped, so a `//` inside a string
+        literal (a URL) is untouched.
+        """
+        return "\n".join(l for l in self._js().splitlines()
+                          if not l.lstrip().startswith("//"))
+
     def test_it_renders_even_when_empty(self):
         """An invisible card is indistinguishable from a broken one."""
         js = self._js()
@@ -58,7 +71,30 @@ class TestTheAdminCard:
         assert "Render deploys it to real users" in js
 
     def test_a_destructive_action_asks_first(self):
-        assert "confirm(" in self._js(), "merge and discard must confirm"
+        """The INTENT survives; the mechanism changed 2026-09-13. A blocking
+        confirm() was the gate and it is a SILENT failure path — a browser that
+        suppresses dialogs makes it return false, so the handler returned with
+        no fetch, no error and no trace. That is what made the owner's Merge
+        click do nothing. Arming in-page cannot be suppressed."""
+        js = self._code()
+        assert "dataset.armed" in js, "the action must arm before it fires"
+        assert "confirm(" not in js, \
+            "a blocking confirm() can be suppressed — that is the silent no-op"
+
+    def test_a_suppressed_dialog_can_no_longer_swallow_the_result(self):
+        """alert() is suppressible too, so a GitHub 403 would vanish the same
+        way the action did. Results render into the page instead."""
+        js = self._code()
+        assert "_shMsg(" in js
+        assert "alert(" not in js, "a suppressed alert would hide a 403"
+
+    def test_a_github_failure_re_enables_the_button(self):
+        """A disabled button with no message is indistinguishable from a
+        successful merge — the failure must be recoverable and visible."""
+        js = self._js()
+        i = js.index("if(!r.ok)")
+        seg = js[i:i + 260]
+        assert "disabled = false" in seg and "true" in seg
 
     def test_a_github_refusal_is_shown_not_swallowed(self):
         """GITHUB_TOKEN dispatches workflows, which IMPLIES merge scope but does
