@@ -164,8 +164,38 @@ def _universe(picks: dict) -> list[dict]:
                     seen.add(t)
                     out.append({"t": t, "entry": p.get("entry_price"),
                                 "stop": p.get("stop_loss"), "target": p.get("target_price"),
-                                "atype": atype})
+                                "atype": atype, "lt": tf == "long_term"})
     return out
+
+
+def _entry_breach(px, u: dict):
+    """How far ABOVE the published entry this fill would land, in percent — or
+    None when it is inside the window the morning message promised.
+
+    🔴 Why the bot must not buy these. The message says "enter within X% — skip
+    if above $Y". The bot bought anyway, so it modelled a user who IGNORES the
+    instruction: `actionability` measured 10 of 98 fills breaching, up to 11.22%
+    (DOT 2026-09-08) and 8.98% (NVDA 2026-08-27). Those are real overnight
+    moves, not a pricing bug, so the honest fix is to OBEY our own rule rather
+    than widen it — widening would legitimise the bad fill.
+
+    Filling BELOW entry is never a breach (a cheaper fill is a better one), so
+    only a positive excess counts. An unusable entry returns None: the window is
+    then unmeasurable, and unmeasurable is never a violation — the same stance
+    as a stop with no ATR. Never re-hardcode 2 or 3; the window has ONE
+    definition (`formatters.entry_window_pct`) and it has drifted before.
+    """
+    from formatters import entry_window_pct
+    try:
+        entry = float(u.get("entry"))
+    except (TypeError, ValueError):
+        return None
+    if not _pos(px) or entry <= 0:
+        return None
+    window = entry_window_pct(is_long_term=bool(u.get("lt")),
+                              is_crypto=u.get("atype") == "crypto")
+    slip = (float(px) - entry) / entry * 100.0
+    return round(slip, 2) if slip > window else None
 
 
 def phase_open(admin: str, dry: bool) -> list[str]:
@@ -181,6 +211,11 @@ def phase_open(admin: str, dry: bool) -> list[str]:
     st = _state(admin)
     opened = set(st.get("real", [])) | set(st.get("paper", []))
     acts, new_real, new_paper, watch = [], [], [], []
+    _skips: list[dict] = []
+    # ET, per the one-clock rule — actionability joins these to picks by DATE,
+    # and a UTC stamp rolls over at 7-8 PM ET and would join to the wrong day.
+    from config_manager import et_today
+    _today = et_today().isoformat()
 
     real_cands = [u for u in uni if u["atype"] == "stock" and u["t"] not in opened][:_MAX_REAL]
     # Paper-buy EVERY pick (all asset types). Paper costs nothing and each pick is
@@ -197,6 +232,23 @@ def phase_open(admin: str, dry: bool) -> list[str]:
         st.setdefault("paper", []).extend(new_paper)
         st["real"] = list(dict.fromkeys(st["real"]))
         st["paper"] = list(dict.fromkeys(st["paper"]))
+        # 🔴 A SKIP IS AN OBSERVATION, not an absence — persist it.
+        # `actionability` measures reachability from the bot's FILLS, so simply
+        # not buying a breached pick would make the breach rate fall toward 0%
+        # while nothing improved. That is the documented failure that let a
+        # closed position erase the worst breach on record (COHR, 15%->8.7%):
+        # "a metric about a PROMISE must not get quieter". Recording the skip
+        # keeps the denominator whole AND is strictly better evidence — it is
+        # the obedient user's outcome, which is the thing being measured.
+        # Deduped on (date, ticker): both loops can log the same pick.
+        if _skips:
+            prev = st.get("skipped") or []
+            seen = {(r.get("date"), r.get("t")) for r in prev}
+            for r in _skips:
+                if (r["date"], r["t"]) not in seen:
+                    seen.add((r["date"], r["t"]))
+                    prev.append(r)
+            st["skipped"] = prev[-500:]      # bounded: the gist has a ~1MB wall
         if not _save_state(admin, st):
             acts.append("🚨 STATE SAVE FAILED — a position just opened may be "
                         "orphaned (never sold at target/stop). Check the log.")
@@ -207,6 +259,14 @@ def phase_open(admin: str, dry: bool) -> list[str]:
             try:
                 px = get_live_price(u["t"])
                 if not _pos(px) or u["t"] in held_real:
+                    continue
+                _slip = _entry_breach(px, u)
+                if _slip is not None:
+                    _skips.append({"t": u["t"], "date": _today, "entry": u.get("entry"),
+                                   "would_pay": round(float(px), 6), "slippage_pct": _slip,
+                                   "atype": u["atype"], "lt": bool(u.get("lt"))})
+                    acts.append(f"\u26d4 SKIP {u['t']} \u2014 ${px:.2f} is {_slip:+.2f}% above the "
+                                f"published entry ${u.get('entry')}; the message said skip it")
                     continue
                 shares = round(_REAL_USD / px, 4)
                 _s, _t, _src = _levels_for(px, u.get("stop"), u.get("target"))
@@ -247,6 +307,15 @@ def phase_open(admin: str, dry: bool) -> list[str]:
             try:
                 px = get_live_price(u["t"])
                 if not _pos(px) or u["t"] in held_paper:
+                    continue
+                _slip = _entry_breach(px, u)
+                if _slip is not None:
+                    # The REAL loop above may have logged this same ticker today;
+                    # _record_skips dedupes on (date, ticker).
+                    _skips.append({"t": u["t"], "date": _today, "entry": u.get("entry"),
+                                   "would_pay": round(float(px), 6), "slippage_pct": _slip,
+                                   "atype": u["atype"], "lt": bool(u.get("lt"))})
+                    acts.append(f"\u26d4 SKIP paper {u['t']} \u2014 {_slip:+.2f}% above published entry")
                     continue
                 shares = round(_PAPER_USD / px, 8)
                 if not dry:
