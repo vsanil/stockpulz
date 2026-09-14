@@ -316,3 +316,73 @@ class TestTheCardIsReadable:
         src = pathlib.Path("scripts/findings.py").read_text()
         assert '"--summary"' in src
         assert "proposed_summary" in src
+
+
+class TestOpenFindingsCanBeDecidedOnAdmin:
+    """🔴 The owner was told to "acknowledge the 5 findings on /admin" — and the
+    card could not render them. `_apply_state` DOES write a record for every
+    derived finding, but its status is "open", and the card filtered to
+    awaiting_approval/approved/resolved_UNAPPROVED only. So the worklist was
+    invisible on the one surface built for deciding it.
+
+    A control that cannot show the thing it decides is the same failure as a
+    card that renders nothing (Aug 23) — and worse here, because the owner was
+    explicitly directed to a button that did not exist.
+    """
+
+    def _js(self):
+        src = pathlib.Path("webhook.py").read_text()
+        i = src.index("function findingsCard(")
+        return src[i:src.index("async function setFinding(", i)]
+
+    def test_open_findings_are_rendered(self):
+        src = pathlib.Path("webhook.py").read_text()
+        i = src.index("_pending = (")
+        assert '"open"' in src[i:i + 120], "the worklist must be visible on the card"
+
+    def test_an_open_finding_offers_acknowledge_not_approve(self):
+        """Nothing has been PROPOSED for an open finding, so there is no
+        concrete change to consent to — admin_finding_disposition returns 409
+        for approving one. Offering Approve would be a button that cannot work."""
+        js = self._js()
+        assert "'acknowledged'" in js.replace("\\", "")
+        i = js.index("x.status==='open'")
+        seg = js[i:i + 700].replace("\\", "")
+        assert "acknowledged" in seg and "wont_fix" in seg
+        assert "'approved'" not in seg, "an open finding must not offer Approve"
+
+    def test_an_open_finding_is_readable(self):
+        """Nothing is proposed, so proposed_summary/change/note are all empty;
+        without the title fallback every worklist row reads '(no description
+        recorded)' — the unreadable-proposal failure one step earlier."""
+        js = self._js()
+        i = js.index("var plain =")
+        assert "x.title" in js[i:i + 200]
+
+    def test_the_status_has_a_plain_english_label(self):
+        js = self._js()
+        i = js.index("var LABEL={")
+        assert "open:" in js[i:i + 200], "internal status strings are not owner vocabulary"
+
+    def test_the_endpoint_accepts_acknowledged(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        r = client.post("/admin/findings/entry_window%2FDOT%2F2026-09-08",
+                        json={"status": "acknowledged", "note": "historical"})
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert (r.get_json() or {}).get("status") == "acknowledged"
+
+    def test_approving_something_never_proposed_is_still_refused(self, client):
+        """The consent gate must not be weakened by making open items clickable."""
+        with client.session_transaction() as s:
+            s["admin"] = True
+        r = client.post("/admin/findings/entry_window%2FNVDA%2F2026-08-27",
+                        json={"status": "approved"})
+        assert r.status_code == 409
+
+    def test_the_page_still_renders(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        r = client.get("/admin")
+        assert r.status_code == 200
+        r.get_data().decode("utf-8")

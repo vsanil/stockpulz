@@ -1474,7 +1474,8 @@ function findingsCard(rows,decidedN){
   }
   // Plain words, not the internal status string. The owner reads this to
   // decide; `awaiting_approval` and `resolved_UNAPPROVED` are my vocabulary.
-  var LABEL={awaiting_approval:'Waiting for your decision',
+  var LABEL={open:'Needs your decision',
+             awaiting_approval:'Waiting for your decision',
              approved:'You approved this &mdash; I can build it',
              resolved_UNAPPROVED:'Built WITHOUT your approval'};
   var body=rows.map(function(x,i){
@@ -1484,7 +1485,15 @@ function findingsCard(rows,decidedN){
       : (x.status==='awaiting_approval'
           ? '<button class=\"btn-success\" onclick=\"setFinding(\\''+x.id+'\\',\\'approved\\')\">Approve</button> '
             +'<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'wont_fix\\')\">Decline</button>'
-          : '<span class="fb-meta">Approved '+(x.approved_on||'')+'.</span>');
+          : x.status==='open'
+            // NOT "Approve". Nothing has been PROPOSED for an open finding, so
+            // there is no concrete change to consent to — the endpoint returns
+            // 409 for exactly that reason. "Acknowledge" is the right verb for
+            // a HISTORICAL finding that cannot be un-made (a past fill); it
+            // leaves the worklist without claiming a change was sanctioned.
+            ? '<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'acknowledged\\')\">Acknowledge</button> '
+              +'<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'wont_fix\\')\">Won&#39;t fix</button>'
+            : '<span class="fb-meta">Approved '+(x.approved_on||'')+'.</span>');
     // 🔴 The PLAIN sentence leads. The technical text is written for an
     // engineer — it names functions and bug classes — and rendering it as the
     // whole card made the proposal unreadable, which turns approving into a
@@ -1515,7 +1524,11 @@ function findingsCard(rows,decidedN){
                : 'no outcome sample recorded yet.')
         + '</div>';
     }
-    var plain = x.proposed_summary || x.proposed_change || x.note
+    // x.title is what makes an OPEN finding readable: nothing is proposed for
+    // it, so the first three are empty and every worklist item would render
+    // "(no description recorded)" — the unreadable-proposal failure, one step
+    // earlier in the flow.
+    var plain = x.proposed_summary || x.proposed_change || x.note || x.title
               || '(no description recorded)';
     var tech  = x.proposed_summary ? (x.proposed_change||'') : '';
     var det = '';
@@ -2100,7 +2113,14 @@ def admin_data():
     try:
         from config_manager import get_finding_dispositions
         _disp = get_finding_dispositions() or {}
-        _pending = ("awaiting_approval", "approved", "resolved_UNAPPROVED")
+        # "open" is DELIBERATE. These ARE the worklist — the items needing a
+        # decision — and omitting them meant the owner was told to "acknowledge
+        # them on /admin" while the card could not render them at all. They do
+        # have a record (written by _apply_state) whose status is "open".
+        # A control that cannot show the thing it decides is the same failure
+        # as a card that renders nothing. Decided items stay hidden: that is
+        # the cry-wolf rule, unchanged.
+        _pending = ("open", "awaiting_approval", "approved", "resolved_UNAPPROVED")
         _findings = [dict(v, id=k) for k, v in sorted(_disp.items())
                      if v.get("status") in _pending]
         # Decided items are NOT listed (that is the cry-wolf failure) but the
