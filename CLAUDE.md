@@ -5,6 +5,14 @@
 
 | due | what | waiting on | resolves |
 |---|---|---|---|
+| **2026-09-28** | **Rotate FIVE credentials** — PAT `ghp_vkMR…` (`admin:org`, widest blast radius), PAT `ghp_3MCR…`, cron-job.org key, Render key, and **`CRON_SECRET` LAST** (needs all 17 cron-job.org URLs updated, `#`→`%23`, or a morning delivery is lost to a silent 401). Owner's dated decision 09-13 — surface the date, do not re-argue it. | OWNER | rotation done |
+| ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. Ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
+| open | **The product claim.** Measurement is now COMPLETE: all four engine stages measured, none showing a detectable edge (ST −1.6 n=510, LT −2.2 n=90, pool vs SPY −3.6, selection −4.74 n=46/41 CI [−12.89,+3.41]). Supported: *"daily picks with real entry/stop/target levels, position sizing, and alerts that fire — measured against SPY."* NOT supported: any claim about beating the market. | OWNER | choose the wording |
+| open | **Prescreener trigger: make cron-job.org PRIMARY?** CLAUDE.md said "decide on Monday 09-07's data"; that decision was never recorded. Evidence now exists — the cron-job.org job fires punctually and succeeds, while GitHub's own crons run 1.6–6 h late and are CORRELATED (shared queue). A ~33% cache-miss morning costs ~10 min delay + a full live 600-ticker screen. | CLAUDE | measure, then cut one GH cron |
+| ~2026-09-15 | `morning.cache_hit_rate` — **4/5 mornings recorded** as of the 09-14 canary; one more trading day before it reports a rate. | WATCH | says "building baseline" until then |
+| open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
+
+---|---|---|---|
 | 2026-09-09 | Tue 09-08 is the first full weekday chain since the migration. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` |
 | ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. It ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
 | 2026-09-09 | **Evaluator report — the product question.** 17 matured picks, trailing SPY 0.80%/pick, 95% CI 26-69%. Not "bad" — *unknown*, and ~13 picks from knowable. | OWNER | more matured picks |
