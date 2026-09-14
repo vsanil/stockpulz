@@ -1,0 +1,37 @@
+# What the morning performance bar actually renders for real users, today.
+#
+# READ-ONLY: no sends, no writes, no Telegram. Same family as input_audit.yml —
+# a diagnostic, not a monitor, so it is manual with no schedule.
+#
+# It exists on CI rather than as a local script because a laptop has no
+# SUPABASE_* and therefore resolves to the GIST, which is the rollback copy.
+# Reading the wrong store and reporting it as production is a mistake this
+# project has made five times; the script prints the backend it resolved to.
+name: Show Perf Bar
+
+on:
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Render the bar from the LIVE store (read-only)
+        env:
+          # Storage backend. Must match Render, or this reads the rollback copy
+          # while production serves something else — the 2026-08-19 split-brain.
+          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
+          GH_GIST_TOKEN: ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID:       ${{ secrets.GIST_ID }}
+          # Deliberately NOT passing TELEGRAM_BOT_TOKEN: this must not be able
+          # to send, even by accident. --report-only was not side-effect-free
+          # either, and that cost a duplicate report to the owner.
+        run: python3 scripts/show_perf_bar.py
