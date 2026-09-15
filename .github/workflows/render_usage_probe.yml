@@ -7,27 +7,26 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Sweep the authenticated API surface for anything usage-shaped
+      - name: Can service EVENTS reconstruct awake-time?
         env:
           K: ${{ secrets.RENDER_API_KEY }}
         run: |
           set -uo pipefail
-          OID=tea-d7pehdmgvqtc73a72lbg
-          for p in \
-            "/v1/owners/$OID" \
-            "/v1/owners/$OID/usage" \
-            "/v1/owners/$OID/billing" \
-            "/v1/owners/$OID/invoices" \
-            "/v1/billing/usage?ownerId=$OID" \
-            "/v1/usage?ownerId=$OID" \
-            "/v1/metrics?ownerId=$OID" \
-            "/v1/services?limit=1" \
-            "/v1/projects?limit=1" \
-            "/v1/notification-settings" \
-            "/v1/users/usage" \
-            "/v1/instance-hours" ; do
-            C=$(curl -s -o /tmp/r.json -w '%{http_code}' -H "Authorization: Bearer $K" "https://api.render.com$p")
-            SZ=$(wc -c < /tmp/r.json | tr -d ' ')
-            printf "  %-40s %s  (%s bytes)\n" "$p" "$C" "$SZ"
-            if [ "$C" = "200" ] && [ "$SZ" -lt 900 ]; then sed 's/^/        /' /tmp/r.json | head -6; fi
+          SID=srv-d8l6aunlk1mc73ck7b30   # PriceDrop, sleeps often -> good test
+          for p in "/v1/services/$SID/events?limit=12" "/v1/services/$SID"; do
+            C=$(curl -s -o /tmp/e.json -w '%{http_code}' -H "Authorization: Bearer $K" "https://api.render.com$p")
+            echo "  $p -> $C"
           done
+          echo "  --- event types present ---"
+          curl -s -H "Authorization: Bearer $K" "https://api.render.com/v1/services/$SID/events?limit=30" \
+            | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          from collections import Counter
+          ts=Counter()
+          for row in d:
+              e=row.get('event',row)
+              ts[e.get('type','?')]+=1
+          for t,n in ts.most_common(): print('   ',t,n)
+          print('    newest:', (d[0].get('event',d[0])).get('timestamp') if d else 'none')
+          "
