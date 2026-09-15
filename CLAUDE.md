@@ -2027,6 +2027,48 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
 
+### ✅/❌ Two verdicts from the 2026-09-15 morning: the bot is fixed, the keep-warm is not
+
+**✅ The synthetic `open` migration WORKS — first punctual buy in the job's history.**
+
+    cron-job.org 8449904   12:00:12 UTC  http=204
+    GitHub run             12:00:14 UTC  workflow_dispatch  --phase open
+    [storage] Using SupabaseBackend.
+    REAL APP @333.48 (target 368) · REAL DVA @189.64 (target 245)
+    PAPER GOOGL/APP/DVA/XLM/UNG · watchlisted 5 · ZERO skips
+
+Timestamp-matched dispatch → run, not inferred from a healthy status code. Seven picks handled an
+hour after publication and **none breached its entry window**.
+⚠️ **One run is not evidence.** At the historical ~10% breach rate, 7 picks would be expected to
+yield ~0.7 breaches, so zero is unremarkable alone. It is CONSISTENT with the execution-lag
+explanation, not proof. Watch the reachability denominator move over several days before treating
+the entry_window findings as explained.
+
+**❌ THE LAUNCH KEEP-WARM DOES NOT WORK — it MAINTAINS, it cannot ESTABLISH. Measured, not
+inferred:**
+
+    cron-job.org 7746621, every 15 min inside the window:
+      12:00:16 http=503   12:45:07 http=503
+      12:15:07 http=503   13:00:16 http=503
+      12:30:12 http=503   13:15:08 http=503
+    Render logs 10:45-13:20 UTC:  0 lines     (control window 08:00-08:30: 27 lines)
+
+The job fires punctually; **Render's edge returns 503 in ~2 s and the instance never boots.** It
+went cold at 08:07 UTC and stayed cold straight through the window opening at 11:00. This
+reproduces the Sept 4-5 finding exactly, with a cleaner signature — a fast 503, not a timeout.
+- **So enabling it bought nothing.** When it was switched on it was described as buying
+  interactive responsiveness for a launch; on the evidence it cannot, because nothing wakes the
+  instance first, and once a user has woken it they have already paid the ~45 s cold start.
+- **It costs nothing either** — a 503 boots no instance, so the ~360 h/mo budgeted is not being
+  spent. No budget harm, no benefit. **Do not quote that 360 h as real usage.**
+- The lever that IS documented to work is `curl -m 30`, which boots the instance 2/2 where
+  cron-job.org's client cannot. A GitHub Actions curl is the obvious home for it and a poor one:
+  GH fires 1.6-6 h late, so it cannot hit 07:00 ET reliably. **Unsolved — do not bolt on a fix
+  without deciding what actually guarantees the wake.**
+- 🔑 The method that settled it: a CONTROL window (08:00-08:30, 27 lines) proved the log query
+  works before reading 0 lines as silence, and the cron-job.org execution history separated
+  "job did not fire" from "job fired and was refused". Those are different bugs.
+
 ### 🔴 The synthetic bot was BUYING 4-6 HOURS LATE — and that contaminated the findings (Sep 15)
 
 Asked whether "Engine findings" works with the synthetic user active. The mechanism does: metrics
