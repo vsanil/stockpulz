@@ -7,27 +7,27 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Ask the API what it knows
+      - name: Sweep the authenticated API surface for anything usage-shaped
         env:
           K: ${{ secrets.RENDER_API_KEY }}
         run: |
           set -uo pipefail
-          echo "== /v1/owners =="
-          OWNERS=$(curl -s -H "Authorization: Bearer $K" https://api.render.com/v1/owners)
-          echo "$OWNERS" | python3 -c "
-          import sys,json
-          d=json.load(sys.stdin)
-          for o in (d if isinstance(d,list) else [d]):
-              ow=o.get('owner',o)
-              print('  id=%s type=%s name=%s' % (ow.get('id'), ow.get('type'), ow.get('name')))
-          "
-          OID=$(echo "$OWNERS" | python3 -c "import sys,json;d=json.load(sys.stdin);o=(d if isinstance(d,list) else [d])[0];print((o.get('owner',o)).get('id',''))")
-          echo
-          echo "== /v1/owners/\$OID/usage =="
-          curl -s -o /tmp/u.json -w "  http=%{http_code}\n" -H "Authorization: Bearer $K" "https://api.render.com/v1/owners/$OID/usage"
-          python3 -c "
-          import json
-          d=json.load(open('/tmp/u.json'))
-          print('  keys:', list(d)[:20] if isinstance(d,dict) else type(d).__name__)
-          print(json.dumps(d, indent=1)[:1200])
-          " || head -c 400 /tmp/u.json
+          OID=tea-d7pehdmgvqtc73a72lbg
+          for p in \
+            "/v1/owners/$OID" \
+            "/v1/owners/$OID/usage" \
+            "/v1/owners/$OID/billing" \
+            "/v1/owners/$OID/invoices" \
+            "/v1/billing/usage?ownerId=$OID" \
+            "/v1/usage?ownerId=$OID" \
+            "/v1/metrics?ownerId=$OID" \
+            "/v1/services?limit=1" \
+            "/v1/projects?limit=1" \
+            "/v1/notification-settings" \
+            "/v1/users/usage" \
+            "/v1/instance-hours" ; do
+            C=$(curl -s -o /tmp/r.json -w '%{http_code}' -H "Authorization: Bearer $K" "https://api.render.com$p")
+            SZ=$(wc -c < /tmp/r.json | tr -d ' ')
+            printf "  %-40s %s  (%s bytes)\n" "$p" "$C" "$SZ"
+            if [ "$C" = "200" ] && [ "$SZ" -lt 900 ]; then sed 's/^/        /' /tmp/r.json | head -6; fi
+          done
