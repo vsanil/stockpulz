@@ -2027,6 +2027,40 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
 
+### 🔴 THE APP PROMISED A DELIVERY HOUR IT DOES NOT KEEP (Sep 15)
+
+Looking at "the product claim", the OUTCOME copy was already clean — onboarding describes
+mechanism, both surfaces render vs-SPY, the footer says "Not financial advice". The defect was a
+promise about TIME: the repo told users **both** hours at once. Seven files said 7 AM ET, **five
+said 8 AM ET**, including the two that matter most:
+
+    cmd_settings.py    the ONBOARDING card — the first thing a new user reads
+    docs/index.html    the PUBLIC LANDING PAGE — "Every morning at 8:00 AM ET" (x2)
+    cmd_market.py      "Check back after 8 AM ET" (x2)
+    agent.py           the briefing label + the module docstring
+    config_manager.py  the cache-age comment (its arithmetic was an hour out too)
+
+**The rule was already in this file** — *"All user-facing strings must say 7 AM ET — never 8 AM
+ET"* — and nothing enforced it, so it drifted for months. A user told 8:00 who gets picks at 7:00
+has been handed a promise the app does not keep, in the same breath as the levels and alerts it
+does. **That is the same class of trust defect as a fill outside the published entry window**,
+which this project already treats as an ACT finding.
+- **7 is correct year-round, and the mechanism is the reason: the morning trigger is cron-job.org
+  job 7726933, `hours=[7] America/New_York` — ET-ANCHORED, therefore DST-safe** (11:00 UTC under
+  EDT, 12:00 under EST). **`0 11 * * 1-5` in `daily_run.yml` is only a run-mode RESOLVER mapping,
+  NOT an active `on.schedule` entry** — verified against the schedule block. If it ever became
+  one, delivery would slide to 6:00 AM ET every winter and every string here would be wrong for
+  four months. A test pins that it stays inactive.
+- Guard: `tests/test_delivery_time_claim.py` (6 tests). It asserts the wrong hour is ABSENT **and
+  the right one is PRESENT** on both pitch surfaces — absence alone would pass on a page that
+  stopped saying when picks arrive at all. 3 mutations verified failing.
+- ⚠️ The banned literal is built as `str(DELIVERY_HOUR_ET + 1)` so it never appears in the test
+  file. The self-flagging trap has bitten this repo a dozen times; CONSTRUCTING the pattern is
+  cheaper than tokenising the prose afterwards.
+- 🔎 Method note: the outcome-claim audit came back clean and it would have been easy to stop
+  there and report "nothing to fix". Reading the actual onboarding and landing-page STRINGS, rather
+  than grepping for claim-shaped words, is what surfaced this.
+
 ### 🟡 LAUNCH KEEP-WARM IS ON — 7am-7pm ET, and it MUST be turned off after (Sep 14)
 
 Owner's call for the friends/group launch. The service is on Render FREE and sleeps, so the
