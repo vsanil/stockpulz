@@ -755,7 +755,7 @@ def set_cached_signal(cache: dict, ticker: str, sentiment: dict | None,
 
 # ── Screener cache (midnight pre-score, consumed by 8 AM morning run) ────────
 
-SCREENER_CACHE_MAX_AGE_HOURS = 10   # midnight ET → 8 AM ET = 8h; 10h gives buffer
+SCREENER_CACHE_MAX_AGE_HOURS = 10   # midnight ET → 7 AM ET = 7h; 10h gives buffer
 
 # Bump this integer whenever the screener scoring logic changes materially
 # (new signals, changed thresholds, new fields) so stale caches are rejected.

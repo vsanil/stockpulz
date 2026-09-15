@@ -2,7 +2,7 @@
 agent.py — Main daily runner. Called by GitHub Actions cron job.
 
 Three run modes (auto-detected by ET time, or forced via RUN_MODE env var):
-  morning      → 8:00 AM ET  — full screener + Claude analysis + save picks
+  morning      → 7:00 AM ET  — full screener + Claude analysis + save picks
   confirmation → 10:30 AM ET — fetch live prices, compare to morning picks
   weekly       → Saturday 8 AM — runs crypto morning picks THEN weekly recap
   week_ahead   → Sunday 8 AM  — standalone Week Ahead brief (earnings + regime)
@@ -963,7 +963,7 @@ def run_morning(config: dict, now_et: datetime):
     # /positions and /perf only reflect trades the user explicitly logs via /bought.
     # Auto-logging bot picks caused /positions to show positions the user never placed.
 
-    n_sent = _send_morning_personalised(picks, config, label="8:00 AM Morning Briefing",
+    n_sent = _send_morning_personalised(picks, config, label="7:00 AM Morning Briefing",
                                         market_closed=bool(is_weekend or is_holiday),
                                         closed_reason=market_closed_reason,
                                         next_open_label=next_open_label)

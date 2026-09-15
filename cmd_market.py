@@ -38,7 +38,7 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
     if text == "TODAY":
         picks = load_picks()
         if not picks:
-            return "📭 No picks for today yet. Check back after 8 AM ET."
+            return "📭 No picks for today yet. Check back after 7 AM ET."
         config = {**get_config(), **get_user_config(chat_id)}
         # Re-generate personal notes on demand (same Haiku call as morning send)
         personal_notes: dict = {}
@@ -106,7 +106,7 @@ def _cmd_market(text: str, original: str, chat_id: str) -> "str | None":
     if text == "PRICES":
         picks = load_picks()
         if not picks:
-            return "📭 No picks found for today yet. Check back after 8 AM ET."
+            return "📭 No picks found for today yet. Check back after 7 AM ET."
         try:
             from price_checker import get_current_prices
             send_typing_action(chat_id)   # fires while live prices load (8-12 yfinance calls)
