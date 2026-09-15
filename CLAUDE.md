@@ -696,7 +696,18 @@ Rules:
   claim is.
   🔑 Consequence, stated plainly: **the cap monitor is structurally tied to the desktop app being
   open.** There is no backend option. The lever that actually helps is scheduling it for a time
-  the owner is reliably at the machine — not more engineering.
+  the owner is reliably at the machine —  not more engineering.
+  🔎 **The `/v1/metrics/` NAMESPACE is the one place worth knowing about, and it is still a dead
+  end.** It was not in the sweep above because it takes a metric name in the PATH:
+  `/v1/metrics/cpu|memory|bandwidth?resource=srv-…` return real series, and **`instance-count` is
+  a VALID name** — a typo returns `invalid metric name`, so the metric genuinely exists — but it
+  returns `[]` for every window tried. Integrating it would have yielded instance-hours exactly.
+  **Two reasons it cannot rescue the cap monitor anyway:** it is empty for this service, and
+  **metrics retention is ~4 HOURS** (a 2-day `cpu` query returned 246 points spanning only
+  18:55→23:00), so no query reaches back far enough for a monthly total.
+  ⚠️ `resolution` is NOT a valid query field there (`invalid filter parameter`); `startTime` and
+  `endTime` are. **Read the 400's message rather than guessing parameters** — it names the bad
+  field, which is faster than any amount of trial.
 
 - **✅ GITHUB ACTIONS COSTS THIS ACCOUNT NOTHING — measured 2026-09-06 from the billing page.**
   Plan **GitHub Free**; **billed amount $0 on every day Sep 1-7**. Gross metered usage $4.21 for
