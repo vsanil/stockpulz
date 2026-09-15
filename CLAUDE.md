@@ -2027,6 +2027,39 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
 
+### The paper-trading routes are covered — 22 → 19 untested (Sep 15)
+
+`tests/test_paper_routes.py` (17 tests) covers `paper_buy` / `paper_sell` / `paper_reset`. Chosen
+because they MUTATE and because `paper_buy` has a history of defects a green suite never saw:
+positions stored with `target_price=None` that could never sell, paper cash draining to $271 so
+buys began failing with nothing stored, and `_live_price` resolving bare `BTC` to a $28
+instrument. **8 of 8 mutations verified failing.**
+
+What is pinned is the ROUTE's contract, not paper_trader's internals:
+- **stop_loss / target_price are FORWARDED.** Dropping them is precisely how a position becomes
+  unsellable, and this route is the mini-app's only way in.
+- **All three are IDOR-tested** (parametrised): the authenticated chat_id is used, never one in
+  the body.
+- **A business rejection is a 200 with `ok:false`, never a 500** — insufficient cash and "no open
+  position" are outcomes the mini-app renders.
+- Junk levels degrade to `None`, never to `0.0`, which would read as a real level at zero.
+- A missing `shares` on SELL means ALL, not 1.
+
+**🔑 The subtle one, and the reason this was worth doing: the route infers success from
+`not msg.startswith("❌")`, while `paper_sell` embeds `"✅" if gain >= 0 else "❌"` in the body of
+that same message.** It is correct today *only* because the success template leads with `📄`.
+Reorder that template so the emoji leads and **every sale at a loss starts reporting as a failure
+to the user while actually having gone through**. `TestALosingSaleStillSucceeds` drives the REAL
+paper_trader (buy at 100 via a patched `_live_price`, sell at 50) rather than a stub, so it breaks
+if anyone touches the template. Mutating the route to `"❌" not in msg` fails it, which is what
+proves the test is not vacuous.
+- ⚠️ All 17 passed on the first run. This file's rule — *a new test passing immediately is a
+  reason to mutation-check it, not to move on* — is why all eight mutations were run; two Aug-19
+  tests were vacuous in exactly that situation.
+- Remaining 19 untested routes are read-only market data (`analyst_ratings`, `markets`,
+  `volume_spikes`, `sparkline`) plus the admin OAuth dance. `/admin/fix_ticker` and
+  `/api/miniapp/update_exclusions` are the only mutators left.
+
 ### Route coverage re-measured — 30 of 86 untested, now 22 (Sep 15)
 
 Re-measured the Aug-19 figure by ROUTE (the name-based heuristic undercounts Flask handlers,
