@@ -2027,6 +2027,53 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
 
+### 🔴 The synthetic bot was BUYING 4-6 HOURS LATE — and that contaminated the findings (Sep 15)
+
+Asked whether "Engine findings" works with the synthetic user active. The mechanism does: metrics
+populate from live data (stop distances n=120, exit mix n=29, geometry n=29, ledger n=48),
+dispositions persist, the card renders. **Its INPUT did not.**
+
+    scheduled:  0 12 (open) + 0 14-20 (manage)  = 8 runs/weekday
+    actual:     3 runs/weekday, never on the minute
+    open ran:   Mon 09-14 17:53 UTC · Fri 09-11 16:04 UTC   (nominal 12:00)
+
+**All 20 runs reported `success`, which is why nothing flagged it.** GitHub's scheduler was
+dropping ~5 of 8 jobs a day and firing the rest hours late.
+
+**🔑 Why this is a measurement bug, not just lateness.** `open` is the phase that BUYS. Running at
+17:53 UTC means buying at **1:53 PM ET against an entry window published at 7 AM**. That does not
+model a real user, so the `entry_window/*` ACT findings — including the 11.22% DOT breach — were
+measuring **the bot's execution lag as much as the engine's levels**. It also explains why
+reachability observations grew 98 → 99 in two days: since the Sep-13 obey-the-window fix the bot
+correctly SKIPS out-of-window picks, and at 2 PM nearly everything is out of window.
+**Re-read those five acknowledged findings in that light before treating them as engine defects.**
+- **Fix: cron-job.org job `8449904`, 8:00 AM ET weekdays**, POSTing `workflow_dispatch` with
+  `{"inputs":{"phase":"open"}}`. Same token, headers and endpoint shape as the other 19 — the
+  Authorization header was COPIED from job 7726933 programmatically and never printed, so the
+  rotation story stays "one token, N jobs".
+- **ET-anchored at 8 AM deliberately**: it must stay one hour after the 7 AM ET delivery across
+  DST. 8 AM ET is the SAME calendar day in UTC, so wdays do NOT shift — unlike the 23:00 ET
+  prescreener, whose Mon-Fri landed Tue-Sat. `scripts/audit_cron_schedules.py` confirms no
+  unacknowledged shift.
+- **The `0 12` GitHub cron was REMOVED in the same change.** Leaving both means the bot opens
+  TWICE a day — double positions, double cash drain, and a doubled denominator in every
+  fill-derived metric. Same reasoning that keeps the morning relay off GitHub's scheduler.
+  The `0 12` mapping stays in the PHASE RESOLVER (it reads `github.event.schedule`, the cron
+  STRING) so a restored cron cannot silently run `manage`.
+- **`manage` stays on GitHub** — it sells at target/stop, where lateness costs a little precision
+  rather than corrupting a metric. It is still only firing ~3x/day against 7 scheduled; worth
+  moving too if that precision starts mattering.
+- ⚠️ **NOT verified by a TEST RUN, deliberately.** A cron-job.org test run IS a production run;
+  firing `open` off-schedule would make the bot buy at the wrong hour — the exact defect being
+  fixed. Verified instead by read-back, by `GET /actions/workflows/synthetic_user.yml` returning
+  200 (URL typo check), and by the shape being byte-identical to 19 proven jobs. First real proof
+  is tomorrow's 8 AM ET run; `canary.check_synthetic_user` already fails if no position carries
+  today's date.
+- Guard: `tests/test_synthetic_open_is_not_double_scheduled.py` (5 tests). ⚠️ Its dispatch-input
+  assertion first read `"phase:" in text` — which **`nophase:` also satisfies**, so mutation 3
+  passed against a renamed input. Now parses the YAML (`on` is the boolean `True` key under
+  PyYAML). *An assertion that accepts the wrong answer is not a guard*, for the umpteenth time.
+
 ### The paper-trading routes are covered — 22 → 19 untested (Sep 15)
 
 `tests/test_paper_routes.py` (17 tests) covers `paper_buy` / `paper_sell` / `paper_reset`. Chosen

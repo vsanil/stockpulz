@@ -10,9 +10,21 @@ name: Synthetic User
 # deliberately NOT in allowed_users, so the robot's mechanical fills are excluded
 # from community stats and from the LLM pick-feedback loop.
 
+# 🔴 The OPEN phase is NOT scheduled here — it is dispatched by cron-job.org job
+# 8449904 at 8:00 AM ET weekdays. Measured 2026-09-15: GitHub's scheduler ran
+# only 3 of the 8 jobs it was asked for each weekday, and fired `open` at 17:53
+# UTC on Mon 09-14 and 16:04 on Fri 09-11 against a nominal 12:00 — 4-6 HOURS
+# LATE. `open` is the phase that BUYS, so a late run buys at 2 PM ET prices
+# against an entry window published at 7 AM, which does not model a real user
+# and quietly contaminated the reachability metric the engine findings rest on.
+# cron-job.org is punctual to the second; the other 17 market-timed triggers
+# moved there on 2026-09-05 and this one was simply left behind.
+#
+# ⚠️ DO NOT re-add a `0 12` cron here. Both would fire and the bot would open
+# TWICE — the same double-send reasoning that keeps the morning relay off
+# GitHub's scheduler. Pinned by tests/test_synthetic_open_is_not_double_scheduled.py
 on:
   schedule:
-    - cron: "0 12 * * 1-5"        # 8 AM ET — open (after the 7 AM morning picks)
     - cron: "0 14-20 * * 1-5"     # 10 AM–4 PM ET hourly — manage (market hours)
   workflow_dispatch:
     inputs:
