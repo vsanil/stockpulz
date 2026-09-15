@@ -85,7 +85,7 @@ def _send_onboarding_complete(chat_id: str) -> None:
         f"You can change any of these anytime with /settings.\n\n"
         "─────────────────────\n"
         "<b>📅 Your daily schedule:</b>\n"
-        "📬 <b>8:00 AM ET</b> — AI-curated picks with entry, target &amp; stop\n"
+        "📬 <b>7:00 AM ET</b> — AI-curated picks with entry, target &amp; stop\n"
         "🕙 <b>10:30 AM ET</b> — Confirmation: enter, wait, or exit signal\n"
         "🔔 <b>Every 30 min</b> — Price alerts if a stop or target is hit\n"
         "📊 <b>4:15 PM ET</b> — End-of-day wrap: how picks moved\n"
