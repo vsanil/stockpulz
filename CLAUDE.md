@@ -671,6 +671,33 @@ Rules:
   API rather than warning — a worse failure than the one being solved. Do not "tighten" it as a
   safety measure.
 
+- **🚫 RENDER'S API DOES NOT EXPOSE FREE INSTANCE HOURS — VERIFIED 2026-09-14 with a real token,
+  not assumed.** This matters because it is the reason the free-hour cap monitor must run as a
+  Claude session on the owner's Mac rather than as a GitHub Actions cron. Authenticated sweep:
+
+        /v1/owners/{id}                 200   email, id, name, type — and NOTHING else
+        /v1/services, /v1/projects      200
+        /v1/owners/{id}/usage           404      /v1/usage                404
+        /v1/owners/{id}/billing         404      /v1/billing/usage        404
+        /v1/metrics?ownerId=            404      /v1/instance-hours       404
+
+  🔎 **The events API is not a workaround either.** `/v1/services/{id}/events` returns 200 but
+  carries only `deploy_started/ended`, `build_started/ended`, `plan_changed` — **no spin-up or
+  spin-down**, so awake-time cannot be reconstructed from it.
+  🚨 **THE METHODOLOGY ERROR IS THE REUSABLE PART: an UNAUTHENTICATED 401 tells you NOTHING about
+  whether a route exists.** Probing without a token, `/v1/owners/x/usage` returned 401 and a
+  nonsense control returned 404, which was read as "the route exists, it just needs auth."
+  **False.** Render authenticates BEFORE routing, so 401 covers any path matching a prefix; with
+  a valid token that same path is 404. **Only an authenticated request can distinguish a real
+  route from a missing one.**
+  ⚠️ Three positions were taken on this question in one session — asserted with no evidence,
+  reversed on the broken 401 test, then verified. The final answer matched the first, which is
+  worse than being wrong: it means the original assertion was LUCKY, not sound. Say which one a
+  claim is.
+  🔑 Consequence, stated plainly: **the cap monitor is structurally tied to the desktop app being
+  open.** There is no backend option. The lever that actually helps is scheduling it for a time
+  the owner is reliably at the machine — not more engineering.
+
 - **✅ GITHUB ACTIONS COSTS THIS ACCOUNT NOTHING — measured 2026-09-06 from the billing page.**
   Plan **GitHub Free**; **billed amount $0 on every day Sep 1-7**. Gross metered usage $4.21 for
   September, included-usage discount $4.21, next payment due "-".
