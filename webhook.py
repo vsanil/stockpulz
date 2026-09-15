@@ -1670,12 +1670,53 @@ async function load(){
    A hidden tab is nobody looking, so it must not keep the dashboard warm.
    Coming back refreshes at once when the data is already a cycle old, so the
    card is never stale on return -- a paused poll must not become stale data. */
+/* ...and stop when nobody is actually LOOKING, not merely when hidden.
+   document.hidden catches a backgrounded tab. It does NOT catch the case that
+   actually happened: /admin left open and VISIBLE on a second monitor
+   overnight, polling once a minute for 4.5 hours straight and pinning the
+   instance awake right through the hours the keep-warm window deliberately
+   leaves cold. Slowing the poll would not help -- any request inside Render's
+   15-min idle timer resets it, so only STOPPING lets the service sleep. */
 var _lastLoad=Date.now();
-function _tick(){ if(document.hidden) return; _lastLoad=Date.now(); load(); }
+var _lastActive=Date.now();
+var _paused=false;
+var IDLE_MS=30*60*1000;
+
+function _idle(){ return Date.now()-_lastActive>IDLE_MS; }
+
+/* A paused poll MUST announce itself. Silently freezing would leave a stale
+   dashboard that looks live -- the same failure as an empty card that does not
+   say it is empty, or a bad date rendering as a number. */
+function _pause(){
+  if(_paused) return;
+  _paused=true;
+  var el=document.getElementById('ts');
+  if(el) el.textContent='Paused (idle) — last updated '
+                        +new Date(_lastLoad).toLocaleTimeString();
+}
+
+function _wake(){
+  _lastActive=Date.now();
+  if(!_paused) return;          /* active tabs: just refresh the activity stamp */
+  _paused=false;                /* MUST reset, or a later idle never re-announces */
+  _tick();                      /* we were paused, so the data is >= IDLE_MS old */
+}
+
+function _tick(){
+  if(document.hidden) return;
+  if(_idle()){ _pause(); return; }
+  _lastLoad=Date.now(); load();
+}
+
 load();
 setInterval(_tick,60000);
+['mousemove','keydown','click','scroll','touchstart','wheel'].forEach(function(ev){
+  document.addEventListener(ev,_wake,{passive:true});
+});
 document.addEventListener('visibilitychange',function(){
-  if(!document.hidden && Date.now()-_lastLoad>60000) _tick();
+  if(document.hidden) return;
+  _wake();
+  if(Date.now()-_lastLoad>60000) _tick();
 });
 </script>
 </body>

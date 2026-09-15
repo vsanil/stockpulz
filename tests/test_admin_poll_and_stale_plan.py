@@ -260,6 +260,126 @@ console.log(JSON.stringify({ loads: __loads }));
         assert r["loads"] == 1, "going hidden triggered a fetch"
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+class TestThePollStopsWhenNobodyIsLooking:
+    """document.hidden is not enough — measured 2026-09-15.
+
+    /admin was left open and VISIBLE overnight and polled once a minute for
+    4.5 hours straight (30 requests per 30-minute block, unbroken), pinning the
+    Render instance awake right through the hours the keep-warm window
+    deliberately leaves cold. Sustained, that is ~744 h/mo against a 750 h
+    ACCOUNT cap shared with three other apps — the condition that suspended
+    QuizMania in August.
+
+    Slowing the poll would NOT fix it: any request inside Render's ~15-minute
+    idle timer resets it, so only stopping lets the service sleep.
+
+    Time is stubbed via Date.now so idleness is FORCED rather than waited for —
+    the same discipline the clock tests use.
+    """
+
+    def _snippet(self, client):
+        html = _admin_html(client)
+        start = html.index("var _lastLoad=")
+        return html[start: html.index("</script>", start)]
+
+    def _run(self, client, script):
+        harness = """
+var __loads = 0, __intervals = [], __handlers = {}, __ts = { textContent: '' };
+var __now = 1000000;
+Date.now = function () { return __now; };
+var document = {
+  hidden: false,
+  addEventListener: function (n, f) { (__handlers[n] = __handlers[n] || []).push(f); },
+  getElementById: function (id) { return id === 'ts' ? __ts : { textContent: '' }; }
+};
+function fire(n) { (__handlers[n] || []).forEach(function (f) { f(); }); }
+function load() { __loads++; __ts.textContent = 'Updated'; }
+function setInterval(f, ms) { __intervals.push({ fn: f, ms: ms }); }
+function tick() { __intervals.forEach(function (i) { i.fn(); }); }
+"""
+        path = pathlib.Path(os.environ.get("TMPDIR", "/tmp"), "sp_idle_probe.js")
+        path.write_text(harness + self._snippet(client) + "\n" + script)
+        out = subprocess.run(["node", str(path)], capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
+        return json.loads(out.stdout.strip().splitlines()[-1])
+
+    def test_an_active_visible_tab_still_polls(self, client):
+        """Non-regression: the dashboard must stay live while it is being used."""
+        r = self._run(client, """
+__now += 60000; tick();
+__now += 60000; tick();
+console.log(JSON.stringify({ loads: __loads }));
+""")
+        assert r["loads"] == 3, f"an active tab loaded {r['loads']} times, expected 3"
+
+    def test_it_stops_after_thirty_idle_minutes(self, client):
+        """The whole point: visible, but nobody is there."""
+        r = self._run(client, """
+__now += 31 * 60000;
+tick(); tick(); tick();
+console.log(JSON.stringify({ loads: __loads, ts: __ts.textContent }));
+""")
+        assert r["loads"] == 1, (
+            f"an unattended tab kept polling ({r['loads'] - 1} extra fetches) — "
+            f"the instance can never sleep"
+        )
+
+    def test_pausing_is_ANNOUNCED_not_silent(self, client):
+        """A frozen dashboard that looks live is worse than one that says it is
+        paused — the same rule as an empty card that must say it is empty."""
+        r = self._run(client, """
+__now += 31 * 60000; tick();
+console.log(JSON.stringify({ ts: __ts.textContent }));
+""")
+        assert "Paused" in r["ts"], (
+            f"the dashboard froze without saying so: {r['ts']!r}"
+        )
+
+    def test_activity_resumes_it_and_refreshes_stale_data(self, client):
+        r = self._run(client, """
+__now += 31 * 60000; tick();
+__now += 60000; fire('mousemove');
+console.log(JSON.stringify({ loads: __loads }));
+""")
+        assert r["loads"] == 2, (
+            "moving the mouse did not resume the dashboard, or did not refresh "
+            "data that was already stale"
+        )
+
+    def test_activity_while_fresh_does_not_refetch(self, client):
+        """Resuming must not turn every mouse twitch into a request."""
+        r = self._run(client, """
+for (var i = 0; i < 20; i++) { fire('mousemove'); fire('click'); }
+console.log(JSON.stringify({ loads: __loads }));
+""")
+        assert r["loads"] == 1, f"{r['loads'] - 1} extra fetches from mouse activity"
+
+    def test_a_second_idle_period_announces_itself_again(self, client):
+        """Caught by mutation: if _wake forgets to clear the paused flag, the
+        dashboard resumes but NEVER announces a later pause — it silently
+        freezes showing stale data, which is the exact failure the announcement
+        exists to prevent."""
+        r = self._run(client, """
+__now += 31 * 60000; tick();          // pause #1 (announces)
+__now += 60000; fire('mousemove');    // resume -> load() sets 'Updated'
+__now += 31 * 60000; tick();          // idle again -> must announce AGAIN
+console.log(JSON.stringify({ ts: __ts.textContent, loads: __loads }));
+""")
+        assert "Paused" in r["ts"], (
+            f"a second idle period froze the dashboard silently: {r['ts']!r}"
+        )
+
+    def test_a_hidden_tab_still_never_polls(self, client):
+        """Non-regression on the original fix."""
+        r = self._run(client, """
+document.hidden = true;
+__now += 60000; tick(); tick();
+console.log(JSON.stringify({ loads: __loads }));
+""")
+        assert r["loads"] == 1
+
+
 class TestThePollWiringReachesTheServedPage:
     """Runs without node, so the class is never left entirely unguarded."""
 
