@@ -2128,6 +2128,39 @@ which this project already treats as an ACT finding.
   there and report "nothing to fix". Reading the actual onboarding and landing-page STRINGS, rather
   than grepping for claim-shaped words, is what surfaced this.
 
+### `/admin` now stops polling when nobody is LOOKING, not merely when hidden (Sep 15)
+
+`document.hidden` closed the forgotten-background-tab case. It does **not** close the one that
+actually happened, measured the same night: `/admin` left open and **VISIBLE** on a second
+monitor, polling once a minute for **4.5 hours unbroken** (30 requests per 30-min block) —
+straight through the hours the new keep-warm window deliberately leaves cold.
+
+    22:00-23:00 UTC  window OPEN    4 cron-job pings at :00 :15 :30 :45   ← keep-warm works
+    23:00-03:30 UTC  window CLOSED  0 pings, but 30 /admin/data per 30min ← the tab
+
+**Sustained that is ~744 h/mo against a 750 h ACCOUNT cap shared with three other apps** — the
+condition that suspended QuizMania in August. **Slowing the poll cannot fix it**: any request
+inside Render's ~15-min idle timer resets it, so only STOPPING lets the service sleep.
+- Now: `_tick()` returns early when `Date.now() - _lastActive > IDLE_MS` (30 min). Activity
+  (`mousemove keydown click scroll touchstart wheel`, all `{passive:true}`) refreshes the stamp
+  and resumes.
+- **🔑 A paused poll ANNOUNCES itself** — `#ts` reads `Paused (idle) — last updated HH:MM:SS`.
+  Freezing silently would leave a stale dashboard that looks live, the same failure as an empty
+  card that does not say it is empty, or a bad date rendering as a number.
+- **`_wake` MUST clear `_paused`.** Found by mutation: leaving it set lets the dashboard resume
+  but never announce a LATER pause — it then freezes silently, which is precisely what the
+  announcement exists to prevent. Guarded by `test_a_second_idle_period_announces_itself_again`.
+- **An always-true branch was DELETED rather than tested around.** `_wake` originally re-checked
+  `Date.now()-_lastLoad>60000` before refetching, but reaching that line means we were paused,
+  i.e. already ≥30 min stale — the condition can never be false. A mutation that broke it changed
+  no observable, which is the tell. Same call as the unreachable `position_sizer` guard: do not
+  contort a test to cover dead logic.
+- Guards: `TestThePollStopsWhenNobodyIsLooking` (6 tests) drives the SERVED JS under node with
+  `Date.now` stubbed, so idleness is FORCED rather than waited for — the discipline the clock
+  tests use. 6 of 6 mutations verified failing, including the hidden-tab non-regression.
+- ⚠️ This does NOT make an open tab free. It makes an *unattended* one free. A dashboard actively
+  in use still holds the instance up, correctly.
+
 ### 🟡 LAUNCH KEEP-WARM IS ON — 7am-7pm ET, and it MUST be turned off after (Sep 14)
 
 Owner's call for the friends/group launch. The service is on Render FREE and sleeps, so the
