@@ -2027,6 +2027,40 @@ Audited both loops end to end after the self_heal gate outage. Loop A (self-heal
 - **⚠️ Two inputs had to be carried or the conversion would have been a silent regression**: `owner_only` (the local path set `OWNER_ONLY=1` via subprocess env; dropping it would **broadcast a manual test run to EVERY user**) and `mock_data` (losing it makes a button labelled *test* fire a REAL run — screeners, Claude, live sends). Both are now declared inputs on `daily_run.yml` AND passed through to `agent.py`'s env — a declared input that is never passed is a no-op, so the guard asserts both halves.
 - Guards: `tests/test_no_local_agent_spawn.py`. **The spawn scan is AST-based, not grep** — the comments explaining this fix name `subprocess.Popen` and `agent.py`, so a text scan flags itself. That trap appeared for the NINTH and TENTH time while writing this, once inside the very file that warns about it. 3 mutations verified failing.
 
+### Route coverage re-measured — 30 of 86 untested, now 22 (Sep 15)
+
+Re-measured the Aug-19 figure by ROUTE (the name-based heuristic undercounts Flask handlers,
+which are exercised through URLs). **30 of 86 had no test hitting their path — barely moved from
+33 of 84**: two routes added, three covered, in four weeks.
+- **The count is not the finding. 11 of the 30 MUTATE state**, and this suite is the only gate
+  between a self-heal fix and real users. A GET that renders a number wrong is a bug; a mutation
+  that runs as the wrong user, or half-runs, changes data nobody can restore.
+- Covered the four with the widest blast radius — `tests/test_admin_mutations.py`, 13 tests,
+  **30 → 22 untested**. All 4 mutations verified failing:
+
+        /admin/broadcast            messages EVERY allowed user, no undo
+        /admin/user/<id>/approve    must grant access AND clear the pending row
+        /admin/user/<id>/ban|unban  must revoke, and must RESTORE on unban
+        /api/miniapp/unlog_bought   deletes a position — and is the IDOR surface
+
+- **The load-bearing test is the IDOR one.** `unlog_bought` acts on a chat_id, so it pins that a
+  body naming somebody else cannot steer the delete. Testing that needs `webhook._miniapp_auth`
+  patched — the conftest bypass makes the request param *be* the auth, so without patching, the
+  authenticated id and the client-supplied one are the same value and the test proves nothing.
+- Two half-fix properties worth having pinned, both of which a careless edit reintroduces:
+  approve that grants access but leaves the pending row (somebody waits ten days for access they
+  already have), and unban that clears the flag without re-adding to the allowlist (unbanned and
+  still locked out).
+- ⚠️ **The measurement OVER-counts coverage, so 22 is a FLOOR.** Matching is on the static prefix
+  before `<param>`, so one test mentioning `/admin/user` would mark all six sibling routes as
+  covered. Read it as "at least 22 untested".
+- ⚠️ A missing-ticker test first returned **403, not 400**, because an arbitrary `chat_id` fails
+  the bypass. It would have passed a sloppy `!= 200` assertion for entirely the wrong reason —
+  **assert the exact status a branch produces, not merely that it failed.**
+- Remaining 22 are mostly read-only market data (`analyst_ratings`, `markets`, `volume_spikes`)
+  plus the OAuth dance and the three paper-trading POSTs. **Paper trading is the next-best target**
+  if this is picked up again: it mutates, and `paper_buy` has a history of silent defects.
+
 ### 🔴 THE APP PROMISED A DELIVERY HOUR IT DOES NOT KEEP (Sep 15)
 
 Looking at "the product claim", the OUTCOME copy was already clean — onboarding describes
