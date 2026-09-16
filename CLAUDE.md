@@ -9,17 +9,8 @@
 | ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. Ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
 | open | **The product claim.** Measurement is now COMPLETE: all four engine stages measured, none showing a detectable edge (ST −1.6 n=510, LT −2.2 n=90, pool vs SPY −3.6, selection −4.74 n=46/41 CI [−12.89,+3.41]). Supported: *"daily picks with real entry/stop/target levels, position sizing, and alerts that fire — measured against SPY."* NOT supported: any claim about beating the market. | OWNER | choose the wording |
 | ~2026-09-21 | **Prescreener fix — does Monday now get a 03:00 dispatch?** The ET-weekday bug is FIXED (job 7727066, wdays Sun-Thu ET). Tonight's fire only proves nothing broke; **Mon 2026-09-21 03:00 UTC is the first run the old schedule could not produce**. Cutting a GitHub prescreener cron stays DEFERRED — they were Monday's only cover. | WATCH | a 03:00 dispatch on 09-21 |
-| **after launch** | **🟡 TURN THE LAUNCH KEEP-WARM OFF.** cron-job.org job `7746621` is ENABLED at 7am-7pm ET (~360 h/mo, account at 63% of cap). It is a launch measure, not a steady state — leaving it on burns headroom the other three apps may need. Disable with `{"job":{"enabled":false}}`. | OWNER | disable the job |
-| 2026-09-15 | **Does the keep-warm ESTABLISH warmth or only MAINTAIN it?** cron-job.org's client is documented as refused in ~500 ms by a SLEEPING Render edge. Check the 07:00-07:30 ET Render log: a `/health` 200 before any user traffic = it establishes. | CLAUDE | read tomorrow's log |
-| ~2026-09-15 | `morning.cache_hit_rate` — **4/5 mornings recorded** as of the 09-14 canary; one more trading day before it reports a rate. | WATCH | says "building baseline" until then |
-| open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
-
----|---|---|---|
-| 2026-09-09 | Tue 09-08 is the first full weekday chain since the migration. | CLAUDE | scheduled task `stockpulz-tuesday-clean-check` |
-| ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. It ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
-| 2026-09-09 | **Evaluator report — the product question.** 17 matured picks, trailing SPY 0.80%/pick, 95% CI 26-69%. Not "bad" — *unknown*, and ~13 picks from knowable. | OWNER | more matured picks |
-| ~2026-09-12 | `selfheal.healthy` red on frozen history (7-day window; cause fixed 09-06). | WATCH | **DO NOT CHASE** — self-clears |
-| ~2026-09-14 | `morning.cache_hit_rate` needs 5 trading days before it reports a rate. | WATCH | says "building baseline" until then |
+| **launch day** | **🔵 RE-ENABLE THE KEEP-WARM when you share the link** — cron-job.org job `7746621`, `{"job":{"enabled":true}}`. Window (7am-7pm ET) is preserved, so that is the whole change. It cannot ESTABLISH warmth (measured 09-15: `http=503` every 15 min against a cold edge) but it DOES maintain it, so during real traffic it turns "everyone after a 15-min gap eats a ~45 s cold start" into "only the first person does". Off now because nothing wakes the instance pre-launch. | OWNER | enable on the day |
+| open | **The launch cold start is UNSOLVED.** `curl -m 30` boots the instance 2/2 where cron-job.org's client is refused in ~2 s — but GitHub Actions fires 1.6-6 h late, so it cannot reliably hit 07:00 ET. Do not bolt on a fix without deciding what actually guarantees the wake. | OWNER | a decision |
 | open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
 
 ---
@@ -2568,3 +2559,69 @@ The pick ledger cleared the honesty gate (n=48 matured; 46 picked vs 41 runners-
   - **Age is computed in UTC, deliberately** — `add_pending_user` stamps `datetime.now(timezone.utc)`. An `et_today()` comparison here would BE the mismatch, not the fix. *Read on the clock the WRITER used.*
 - It names the oldest age, because "10 days" is what makes it actionable — a bare count is not. Silent when nobody waits.
 - **⚠️ THE MUTATION-TARGETING TRAP, FOURTH OCCURRENCE, and it reported a FALSE PASS.** `oldest = f", oldest {max(ages)}d" if ages else ""` appears **three times** in `canary.py` (the three reminder checks share the idiom), so `source.replace(t, mutant, 1)` patched `check_selfheal_unmerged` instead and the guard looked useless when it was fine. **Slice the FUNCTION first, then replace within it — and confirm the patched line is gone before believing a MISSED.** Guards: `tests/test_pending_approval_reminder.py` (11), 4 mutations verified failing once correctly targeted.
+
+### ✅ The CANARY moved to cron-job.org — and its 10-day red streak was all REAL (Sep 15)
+
+**The monitors were left behind by the Sep-5 migration.** That migration moved the 17 *product*
+triggers off GitHub's scheduler; `canary`, `full_sweep`, `evaluate_picks` and `analyze_engine`
+kept their `schedule:` crons. Measured against a nominal **12:30 UTC**, the canary fired at:
+
+    09-11 16:37   09-12 15:38   09-13 16:29   09-14 18:06   09-15 17:09
+
+**Never once near its slot**, drifting 3-6 h, and on 09-14 it also ran at 05:33 — GitHub's usual
+behaviour on this repo, now hitting the monitors.
+- 🔑 **Lateness costs MORE here than it looks.** The 12:30 slot was chosen to sit ~30 min after
+  the 7 AM ET delivery so `delivery.morning` / `picks.fresh` grade a window that is still open. A
+  run at 18:06 grades one that closed seven hours earlier. And `check_endpoints` deliberately
+  WAKES the free Render instance, so a random-hour run also pays a cold start nobody budgeted.
+- **Now cron-job.org job `8454784`, 7:30 AM ET DAILY**, POSTing `canary.yml/dispatches` with
+  `{"ref":"main"}`. ET-anchored because the morning relay it trails (job 7726933) is ET-anchored —
+  a fixed-UTC canary drifts an hour against it at every DST change. 7:30 AM ET is the same
+  calendar day in UTC under both EDT and EST, and the job runs daily (`wdays [-1]`), so **no
+  weekday can shift** — the trap that cost Monday its prescreener for eight weeks. Confirmed by
+  `scripts/audit_cron_schedules.py`: no unacknowledged shift.
+- **The GitHub `schedule:` was REMOVED in the same change**, same reasoning as `synthetic_user`'s
+  `0 12`: with both live the canary runs TWICE a day — two DM reports, two sets of **mutating**
+  snapshot→act→restore round-trips against production storage, and two deliberate Render wakes.
+- **self_heal is unaffected** — it triggers on `workflow_run` by workflow NAME, and a
+  dispatch-triggered run still fires it. That holds only because cron-job.org authenticates with a
+  **PAT**; a run dispatched by the automatic `GITHUB_TOKEN` creates no downstream workflow runs,
+  and the auto-fix net would go quiet with nothing reporting it.
+- ⚠️ **Residual, stated rather than solved: nothing watches the canary's own trigger.** Removing
+  the GH cron removes the (bad) backup too, so if job 8454784 is ever deleted the canary simply
+  stops and no check notices. The canary is the thing that would have noticed.
+- The token was **copied programmatically from job 8449904 and never printed**; SHA-256 prefix
+  `63a73f0a`, len 100 — byte-identical to the 20 proven jobs, so the rotation story stays "one
+  token, N jobs". Verified by **read-back**, not by the `HTTP 200`, and the workflow path was
+  checked with a `GET .../workflows/canary.yml` (200) before pointing a scheduler at it.
+- Guard: `tests/test_canary_is_not_double_scheduled.py` (6 tests), **5 of 5 mutations caught**.
+  Its cron scan slices `on:`→`jobs:` and never reads the prose, because the header quotes the
+  removed cron while explaining its removal — the self-flagging trap, again.
+
+**🔑 THE FAILURE STREAK WAS NOT NOISE — 10 consecutive reds, every one correct.** Worth writing
+down because the instinct on seeing a long red run is to suspect the monitor:
+
+    09-04 → 09-13   selfheal.healthy   the auto-fix net WAS down — self_heal's gate could not
+                                       run (pyyaml missing from requirements.txt, CI red since
+                                       09-07). Fixed 09-13; the 7-day window cleared it 09-14.
+    09-07 (also)    synthetic.opened   the bot opened NOTHING — the 4-6 h late `open` phase,
+                                       fixed 09-15 by moving it to cron-job.org job 8449904.
+    09-06 (also)    runs.silent_failures
+    09-13 (also)    data.completeness + storage.surfaces   ← the only one worth a second look
+
+- **09-13's pair had ONE cause**: `SupabaseBackend init failed (Supabase write probe timed out
+  after 4.0s), falling back to Gist`. Everything downstream follows — `storage.surfaces` correctly
+  reported the SPLIT BRAIN (this job on gist, the web service on supabase), and
+  `data.completeness` read the Gist's frozen `2026-08-19` copy and correctly called it stale.
+- **It is a genuine one-off, not a live fault.** Zero `init failed` lines across 60 runs of
+  `full_sweep` / `synthetic_user` / `daily_run`, and the 09-14 and 09-15 canaries both passed
+  **47/47**. `_verify_write_access`'s 4.0 s bound is tight, and **failing closed to the Gist is
+  the designed behaviour** — a backend that cannot be verified must not be trusted with storage
+  while a working Gist is available. The design worked and the monitor said so.
+- ⚠️ One consequence to know rather than chase: on that run the canary's mutating round-trips AND
+  its restore both went to the **Gist**, so they were self-consistent (snapshot gist → write gist →
+  restore gist) and production was untouched. Several restore PATCHes returned **409 Conflict**,
+  so the Gist — the rollback copy, not the live store — may carry residue from 09-13.
+- 🚨 **Do NOT "fix" this by widening the 4 s timeout.** A slow probe on a backend the app is about
+  to trust with every per-user write is information, not an inconvenience; the Aug-19/21 outages
+  are what that guard exists to prevent. If it recurs, measure the probe latency first.
