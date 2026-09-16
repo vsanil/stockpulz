@@ -5,14 +5,29 @@ name: Daily Canary
 # watchlist, backtest, delivery/cron health, endpoint health), verifies the math,
 # and DMs a report to the admin. Non-destructive (snapshot→act→restore).
 #
-# 12:30 UTC (7:30 AM ET) — ~30 min AFTER the 11:00 UTC morning run, so the
-# delivery checks can confirm today's picks actually went out. Public repo →
-# GitHub Actions minutes are unlimited.
+# TRIGGER: cron-job.org job 8454784, 7:30 AM ET DAILY, POSTing this workflow's
+# dispatch endpoint directly. NOT a GitHub `schedule:` — see below.
+#
+# 7:30 AM ET is ~30 min after the 7 AM ET morning delivery, so the delivery
+# checks can confirm today's picks actually went out. ET-anchored on purpose:
+# the morning relay (cron-job.org job 7726933) is ET-anchored too, so a fixed
+# UTC canary would drift against it by an hour at every DST change. 7:30 AM ET
+# is the same calendar day in UTC under both EDT and EST, and this job runs
+# daily anyway, so no weekday can shift.
+#
+# 🔴 DO NOT RE-ADD A `schedule:` CRON HERE. GitHub's scheduler fired this
+# workflow at 05:33, 15:38, 16:29 and 18:06 UTC against a nominal 12:30 — it
+# drops runs and lands hours late, so the delivery checks were grading a
+# window that had long closed. Worse, with BOTH triggers live the canary runs
+# TWICE a day: two DMs, two sets of mutating snapshot->restore round-trips
+# against production storage, and two deliberate Render wakes (~0.28 h each).
+# Same reasoning that removed synthetic_user's `0 12` cron on 2026-09-15.
+#
+# Public repo → GitHub Actions minutes are unlimited; this is about WHEN it
+# fires, not what it costs.
 
 on:
-  schedule:
-    - cron: "30 12 * * *"      # 7:30 AM ET daily
-  workflow_dispatch: {}         # manual "run now"
+  workflow_dispatch: {}         # cron-job.org dispatches this; also "run now"
 
 jobs:
   canary:
