@@ -2625,3 +2625,58 @@ down because the instinct on seeing a long red run is to suspect the monitor:
 - 🚨 **Do NOT "fix" this by widening the 4 s timeout.** A slow probe on a backend the app is about
   to trust with every per-user write is information, not an inconvenience; the Aug-19/21 outages
   are what that guard exists to prevent. If it recurs, measure the probe latency first.
+
+### 🔴 I MADE TWO JOBS PUNCTUAL AND INVERTED THEIR ORDER — `synthetic.opened` (Sep 17)
+
+Both fixes on Sep 15 were right on their own, and together they broke a monitor:
+
+    Sep 15 am   synthetic `open`  -> cron-job.org 8449904, 08:00 ET (12:00 UTC)
+    Sep 15 pm   canary            -> cron-job.org 8454784, 07:30 ET (11:30 UTC)
+
+**The canary now ran 30 minutes BEFORE the bot it checks.** So `synthetic.opened`
+asked *"did the bot open anything today?"* before the bot had run, and answered no —
+**failing every weekday by construction, on a perfectly healthy bot.** Measured on 09-16:
+
+    11:30:16 UTC  canary   FAIL synthetic.opened · "the bot opened NOTHING today"
+    12:00:12 UTC  bot      REAL WST/RVTY/KR/DDOG + 4 paper + watchlisted 4
+
+- 🔑 **Previously the ordering held BY ACCIDENT.** Both sat on GitHub's late scheduler
+  (canary 16:00-18:06, bot 16:04-17:53), so the canary always happened to land after the
+  bot. Nothing recorded that the ordering mattered, so making both punctual — an
+  unambiguous improvement — silently inverted it. **When you fix lateness, check what was
+  depending on the lateness.**
+- 🚨 **A canary failure summons self-heal**, so this was also spending API credit nightly
+  on a non-bug. It produced `auto/self-heal-1789558366`, whose **diagnosis was right** — it
+  added a `_now_et()` clock helper so a test could pin the hour — but it stopped before
+  wiring it in, leaving an unused function. **12 correct diagnoses, delivery incomplete
+  again.** The fix here COMPLETES that helper rather than duplicating it.
+- **Fixed at BOTH levels, deliberately.** The schedule moved to 08:30 ET (after the bot),
+  *and* the check now reports `not run yet` instead of failing whenever it fires before
+  the bot has had its chance. A schedule is a convention edited from a web console with
+  nothing in this repo to stop it — this file's own lesson is *a SCHEDULE was doing the
+  job of a GUARD*. With the runtime guard, moving either job can no longer manufacture a
+  false alarm.
+- **An ET clock here is the RIGHT clock, not the clock-mismatch class.** The bot's trigger
+  is ET-anchored (`08:00 America/New_York`), so comparing against ET reads on the clock
+  the writer uses. `SYNTHETIC_OPEN_HOUR_ET = 8`, `SYNTHETIC_OPEN_GRACE_MIN = 15`.
+- ⚠️ **Honest limit, recorded rather than papered over:** a canary permanently moved
+  BEFORE the bot would report "not run yet" forever and quietly stop verifying anything.
+  The note names both times (`fires at 08:00 ET and it is now 07:30 ET`) so a human can
+  see it — but nobody reads passing lines. **Neither schedule lives in this repo, so no
+  test can assert their order.** That is a mitigation, not a guarantee.
+- **🔴 `TestSyntheticUserCheck` wired the STORE but never the CLOCK**, so it inherited
+  whatever hour the suite ran at — fine while the function had no clock dependency, and
+  broken the moment it gained one. Its `_wire` now FORCES the clock past the window, which
+  is what each case means to assert. Verified they still bite: mutating the check to
+  always-pass fails 2 of them.
+- ⚠️ **My first test stub collapsed `detail` and `fail_detail`** into `detail or fail_detail`,
+  so the dead-bot case never saw the failure note and the test failed for the wrong reason.
+  The real `_check` uses `detail if ok else (fail_detail or detail)`. *A stub more
+  permissive than production certifies bugs* — the traffic-tracker trap, again.
+- Guard: `tests/test_synthetic_check_waits_for_the_bot.py` (6 tests), **5 of 5 mutations
+  caught**, and the new branch was DRIVEN against live data once (read-only) rather than
+  only under stubs — `PASS · the open phase has not run yet today … it is now 01:23 ET`.
+
+**✅ The canary migration itself is PROVEN as transport** — dispatch `11:30:16` → GitHub run
+`11:30:16`, `workflow_dispatch`, timestamp-matched to the second. First punctual canary in
+its history. The schedule was right; the ORDER was wrong.
