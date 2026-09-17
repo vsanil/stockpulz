@@ -195,6 +195,29 @@ def _raw_picks() -> dict:
         return {}
 
 
+# The synthetic bot's OPEN phase is triggered by cron-job.org job 8449904 at
+# 08:00 America/New_York; the canary is job 8454784 at 08:30 ET. The half-hour
+# gap is a CONVENTION, and on 2026-09-16 it was inverted: both jobs had just
+# been made punctual (canary 11:30 UTC, bot 12:00 UTC), so `synthetic.opened`
+# read a perfectly healthy bot as blind, FAILED every weekday by construction,
+# and summoned self-heal. Before that, both sat on GitHub's late scheduler and
+# the ordering happened to hold by accident.
+#
+# So the ordering is no longer relied on: the check reports "not run yet"
+# instead of failing whenever the canary fires before the bot has had its
+# chance. Moving either schedule can no longer manufacture a false alarm.
+SYNTHETIC_OPEN_HOUR_ET = 8
+SYNTHETIC_OPEN_GRACE_MIN = 15
+
+
+def _now_et():
+    """The current wall clock in America/New_York, as its own function so a
+    test can monkeypatch the CLOCK directly rather than faking pytz's offset
+    (which only shifts by a fixed amount, not to an exact hour:minute)."""
+    import datetime as dt, pytz
+    return dt.datetime.now(pytz.timezone("America/New_York"))
+
+
 def _expected_delivery_date() -> str:
     """The date we SHOULD have morning picks/delivery for, given the clock.
     Morning runs ~11:00 UTC (7 AM ET). Today counts only if it's a weekday and
@@ -641,6 +664,21 @@ def check_synthetic_user() -> None:
     if today.weekday() >= 5:
         _check("synthetic.opened", True, "weekend — the open phase does not run")
         return
+
+    # Has the bot had its chance yet? An ET clock is the RIGHT clock here, not a
+    # mismatch: the trigger itself is ET-anchored, so this reads on the same
+    # clock the writer uses.
+    now_et = _now_et()
+    ready = now_et.replace(hour=SYNTHETIC_OPEN_HOUR_ET,
+                           minute=SYNTHETIC_OPEN_GRACE_MIN,
+                           second=0, microsecond=0)
+    if now_et < ready:
+        _check("synthetic.opened", True,
+               f"the open phase has not run yet today — it fires at "
+               f"{SYNTHETIC_OPEN_HOUR_ET:02d}:00 ET and it is now "
+               f"{now_et:%H:%M} ET, so there is nothing to verify")
+        return
+
     try:
         picks = load_picks() or {}
     except Exception as exc:

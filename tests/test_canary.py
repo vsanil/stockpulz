@@ -415,6 +415,19 @@ class TestSyntheticUserCheck:
         monkeypatch.setattr(cm, "load_user_trade_log", _log)
         monkeypatch.setattr(cm, "load_user_paper", lambda uid: {
             "positions": [{"ticker": t, "bought_date": d} for t, d in paper]})
+
+        # FORCE the clock past the bot's open window, rather than inheriting
+        # whatever hour the suite happens to run at. The check now short-circuits
+        # with "not run yet" before that window (added 2026-09-17, after it spent
+        # a day failing a healthy bot because the canary fired 30 min BEFORE it),
+        # so without this every case below would silently stop exercising its
+        # own branch whenever the suite ran in the morning — the wall-clock
+        # fragility this repo has paid for six times.
+        import pytz as _pytz
+        _et = _pytz.timezone("America/New_York")
+        monkeypatch.setattr(
+            canary, "_now_et",
+            lambda: _et.localize(_dt.datetime(day.year, day.month, day.day, 9, 0)))
         canary.RESULTS.clear()
 
     def _result(self):
