@@ -77,15 +77,32 @@ class TestSafety:
         doc = ae.build(dry=True)
         assert "Engine findings" in doc and "HOLD" in doc
 
+    # DECIDED ranks LAST: a finding the owner has ruled on must never sit above
+    # one still waiting on them. Added 2026-09-18 with the demotion — a bare
+    # rank map would KeyError the moment a real decided finding appeared, which
+    # the synthetic fixture below never produces.
+    _RANK = {"ACT": 0, "MEASURE": 1, "HOLD": 2, "DECIDED": 3}
+
+    @staticmethod
+    def _tiers(doc):
+        return [l.split("]")[0].split("[")[1]
+                for l in doc.splitlines() if l.startswith("### [")]
+
     def test_tiers_are_ordered_act_first(self, monkeypatch):
         monkeypatch.setattr(ae, "_load", lambda: {
             "uid": "0", "log": {}, "paper": {}, "rows": []})
         doc = ae.build(dry=True)
-        tiers = [l.split("]")[0].split("[")[1]
-                 for l in doc.splitlines() if l.startswith("### [")]
-        rank = {"ACT": 0, "MEASURE": 1, "HOLD": 2}
-        assert tiers == sorted(tiers, key=lambda t: rank[t]), \
+        tiers = self._tiers(doc)
+        assert tiers == sorted(tiers, key=lambda t: self._RANK[t]), \
             "an ACT finding could be buried below a HOLD"
+
+    def test_every_rendered_tier_token_is_known(self, monkeypatch):
+        """The ordering guard indexes a dict, so an unknown token is a KeyError
+        rather than a failure — it would take the whole check out."""
+        monkeypatch.setattr(ae, "_load", lambda: {
+            "uid": "0", "log": {}, "paper": {}, "rows": []})
+        for t in self._tiers(ae.build(dry=True)):
+            assert t in self._RANK, f"unknown tier token {t!r}"
 
 
 class TestLevelsSourceIsRecorded:

@@ -2754,3 +2754,33 @@ and the generator was never updated**, so the agenda kept emitting the rejected 
 - Guard: `tests/test_entry_window_fix_text.py` (10 tests), **6 of 6 mutations caught** — including
   the rejected advice returning, the history/news distinction collapsing, and the helper being
   orphaned so the builder inlines prose again.
+
+### A finding you have RULED ON leaves the urgency tier — `[DECIDED]` (Sep 18)
+
+The five acknowledged `entry_window` fills led `ENGINE_FINDINGS.md` as **`[ACT]`** every night.
+`ACT` means *binary — one instance is enough to act on*, which **directly contradicts the
+decision already recorded against them**. They are historical fills that can never stop being
+derived, so they would have led the agenda forever — in the one file a session is told to read
+FIRST. That is the cry-wolf failure the worklist exists to prevent, one level up.
+- **`DECIDED_STATUSES = ("acknowledged", "wont_fix")`.** `Finding.render()` emits
+  `### [DECIDED] …` for those, and the `**Fix:**` label becomes
+  *"You ruled: acknowledged. No action is outstanding. For the record, the suggested fix was…"*
+  — **the text is DEMOTED, never dropped**, and the "Decided, still present" list is unchanged.
+  Neither nagged about nor forgotten.
+- 🚨 **`fixed` is deliberately NOT in that tuple.** A finding marked fixed that is STILL PRESENT
+  is REOPENED; demoting it would make "fixed" and "hidden" the same word — the exact rule
+  `position_audit` already enforces. `awaiting_approval` and `approved` keep their tier too: one
+  waits on the owner, the other on me. Neither has been ruled on. All three pinned by test.
+- ✅ **It cannot silence a RECURRENCE, and that is what makes the demotion safe.** Every id is
+  per-instance — `entry_window/{ticker}/{date}`, `stop_tight/{ticker}/{pct}`, integrity's `_fid`
+  including the levels — so a new breach is a NEW id arriving as a fresh ACT finding.
+  Acknowledging NVDA on 08-27 cannot pre-silence NVDA on 09-30. Pinned.
+- 🔴 **The tier-ordering guard indexed a bare dict (`rank[t]`), so the new token would have been
+  a KeyError, not a failure — taking the whole check out rather than failing it.** `DECIDED`
+  ranks **3**, so a ruled-on finding can never sit above one still waiting on the owner, and a
+  second test asserts every rendered token is known. **The existing test passed my change only
+  because its synthetic fixture produces no decided findings** — it would have broken on the
+  first real run. *A guard that has never seen the case it protects is not known to work.*
+- Guard: `tests/test_decided_findings_are_demoted.py` (11 tests), **5 of 5 mutations caught** —
+  including `fixed` being added to the tuple, `awaiting_approval` being demoted, and the fix text
+  being dropped instead of demoted.
