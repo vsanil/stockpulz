@@ -2716,3 +2716,41 @@ asked *"did the bot open anything today?"* before the bot had run, and answered 
 **✅ The canary migration itself is PROVEN as transport** — dispatch `11:30:16` → GitHub run
 `11:30:16`, `workflow_dispatch`, timestamp-matched to the second. First punctual canary in
 its history. The schedule was right; the ORDER was wrong.
+
+### 🔴 A finding was recommending a fix this project had already REJECTED (Sep 18)
+
+The five `entry_window` ACT findings carried, nightly, for five days after the decision:
+
+> *"Either widen the published window in `formatters.entry_window_pct` to match measured
+> reality…"*
+
+That was proposed on 2026-09-13, investigated the same day, and **rejected** — DOT's 11.22% was
+a real overnight crypto move, not a pricing bug, so there was nothing to accommodate, and
+widening would legitimise the bad fill while weakening a promise the morning message makes to
+users. The bot was made to OBEY the window instead. **The rejection was written into this file
+and the generator was never updated**, so the agenda kept emitting the rejected instruction.
+- 🔑 **This is worse than a stale comment, because of WHERE it lives.** These findings lead
+  `analysis/ENGINE_FINDINGS.md`, the file a session is instructed to read BEFORE answering the
+  first request. **A stale instruction in the agenda is an instruction.** *A worklist item is a
+  hypothesis, not an instruction* cuts both ways: the generator must not phrase a rejected
+  hypothesis as a fix.
+- **`_entry_window_fix(date)` now branches on WHEN**, which was the missing half. Before
+  `_BOT_OBEYS_WINDOW_SINCE = "2026-09-15"` the bot both ignored the window and bought 4-6 h late,
+  so a breach measured its own execution lag → **HISTORICAL, acknowledge, cannot be un-made**.
+  After it → **NEW, real evidence about the levels**, pointing at the midnight-cache anchoring
+  rather than the window. Both branches still forbid widening.
+- 🔴 **An UNDATED fill must degrade to HISTORICAL, and the naive comparison gets this backwards.**
+  `ex.get("date", "?")` can yield `"?"`, and `"?" < "2026-09-15"` is **False** (chr 63 > chr 50),
+  so a plain string compare would announce an undatable fill as fresh evidence about the levels —
+  a claim it cannot support. Guarded by a shape check first. *Unmeasurable is never a finding*,
+  the same rule as the ATR-less stop reported "not assessed".
+- ⚠️ **`import re` was used before it existed at module level** — the documented called-but-never-
+  imported class, caught because the tests DRIVE the helper rather than reading it.
+- 🔴 **`TestTheDerivedFindingsAreClassified` was anchored on `src[i:src.index("))", i)]`** — a
+  marker-to-next-`))` window. Adding `_entry_window_fix(ex.get("date", "?"))` put a `))` in front
+  of `category=`, so a correctly-classified finding reported as unclassified. **A window anchored
+  on a delimiter is a fixed-offset scan wearing a disguise.** All three now walk the AST to the
+  `Finding(...)` call and read its `category` keyword; re-verified both flips still fail.
+- Guard: `tests/test_entry_window_fix_text.py` (10 tests), **6 of 6 mutations caught** — including
+  the rejected advice returning, the history/news distinction collapsing, and the helper being
+  orphaned so the builder inlines prose again.

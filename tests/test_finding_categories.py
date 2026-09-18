@@ -50,27 +50,57 @@ class TestTheSplitExists:
             _ae().Finding("a", "ACT", "t", "e", "f", category="cosmetic")
 
 
+def _category_of(id_prefix):
+    """The `category=` on the Finding whose id starts with `id_prefix`, read from
+    the AST.
+
+    🔴 These three used to slice `src[i:src.index("))", i)]` — from a marker to
+    the next `))`. That window silently shrinks whenever ANY nested call is added
+    inside the Finding, and on 2026-09-18 it did: replacing the inline fix prose
+    with `_entry_window_fix(ex.get("date", "?"))` put a `))` in front of
+    `category=`, so a correctly-classified finding reported as unclassified.
+    **A window anchored on a delimiter is a fixed-offset scan wearing a disguise**
+    — this repo has paid for that shape repeatedly. Walk the call instead.
+    """
+    import ast
+    tree = ast.parse(SRC.read_text())
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "Finding" and node.args):
+            continue
+        first = node.args[0]
+        # the id is an f-string like f"entry_window/{tk}/..." — its first literal
+        # chunk carries the prefix
+        lit = ""
+        if isinstance(first, ast.JoinedStr) and first.values:
+            head = first.values[0]
+            lit = head.value if isinstance(head, ast.Constant) else ""
+        elif isinstance(first, ast.Constant):
+            lit = str(first.value)
+        if not lit.startswith(id_prefix):
+            continue
+        for kw in node.keywords:
+            if kw.arg == "category" and isinstance(kw.value, ast.Constant):
+                return kw.value.value
+        return None
+    raise AssertionError(f"no Finding with an id starting {id_prefix!r}")
+
+
 class TestTheDerivedFindingsAreClassified:
     """Classification is a judgement, so it is pinned rather than inferred."""
 
     def test_integrity_is_a_bug(self):
-        src = SRC.read_text()
-        i = src.index('f"integrity/{f.get(')
-        assert 'category="bug"' in src[i:src.index("))", i)]
+        assert _category_of("integrity/") == "bug"
 
     def test_entry_window_is_a_bug(self):
         """A published promise not honoured. Binary — one breach is enough, no
         outcome statistics required."""
-        src = SRC.read_text()
-        i = src.index('f"entry_window/{tk}/')
-        assert 'category="bug"' in src[i:src.index("))", i)]
+        assert _category_of("entry_window/") == "bug"
 
     def test_stop_tightness_is_an_engine_change(self):
         """Stop placement decides when a thesis is abandoned, so changing it
         changes outcomes."""
-        src = SRC.read_text()
-        i = src.index('f"stop_tight/{tk}/{pct}"')
-        assert 'category="engine"' in src[i:src.index("))", i)]
+        assert _category_of("stop_tight/") == "engine"
 
 
 class TestStatePreservesTheProposal:
