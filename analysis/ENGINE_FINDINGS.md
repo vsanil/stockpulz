@@ -1,6 +1,6 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-09-18 00:01 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-09-18 06:21 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 0 finding(s) needing a decision
 
@@ -40,7 +40,7 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 **Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 108 observations breach (9.3%).
 
-**Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
+**Fix:** HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
@@ -56,7 +56,7 @@ AMZN was bought 4.0% above the price the morning message told people not to go p
 
 **Evidence:** The morning message promises "enter within X% — skip if above". AMZN filled 4.0% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 108 observations breach (9.3%).
 
-**Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
+**Fix:** HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
@@ -72,7 +72,7 @@ NOW was bought 2.68% above the price the morning message told people not to go p
 
 **Evidence:** The morning message promises "enter within X% — skip if above". NOW filled 2.68% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 108 observations breach (9.3%).
 
-**Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
+**Fix:** HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
@@ -88,7 +88,7 @@ MMED was bought 5.74% above the price the morning message told people not to go 
 
 **Evidence:** The morning message promises "enter within X% — skip if above". MMED filled 5.74% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 108 observations breach (9.3%).
 
-**Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
+**Fix:** HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
@@ -104,7 +104,7 @@ DOT was bought 11.22% above the price the morning message told people not to go 
 
 **Evidence:** The morning message promises "enter within X% — skip if above". DOT filled 11.22% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 108 observations breach (9.3%).
 
-**Fix:** This is a TRUST defect, not a performance one. Either widen the published window in formatters.entry_window_pct to match measured reality, or make agent._build_premarket_gap_warnings warn on the gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE definition and it has drifted before.
+**Fix:** HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
