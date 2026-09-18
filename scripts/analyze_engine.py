@@ -30,6 +30,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import statistics
 import sys
 
@@ -346,6 +347,60 @@ def _integrity(uid, log, paper) -> list:
     return out
 
 
+# The bot OBEYS the published entry window from 2026-09-13 (synthetic_user._entry_breach
+# skips an out-of-window pick and records the skip as a breach observation), and buys
+# PUNCTUALLY at 08:00 ET from 2026-09-15 (cron-job.org job 8449904; before that GitHub ran
+# it 4-6 h late, so a fill measured the bot's execution lag as much as the engine's levels).
+# 09-15 is the conservative date: the first on which BOTH held.
+_BOT_OBEYS_WINDOW_SINCE = "2026-09-15"
+
+
+def _entry_window_fix(fill_date: str) -> str:
+    """What to actually DO about an out-of-window fill — which depends on WHEN.
+
+    🔴 The previous text told the reader to "either widen the published window in
+    formatters.entry_window_pct to match measured reality". That advice was
+    proposed, investigated and REJECTED on 2026-09-13 — and kept being emitted
+    nightly for five days afterwards, at the top of the agenda a session is told
+    to read first. Widening would legitimise the bad fill and quietly weaken a
+    promise made to users in the morning message; DOT's 11.22% was a REAL
+    overnight crypto move, not a pricing bug, so there was nothing to
+    accommodate. *A worklist item is a hypothesis, not an instruction.*
+
+    It also said nothing about WHEN the fill happened, which is the whole
+    question: before the cutoff there is nothing to do but acknowledge, after it
+    the same number is genuine evidence about the levels.
+    """
+    # An UNDATED fill degrades to the conservative branch. Naive string ordering
+    # puts "?" AFTER "2026-…" (chr 63 > chr 50), so the obvious comparison would
+    # announce an undatable fill as fresh evidence about the levels — a claim it
+    # cannot support. Unmeasurable is never a finding; same rule as the ATR-less
+    # stop that is reported "not assessed" rather than flagged.
+    dated = bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(fill_date)))
+    if not dated or str(fill_date) < _BOT_OBEYS_WINDOW_SINCE:
+        return (
+            "HISTORICAL — acknowledge it; it cannot be un-made. This fill predates "
+            f"{_BOT_OBEYS_WINDOW_SINCE}, when the bot began both OBEYING the window "
+            "(synthetic_user._entry_breach skips an out-of-window pick, and records the "
+            "skip so the metric cannot go quiet) and buying punctually at 08:00 ET. "
+            "Before that it bought 4-6 h late, so this fill measured its own execution "
+            "lag as much as the engine's levels. "
+            "Do NOT widen formatters.entry_window_pct 'to match measured reality' — "
+            "proposed, investigated and rejected 2026-09-13: it would legitimise the bad "
+            "fill and weaken a published promise."
+        )
+    return (
+        "NEW — this one is REAL EVIDENCE about the levels, because it happened AFTER "
+        f"{_BOT_OBEYS_WINDOW_SINCE}, when the bot started obeying the window and buying on "
+        "time. A fill still landing outside it means the published entry genuinely drifted "
+        "from what was reachable — not that the bot was late or disobedient. Look at the "
+        "LEVELS: the morning run builds from the midnight screener cache, so the entry is "
+        "anchored ~8 h before the message is sent and ~10 h before the open. "
+        "Still do NOT widen formatters.entry_window_pct — it is the ONE definition of a "
+        "promise to users, and widening it to fit a miss is how a promise erodes."
+    )
+
+
 def _reachability(rows, log, paper) -> list:
     try:
         import actionability
@@ -369,13 +424,11 @@ def _reachability(rows, log, paper) -> list:
             f"would have skipped a pick the bot bought. "
             f"{entry.get('outside_window', 0)} of {entry.get('n', 0)} "
             f"observations breach ({entry.get('outside_pct', 0)}%).",
-            "This is a TRUST defect, not a performance one. Either widen the "
-            "published window in formatters.entry_window_pct to match measured "
-            "reality, or make agent._build_premarket_gap_warnings warn on the "
-            "gap. Do NOT re-hardcode 2 or 3 — that constant is the ONE "
-            "definition and it has drifted before.",
+            _entry_window_fix(ex.get("date", "?")),
             n=entry.get("n"),
-            where="formatters.entry_window_pct / agent._build_premarket_gap_warnings",
+            where=("scripts/synthetic_user._entry_breach (the obey rule) · "
+                   "formatters.entry_window_pct (the ONE window definition — "
+                   "read it, do not change it)"),
             category="bug",
             plain=(f"{tk} was bought {slip}% above the price the morning "
                    f"message told people not to go past, so anyone who "
