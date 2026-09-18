@@ -53,6 +53,12 @@ WORKLIST_STATUSES = ("open", "awaiting_approval")
 # its condition disappears — including things you chose to live with.
 ACTIVE_STATUSES = ("open", "acknowledged", "wont_fix",
                    "awaiting_approval", "approved")
+# Ruled on by the owner: no action is outstanding. These are DEMOTED out of the
+# urgency tiers in the report (rendered `[DECIDED]`) rather than hidden — the
+# whole point of "decided, still present" is neither nagging nor forgetting.
+# `fixed` is deliberately NOT here: a finding marked fixed that is still present
+# is REOPENED, because otherwise "fixed" and "hidden" become the same word.
+DECIDED_STATUSES = ("acknowledged", "wont_fix")
 
 
 class Finding:
@@ -132,7 +138,25 @@ class Finding:
         # decisions with different evidence bars.
         tag = (self.CATEGORY_LABEL[self.category] if self.kind == "finding"
                else "METRIC")
-        head = f"### [{self.tier}] [{tag}] {self.title}"
+        # 🔴 A finding the owner has RULED ON is not in an urgency tier any more.
+        # The five entry_window fills led this report as [ACT] every night — and
+        # ACT means "one instance is enough to act on", which directly contradicts
+        # the decision already recorded against them. They are historical fills
+        # that can never stop being derived, so without this they lead the agenda
+        # forever. That is the cry-wolf failure, in the one file a session is
+        # instructed to read FIRST.
+        #
+        # DEMOTED, never dropped: they keep their full entry here and their line
+        # in "Decided, still present". Neither nagged about nor forgotten.
+        #
+        # ⚠️ This cannot silence a RECURRENCE. Every id is per-instance
+        # (`entry_window/{ticker}/{date}`, `stop_tight/{ticker}/{pct}`,
+        # integrity's `_fid` including the levels), so a new breach is a new id
+        # and arrives as a fresh ACT finding. And `fixed` is untouched — a
+        # finding marked fixed that is still present is still REOPENED, because
+        # there "hidden" and "fixed" would otherwise be the same word.
+        tier = "DECIDED" if self.status in DECIDED_STATUSES else self.tier
+        head = f"### [{tier}] [{tag}] {self.title}"
         if self.n is not None:
             head += f"  *(n={self.n})*"
         L = [head, ""]
@@ -160,7 +184,15 @@ class Finding:
                   "about how picks are chosen.", ""]
         if self.plain:
             L += ["<details><summary>Technical detail</summary>", ""]
-        L += [f"**Evidence:** {self.evidence}", "", f"**Fix:** {self.fix}"]
+        L += [f"**Evidence:** {self.evidence}", ""]
+        if self.status in DECIDED_STATUSES:
+            # Keep the text — it is the record of what WOULD have been done —
+            # but stop labelling it "Fix:", which reads as an outstanding
+            # instruction on something already closed out.
+            L += [f"**You ruled: {self.status}.** No action is outstanding. "
+                  f"For the record, the suggested fix was: {self.fix}"]
+        else:
+            L += [f"**Fix:** {self.fix}"]
         if self.blocked_until:
             L += ["", f"**Held until:** {self.blocked_until} — below n={MIN_N} "
                       f"any conclusion is noise."]
