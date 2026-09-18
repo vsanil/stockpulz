@@ -657,7 +657,17 @@ Rules:
   🚨 **THEY WATCH SPEND, NOT BALANCE — the gap is real and deliberate.** Spend $8 with $2 left and
   NO email fires. **Auto-reload is OFF** (owner's call; it charges the card automatically), so the
   actual failure — balance hitting zero mid-week and `morning` silently producing nothing — can
-  still happen between thresholds. Only auto-reload closes this.
+  still happen between thresholds.
+  🔑 **DECIDED (owner, 2026-09-18): AUTO-RELOAD STAYS OFF. Surface the date, do not re-argue it.**
+  So the trade is explicit and accepted: a dry balance costs that day's picks, and the system
+  REPORTS rather than PREVENTS. Do not propose auto-reload again, and do not build extra
+  alerting for it — **the alarm already works and was verified**: `_alert` reached
+  `send_inline_keyboard`, which logs on every failure path and is silent only on success, and
+  the 09-17 run carries ZERO `[telegram]` lines (no failure, no DRY_RUN suppression). The owner
+  was DM'd at 11:01 UTC, and the canary DM'd again at 12:30. What failed on 09-17 was not
+  detection.
+  ⚠️ **Absence of a failure line is only evidence when failures are logged** — that was checked
+  in `telegram_api` before concluding it, not assumed.
   🔴 **IT HAS NOW HAPPENED THREE TIMES (09-05, 09-07, and 2026-09-17), and the third cost a FULL
   DAY OF PICKS to both real users.** Topped up 09-18; verified by a 1-token Haiku probe against
   the same key (`HTTP 200`) rather than taken on trust.
