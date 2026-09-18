@@ -657,7 +657,29 @@ Rules:
   🚨 **THEY WATCH SPEND, NOT BALANCE — the gap is real and deliberate.** Spend $8 with $2 left and
   NO email fires. **Auto-reload is OFF** (owner's call; it charges the card automatically), so the
   actual failure — balance hitting zero mid-week and `morning` silently producing nothing — can
-  still happen between thresholds. It ran dry twice in two days. Only auto-reload closes this.
+  still happen between thresholds. Only auto-reload closes this.
+  🔴 **IT HAS NOW HAPPENED THREE TIMES (09-05, 09-07, and 2026-09-17), and the third cost a FULL
+  DAY OF PICKS to both real users.** Topped up 09-18; verified by a 1-token Haiku probe against
+  the same key (`HTTP 200`) rather than taken on trust.
+  🔎 **How it presented, because every layer looked healthy:** cron-job.org fired `11:00 UTC
+  http=204`, GitHub dispatched, the run started, hit the cache, **and exited 0** —
+
+        [agent] Starting [MORNING] at 2026-09-17 07:01 ET
+        [agent] Using midnight screener cache — skipping live screener.
+        [agent] Claude analysis failed: 400 invalid_request_error
+                'Your credit balance is too low to access the Anthropic API.'
+        [agent] ALERT: Morning run FAILED — Claude analysis error
+
+  `cron_last_morning` stamped `2026-09-17` while `last_morning_run` froze at `09-16` — the exact
+  split this file documents for an OOM-killed run, from a different cause. **A success with a
+  failure printed inside it**, and the ONLY thing that surfaced it was the canary's
+  `runs.silent_failures` + `delivery.morning`. No workflow went red.
+  ⚠️ **It takes everything Claude-touching with it, not just picks** — natural-language bot
+  commands (`NL parse failed`, silently downgraded to an "explain query"), portfolio guidance,
+  and **self_heal**, so the auto-fix net is down at the same moment.
+  🔑 **Recovery is to let the NEXT scheduled run do it, not to force one.** The per-day guard
+  reads `cron_last_morning`, so a new ET day proceeds on its own; forcing a catch-up at 2 AM ET
+  would deliver yesterday's stale levels at an hour this file forbids.
   ⚠️ **The $200,000 monthly spend LIMIT was deliberately left alone.** Set too low it BLOCKS the
   API rather than warning — a worse failure than the one being solved. Do not "tighten" it as a
   safety measure.
