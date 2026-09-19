@@ -2827,3 +2827,38 @@ zero from a rejected query and a zero from real silence look identical:
   the read-back test counted the word `curl`, which also appears in the step's own COMMENTS, so
   replacing the read-back with a literal `VERIFY=200` sailed through. Re-anchored on the
   assignment (`VERIFY=$(curl`). **Prose keeps being the thing that fools these scans.**
+
+## 🏁 THE TOURNAMENT — the program that ENDS the endless-improvement loop (owner, 2026-09-19)
+
+> Owner: *"you can propose, i just dont want the endless improvements as its going now."*
+> Then, to the three decisions: **"option B, 3 months is fine, index winning is ok."**
+
+**Why.** Five months of fixes; the measurement layer became rarer and better than the product,
+and the loop stayed OPEN — evidence in, nothing changes (one `ENGINE_CHANGES` entry ever; the
+arms built and never scheduled; `build_report` claims arm segmentation and has zero references
+to it). The engine shows no detectable edge at any of four stages. "Best recommendation app"
+therefore cannot mean "beats the market". It CAN mean: several genuinely different strategies
+run daily against each other AND against the index, through the execution a real user would
+have, and the app says which has earned the recommendation — or that none has.
+
+**The three decisions, dated, do not re-argue:**
+1. **Option B — only the LIVE arm calls Claude; every other arm is screener-only.** ~$60/mo
+   instead of ~$200, and it isolates Claude's marginal value, which has never been measured.
+2. **Three months without touching the engine.** ~60 trading days for ST arms, ~180 for LT.
+3. **SPY-hold winning is an ACCEPTABLE outcome.** If no strategy separates from the index arm,
+   the product is "index + real levels + alerts + discipline", and the app says so.
+
+**Phases and the stopping rule:**
+- **Phase 1 — the synthetic user becomes a real trader.** Sizing via the app's own sizer, the
+  portfolio rules honoured, a TIME STOP so every position resolves (today: target/stop only, so
+  LT picks never exit and the exit mix is a survivor sample), a full simulated portfolio with an
+  equity curve vs SPY on identical cash flows.
+- **Phase 2 — the tournament.** 4-5 arms with measured pick-overlap < 20% (the current two
+  overlap the default 44-63%), **SPY-hold as an arm**, evaluator segmenting by arm for real,
+  same-day paired comparison, CI must exclude zero.
+- **Phase 3 — benchmark-first product.** Standings lead the message; promotion goes through the
+  existing propose→approve-on-`/admin` flow; "no edge this quarter — the recommendation is the
+  index" is a first-class message.
+- 🛑 **STOPPING RULE: after Phase 2's first read the program ENDS with one of two outcomes.
+  There is no Phase 4.** Until that read exists: no UI polish, no coverage passes, no new
+  monitors. Fold `full_sweep` into the canary; retire two of the fourteen workflows.
