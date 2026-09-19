@@ -2784,3 +2784,46 @@ FIRST. That is the cry-wolf failure the worklist exists to prevent, one level up
 - Guard: `tests/test_decided_findings_are_demoted.py` (11 tests), **5 of 5 mutations caught** —
   including `fixed` being added to the tuple, `awaiting_approval` being demoted, and the fix text
   being dropped instead of demoted.
+
+### ✅ THE COLD START IS SOLVED — dispatch, not schedule (Sep 19)
+
+Three sessions recorded this as unsolved. The answer was a CHAIN: each half's failure was
+already measured, and nobody had put the two next to each other.
+
+    cron-job.org   punctual to the second (20 jobs prove it), but its client is REFUSED by
+                   Render's sleeping edge in ~2 s — MAINTAINS warmth, never ESTABLISHES it
+    GitHub runner  its curl CAN boot the instance, but `schedule:` fires 1.6-6 h late here
+    → dispatch     a workflow_dispatch starts in SECONDS. Punctuality from one, reach from
+                   the other.
+
+**Measured end-to-end against a genuinely cold instance** — 0 Render log lines for the
+preceding 4 h, against a control window that returned 9. **The control ran FIRST**, because a
+zero from a rejected query and a zero from real silence look identical:
+
+    19:02:08  cron/dispatch accepted by GitHub
+    19:02:12  runner curl starts                          +4 s
+    19:02:25  Render: Running 'gunicorn webhook:app …'   +17 s   ← the boot began
+    19:02:42  curl exits 28 (timed out at 30 s)                  ← irrelevant, see below
+    19:03:03  gunicorn Listening at 0.0.0.0:10000        +55 s   ← warm
+
+- 🔑 **The untested assumption was that a GitHub runner's curl behaves like the Mac's.** It
+  does — but this file's own rule is *never generalise Render edge behaviour from one client to
+  another*, which is exactly why the chain had never been tried. It took ONE dispatch to settle.
+- 🔴 **The mechanism looked broken because the REPORTING was broken.** `keepwarm.yml` used
+  `--max-time 30` against a ~55 s cold start under `bash -e`, so curl aborted mid-boot with exit
+  28 and killed the step **before it printed anything** — a run that HAD woken the instance was
+  marked a failure. Now 90 s; a timeout is a `::warning::`, not an error; already-warm is
+  distinguished from woken; the elapsed time is reported (that figure has gone stale twice in
+  this file and been re-quoted as measured); and it reads back.
+- **Two jobs, one mechanism — either alone is near-useless.** `8474212` **StockPulz-wake**
+  (6:55 AM ET daily → dispatch → establishes) and `7746621` **StockPulz-keepalive** (7am-7pm ET,
+  every 15 min → maintains). The wake alone buys ~15 min before Render idles out; the maintainer
+  alone can never start the instance. **Both DISABLED** pending launch day, per the owner's
+  standing decision.
+- 💵 Cost with both on: ~360 h/mo → account ~510 h of 750 (68%). The honest alternative is
+  **$7/mo Starter on this one service**, which removes it from the free pool entirely and frees
+  all 750 h for the other three apps. A product decision, not a code one.
+- Guard: `tests/test_wake_chain.py` (8 tests), 6 of 6 mutations caught. ⚠️ One initially MISSED:
+  the read-back test counted the word `curl`, which also appears in the step's own COMMENTS, so
+  replacing the read-back with a literal `VERIFY=200` sailed through. Re-anchored on the
+  assignment (`VERIFY=$(curl`). **Prose keeps being the thing that fools these scans.**
