@@ -1,54 +1,73 @@
 name: Keep Render Warm
 
-# Pings /health so Render isn't cold when someone actually uses the bot. A cold
-# server → the first /start or button tap waits ~30-60s for a boot (or the reply is
-# dropped mid-boot), which reads as "the bot isn't working".
+# WAKE the free Render instance — the half cron-job.org cannot do itself.
 #
-# 🔴 GitHub Actions minutes are free on a public repo, but Render instance-hours
-# are NOT: the free plan allows 750 h/month and every ping WAKES the service for
-# ~15 min. Warming 24/7 costs ~744 h/month = 99% of the cap, leaving no margin —
-# exceed it and Render suspends the service until the next billing cycle.
+# 🔴 The problem this solves, measured rather than assumed. Render Free spins
+# down after ~15 min idle and takes ~55 s to come back, so the first person to
+# tap a share link after a gap waits that long or gets no reply. cron-job.org
+# fires punctually but its HTTP client is REFUSED by Render's sleeping edge in
+# ~2 s (http=503, dozens of observations) — it can MAINTAIN warmth and can never
+# ESTABLISH it. GitHub's own `schedule:` can establish it but fires 1.6-6 h late
+# on this repo, so it cannot hit an hour.
 #
-# 🔴 StockPulz is on Render's STARTER (paid) plan: it NEVER spins down, and paid
-# services draw NOTHING from the 750 h free pool. So this workflow, the
-# cron-job.org /health job and the in-process gate are all NO-OPS today — kept
-# only so the service still warms itself if it is ever downgraded to Free.
-# Proven Aug 11: StockPulz stayed warm through 45 min of total silence while
-# PiQValet and pricedrop (both Free, same account) went cold in 20 min.
+# ✅ The chain that works, proven end-to-end 2026-09-19 against a genuinely cold
+# instance (0 Render log lines for the preceding 4 h, control window verified):
 #
-# 🔴 This MUST stay inside that window. Every ping wakes the service for ~15 min,
-# so a GH ping outside the paid window is pure cost: the previous 10:00-03:59 UTC
-# schedule would have fired ~6 times a day outside it, ~46 h/month for nothing.
-# If the cron-job.org window changes, change this to match or it silently
-# reinflates the bill.
+#     19:02:08  cron-job.org POSTs this workflow's dispatch endpoint
+#     19:02:12  runner curl starts                          (+4 s)
+#     19:02:25  Render: Running 'gunicorn webhook:app …'    (+17 s, boot began)
+#     19:03:03  gunicorn Listening at 0.0.0.0:10000         (+55 s, warm)
 #
-# ⚠️ This workflow is NOT what actually keeps Render warm. Measured over 13
-# consecutive runs its real cadence is ~53 min (GitHub throttles */10 hard), and
-# Render sleeps after ~15 min idle — so it cannot hold the service up. The clean
-# 15-min ticks in the Render log come from the cron-job.org /health job. Narrowing
-# THAT job to the same window is what changes the bill; this file only stops GH
-# from waking the service during the cold hours.
+# A DISPATCH starts in seconds; only `schedule:` is late. That is the whole
+# trick — punctuality from cron-job.org, reach from a GitHub runner.
+#
+# ⚠️ This job ESTABLISHES warmth once. It does not maintain it: Render idles out
+# ~15 min later. Pair it with cron-job.org job 7746621 (7am-7pm ET, every 15 min),
+# which is the half that client CAN do. One without the other is close to useless
+# — the wake alone buys ~15 minutes, and the maintainer alone never gets started.
+
 on:
-  # 🔴 SCHEDULE DISABLED 2026-08-11 — StockPulz is on Render's Starter plan and
-  # never spins down, so this pinged an already-running service ~27 times a day
-  # (and cluttered the Actions history enough to help hide a failing Tests run).
-  # Kept, not deleted: uncomment if the service is ever downgraded to Free.
-  # schedule:
-  #   - cron: "*/10 * * * *"
-  workflow_dispatch: {}   # still runnable by hand
+  workflow_dispatch: {}   # cron-job.org dispatches this; also runnable by hand
 
 jobs:
-  ping:
+  wake:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
-
+    timeout-minutes: 5
     steps:
-      - name: Ping health endpoint
+      - name: Wake the instance and measure the cold start
+        env:
+          URL: ${{ secrets.RENDER_EXTERNAL_URL }}
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "${{ secrets.RENDER_EXTERNAL_URL }}/health")
-          echo "Health check status: $STATUS"
-          if [[ "$STATUS" != "200" ]]; then
-            echo "⚠️  Unexpected status $STATUS — server may be starting up"
-          else
-            echo "✅ Server is warm"
+          set -uo pipefail          # NOT -e: a timeout is an expected outcome here
+          if [ -z "${URL:-}" ]; then
+            echo "::error::RENDER_EXTERNAL_URL is not set — nothing to wake."
+            exit 1
           fi
+
+          # --max-time 90 clears the measured ~55 s cold start with margin. The
+          # old value was 30, so curl aborted mid-boot with exit 28 and `bash -e`
+          # killed the step BEFORE it could report — a run that had successfully
+          # woken the instance was marked a failure, which is how a working
+          # mechanism gets mistaken for a broken one.
+          START=$(date +%s)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$URL/health" || echo "000")
+          ELAPSED=$(( $(date +%s) - START ))
+
+          echo "http=$STATUS  elapsed=${ELAPSED}s"
+          if [ "$STATUS" = "200" ] && [ "$ELAPSED" -lt 5 ]; then
+            echo "✅ already warm (${ELAPSED}s) — something else had woken it"
+          elif [ "$STATUS" = "200" ]; then
+            echo "✅ WOKEN from cold in ${ELAPSED}s"
+          else
+            # Do not fail the run. The boot is asynchronous: curl can give up
+            # while Render keeps starting, which is exactly what happened at the
+            # old 30 s limit. Read the Render log before calling this broken.
+            echo "::warning::no 200 after ${ELAPSED}s (http=$STATUS). The boot may "\
+                 "still be in progress — check the Render log for 'Booting worker'."
+          fi
+
+          # Confirm by READ-BACK rather than trusting the first response.
+          sleep 5
+          VERIFY=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$URL/health" || echo "000")
+          echo "verify http=$VERIFY"
+          [ "$VERIFY" = "200" ] || echo "::warning::still not serving — instance did not come up"
