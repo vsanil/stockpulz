@@ -140,6 +140,15 @@ def select(screen: dict, strategy=None, max_per_section: int = MAX_PICKS_PER_SEC
     RANKING. The live arm takes the same pool and hands it to Claude, so the
     difference between them is the selection step and nothing else.
     """
+    if not isinstance(screen, dict):
+        # A failed screen must never read as "this arm sat out today". A
+        # starved arm and a quiet market are indistinguishable unless the code
+        # says which, and the caller turns an exception into a loud CRASHED
+        # line rather than a silent zero.
+        raise TypeError(
+            f"arm_selector.select needs the screener's output dict, got "
+            f"{type(screen).__name__} — the screen failed; an arm must not "
+            f"report that as having no candidates")
     out = {sec: {"short_term": [], "long_term": []}
            for sec in ("stocks", "crypto", "etfs", "commodities")}
     for key, lt in (("short_term", False), ("long_term", True)):

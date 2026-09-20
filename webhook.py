@@ -1293,6 +1293,41 @@ function sparkPair(curve){
     +'<span style="color:#f59e0b">&#9644;</span> SPY twin</div>';
 }
 
+// ── The tournament standings ─────────────────────────────────────────────
+// Phase 2. Every arm trades the same days through the same trader, so the
+// difference between them is the strategy. A METRIC: it is read, never ruled
+// on, so it never appears on the Engine findings card.
+function tournamentSection(t){
+  if(!t || t.error) return '';
+  var rows = t.rows || [];
+  if(!rows.length) return '';
+  var any = rows.some(function(r){ return r.active; });
+  var pct=function(v){ return v==null ? '&mdash;' : (v>0?'+':'')+v+'%'; };
+  var money=function(v){ return v==null ? '&mdash;' : '$'+Number(v).toLocaleString(undefined,{maximumFractionDigits:0}); };
+  var body = rows.map(function(r,i){
+    if(!r.active){
+      return '<div class="fb-row"><div class="fb-meta"><b>'+esc(r.arm)+'</b></div>'
+        +'<div class="fb-text fb-meta">no curve yet &mdash; this arm has not traded</div></div>';
+    }
+    var medal = i===0 ? '&#129351; ' : '';
+    return '<div class="fb-row"><div class="fb-meta">'+medal+'<b>'+esc(r.arm)+'</b> &middot; '
+      +r.days+' day'+(r.days==1?'':'s')+'</div>'
+      +'<div class="fb-text">'+money(r.bot_equity)+' &middot; <b>'+pct(r.bot_ret_pct)+'</b>'
+      +' &middot; own twin '+pct(r.twin_ret_pct)
+      +' &middot; max drawdown '+pct(r.max_drawdown_pct==null?null:-r.max_drawdown_pct)+'</div></div>';
+  }).join('');
+  var note = any
+    ? '<div class="fb-meta" style="margin-top:8px">Ranked by RETURN over the same days. '
+      +'Alpha is per-arm (each twin gets that arm&rsquo;s own cash flows), so it compares timing '
+      +'WITHIN an arm and not across them. Below 30 trading days this is a direction, not a verdict.</div>'
+    : '<div class="fb-meta">No arm has traded yet.</div>';
+  return '<div class="card" id="tourney-card"><div class="card-title">Tournament standings</div>'
+    +'<div class="fb-meta" style="margin-bottom:8px">Engine variants traded side by side on the '
+    +'same days, through the same trader, paper only. <b>spy_hold</b> is the index doing nothing &mdash; '
+    +'the alternative every other arm has to beat.</div>'
+    +body+note+'</div>';
+}
+
 function actionSection(a){
   if(!a || a.error) return '';
   var e=a.entry||{}, st=a.stops||{}, oc=a.outcomes||{};
@@ -1699,6 +1734,7 @@ async function load(){
     +'</div>'
     +auditSection(d.audit)
     +bookSection(d.sim_portfolio)
+    +tournamentSection(d.tournament)
     +actionSection(d.actionability)
     +trafficSection(d.traffic);
   document.getElementById('ts').textContent='Updated '+new Date().toLocaleTimeString();
@@ -1995,6 +2031,25 @@ def _build_actionability() -> dict:
         return {"error": str(exc)[:120]}
 
 
+def _build_tournament() -> dict:
+    """The arms' books side by side — Phase 2's read.
+
+    A METRIC, like the synthetic trader's own curve: a standing is something
+    you read, not something you rule on, so it never reaches the Engine
+    findings card. Never raises; the dashboard must render without it.
+    """
+    try:
+        import sim_portfolio as sp
+        from config_manager import ARM_CHAT_IDS
+        if not ARM_CHAT_IDS:
+            return {"rows": []}
+        labels = {cid: name for name, cid in ARM_CHAT_IDS.items()}
+        return {"rows": sp.standings(sp.all_books(), labels)}
+    except Exception as exc:
+        print(f"[admin] tournament build failed: {exc}")
+        return {"error": str(exc)[:120]}
+
+
 def _build_sim_portfolio() -> dict:
     """The synthetic trader's book against its SPY twin — the Phase-1 headline
     of the tournament. A METRIC, so it renders beside actionability and never
@@ -2210,6 +2265,7 @@ def admin_data():
     audit   = _build_audit_findings()
     action  = _build_actionability()
     book    = _build_sim_portfolio()
+    tourney = _build_tournament()
     now_utc = _dt.now(_tz.utc)
     users   = []
     total_open   = 0
@@ -2334,6 +2390,7 @@ def admin_data():
         "audit":            audit,
         "actionability":    action,
         "sim_portfolio":    book,
+        "tournament":       tourney,
         "traffic":          _build_traffic(),
         "cron":             cron,
         "last_morning_run": cfg.get("last_morning_run", ""),

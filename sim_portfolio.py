@@ -219,6 +219,35 @@ def summary(doc: dict | None) -> dict:
     }
 
 
+def standings(books: dict, labels: dict) -> list:
+    """One row per arm, best first — the tournament table.
+
+    `books` is the whole stored document ({account: doc}); `labels` maps an
+    account to the arm name. Arms with no curve yet are reported as inactive
+    rather than omitted: an arm that is silently missing looks like an arm that
+    has not been built, which is the failure the empty-state rule exists for.
+
+    Ranked on RETURN, not on alpha: every arm's twin receives that arm's own
+    cash flows, so alpha is a statement about timing within an arm and is not
+    comparable ACROSS arms. Return over the same days is.
+    """
+    rows = []
+    for account, name in sorted(labels.items(), key=lambda kv: kv[1]):
+        s = summary((books or {}).get(str(account)))
+        rows.append({"arm": name, "account": str(account), **s})
+    live = [r for r in rows if r.get("active")]
+    idle = [r for r in rows if not r.get("active")]
+    live.sort(key=lambda r: (r.get("bot_ret_pct") is None, -(r.get("bot_ret_pct") or 0)))
+    return live + idle
+
+
+def all_books() -> dict:
+    """Every account's book in ONE read — they share a document on purpose, so
+    the dashboard pays a single round trip however many arms are running."""
+    from config_manager import _load_gist_file, SIM_PORTFOLIO_FILE
+    return _load_gist_file(SIM_PORTFOLIO_FILE) or {}
+
+
 # ── storage ─────────────────────────────────────────────────────────────────
 
 def load(account: str) -> dict | None:

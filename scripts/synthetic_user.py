@@ -335,7 +335,20 @@ def _entry_breach(px, u: dict):
     return round(slip, 2) if slip > window else None
 
 
-def phase_open(admin: str, dry: bool) -> list[str]:
+def phase_open(admin: str, dry: bool, picks: dict | None = None,
+               open_real: bool = True) -> list[str]:
+    """Open the day's positions for ONE account.
+
+    🔴 EVERY TOURNAMENT ARM TRADES THROUGH THIS FUNCTION. That is the point: if
+    an arm had its own buying code, the standings would compare execution as
+    much as selection, and the whole experiment would be confounded. Arms differ only
+    in the `picks` handed in — sizing, the hard book rules, the entry-window
+    obedience, the levels and the SPY twin are identical for all of them.
+
+    picks      — inject an arm's picks; defaults to production's picks.json.
+    open_real  — arms are PAPER ONLY and pass False. An arm must never open a
+                 real position; these are experiments, not recommendations.
+    """
     from market_data import get_live_price
     from trade_logger import add_holding, load_user_trade_log
     from paper_trader import paper_buy, load_user_paper
@@ -343,7 +356,7 @@ def phase_open(admin: str, dry: bool) -> list[str]:
     import webhook as wh
     import sim_portfolio as sp
 
-    uni = _universe(_raw_picks())
+    uni = _universe(_raw_picks() if picks is None else picks)
     if not uni:
         return ["no picks today — nothing to open"]
     st = _state(admin)
@@ -357,7 +370,8 @@ def phase_open(admin: str, dry: bool) -> list[str]:
     from config_manager import et_today
     _today = et_today().isoformat()
 
-    real_cands = [u for u in uni if u["atype"] == "stock" and u["t"] not in opened][:_MAX_REAL]
+    real_cands = ([u for u in uni if u["atype"] == "stock" and u["t"] not in opened][:_MAX_REAL]
+                  if open_real else [])
     # Consider EVERY pick (all asset types); the BOOK RULES decide how many the
     # book can actually carry. Each fill is one independent sample for the
     # evaluation, and each refusal is recorded as what a sized trader would do.
@@ -677,6 +691,18 @@ def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
     # NOTE: returns ONLY actionable events (sells/cuts/expiries/errors). An empty
     # list means "nothing to do" — main() then stays silent (no Telegram spam).
     return acts
+
+
+def manage_account(admin: str, dry: bool) -> list[str]:
+    """Public name for the ONE manage implementation.
+
+    The tournament arms exit through exactly this function, so target, stop and
+    the time stop mean the same thing in every arm. Reaching into the private
+    `_manage_account` from another module would invite a second copy of the
+    exit rules, and the standings would then compare execution as much as
+    selection.
+    """
+    return _manage_account(admin, dry)
 
 
 def phase_reset(admin: str, dry: bool) -> list[str]:

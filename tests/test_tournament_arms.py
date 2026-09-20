@@ -249,3 +249,251 @@ class TestTheArmSelectorIsMeasurementOnly:
                 {getattr(n, "id", None) for n in ast.walk(tree)}
         for banned in ("analyze_with_claude", "anthropic", "Anthropic", "_get_client"):
             assert banned not in names, f"an arm must not spend a Claude call: {banned}"
+
+
+def _arms():
+    spec = importlib.util.spec_from_file_location("run_arms_t", ROOT / "scripts" / "run_arms.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+class TestThePassiveArm:
+    """The alternative every other arm has to beat. The owner accepted in
+    advance (2026-09-19) that this arm winning is a legitimate outcome, so it
+    must be given a fair run — a handicapped benchmark flatters everything
+    measured against it."""
+
+    def _wire(self, monkeypatch, cash=10_000.0, positions=(), spy=500.0):
+        import market_data, paper_trader, sim_portfolio
+        state = {"buys": [], "docs": []}
+        monkeypatch.setattr(market_data, "get_live_price",
+                            lambda t: spy if t.upper() == "SPY" else None)
+        monkeypatch.setattr(paper_trader, "load_user_paper",
+                            lambda cid: {"cash": cash, "positions": list(positions),
+                                         "history": [], "starting_cash": 10_000.0})
+        monkeypatch.setattr(paper_trader, "paper_buy",
+                            lambda *a, **k: (state["buys"].append((a, k)), "📄 ok")[1])
+        monkeypatch.setattr(sim_portfolio, "update",
+                            lambda acct, fn: (state["docs"].append(fn(None)), state["docs"][-1])[1])
+        return state
+
+    def test_it_deploys_the_WHOLE_book_into_the_index(self, monkeypatch):
+        """Not 80%. Capping a one-position index arm the way a diversified
+        stock book is capped would handicap the benchmark."""
+        arms = _arms()
+        st = self._wire(monkeypatch, cash=10_000.0, spy=500.0)
+        acts = arms.open_passive("900000013", dry=False)
+        (ticker, shares, _cid), kw = st["buys"][0]
+        assert ticker == "SPY" and shares == 20.0        # the entire $10,000
+        assert kw.get("price") == 500.0
+        assert "never sold" in acts[0]
+
+    def test_it_buys_no_stop_and_no_target(self, monkeypatch):
+        """Buy-and-hold has neither; giving it one makes it a different
+        strategy and stops it being the benchmark."""
+        arms = _arms()
+        st = self._wire(monkeypatch)
+        arms.open_passive("900000013", dry=False)
+        _, kw = st["buys"][0]
+        assert "stop_loss" not in kw and "target_price" not in kw
+
+    def test_it_is_idempotent_because_holding_IS_the_strategy(self, monkeypatch):
+        arms = _arms()
+        st = self._wire(monkeypatch, positions=[{"ticker": "SPY", "shares": 20,
+                                                 "avg_price": 500.0}])
+        assert arms.open_passive("900000013", dry=False) == []
+        assert st["buys"] == []
+
+    def test_an_unpriceable_index_buys_NOTHING_and_invents_nothing(self, monkeypatch):
+        arms = _arms()
+        st = self._wire(monkeypatch, spy=None)
+        acts = arms.open_passive("900000013", dry=False)
+        assert st["buys"] == [] and st["docs"] == []
+        assert "did NOT buy" in acts[0]
+
+    def test_a_broke_passive_arm_says_so(self, monkeypatch):
+        arms = _arms()
+        st = self._wire(monkeypatch, cash=0.0)
+        acts = arms.open_passive("900000013", dry=False)
+        assert st["buys"] == [] and "no cash" in acts[0]
+
+    def test_a_dry_run_writes_nothing(self, monkeypatch):
+        arms = _arms()
+        st = self._wire(monkeypatch)
+        acts = arms.open_passive("900000013", dry=True)
+        assert st["buys"] == [] and st["docs"] == [] and acts
+
+    def test_manage_never_routes_the_passive_arm_through_the_exit_rules(self, monkeypatch):
+        """It is buy-and-hold. Target, stop and the time stop would make it a
+        trading strategy and it would stop being the benchmark.
+
+        ⚠️ The first version of this test stubbed `paper_sell` and asserted
+        nothing sold — and PASSED against a mutant that routed the passive arm
+        straight into the exit rules, because the tracked-ticker state read
+        came back empty so nothing could have sold either way. It also hit the
+        network for 26 seconds. Assert the ROUTING, which is the actual
+        invariant, and stub the trader so no I/O happens at all.
+        """
+        arms = _arms()
+        calls = []
+
+        class _Trader:
+            def manage_account(self, cid, dry):
+                calls.append(("manage_account", cid))
+                return []
+
+            def phase_open(self, *a, **k):
+                calls.append(("phase_open", a, k))
+                return []
+
+        monkeypatch.setattr(arms, "_su", lambda: _Trader())
+        monkeypatch.setattr(arms, "_account_for", lambda n: "900000013")
+        monkeypatch.setattr(arms, "snapshot_passive", lambda cid, dry: ["marked"])
+        assert arms.manage_arm("spy_hold", dry=False)["acts"] == ["marked"]
+        assert calls == [], "the passive arm must not be put through the exit rules"
+
+    def test_manage_DOES_route_a_trading_arm_through_the_exit_rules(self, monkeypatch):
+        """The other half — a guard that never fires in both directions is not
+        a guard."""
+        arms = _arms()
+        calls = []
+
+        class _Trader:
+            def manage_account(self, cid, dry):
+                calls.append(cid)
+                return ["sold something"]
+
+        monkeypatch.setattr(arms, "_su", lambda: _Trader())
+        monkeypatch.setattr(arms, "_account_for", lambda n: "900000010")
+        assert arms.manage_arm("breakout", dry=False)["acts"] == ["sold something"]
+        assert calls == ["900000010"]
+
+    def test_it_is_marked_daily_so_its_curve_is_comparable(self, monkeypatch):
+        """Without a daily mark its equity curve is a single dot and cannot be
+        read beside arms that snapshot every day."""
+        arms = _arms()
+        import paper_trader, sim_portfolio, market_data
+        marked = []
+        monkeypatch.setattr(market_data, "get_live_price", lambda t: 550.0)
+        monkeypatch.setattr(paper_trader, "load_user_paper",
+                            lambda cid: {"cash": 0.0, "positions": [
+                                {"ticker": "SPY", "shares": 20, "avg_price": 500.0}],
+                                "history": [], "starting_cash": 10_000.0})
+        monkeypatch.setattr(sim_portfolio, "update",
+                            lambda acct, fn: marked.append(acct))
+        assert arms.snapshot_passive("900000013", dry=False) == []
+        assert marked == ["900000013"]
+
+
+class TestTheRunnerIsSafeInEveryPhase:
+    def test_the_passive_arm_runs_no_screener_and_spends_no_model_call(self):
+        """It has nothing to select. A screen here would be pure cost."""
+        arms = _arms()
+        src = (ROOT / "scripts" / "run_arms.py").read_text()
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef) and n.name == "open_passive")
+        body = ast.unparse(fn)
+        assert "run_screener" not in body and "arm_selector" not in body
+
+    def test_no_arm_path_calls_claude(self):
+        """Owner's Option B: only the LIVE arm spends a model call."""
+        src = (ROOT / "scripts" / "run_arms.py").read_text()
+        names = {getattr(n, "attr", None) for n in ast.walk(ast.parse(src))} | \
+                {getattr(n, "id", None) for n in ast.walk(ast.parse(src))}
+        for banned in ("analyze_with_claude", "anthropic", "Anthropic"):
+            assert banned not in names
+
+    def test_a_failed_screen_is_loud_not_reported_as_sitting_out(self):
+        """A starved arm and a quiet market must never look the same."""
+        import pytest as _pt
+        with _pt.raises(TypeError, match="the screen failed"):
+            sel.select(None)
+
+
+class TestTheStandingsSurface:
+    def _admin(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        return client
+
+    def test_every_arm_appears_even_before_it_has_traded(self):
+        """An arm that is silently missing looks like an arm that was never
+        built — the empty-state rule that cost a day when the findings card
+        rendered nothing at all."""
+        import sim_portfolio as sp
+        labels = {cid: n for n, cid in cm.ARM_CHAT_IDS.items()}
+        rows = sp.standings({}, labels)
+        assert {r["arm"] for r in rows} == set(cm.ARM_CHAT_IDS)
+        assert all(r["active"] is False for r in rows)
+
+    def test_it_ranks_by_return_and_puts_the_best_first(self):
+        import sim_portfolio as sp
+
+        def _book(acct, ret):
+            d = sp.new_doc(acct, "2026-09-22", 10_000.0)
+            return sp.snapshot(d, "2026-09-23", 10_000.0 * (1 + ret / 100), 500.0, 1)
+
+        books = {"1": _book("1", 2.0), "2": _book("2", 9.0), "3": _book("3", -4.0)}
+        rows = sp.standings(books, {"1": "breakout", "2": "pullback", "3": "quality"})
+        assert [r["arm"] for r in rows] == ["pullback", "breakout", "quality"]
+
+    def test_an_inactive_arm_never_outranks_one_with_a_curve(self):
+        import sim_portfolio as sp
+        d = sp.snapshot(sp.new_doc("1", "2026-09-22", 10_000.0),
+                        "2026-09-23", 9_000.0, 500.0, 1)          # a LOSING arm
+        rows = sp.standings({"1": d}, {"1": "breakout", "2": "quality"})
+        assert rows[0]["arm"] == "breakout" and rows[1]["active"] is False
+
+    def test_the_dashboard_carries_the_standings(self, client):
+        d = self._admin(client).get("/admin/data").get_json()
+        assert "tournament" in d
+        assert {r["arm"] for r in d["tournament"]["rows"]} == set(cm.ARM_CHAT_IDS)
+
+    def test_the_page_renders_it_after_the_synthetic_book(self, client):
+        html = self._admin(client).get("/admin").get_data(as_text=True)
+        assert "function tournamentSection" in html and 'id="tourney-card"' in html
+        assert html.index("bookSection(d.sim_portfolio)") < html.index("tournamentSection(d.tournament)")
+
+    def test_it_names_the_passive_arm_as_the_thing_to_beat(self, client):
+        html = self._admin(client).get("/admin").get_data(as_text=True)
+        assert "spy_hold" in html and "has to beat" in html
+
+    def test_the_book_document_is_read_once_for_every_arm(self):
+        """All books share one document on purpose — the dashboard must not pay
+        a round trip per arm."""
+        src = (ROOT / "sim_portfolio.py").read_text()
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef) and n.name == "all_books")
+        # Count CALL nodes, not the substring: the import statement carries the
+        # same name, so a text count reads 2 for a function that reads once.
+        calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", None) == "_load_gist_file"]
+        assert len(calls) == 1
+
+
+class TestTheWorkflowCannotSpendOnAModel:
+    def _wf(self):
+        import yaml
+        return yaml.safe_load((ROOT / ".github/workflows/ab_arms.yml").read_text())
+
+    def test_no_anthropic_key_reaches_the_arms(self):
+        """Option B as a STRUCTURAL guarantee: reintroducing a Claude call to
+        this path fails loudly instead of quietly tripling the bill."""
+        env = self._wf()["jobs"]["run"]["steps"][-1]["env"]
+        assert not any("ANTHROPIC" in k.upper() for k in env)
+
+    def test_the_open_phase_is_not_on_githubs_late_scheduler(self):
+        """GitHub runs this repo 1.6-6 h late. An arm bought hours after the
+        entry window was published measures lateness, not strategy."""
+        wf = self._wf()
+        crons = [c["cron"] for c in wf[True]["schedule"]]
+        assert crons and all(c.startswith("15 14-20") for c in crons), crons
+        body = (ROOT / ".github/workflows/ab_arms.yml").read_text()
+        i = body.index("Pick phase")
+        assert "manage" in body[i:i + 400]
+
+    def test_it_carries_the_storage_secrets_so_it_cannot_split_brain(self):
+        env = self._wf()["jobs"]["run"]["steps"][-1]["env"]
+        for k in ("SUPABASE_URL", "SUPABASE_KEY", "GIST_ID", "GH_GIST_TOKEN"):
+            assert k in env, f"{k} missing — GH Actions would write a different store"
