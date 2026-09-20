@@ -445,6 +445,14 @@ STRATEGIES: dict[str, Strategy] = {
     "default":  DEFAULT_STRATEGY,
     # Momentum only: ignore the mean-reversion signals entirely.
     "breakout": Strategy(name="breakout", requires_setup="breakout",
+                         # SHORT-TERM ONLY. A breakout is a technical thesis
+                         # measured in days; holding long-term fundamental
+                         # names alongside it made the arm incoherent AND
+                         # re-created the duplication this design removes —
+                         # the Aug 8 dry run measured arms sharing 4 of 5
+                         # LONG-TERM picks while their short-term overlap was
+                         # already 0 of 5. `quality` owns the long-term axis.
+                         trades_long_term=False,
                          w_rsi=0, w_bb_bounce=0,
                          w_breakout=25, w_near_high=20, w_vol_surge=25,
                          prompt_directive=(
@@ -457,6 +465,7 @@ STRATEGIES: dict[str, Strategy] = {
                          w_rev_growth=35, w_above_200ma=20),
     # Mean-reversion only: ignore the breakout signals entirely.
     "pullback": Strategy(name="pullback", requires_setup="pullback",
+                         trades_long_term=False,     # see `breakout` above
                          w_breakout=0, w_near_high=0,
                          w_rsi=35, w_bb_bounce=25,
                          prompt_directive=(
