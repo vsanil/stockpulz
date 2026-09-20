@@ -9,8 +9,8 @@
 | ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. Ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
 | open | **The product claim.** Measurement is now COMPLETE: all four engine stages measured, none showing a detectable edge (ST −1.6 n=510, LT −2.2 n=90, pool vs SPY −3.6, selection −4.74 n=46/41 CI [−12.89,+3.41]). Supported: *"daily picks with real entry/stop/target levels, position sizing, and alerts that fire — measured against SPY."* NOT supported: any claim about beating the market. | OWNER | choose the wording |
 | ~2026-09-21 | **Prescreener fix — does Monday now get a 03:00 dispatch?** The ET-weekday bug is FIXED (job 7727066, wdays Sun-Thu ET). Tonight's fire only proves nothing broke; **Mon 2026-09-21 03:00 UTC is the first run the old schedule could not produce**. Cutting a GitHub prescreener cron stays DEFERRED — they were Monday's only cover. | WATCH | a 03:00 dispatch on 09-21 |
-| **launch day** | **🔵 RE-ENABLE THE KEEP-WARM when you share the link** — cron-job.org job `7746621`, `{"job":{"enabled":true}}`. Window (7am-7pm ET) is preserved, so that is the whole change. It cannot ESTABLISH warmth (measured 09-15: `http=503` every 15 min against a cold edge) but it DOES maintain it, so during real traffic it turns "everyone after a 15-min gap eats a ~45 s cold start" into "only the first person does". Off now because nothing wakes the instance pre-launch. | OWNER | enable on the day |
-| open | **The launch cold start is UNSOLVED.** `curl -m 30` boots the instance 2/2 where cron-job.org's client is refused in ~2 s — but GitHub Actions fires 1.6-6 h late, so it cannot reliably hit 07:00 ET. Do not bolt on a fix without deciding what actually guarantees the wake. | OWNER | a decision |
+| **launch day** | **🔵 Enable BOTH keep-warm jobs — two halves of one mechanism.** `{"job":{"enabled":true}}` on **`8474212` StockPulz-wake** (6:55 AM ET daily → dispatches `keepwarm.yml`; a GitHub runner's curl ESTABLISHES warmth — measured 09-19: dispatch → gunicorn listening in 55 s against a 4-h-cold instance) and **`7746621` StockPulz-keepalive** (7am-7pm ET every 15 min → MAINTAINS it; its own client is refused by a sleeping edge in ~2 s, so alone it can never start the instance). Cost with both ~360 h/mo → account ~510 of 750 h. Alternative: $7/mo Starter on this one service. Both DISABLED now. | OWNER | both enabled on the day |
+| **Mon 2026-09-21 08:00 ET** | **🏁 Phase 1 first real run.** The synthetic user now trades a SIZED, rule-bound $10k paper book with time stops and a SPY twin (`sim_portfolio.py`). Dry-run on CI proved the path 09-20. The book was RESET on 09-20 (`--phase reset`, history kept). The first `open` writes the first snapshot; `/admin` "Synthetic trader · book vs SPY twin" goes from "No equity curve yet" to a number. **Below 30 trading days it is a direction, not a verdict — do not tune anything on it.** | WATCH | a snapshot dated 09-21 |
 | open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
 
 ---
@@ -2862,3 +2862,65 @@ have, and the app says which has earned the recommendation — or that none has.
 - 🛑 **STOPPING RULE: after Phase 2's first read the program ENDS with one of two outcomes.
   There is no Phase 4.** Until that read exists: no UI polish, no coverage passes, no new
   monitors. Fold `full_sweep` into the canary; retire two of the fourteen workflows.
+
+### ✅ Phase 1 BUILT (2026-09-19/20) — the synthetic user is now a trader
+
+Owner: *"go, start phase 1, i thought it was built already."* It was not: the paper book bought a
+flat $500 of every pick, never exited on time, refilled its own cash, held **74 positions** at once,
+and gave long-term picks a 5% stop the engine never published. A bug detector, not a user.
+
+**What changed (`scripts/synthetic_user.py`, `sim_portfolio.py`, `paper_trader.py`, `webhook.py`,
+`scripts/analyze_engine.py`):**
+- **Sized by the app's own sizer.** Every paper buy goes through `position_sizer.size_pick`
+  against the book's LIVE equity (conviction scaling, 10% position cap, 1% risk). Stocks take
+  whole shares, crypto a dollar amount, exactly as `/size` and the morning message do.
+- **The portfolio rules are HARD.** `apply_portfolio_sizing` only WARNS (>8 positions, >80%
+  deployed, >5% at risk); a rule that never blocks a trade is a comment. `_book_block` applies
+  the same three numbers to a running tally, and a refusal is recorded under `held` in the state
+  file — a different fact from an entry-window `skipped`, kept separate so neither metric
+  borrows the other's count. The sector cap is NOT enforced: positions carry no sector.
+- **Long-term stop = `agent.LT_INVALIDATION_PCT` (15%)** under its own `levels_source`
+  `"invalidation"` (or `"invalidation+target"`), never the ±5% short-term fallback. Pinned by
+  test to agent's constant, not imported — `agent` costs ~121 MB.
+- **Time stops: 30 d ST / 180 d LT**, pinned to `evaluate_picks._HORIZON_DAYS` and
+  `backtest_longterm.LT_HORIZON_DAYS`. Paper AND real positions expire with
+  `outcome="expired"`; the real loop now passes `timeframe_override` so manage can read it.
+  Before this, LT picks never exited and the exit mix was a survivor sample.
+- **`paper_sell(..., outcome=)`** records WHY on the history row (`PAPER_OUTCOMES`; unknown →
+  `manual`). The bot always passes one.
+- **No cash top-up, no scale-in.** A book that prints its own money has no equity curve.
+- **`sim_portfolio.py`** — equity curve + a SPY twin that receives the SAME dollars on the SAME
+  days (a lot per ticker, sold when the bot sells). A position opened BEFORE the book has no lot,
+  so legacy liquidations neither help nor hurt the twin. ONE store write per run (buys + the
+  snapshot), idempotent per date, NaN-safe, capped, keyed by ACCOUNT so each Phase-2 arm gets its
+  own book without a new file. A snapshot is skipped, never invented, when SPY or any position
+  cannot be priced. **Measurement, never input** — a test asserts the engine never imports it.
+- **Surfaces.** `/admin` **"Synthetic trader · book vs SPY twin"** card beside Actionability —
+  a METRIC, deliberately NOT on the Engine findings card (a curve is read, not ruled on). The
+  file is in `_ADMIN_PREFETCH`. `analyze_engine` carries it as a `MEASURE` metric.
+- **`--phase reset`** liquidates at market (`outcome="liquidated"`, so the exit mix never reads
+  it as a stop-out), sets the book to $10k and starts the curve. **History is KEPT** —
+  reachability depends on closed rows, and a metric about a promise must not get quieter
+  because the book restarted. Refuses outright if any position cannot be priced.
+- `synthetic_user.yml` gained a **`dry_run` input**: drive a phase on CI against live data with
+  no writes and no DM. Local dry-runs are useless here — yfinance fails TLS on the Mac.
+
+**Proven on CI 2026-09-20 (dry run):** `Using SupabaseBackend`, book priced LIVE across all 74
+positions (`equity $45,658.79 · $37,020 deployed · $2,048 at risk`), SPY fetched ($762.63). No
+buys — every weekend pick was already held, the expected Saturday result. **The buy/size/rule
+branch has run only under tests**; Monday 2026-09-21 08:00 ET is its first live exercise, and
+`canary.check_synthetic_user` already fails on a bot that opens nothing.
+
+**Reset run on CI 2026-09-20 04:05 UTC:** 74 positions liquidated at market (`outcome=
+"liquidated"`), book set to $10,000, 36 prior closed rows kept, curve starts 2026-09-20.
+
+**Real positions are unchanged on purpose** (flat $1,000, four a day): they exercise the
+real-position and alert paths and are NOT part of the curve. The curve is the paper book only.
+
+🚨 **Do not read the curve for 30 trading days**, and never tune anything on it. The card and
+the report both say so. Phase 2 is where a strategy earns a change.
+
+Guards: `tests/test_sim_portfolio.py` (24), `tests/test_synthetic_trader.py` (37). **6 of 6
+mutations caught — one only after a fix**: the running-tally test passed with the tally removed
+because nine $1,000 buys hit the deployed cap before the position count. *A guard that passes
+for the wrong reason is not a guard*; the picks are now small enough that the count binds.
