@@ -125,7 +125,14 @@ jobs:
       TG_CHAT:     ${{ secrets.TELEGRAM_CHAT_ID }}
       RENDER_URL:  ${{ secrets.RENDER_EXTERNAL_URL }}
       # auto-merge only on a real monitor failure, never on a manual test dispatch
-      AUTO_MERGE:  ${{ github.event_name == 'workflow_run' }}
+      # 🔴 The name is stale and the behaviour is not: since the PR gate this
+      # decides "propose a PR", never "merge". It must ALSO be true for a
+      # finding the owner APPROVED on /admin — that is a real fix awaiting
+      # review, not a manual test, and without this the run pushed the branch
+      # and then stopped, reporting "🧪 TEST run ... no PR (manual run)". The
+      # loop would have looked complete while ending one step short — the
+      # gate-that-could-never-pass class this workflow has hit twice.
+      AUTO_MERGE:  ${{ github.event_name == 'workflow_run' || github.event.inputs.finding_id != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -448,7 +455,7 @@ jobs:
               else
                 MSG="⚠️ Self-heal produced a fix for $M but tests are RED — pushed to $BR, NOT proposed for merge. Needs you: ${URL}"
               fi ;;
-            testfix) MSG="🧪 Self-heal TEST run for *$M*: fix on \`$BR\` (files: ${FILES}), tests green — no PR (manual run)." ;;
+            testfix) MSG="🧪 Self-heal TEST run for *$M*: fix on \`$BR\` (files: ${FILES}), tests green — no PR (manual test dispatch, no finding attached)." ;;
             duplicate)
               # 🔴 SILENT ON PURPOSE. The identical fix is already on a branch the
               # owner was ALREADY DM'd about, and canary.check_selfheal_unmerged
