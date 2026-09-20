@@ -35,7 +35,15 @@ class TestWilsonInterval:
         assert lo < 55 < hi
 
     def test_zero_n_safe(self):
-        assert ev._wilson(0, 0) == (0.0, 0.0)
+        """Safe AND not falsely precise. It used to return (0.0, 0.0) — a
+        ZERO-WIDTH interval on zero observations, which is exactly the false
+        precision this interval is chosen to avoid. Consolidating the three
+        copies into `stats_ci` settled it on the honest answer: with no data
+        the whole range is possible. `_agg` returns early at n=0, so no report
+        ever rendered the old value."""
+        lo, hi = ev._wilson(0, 0)
+        assert (lo, hi) == (0.0, 100.0)
+        assert hi > lo, "zero observations must never look like a confident zero"
 
 
 class TestHonestyGate:
@@ -50,8 +58,12 @@ class TestHonestyGate:
         assert "Sample is meaningful" in r
 
     def test_no_matured_picks_says_so(self):
+        """Wording sharpened to 'PRODUCTION picks' when arms arrived: an
+        arm-only ledger HAS matured rows, so the old sentence would have been
+        false exactly when the tournament started running."""
         r = ev.build_report([])
-        assert "No picks have matured" in r
+        assert "No PRODUCTION picks have matured" in r
+        assert "Nothing to conclude" in r
 
 
 class TestBenchmarkVerdict:

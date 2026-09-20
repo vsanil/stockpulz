@@ -78,33 +78,21 @@ MIN_N = 30
 
 # ── statistics ───────────────────────────────────────────────────────────────
 def _wilson(w: int, n: int) -> tuple[float, float, float]:
-    """(point, lo, hi) as fractions. Wide at small n, and honestly so."""
-    if not n:
-        return (0.0, 0.0, 1.0)
-    p, z = w / n, 1.96
-    d = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    m = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
-    return (p, max(0.0, c - m), min(1.0, c + m))
+    """(point, lo, hi) as fractions — see `stats_ci`, the ONE definition."""
+    from stats_ci import wilson
+    return wilson(w, n)
 
 
 def _diff_ci(w1: int, n1: int, w2: int, n2: int) -> tuple[float, float, float]:
-    """95% CI for p1 - p2, Newcombe's hybrid-score method.
+    """95% CI for p1 - p2 by Newcombe's hybrid-score method — see `stats_ci`.
 
-    Newcombe rather than a Wald interval on the difference because Wald breaks
-    down exactly where a small backtest lands it: at proportions near 0 or 1 its
-    variance term collapses, so a 12-for-12 arm gets a ZERO-WIDTH interval and
-    the harness would report a decisive win from twelve observations. Newcombe
-    inherits Wilson's behaviour at the extremes and stays honestly wide.
-
-    (Near p=0.5 the two are comparable — the extremes are the failure mode.)
+    Newcombe rather than Wald because Wald breaks down exactly where a small
+    backtest lands it: at proportions near 0 or 1 its variance term collapses,
+    so a 12-for-12 arm would get a ZERO-WIDTH interval and the harness would
+    report a decisive win from twelve observations.
     """
-    p1, l1, u1 = _wilson(w1, n1)
-    p2, l2, u2 = _wilson(w2, n2)
-    d = p1 - p2
-    lo = d - ((p1 - l1) ** 2 + (u2 - p2) ** 2) ** 0.5
-    hi = d + ((u1 - p1) ** 2 + (p2 - l2) ** 2) ** 0.5
-    return (d, lo, hi)
+    from stats_ci import diff_ci
+    return diff_ci(w1, n1, w2, n2)
 
 
 # ── running one strategy ─────────────────────────────────────────────────────

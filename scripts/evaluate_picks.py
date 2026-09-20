@@ -364,14 +364,15 @@ def score_pick(row: dict) -> dict | None:
 # ── reporting ─────────────────────────────────────────────────────────────────
 
 def _wilson(wins: int, n: int) -> tuple[float, float]:
-    """95% Wilson confidence interval for a win rate — honest about small N."""
-    if n == 0:
-        return (0.0, 0.0)
-    z, p = 1.96, wins / n
-    den = 1 + z * z / n
-    centre = (p + z * z / (2 * n)) / den
-    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / den
-    return (max(0.0, (centre - half) * 100), min(100.0, (centre + half) * 100))
+    """95% Wilson CI for a win rate, as PERCENTAGES — honest about small N.
+
+    Delegates to `stats_ci`, which is the ONE definition. There were three
+    copies of this arithmetic and it is what decides whether a tournament arm
+    has actually beaten another; copies drift. `_agg` returns early at n=0, so
+    this is never called with an empty sample (pinned by test).
+    """
+    from stats_ci import wilson_pct
+    return wilson_pct(wins, n)
 
 
 def _score_band(r: dict) -> str:
@@ -434,6 +435,106 @@ def _engine_change_note(scored: list[dict]) -> list[str]:
     return out + [""] if out else []
 
 
+LIVE_ARM = "live"      # production picks carry no `arm` tag at all
+
+
+def _arm_of(r: dict) -> str:
+    return r.get("arm") or LIVE_ARM
+
+
+def _pick_keys(rows: list[dict]) -> set:
+    return {(r["date"], r["ticker"]) for r in rows}
+
+
+def _overlap_pct(a: list[dict], b: list[dict]):
+    """What share of arm A's picks arm B also made on the same day.
+
+    🔴 This is the number that decides whether a comparison is worth reading at
+    all. Measured 2026-08-14 on replayed history, `breakout` shared 44% of its
+    picks with `default` and `pullback` 63% — so most of each arm's budget was
+    spent buying identical names, whose outcomes are identical by construction.
+    High overlap does not make an arm wrong; it makes it SLOW, because only the
+    disagreements carry information.
+    """
+    ka, kb = _pick_keys(a), _pick_keys(b)
+    return round(len(ka & kb) / len(ka) * 100, 1) if ka else None
+
+
+def _head_to_head(live: list[dict], arm: list[dict]) -> dict:
+    """Compare two arms on the picks they DISAGREED about, and nothing else.
+
+    🔴 The rule is inherited from `backtest_compare`, where it was established
+    on measured data: two strategies over the same dates mostly pick the same
+    names, and a shared pick has an IDENTICAL outcome in both arms by
+    construction. Counting those drags the two win rates together and
+    manufactures "no difference" however far apart the strategies really are.
+    Total agreement therefore reports NOT CONCLUSIVE, never a confident 0.0.
+    """
+    shared = _pick_keys(live) & _pick_keys(arm)
+    l = [r for r in live if (r["date"], r["ticker"]) not in shared]
+    a = [r for r in arm if (r["date"], r["ticker"]) not in shared]
+    wl = sum(1 for r in l if r["ret_pct"] > 0)
+    wa = sum(1 for r in a if r["ret_pct"] > 0)
+    from stats_ci import diff_ci, excludes_zero
+    d, lo, hi = diff_ci(wa, len(a), wl, len(l))
+    return {"n_live": len(l), "n_arm": len(a), "shared": len(shared),
+            "diff_pts": round(d * 100, 1), "lo_pts": round(lo * 100, 1),
+            "hi_pts": round(hi * 100, 1),
+            "decisive": excludes_zero(lo, hi) and min(len(l), len(a)) >= _MIN_N}
+
+
+def _standings(by_arm: dict) -> list[str]:
+    """The tournament table. Renders ONLY when an arm has actually run, so on a
+    production-only ledger it adds nothing to a report already close to
+    Telegram's 4096-character ceiling."""
+    others = sorted(k for k in by_arm if k != LIVE_ARM)
+    if not others:
+        return []
+    live = by_arm.get(LIVE_ARM, [])
+    L = ["<b>🏁 Tournament standings</b>",
+         "<i>Each arm ran on the SAME market days, so regime is not the "
+         "difference between them. Paper only; no real user saw an arm's pick.</i>"]
+    order = ([LIVE_ARM] + others) if live else others
+    for name in order:
+        rows = by_arm.get(name, [])
+        g = _agg(rows)
+        if not g["n"]:
+            continue
+        a = f"{g['avg_alpha']:+.2f}%" if g["avg_alpha"] is not None else "n/a"
+        tag = "" if g["n"] >= _MIN_N else "  <i>(low n)</i>"
+        L.append(f"  <b>{name}</b>: n={g['n']} · win {g['win_rate']}% "
+                 f"· α {a} · CI {g['win_ci'][0]:.0f}-{g['win_ci'][1]:.0f}%{tag}")
+    if not live:
+        L += ["  <i>No matured production picks in range — an arm can only be "
+              "read against the live engine, so there is nothing to compare "
+              "against yet.</i>", ""]
+        return L
+
+    L.append("<b>Against the live engine, on the picks they disagreed about</b>")
+    for name in others:
+        h = _head_to_head(live, by_arm[name])
+        ov = _overlap_pct(by_arm[name], live)
+        head = f"  <b>{name}</b> vs {LIVE_ARM}: "
+        if min(h["n_live"], h["n_arm"]) == 0:
+            L.append(head + f"<i>no disagreement to measure ({h['shared']} shared "
+                            f"picks) — this arm is not testing anything.</i>")
+            continue
+        body = (f"{h['diff_pts']:+.1f} pts "
+                f"[{h['lo_pts']:+.1f}, {h['hi_pts']:+.1f}] "
+                f"· n={h['n_arm']}/{h['n_live']} disagreeing · {ov}% overlap")
+        if h["decisive"]:
+            verdict = "🟢 <b>beats</b>" if h["diff_pts"] > 0 else "🔴 <b>loses to</b>"
+            L.append(head + f"{verdict} the live engine: {body}")
+        elif min(h["n_live"], h["n_arm"]) < _MIN_N:
+            L.append(head + f"{body} — <i>below n={_MIN_N} on one side, NOT a finding.</i>")
+        else:
+            L.append(head + f"{body} — <i>interval includes zero, so no winner.</i>")
+    L += ["  <i>Scored on DISAGREEMENT ONLY: a pick both arms made has the same "
+          "outcome in both by construction, and counting it would drag them "
+          "together. A winner needs a 95% interval that excludes zero.</i>", ""]
+    return L
+
+
 def build_report(scored: list[dict]) -> str:
     # 🔴 Controls are the runners-up we did NOT pick. They exist only as a
     # baseline and must NEVER enter the headline, the slices, or any number a
@@ -441,10 +542,28 @@ def build_report(scored: list[dict]) -> str:
     # never recommended. Split first, before anything is aggregated.
     controls = [r for r in scored if r.get("control")]
     scored   = [r for r in scored if not r.get("control")]
+    # 🔴 ARMS ARE SPLIT OUT HERE, for the same reason as controls and with the
+    # same consequence if they are not. An arm is an EXPERIMENT that no real
+    # user ever saw; letting its picks into the headline would report the
+    # engine's track record as the average of the product and every variant
+    # being tested against it. Both `run_arms.run_arm` and `record_picks`
+    # DOCUMENTED this behaviour and no code implemented it — the report had
+    # zero arm references. It was dormant only because the arms workflow has
+    # never been scheduled, so scheduling one would have quietly poisoned the
+    # one number the product is judged on.
+    by_arm   = {}
+    for r in scored:
+        by_arm.setdefault(_arm_of(r), []).append(r)
+    scored   = [r for r in scored if not r.get("arm")]
 
     if not scored:
-        return ("📊 <b>Pick evaluation</b>\n\n<i>No picks have matured yet "
-                f"({_HORIZON_DAYS}-day horizon). Nothing to conclude — by design.</i>")
+        # An arm-only ledger still has something to say, and silently returning
+        # "nothing matured" while arm rows sit scored would be the same class of
+        # lie as a green monitor that could not run.
+        tail = _standings(by_arm)
+        return ("📊 <b>Pick evaluation</b>\n\n<i>No PRODUCTION picks have matured yet "
+                f"({_HORIZON_DAYS}-day horizon). Nothing to conclude — by design.</i>"
+                + ("\n\n" + "\n".join(tail) if tail else ""))
 
     o = _agg(scored)
     L = ["📊 <b>Pick evaluation — are the picks beneficial?</b>",
@@ -508,6 +627,7 @@ def build_report(scored: list[dict]) -> str:
               f"excluded from the setup/score slices.</i>", ""]
 
     L += _engine_change_note(scored)
+    L += _standings(by_arm)
 
     # ── Picked vs not-picked ─────────────────────────────────────────────────
     # Compared on mark-to-market only: controls have no target/stop, so this is
@@ -581,8 +701,16 @@ def main() -> int:
         all_rows = all_rows + shard["picks"][before:]
     rows = all_rows
     n_ctl = sum(1 for r in rows if r.get("control"))
-    print(f"[evaluate] ledger={len(rows)} rows ({len(rows) - n_ctl} picks + "
-          f"{n_ctl} controls, +{added} today) · shard={shard_name}")
+    n_arm = sum(1 for r in rows if r.get("arm"))
+    print(f"[evaluate] ledger={len(rows)} rows ({len(rows) - n_ctl - n_arm} production "
+          f"picks + {n_ctl} controls + {n_arm} arm rows, +{added} today) "
+          f"· shard={shard_name}")
+    if n_arm:
+        tally: dict = {}
+        for r in rows:
+            if r.get("arm"):
+                tally[r["arm"]] = tally.get(r["arm"], 0) + 1
+        print(f"[evaluate] arms: {dict(sorted(tally.items()))}")
 
     scored = []
     for r in rows:
