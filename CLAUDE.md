@@ -3084,3 +3084,40 @@ was repinned to the rule in both directions rather than relaxed.
 
 Guards: `tests/test_bug_auto_proposal.py` (35). Mutations **7/7**, plus the PR-path mutation.
 Suite 2405.
+
+### 🔴 A DUPLICATE YAML KEY KILLED self_heal FOR THREE HOURS — and `safe_load` said it was fine (2026-09-20)
+
+Inserting the four finding inputs used a **two-line offset**, which split the original
+`failed_run_id` block and orphaned its trailing `required: false` onto `finding_files`, which
+already had one. Two identical keys in one mapping.
+
+**GitHub REJECTS a duplicate key; `yaml.safe_load` silently keeps the LAST one.** So the check I
+ran after every workflow edit that day — `yaml.safe_load(...)` then print "yaml ok" — passed on a
+file GitHub refuses to read. *A validator that cannot fail is not a validator*, the same class as
+the guard that reported zero against an unfixed bug for a month.
+
+🔎 **THE TELL, worth memorising: a run named after the FILE PATH.** GitHub falls back to
+`.github/workflows/self_heal.yml` as the run name when it cannot parse the file, and it
+manufactures a **failed run on `push`** — an event the workflow does not even declare. Before the
+bad edit the same workflow only ever logged `skipped`. That signature is unambiguous:
+
+    09-20 16:43  skipped  workflow_run  cf313d4   <- healthy
+    09-20 19:05  FAILURE  push         3d6760a   <- unparseable, from the first bad edit
+    09-20 23:32  (none)   push         e4f6a46   <- fixed: no run manufactured at all
+
+**The cost was not the downtime.** The approve-and-build loop shipped the same afternoon could
+never have worked: approving a finding would have dispatched a workflow GitHub refuses to run,
+and the dashboard would have reported the dispatch accepted. The auto-fix net was also down the
+whole time.
+
+🔑 **Found by PRE-FLIGHTING Monday's chain rather than waiting for Monday** — checking the cron
+jobs, the deployed commit and recent CI health before the highest-risk morning. This project's
+record is 12 correct diagnoses and a delivery failure every single time; the lesson keeps being
+that the last link is the one to check.
+
+Guard: `tests/test_workflows_are_parseable.py` parses EVERY workflow with a loader that refuses
+duplicate keys, and pins that each declares a `name:`, a trigger and a job, and stays inside
+GitHub's 10-input dispatch limit. It includes a test that the LENIENT loader still accepts what
+the strict one rejects, so the guard cannot rot back into the thing it replaced. Mutation
+verified against the exact duplicate that caused this. **Never validate a workflow with
+`safe_load` alone.** Suite 2463.
