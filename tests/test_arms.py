@@ -41,13 +41,26 @@ class TestArmSafety:
         monkeypatch.setattr(screener, "STRATEGIES",
                             dict(screener.STRATEGIES, rogue=screener.DEFAULT_STRATEGY))
         monkeypatch.setattr(arms, "STRATEGIES", screener.STRATEGIES)
-        monkeypatch.setattr(cm, "get_allowed_users", lambda: ["55501"])
+        # 🔴 Patch the name ON run_arms. It imports `get_allowed_users` at
+        # MODULE level, so patching config_manager's copy leaves the already-
+        # bound reference untouched and the guard is never exercised — the
+        # scope trap that once let a "patched" test write to the live gist.
+        monkeypatch.setattr(arms, "get_allowed_users", lambda: ["55501"])
         called = {"screened": False}
         monkeypatch.setattr(screener, "run_screener",
                             lambda **k: called.__setitem__("screened", True))
         with pytest.raises(SystemExit):
-            arms.run_arm("rogue", dry=True)
+            arms.open_arm("rogue", dry=True)
         assert not called["screened"], "it must refuse BEFORE doing any work"
+
+    def test_every_phase_refuses_a_rogue_account(self, monkeypatch):
+        """open is not the only way in. A manage or reset aimed at a real
+        account would sell or liquidate a live user's paper book."""
+        monkeypatch.setattr(arms, "ARM_CHAT_IDS", dict(cm.ARM_CHAT_IDS, rogue="55501"))
+        monkeypatch.setattr(arms, "get_allowed_users", lambda: ["55501"])
+        for phase in (arms.open_arm, arms.manage_arm, arms.reset_arm):
+            with pytest.raises(SystemExit):
+                phase("rogue", dry=True)
 
     def test_arms_never_write_production_picks(self):
         """Scan CALL SITES, not prose — the module docstring legitimately says
@@ -63,9 +76,35 @@ class TestArmSafety:
         assert "PICKS_FILENAME" not in {getattr(n, "id", None) for n in ast.walk(tree)}
 
     def test_arms_never_open_a_real_position(self):
+        """Arms are paper-only, and the guarantee MOVED when they started
+        trading through the shared trader: run_arms no longer calls
+        `add_holding` itself, it passes `open_real=False`. Scanning only for
+        the old names would now pass vacuously, so assert the flag instead —
+        at every call site, with the value that matters."""
+        import ast
         src = open(os.path.join(ROOT, "scripts", "run_arms.py")).read()
         for forbidden in ("add_holding", "close_trade", "open_trades"):
             assert forbidden not in src, f"arms are paper-only; found {forbidden}"
+
+        calls = [n for n in ast.walk(ast.parse(src))
+                 if isinstance(n, ast.Call)
+                 and getattr(n.func, "attr", None) == "phase_open"]
+        assert calls, "the arms must trade through the shared trader"
+        for c in calls:
+            kw = {k.arg: k.value for k in c.keywords}
+            assert "open_real" in kw, "an arm that omits open_real opens REAL positions"
+            assert kw["open_real"].value is False
+
+    def test_arms_trade_through_the_ONE_trader(self):
+        """If an arm had its own buying code the standings would compare
+        execution as much as selection."""
+        import ast
+        src = open(os.path.join(ROOT, "scripts", "run_arms.py")).read()
+        names = {getattr(n.func, "attr", None)
+                 for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Call)}
+        assert {"phase_open", "manage_account", "phase_reset"} <= names
+        assert "paper_add_cash" not in names, \
+            "an arm that tops up its own cash has no equity curve worth reading"
 
 
 class TestArmPromptDivergence:
@@ -73,7 +112,10 @@ class TestArmPromptDivergence:
         assert screener.DEFAULT_STRATEGY.prompt_directive == ""
 
     def test_each_arm_has_a_directive(self):
-        for n in ("breakout", "pullback"):
+        """Kept even though Option B means arms do not call Claude: the
+        directive is the correct instruction if one ever is run through the
+        model, and it documents what the arm means."""
+        for n in ("breakout", "pullback", "quality"):
             assert len(screener.STRATEGIES[n].prompt_directive) > 50
 
     def test_arms_tell_claude_opposite_things(self):

@@ -1,142 +1,219 @@
 #!/usr/bin/env python3
 """
-run_arms.py — run engine VARIANTS side by side on the same market day.
+run_arms.py — THE TOURNAMENT. Engine variants traded side by side, every day,
+against each other and against the index.
 
-Why this exists
----------------
-Comparing "engine v1 in July" against "engine v2 in August" measures July vs
-August. Market regime dominates any real difference between two variants, so a
-sequential comparison is close to worthless. Arms remove that confound by
-running every variant on the SAME day against the SAME market.
+Why it exists
+-------------
+Comparing "engine v1 in July" with "engine v2 in August" measures July against
+August. Arms remove that confound by running every variant on the SAME day
+against the SAME market. What arms cannot fix is sample size — only the picks
+where arms DISAGREE carry information — which is why the arms are now disjoint
+BY CONSTRUCTION rather than by hope: `screener.eligible_candidates` filters each
+technical arm to a different `setup_type`, and that function returns exactly one
+label per candidate. `quality` trades the long-term pool only, so it cannot
+intersect either of them. Before this they were weight variants of one pool and
+overlapped the default 44-63%.
 
-What arms do NOT fix is sample size: separating a 55% engine from a 60% one
-needs ~1,500 picks per arm either way, because only the picks where arms
-DISAGREE carry information. That is why the arms here are deliberately far
-apart — breakout (momentum only) vs pullback (mean-reversion only) — the one
-split with measured evidence behind it: on live data those two signals never
-fire on the same candidate (5/5 anti-correlated).
+The four rules this file exists to keep
+---------------------------------------
+1. **ONE TRADER.** Every arm opens and manages through
+   `synthetic_user.phase_open` / `_manage_account` — the same sizing, the same
+   hard book rules, the same entry-window obedience, the same time stops, the
+   same SPY twin. If an arm had its own buying code the standings would compare
+   execution as much as selection, and the experiment would be worthless.
+2. **ONLY THE LIVE ARM CALLS CLAUDE** (owner's Option B, 2026-09-19). Arms here
+   are selected deterministically by `arm_selector` from the screener's own
+   ranking. That is ~$60/month instead of ~$200, and it isolates the one thing
+   never measured: what the model's selection adds over taking the top N.
+3. **PAPER ONLY, OWN ACCOUNT, NEVER picks.json.** An arm cannot touch a real
+   user's data or change what anyone is recommended.
+4. **THE BENCHMARK IS NOT HANDICAPPED.** `spy_hold` deploys its whole book into
+   the index, because capping it the way a diversified stock book is capped
+   would flatter every other arm. The owner accepted in advance that this arm
+   winning is a legitimate outcome.
 
-Safety rules baked in
----------------------
-  * PAPER ONLY. An arm never opens a real position. These are experiments.
-  * Each arm trades its OWN account (config_manager.ARM_CHAT_IDS), which are
-    registered test users — so no Telegram send is attempted, and they are
-    absent from allowed_users, which is what actually keeps them out of
-    community stats and the LLM pick prompt.
-  * It NEVER writes picks.json. Production picks are untouched; this process
-    cannot change what a real user receives.
-  * Ledger rows are tagged `arm`, and the evaluator segments them away from the
-    headline exactly like controls.
-
-Cost note: each arm is a full screener pass plus one Claude call. Arms run
-SEQUENTIALLY on purpose — firing three screeners at Yahoo/Finnhub at once
-invites rate limiting, and an arm that silently got degraded data would be
-measuring the API rather than the strategy.
+Cost note: each screener arm is a full 600-ticker screen and NO Claude call.
+Arms run SEQUENTIALLY — three concurrent screens invite rate limiting, and an
+arm running on degraded data measures the API rather than the strategy.
 
 Usage:
-    python scripts/run_arms.py --dry-run          # no writes, prints what would happen
-    python scripts/run_arms.py --arms breakout,pullback
+    python scripts/run_arms.py --phase open   [--arms breakout,pullback] [--dry-run]
+    python scripts/run_arms.py --phase manage [--dry-run]
+    python scripts/run_arms.py --phase reset  --arms breakout   # deliberate restart
 """
 from __future__ import annotations
 
+import argparse
+import importlib.util
 import os
 import sys
-import argparse
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config_manager import (ARM_CHAT_IDS, et_today, get_config, is_test_user,
-                            load_user_paper)
+from config_manager import ARM_CHAT_IDS, et_today, get_config, get_allowed_users
 from screener import STRATEGIES
 
-_PAPER_USD = 500.0          # per pick, per arm — arms must be comparable
-_MIN_CASH  = 20_000.0       # top up below this so a broke arm never silently stops buying
+PASSIVE_ARM = "spy_hold"
+BENCHMARK = "SPY"
+
+_SU_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "synthetic_user.py")
+
+
+def _su():
+    """The ONE trader. Loaded by path because it is a script, not a package."""
+    spec = importlib.util.spec_from_file_location("synthetic_user", _SU_PATH)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def _ev():
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evaluate_picks.py")
+    spec = importlib.util.spec_from_file_location("evaluate_picks", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
 
 
 def _pos(x) -> bool:
     try:
-        return x is not None and float(x) > 0
+        import math
+        return x is not None and math.isfinite(float(x)) and float(x) > 0
     except (TypeError, ValueError):
         return False
 
 
-def _ensure_cash(chat_id: str, dry: bool) -> float:
-    """An arm that runs out of cash stops buying and quietly stops being an arm.
-    That already happened once to the synthetic bot ($271 across 33 positions),
-    where it looked like the paper path working rather than failing."""
-    paper = load_user_paper(chat_id)
-    cash  = float(paper.get("cash") or 0)
-    if cash >= _MIN_CASH or dry:
-        return cash
-    from paper_trader import paper_add_cash
-    paper_add_cash(_MIN_CASH - cash + 5_000.0, chat_id)
-    return float(load_user_paper(chat_id).get("cash") or 0)
+def _account_for(name: str) -> str:
+    """Resolve an arm's account, refusing point-blank to aim at a real one.
 
-
-def run_arm(name: str, dry: bool) -> dict:
-    """One arm: screen → analyse → paper-buy every pick → ledger it."""
-    strat   = STRATEGIES[name]
+    ⚠️ Checking `is_test_user()` here would be CIRCULAR — `get_test_users()` is
+    DERIVED from ARM_CHAT_IDS, so anything listed is a test user by definition
+    and the guard could never fire. The allowlist is the independent fact: a
+    real user is someone who receives messages.
+    """
     chat_id = ARM_CHAT_IDS[name]
-    # Guard against an arm ever pointing at a REAL account. Note that checking
-    # is_test_user() here would be circular — get_test_users() is DERIVED from
-    # ARM_CHAT_IDS, so anything listed there is a "test user" by definition and
-    # the assert could never fire. The allowlist is the independent fact: a real
-    # user is someone who receives messages.
-    from config_manager import get_allowed_users
     owner = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
     if str(chat_id) in set(get_allowed_users()) or str(chat_id) == owner:
         raise SystemExit(f"[arms] REFUSING: arm '{name}' points at real account "
                          f"{chat_id}. Arms paper-trade; they must never touch a "
                          f"live user's data.")
+    return str(chat_id)
 
-    out = {"arm": name, "chat_id": chat_id, "picks": 0, "bought": 0, "errors": []}
-    cfg = get_config()
 
-    from screener import run_screener
-    from ai_analyzer import analyze_with_claude
+# ── the passive arm ──────────────────────────────────────────────────────────
 
-    stock = run_screener(watchlist=cfg.get("watchlist", []),
-                         excluded_sectors=cfg.get("excluded_sectors", []),
-                         strategy=strat)
-    picks = analyze_with_claude(stock, cfg, strategy=strat)
+def open_passive(chat_id: str, dry: bool) -> list[str]:
+    """Buy the index once with the whole book, then hold it forever.
 
-    flat = []
-    for sec, key in (("stocks", "ticker"), ("crypto", "symbol"),
-                     ("etfs", "ticker"), ("commodities", "ticker")):
-        for tf in ("short_term", "long_term"):
-            for p in (picks.get(sec, {}) or {}).get(tf, []) or []:
-                t = (p.get(key) or p.get("ticker") or p.get("symbol") or "").upper()
-                if t and _pos(p.get("entry_price")):
-                    flat.append((t, p))
-    out["picks"] = len(flat)
+    This is the alternative every other arm has to beat for the product to mean
+    anything, so it is deliberately NOT subjected to the diversified-book rules:
+    an 80% deployment cap on a one-position index arm would handicap the
+    benchmark and flatter everything measured against it.
 
-    if dry:
-        out["tickers"] = [t for t, _ in flat]
+    Idempotent — once it holds SPY it does nothing, which is the whole strategy.
+    """
+    from market_data import get_live_price
+    from paper_trader import load_user_paper, paper_buy
+    import sim_portfolio as sp
+
+    today = et_today().isoformat()
+    paper = load_user_paper(chat_id)
+    if any(p.get("ticker") == BENCHMARK for p in paper.get("positions") or []):
+        return []                       # already invested — holding IS the strategy
+
+    px = get_live_price(BENCHMARK)
+    if not _pos(px):
+        return [f"⚠️ {BENCHMARK} unpriceable — the passive arm did NOT buy; "
+                f"nothing was invented"]
+    cash = float(paper.get("cash") or 0)
+    if cash <= 0:
+        return [f"⚠️ passive arm has no cash (${cash:,.2f}) — nothing bought"]
+
+    shares = round(cash / float(px), 8)
+    equity0 = round(cash, 2)
+    if not dry:
+        # No stop, no target: buy-and-hold has neither, and giving it one would
+        # turn the benchmark into a different strategy.
+        msg = paper_buy(BENCHMARK, shares, chat_id, price=float(px))
+        if str(msg).startswith("❌"):
+            return [f"⚠️ passive buy refused: {str(msg)[:90]}"]
+
+        def _sim(d):
+            d = d or sp.new_doc(chat_id, today, equity0)
+            sp.record_buy(d, BENCHMARK, equity0, float(px), today)
+            return sp.snapshot(d, today, equity0, float(px), 1)
+        try:
+            sp.update(chat_id, _sim)
+        except Exception as exc:
+            return [f"⚠️ passive book update failed: {exc}"]
+    return [f"🅢 PASSIVE bought {shares:g} {BENCHMARK} @ ${px:,.2f} = "
+            f"${equity0:,.2f} — held from here, never sold"]
+
+
+def snapshot_passive(chat_id: str, dry: bool) -> list[str]:
+    """Mark the passive arm daily so its curve has the same points as the others.
+
+    It never trades, so without this its equity curve would be a single dot and
+    could not be read beside arms that snapshot every day.
+    """
+    from market_data import get_live_price
+    from paper_trader import load_user_paper
+    import sim_portfolio as sp
+
+    today = et_today().isoformat()
+    paper = load_user_paper(chat_id)
+    px = get_live_price(BENCHMARK)
+    if not _pos(px):
+        return [f"⚠️ {BENCHMARK} unpriceable — passive arm NOT marked today"]
+    eq = sp.bot_equity(paper, get_live_price)
+    if eq is None or dry:
+        return [] if dry else ["⚠️ passive arm could not be marked (unpriceable position)"]
+    try:
+        sp.update(chat_id, lambda d: sp.snapshot(d, today, eq, float(px),
+                                                 len(paper.get("positions") or []))
+                  if d else None)
+    except Exception as exc:
+        return [f"⚠️ passive snapshot failed: {exc}"]
+    return []
+
+
+# ── screener arms ────────────────────────────────────────────────────────────
+
+def open_arm(name: str, dry: bool) -> dict:
+    """One arm's day: screen -> select (no Claude) -> trade -> ledger."""
+    out = {"arm": name, "picks": 0, "acts": [], "errors": [], "ledgered": 0}
+    chat_id = _account_for(name)
+    out["chat_id"] = chat_id
+
+    if name == PASSIVE_ARM:
+        out["acts"] = open_passive(chat_id, dry) + snapshot_passive(chat_id, dry)
         return out
 
-    _ensure_cash(chat_id, dry)
-    from paper_trader import paper_buy
-    for t, p in flat:
-        try:
-            px = float(p["entry_price"])
-            shares = round(_PAPER_USD / px, 6)
-            msg = paper_buy(t, shares, chat_id, price=px,
-                            stop_loss=p.get("stop_loss"),
-                            target_price=p.get("target_price"))
-            if msg.startswith("❌"):
-                out["errors"].append(f"{t}: {msg[:60]}")
-            else:
-                out["bought"] += 1
-        except Exception as exc:                      # one bad ticker never aborts an arm
-            out["errors"].append(f"{t}: {type(exc).__name__} {exc}")
+    import arm_selector
+    from screener import run_screener
 
-    # Ledger the arm's picks so the evaluator can score them independently.
+    cfg = get_config()
+    screen = run_screener(watchlist=cfg.get("watchlist", []),
+                          excluded_sectors=cfg.get("excluded_sectors", []),
+                          strategy=STRATEGIES[name])
+    picks = arm_selector.select(screen, STRATEGIES[name])
+    flat = picks["stocks"]["short_term"] + picks["stocks"]["long_term"]
+    out["picks"] = len(flat)
+    out["tickers"] = [p["ticker"] for p in flat]
+    if not flat:
+        out["acts"] = [f"no eligible candidates today — this arm sat out, "
+                       f"which is a market fact, not an error"]
+        return out
+
+    # THE ONE TRADER. open_real=False: an arm never opens a real position.
+    out["acts"] = _su().phase_open(chat_id, dry, picks=picks, open_real=False)
+
+    if dry:
+        return out
     try:
-        import importlib.util
-        _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evaluate_picks.py")
-        _s = importlib.util.spec_from_file_location("evaluate_picks", _p)
-        ev = importlib.util.module_from_spec(_s); _s.loader.exec_module(ev)
+        ev = _ev()
         all_rows, shard, shard_name = ev._load_ledger()
         n = ev.record_picks(shard, picks, et_today().isoformat(), arm=name,
                             known={ev._key(r) for r in all_rows})
@@ -148,40 +225,79 @@ def run_arm(name: str, dry: bool) -> dict:
     return out
 
 
+def manage_arm(name: str, dry: bool) -> dict:
+    """Exit at target, stop or the time stop — through the ONE trader."""
+    out = {"arm": name, "acts": [], "errors": []}
+    chat_id = _account_for(name)
+    out["chat_id"] = chat_id
+    if name == PASSIVE_ARM:
+        # Buy-and-hold never exits. It is still MARKED daily so its curve is
+        # comparable with arms that trade.
+        out["acts"] = snapshot_passive(chat_id, dry)
+        return out
+    out["acts"] = _su().manage_account(chat_id, dry)
+    return out
+
+
+def reset_arm(name: str, dry: bool) -> dict:
+    out = {"arm": name, "acts": [], "errors": []}
+    chat_id = _account_for(name)
+    out["chat_id"] = chat_id
+    out["acts"] = _su().phase_reset(chat_id, dry)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arms", default="breakout,pullback",
-                    help="comma-separated arm names from screener.STRATEGIES")
+    ap.add_argument("--phase", choices=["open", "manage", "reset"], default="open")
+    ap.add_argument("--arms", default=",".join(sorted(ARM_CHAT_IDS)),
+                    help="comma-separated arm names; defaults to every arm")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     names = [a.strip() for a in args.arms.split(",") if a.strip()]
-    bad = [a for a in names if a not in STRATEGIES or a not in ARM_CHAT_IDS]
+    known = set(ARM_CHAT_IDS) & (set(STRATEGIES) | {PASSIVE_ARM})
+    bad = [a for a in names if a not in known]
     if bad:
-        print(f"[arms] unknown arm(s): {bad}. known={sorted(set(STRATEGIES) & set(ARM_CHAT_IDS))}")
+        print(f"[arms] unknown arm(s): {bad}. known={sorted(known)}")
         return 2
 
+    runner = {"open": open_arm, "manage": manage_arm, "reset": reset_arm}[args.phase]
     results, failed = [], False
     for name in names:                       # SEQUENTIAL — see the module docstring
-        print(f"[arms] ── {name} ──")
+        print(f"[arms] ── {name} ({args.phase}) ──")
         try:
-            r = run_arm(name, args.dry_run)
+            r = runner(name, args.dry_run)
+        except SystemExit:
+            raise
         except Exception as exc:
             traceback.print_exc()
-            r = {"arm": name, "picks": 0, "bought": 0, "errors": [f"CRASHED: {exc}"]}
+            r = {"arm": name, "acts": [], "errors": [f"CRASHED: {exc}"]}
         results.append(r)
-        print(f"[arms] {name}: {r['picks']} picks, {r.get('bought',0)} bought, "
-              f"{len(r['errors'])} error(s)")
+        for a in r.get("acts", []):
+            print(f"[arms]   {a}")
         for e in r["errors"]:
             print(f"[arms]   ! {e}")
         failed = failed or bool(r["errors"])
 
-    lines = [f"🧪 <b>A/B arms — {et_today().isoformat()}</b>",
+    lines = [f"🏁 <b>Tournament arms — {args.phase} — {et_today().isoformat()}</b>",
              "<i>paper only · test accounts · production picks untouched</i>", ""]
     for r in results:
-        lines.append(f"<b>{r['arm']}</b>: {r['picks']} picks · {r.get('bought',0)} bought"
-                     + (f" · ⚠️ {len(r['errors'])} error(s)" if r["errors"] else ""))
-    if not args.dry_run:
+        bits = [f"<b>{r['arm']}</b>"]
+        if args.phase == "open":
+            bits.append(f"{r.get('picks', 0)} picks")
+            if r.get("ledgered"):
+                bits.append(f"{r['ledgered']} ledgered")
+        acted = [a for a in r.get("acts", []) if a.strip()]
+        bits.append(f"{len(acted)} event(s)")
+        if r["errors"]:
+            bits.append(f"⚠️ {len(r['errors'])} error(s)")
+        lines.append(" · ".join(bits))
+
+    # `manage` runs hourly: stay silent unless something actually happened, so
+    # the reports do not become noise nobody reads.
+    actionable = any(r.get("acts") or r["errors"] for r in results)
+    if not args.dry_run and (args.phase != "manage" or actionable):
         try:
             from telegram_api import send_message
             owner = os.environ.get("TELEGRAM_CHAT_ID", "")

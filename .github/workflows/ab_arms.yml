@@ -1,29 +1,55 @@
-name: A/B Arms
+name: Tournament Arms
 
-# Runs engine VARIANTS side by side on the same market day, paper only, into
+# Engine variants traded side by side on the same market day, paper only, into
 # their own test accounts. Production picks are never touched.
 #
-# 🔴 DELIBERATELY workflow_dispatch ONLY — no schedule. Each arm is a full
-# screener pass plus a Claude call, and until the Sep 9 evaluator report says
-# whether breakout and pullback actually differ, running these daily would spend
-# API budget and hammer Yahoo/Finnhub to measure a difference we have no
-# evidence exists yet. Add a cron ONLY after that report justifies it.
+# 🔴 NO ANTHROPIC_API_KEY IS PASSED, AND THAT IS A SAFEGUARD, NOT AN OVERSIGHT.
+# The owner's Option B (2026-09-19) is that only the LIVE arm spends a model
+# call; arms here are selected deterministically by `arm_selector` from the
+# screener's own ranking. If anyone reintroduces a Claude call to this path it
+# fails loudly here instead of quietly tripling the monthly bill. Pinned by
+# tests/test_tournament_arms.py.
+#
+# 🔴 THE `open` PHASE MUST BE PUNCTUAL, so it is NOT scheduled here.
+# GitHub's scheduler runs this repo 1.6-6 h late. The synthetic user was buying
+# at 1:53 PM ET against an entry window published at 7 AM, which did not model
+# a real user and contaminated the reachability metric the engine findings rest
+# on. An arm bought hours late measures lateness, not strategy.
+#
+#   ▶ TO START THE TOURNAMENT (one owner action, and it starts a ~3-month
+#     experiment): create a cron-job.org job at 8:05 AM ET on weekdays that
+#     POSTs to this workflow's dispatch endpoint with
+#       {"ref":"main","inputs":{"phase":"open"}}
+#     — five minutes after the synthetic user's 8:00 job, so the arms trade the
+#     same market moment without three screeners racing it for rate limit.
+#     Until that job exists, arms run only when dispatched by hand.
+#
+# `manage` is on GitHub's scheduler deliberately: it sells at target, stop or
+# the time stop, where lateness costs a little precision rather than corrupting
+# a measurement. Same reasoning that left the synthetic user's manage phase here.
+
 on:
+  schedule:
+    - cron: "15 14-20 * * 1-5"   # 10:15 AM-4:15 PM ET hourly — manage only
   workflow_dispatch:
     inputs:
-      arms:
-        description: "comma-separated arms (breakout,pullback)"
+      phase:
+        description: "open | manage | reset  (reset liquidates an arm's book and restarts its curve)"
         required: false
-        default: "breakout,pullback"
+        default: "open"
+      arms:
+        description: "comma-separated arm names; blank = every arm"
+        required: false
+        default: ""
       dry_run:
-        description: "true = screen + analyse but write nothing"
+        description: "true = screen, select and price against LIVE data but write nothing"
         required: false
         default: "true"
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 45          # each arm is a full 600-ticker screen
+    timeout-minutes: 60          # each screener arm is a full 600-ticker screen
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,13 +61,21 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-
       - run: pip install -r requirements.txt
+      - name: Pick phase (a schedule event is always manage)
+        id: p
+        run: |
+          if [[ -n "${{ github.event.inputs.phase }}" ]]; then
+            echo "phase=${{ github.event.inputs.phase }}" >> $GITHUB_OUTPUT
+          else
+            echo "phase=manage" >> $GITHUB_OUTPUT
+          fi
       - name: Run arms
         run: |
-          FLAG=""
-          [ "${{ github.event.inputs.dry_run }}" = "true" ] && FLAG="--dry-run"
-          python scripts/run_arms.py --arms "${{ github.event.inputs.arms }}" $FLAG
+          ARGS="--phase ${{ steps.p.outputs.phase }}"
+          [ -n "${{ github.event.inputs.arms }}" ] && ARGS="$ARGS --arms ${{ github.event.inputs.arms }}"
+          [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          python scripts/run_arms.py $ARGS
         env:
-          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_GIST_TOKEN:      ${{ secrets.GH_GIST_TOKEN }}
