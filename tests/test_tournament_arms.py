@@ -66,6 +66,33 @@ class TestArmsAreDisjointByConstruction:
         assert "BRK2" in self._pool("breakout")
         assert "BRK2" not in self._pool("pullback")
 
+    def test_no_two_arms_share_a_horizon_at_all(self):
+        """Total separation, not partial. The technical arms are short-term
+        only and `quality` is long-term only, so there is no leg left on which
+        two arms could pick the same name — which is what the earlier design
+        got wrong: short-term overlap went to 0 while the arms still shared 4
+        of 5 LONG-TERM picks, so half of every arm was a duplicate."""
+        horizons = {}
+        for name, st in sc.STRATEGIES.items():
+            if name == "default":
+                continue
+            horizons[name] = (st.trades_short_term, st.trades_long_term,
+                              st.requires_setup)
+        assert horizons["breakout"] == (True, False, "breakout")
+        assert horizons["pullback"] == (True, False, "pullback")
+        assert horizons["quality"] == (False, True, "")
+        # No pair shares a tradeable horizon under the same setup label.
+        seen = set()
+        for name, (short, long_, setup) in horizons.items():
+            key = ("ST", setup) if short else ("LT", setup)
+            assert key not in seen, f"{name} shares a lane with another arm"
+            seen.add(key)
+
+    def test_the_technical_arms_hold_no_long_term_names(self):
+        pop = [_cand("L1", rsi=45), _cand("L2", breakout_today=True)]
+        for arm in ("breakout", "pullback"):
+            assert sc.eligible_candidates(pop, sc.STRATEGIES[arm], is_short=False) == []
+
     def test_quality_cannot_intersect_either_technical_arm(self):
         """A third AXIS, not a third weighting: it does not trade their pool."""
         assert self._pool("quality") == set()
