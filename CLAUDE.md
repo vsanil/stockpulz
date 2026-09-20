@@ -2907,9 +2907,11 @@ and gave long-term picks a 5% stop the engine never published. A bug detector, n
 
 **Proven on CI 2026-09-20 (dry run):** `Using SupabaseBackend`, book priced LIVE across all 74
 positions (`equity $45,658.79 · $37,020 deployed · $2,048 at risk`), SPY fetched ($762.63). No
-buys — every weekend pick was already held, the expected Saturday result. **The buy/size/rule
-branch has run only under tests**; Monday 2026-09-21 08:00 ET is its first live exercise, and
-`canary.check_synthetic_user` already fails on a bot that opens nothing.
+buys — every weekend pick was already held, the expected Saturday result. **A second dry run
+AFTER the reset exercised the buy branch against live picks:** `equity $10,000.00 (live) · 0 open`,
+then BTC / ETH / UNG each sized to **$1,000 (position_cap)** with the pick's own stop and risk of
+$40 / $31 / $51 — 3 twin buys at SPY $762.63. Nothing was written. Monday 2026-09-21 08:00 ET is
+the first run that writes, and `canary.check_synthetic_user` fails on a bot that opens nothing.
 
 **Reset run on CI 2026-09-20 04:05 UTC:** 74 positions liquidated at market (`outcome=
 "liquidated"`), book set to $10,000, 36 prior closed rows kept, curve starts 2026-09-20.
