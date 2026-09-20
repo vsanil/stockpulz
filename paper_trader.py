@@ -165,9 +165,22 @@ def paper_buy(ticker: str, shares: float, chat_id: str, price: float | None = No
     )
 
 
+# WHY a paper position closed. Mirrors trade_logger.VALID_OUTCOMES for real
+# trades, plus "liquidated" — a book reset, which says nothing about the pick
+# and must never be read as a stop-out. `manual` means a HUMAN chose to sell;
+# the synthetic trader always passes a reason, because an exit whose reason is
+# unrecorded makes stop-vs-target-vs-time-stop unmeasurable (the Aug-8 defect).
+PAPER_OUTCOMES = ("manual", "target", "stop", "expired", "liquidated")
+
+
 def paper_sell(ticker: str, chat_id: str, shares: float | None = None,
-               price: float | None = None) -> str:
-    """Simulate selling for a user. If shares=None, sells entire position."""
+               price: float | None = None, outcome: str | None = None) -> str:
+    """Simulate selling for a user. If shares=None, sells entire position.
+
+    `outcome` is recorded on the history row (see PAPER_OUTCOMES). An unknown
+    value falls back to "manual" so free text can never poison an aggregate
+    that groups by it."""
+    outcome = outcome if outcome in PAPER_OUTCOMES else "manual"
     ticker = ticker.upper()
     live   = _live_price(ticker)
     if live is None:
@@ -214,6 +227,7 @@ def paper_sell(ticker: str, chat_id: str, shares: float | None = None,
             # trade whose stop was SUBSTITUTED says nothing about the engine's
             # published levels, and without this the exit mix cannot tell.
             "levels_source": position.get("levels_source"),
+            "outcome":       outcome,
         })
 
         # Update position

@@ -1251,6 +1251,48 @@ function closeDrawer(){
 // whether the pick was RIGHT (that is the evaluator, and it needs ~1,500 obs).
 // These are descriptive, so a few dozen fills already say something. Every
 // figure carries its n, because a percentage over 20 rows still misleads.
+// ── The synthetic trader's book vs its SPY twin ──────────────────────────
+// Phase-1 headline of the tournament (2026-09-19). A METRIC, deliberately not
+// a finding: a curve is something you read, not something you rule on, so it
+// lives here beside the other bot measurements and never on the findings card.
+function bookSection(p){
+  if(!p || p.error) return '';
+  var head='<div class="card" id="book-card"><div class="card-title">Synthetic trader &middot; book vs SPY twin';
+  var why='<div class="fb-meta" style="margin-bottom:8px">The bot sizes every paper buy with the app&rsquo;s own sizer, '
+    +'obeys the portfolio rules, and exits at target, stop or the time stop. The twin puts the SAME dollars into SPY '
+    +'on the SAME days, so the only difference between the two curves is what was bought.</div>';
+  if(!p.active){ return head+'</div>'+why+'<div class="fb-meta">'+esc(p.note||'No curve yet.')+'</div></div>'; }
+  var a=p.alpha_pct, cls = (a==null) ? '' : (a>=0 ? 'p-active' : 'p-pending');
+  var pill = (a==null) ? '' : ' <span class="pill '+cls+'">'+(a>0?'+':'')+a+' pts vs twin</span>';
+  var fmt=function(v){ return v==null ? '&mdash;' : '$'+Number(v).toLocaleString(undefined,{maximumFractionDigits:0}); };
+  var pct=function(v){ return v==null ? '&mdash;' : (v>0?'+':'')+v+'%'; };
+  var line='<div class="fb-text">Bot <b>'+fmt(p.bot_equity)+'</b> ('+pct(p.bot_ret_pct)+') &middot; SPY twin <b>'
+    +fmt(p.twin_equity)+'</b> ('+pct(p.twin_ret_pct)+') &middot; since '+esc(p.start_date)+' &middot; '
+    +p.days+' trading day'+(p.days==1?'':'s')+'</div>';
+  var dd='<div class="fb-meta">max drawdown: bot <b>'+pct(p.max_drawdown_pct==null?null:-p.max_drawdown_pct)
+    +'</b> &middot; twin <b>'+pct(p.twin_max_drawdown_pct==null?null:-p.twin_max_drawdown_pct)+'</b> &middot; '
+    +p.open_positions+' open &middot; '+p.buys+' buys / '+p.sells+' sells</div>';
+  var warn = p.sample_warning ? '<div class="fb-meta" style="margin-top:6px">&#9888; '+esc(p.sample_warning)+'</div>' : '';
+  return head+pill+'</div>'+why+line+dd+sparkPair(p.curve)+warn+'</div>';
+}
+function sparkPair(curve){
+  if(!curve || curve.length<2) return '';
+  var W=300, H=60, vals=[];
+  curve.forEach(function(c){ if(c[1]!=null) vals.push(c[1]); if(c[2]!=null) vals.push(c[2]); });
+  if(vals.length<2) return '';
+  var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals); if(hi===lo){ hi=lo+1; }
+  var pts=function(i){
+    return curve.map(function(c,k){ var v=c[i]; if(v==null) return null;
+      var x=(k/(curve.length-1))*W, y=H-((v-lo)/(hi-lo))*(H-4)-2; return x.toFixed(1)+','+y.toFixed(1); })
+      .filter(function(s){ return s!==null; }).join(' ');
+  };
+  return '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" style="width:100%;height:60px;margin-top:6px;display:block">'
+    +'<polyline fill="none" stroke="#f59e0b" stroke-width="1.5" points="'+pts(2)+'"></polyline>'
+    +'<polyline fill="none" stroke="#3b82f6" stroke-width="1.5" points="'+pts(1)+'"></polyline></svg>'
+    +'<div class="fb-meta"><span style="color:#3b82f6">&#9644;</span> bot &nbsp; '
+    +'<span style="color:#f59e0b">&#9644;</span> SPY twin</div>';
+}
+
 function actionSection(a){
   if(!a || a.error) return '';
   var e=a.entry||{}, st=a.stops||{}, oc=a.outcomes||{};
@@ -1656,6 +1698,7 @@ async function load(){
       +'<div class="card"><div class="card-title">Feedback</div>'+feedback(d.feedback)+'</div>'
     +'</div>'
     +auditSection(d.audit)
+    +bookSection(d.sim_portfolio)
     +actionSection(d.actionability)
     +trafficSection(d.traffic);
   document.getElementById('ts').textContent='Updated '+new Date().toLocaleTimeString();
@@ -1952,6 +1995,18 @@ def _build_actionability() -> dict:
         return {"error": str(exc)[:120]}
 
 
+def _build_sim_portfolio() -> dict:
+    """The synthetic trader's book against its SPY twin — the Phase-1 headline
+    of the tournament. A METRIC, so it renders beside actionability and never
+    on the Engine findings card: a curve is read, not ruled on. Never raises."""
+    try:
+        import sim_portfolio as sp
+        return sp.summary(sp.load(_TEST_CHAT_ID))
+    except Exception as exc:
+        print(f"[admin] sim portfolio build failed: {exc}")
+        return {"error": str(exc)[:120]}
+
+
 def _enrich_feedback(entries: list, users: list) -> list:
     """Merge live user stats into feedback entries for admin triage."""
     user_map = {str(u["id"]): u for u in users}
@@ -2084,7 +2139,7 @@ def admin_selfheal_action(branch, action):
         return jsonify({"error": f"GitHub unreachable: {exc}"}), 502
 
 
-from config_manager import DEFAULT_TEST_CHAT_ID as _TEST_CHAT_ID
+from config_manager import DEFAULT_TEST_CHAT_ID as _TEST_CHAT_ID, SIM_PORTFOLIO_FILE as _SIM_FILE
 
 # Every storage file /admin/data touches. Kept as a tuple the guard can
 # diff against real reads, so a new builder that reads a new file fails a
@@ -2097,6 +2152,8 @@ _ADMIN_PREFETCH = (
     # bot's recorded entry-window SKIPS, which actionability counts as
     # observations (see actionability.entry_slippage).
     f"synthetic_state_{_TEST_CHAT_ID}.json",
+    # The synthetic trader's equity curve + SPY twin (sim_portfolio.py).
+    _SIM_FILE,
 )
 
 
@@ -2152,6 +2209,7 @@ def admin_data():
     owner   = os.environ.get("TELEGRAM_CHAT_ID", "")
     audit   = _build_audit_findings()
     action  = _build_actionability()
+    book    = _build_sim_portfolio()
     now_utc = _dt.now(_tz.utc)
     users   = []
     total_open   = 0
@@ -2275,6 +2333,7 @@ def admin_data():
         "feedback":         _enrich_feedback(load_feedback()[:20], users),
         "audit":            audit,
         "actionability":    action,
+        "sim_portfolio":    book,
         "traffic":          _build_traffic(),
         "cron":             cron,
         "last_morning_run": cfg.get("last_morning_run", ""),
