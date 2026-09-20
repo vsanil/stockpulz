@@ -345,11 +345,20 @@ class TestThePassiveArm:
         acts = arms.open_passive("900000013", dry=False)
         assert st["buys"] == [] and "no cash" in acts[0]
 
-    def test_a_dry_run_writes_nothing(self, monkeypatch):
+    def test_a_dry_run_writes_nothing_AND_does_not_claim_it_did(self, monkeypatch):
+        """The first version asserted only that the report was non-empty, and
+        passed while that report said "PASSIVE bought" on a run that bought
+        nothing. The log is the evidence a later session reasons from."""
         arms = _arms()
         st = self._wire(monkeypatch)
         acts = arms.open_passive("900000013", dry=True)
-        assert st["buys"] == [] and st["docs"] == [] and acts
+        assert st["buys"] == [] and st["docs"] == []
+        assert acts and "would buy" in acts[0] and "bought" not in acts[0]
+
+    def test_a_real_run_says_bought(self, monkeypatch):
+        arms = _arms()
+        self._wire(monkeypatch)
+        assert "bought" in arms.open_passive("900000013", dry=False)[0]
 
     def test_manage_never_routes_the_passive_arm_through_the_exit_rules(self, monkeypatch):
         """It is buy-and-hold. Target, stop and the time stop would make it a

@@ -148,7 +148,8 @@ def open_passive(chat_id: str, dry: bool) -> list[str]:
             sp.update(chat_id, _sim)
         except Exception as exc:
             return [f"⚠️ passive book update failed: {exc}"]
-    return [f"🅢 PASSIVE bought {shares:g} {BENCHMARK} @ ${px:,.2f} = "
+    verb = "would buy" if dry else "bought"
+    return [f"🅢 PASSIVE {verb} {shares:g} {BENCHMARK} @ ${px:,.2f} = "
             f"${equity0:,.2f} — held from here, never sold"]
 
 
