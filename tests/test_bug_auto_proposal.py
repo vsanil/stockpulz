@@ -325,3 +325,43 @@ class TestSelfHealAcceptsAFinding:
         else:
             assert text.startswith("A monitoring workflow just failed")
             assert "APPROVED" not in text
+
+
+class TestAnApprovedFindingReachesAPullRequest:
+    """🔴 The loop must not end one step short. A finding-triggered run pushes
+    a branch; without this it then reported "🧪 TEST run ... no PR (manual
+    run)" and created nothing to review, because the flag conflated "manual
+    dispatch" with "do not propose". That is the gate-that-could-never-pass
+    class this workflow has already hit twice — a missing test runner, then a
+    missing test dependency, each leaving correct diagnoses undelivered."""
+
+    def _wf(self):
+        import yaml
+        return yaml.safe_load((ROOT / ".github/workflows/self_heal.yml").read_text())
+
+    def test_a_dispatched_finding_takes_the_PR_path(self):
+        env = self._wf()["jobs"]["self-heal"]["env"]["AUTO_MERGE"]
+        assert "finding_id" in env, "an approved finding must not be treated as a test run"
+        assert "workflow_run" in env, "a monitor failure must still propose"
+
+    def test_a_bare_manual_dispatch_still_proposes_nothing(self):
+        """The safety this flag was protecting: exercising the healer by hand
+        must not open a PR."""
+        env = self._wf()["jobs"]["self-heal"]["env"]["AUTO_MERGE"]
+        assert "!=" in env and "''" in env, "a dispatch WITHOUT a finding must stay a test"
+
+    def test_a_dispatched_finding_reaches_the_build_job_at_all(self):
+        """triage gates the build. A manual dispatch is declared actionable
+        unconditionally, which is what lets an approved finding through."""
+        wf = self._wf()
+        assert wf["jobs"]["self-heal"]["needs"] == "triage"
+        triage = "\n".join(str(s.get("run", "")) for s in wf["jobs"]["triage"]["steps"])
+        assert "workflow_dispatch" in triage and "actionable=true" in triage
+
+    def test_nothing_in_this_path_merges_or_deploys_on_its_own(self):
+        """Approval buys a PR, never a deploy. The second decision stays with
+        the owner on the self-heal card."""
+        body = (ROOT / ".github/workflows/self_heal.yml").read_text()
+        assert "git push origin HEAD:main" not in body
+        i = body.index("gh pr create")
+        assert "--base main" in body[i:i + 200]
