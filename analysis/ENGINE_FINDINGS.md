@@ -1,6 +1,6 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-09-20 00:00 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-09-20 19:06 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 0 finding(s) needing a decision
 
@@ -156,7 +156,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [MEASURE] [METRIC] Exit-reason mix  *(n=32)*
 
-**Evidence:** {'manual': 5, 'stop': 23, 'target': 4} — stops hit 5.8x as often as targets.  By levels source — pick: 34 · stop: 1 · unrecorded: 33. Only `pick` speaks to the ENGINE's levels.
+**Evidence:** {'manual': 5, 'stop': 23, 'target': 4} — stops hit 5.8x as often as targets.  By levels source — pick: 63 · stop: 15 · unrecorded: 64. Only `pick` speaks to the ENGINE's levels.
 
 **Fix:** Judge the published levels on the `pick` slice ALONE. A high stop:target ratio there means stops are too tight; the same ratio in the fallback slice means the pick's levels did not bracket the fill — levels drifting from the live price by delivery time, which is a different fix.
 
