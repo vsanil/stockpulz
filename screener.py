@@ -395,6 +395,26 @@ class Strategy:
     w_net_margin: int = 20
     w_low_debt: int = 15
     w_above_200ma: int = 10
+    # ── HARD eligibility, not a weight ────────────────────────────────────
+    # 🔴 Why arms needed this. Before it, an arm differed only in WEIGHTS, so
+    # the same name could still bubble to the top of two arms through the legs
+    # they share (MACD, EMA20, OBV, volume, candlesticks and the whole
+    # fundamentals block). Measured 2026-08-14: `breakout` shared 44% of its
+    # picks with `default` and `pullback` 63%. A shared pick has an IDENTICAL
+    # outcome in both arms, so most of each arm's budget was buying information
+    # it already had.
+    #
+    # `requires_setup` filters the short-term pool by `setup_type()` — THE one
+    # definition of which trade a candidate represents, and one that returns
+    # exactly one label per candidate. So two arms requiring different setups
+    # are DISJOINT BY CONSTRUCTION, not by hope. "" means no filter, which is
+    # what keeps production byte-identical.
+    requires_setup: str = ""
+    # An arm may trade only one horizon. `quality` is long-term only, which is
+    # what makes it independent of the two technical arms rather than a third
+    # weighting of the same short-term pool.
+    trades_short_term: bool = True
+    trades_long_term: bool = True
     # candlestick / chart patterns
     w_bull_flag: int = 15
     w_bullish_engulfing: int = 15
@@ -407,12 +427,25 @@ DEFAULT_STRATEGY = Strategy()
 
 # Arms worth running. These are deliberately FAR APART — two variants that
 # disagree on only a few picks need more data than we will ever have, because
-# only the picks where arms differ carry information. breakout vs pullback is
-# the one split we have measured evidence for.
+# only the picks where arms differ carry information.
+#
+# 🔴 SEPARATION IS NOW STRUCTURAL, NOT HOPED FOR. `breakout` and `pullback`
+# require different `setup_type` labels, and that function returns exactly ONE
+# label per candidate — so their short-term picks cannot intersect at all.
+# `quality` trades the long-term pool only, so it cannot intersect either of
+# them. Before this the three were weight variants of one pool and overlapped
+# the default 44-63%.
+#
+# ⚠️ Under the owner's Option B (2026-09-19) only the LIVE arm calls Claude;
+# every arm here is selected deterministically by `arm_selector`. The
+# `prompt_directive` fields are kept because they are the correct instruction
+# if an arm is ever run through the model, and because they document what each
+# arm means — but the tournament does not spend a Claude call on them.
 STRATEGIES: dict[str, Strategy] = {
     "default":  DEFAULT_STRATEGY,
     # Momentum only: ignore the mean-reversion signals entirely.
-    "breakout": Strategy(name="breakout", w_rsi=0, w_bb_bounce=0,
+    "breakout": Strategy(name="breakout", requires_setup="breakout",
+                         w_rsi=0, w_bb_bounce=0,
                          w_breakout=25, w_near_high=20, w_vol_surge=25,
                          prompt_directive=(
                              "STRATEGY FOR THIS RUN — BREAKOUT/MOMENTUM ONLY: select only "
@@ -423,7 +456,8 @@ STRATEGIES: dict[str, Strategy] = {
                          w_pe_at_or_below=10, w_pe_moderate=10, w_pe_high=10,
                          w_rev_growth=35, w_above_200ma=20),
     # Mean-reversion only: ignore the breakout signals entirely.
-    "pullback": Strategy(name="pullback", w_breakout=0, w_near_high=0,
+    "pullback": Strategy(name="pullback", requires_setup="pullback",
+                         w_breakout=0, w_near_high=0,
                          w_rsi=35, w_bb_bounce=25,
                          prompt_directive=(
                              "STRATEGY FOR THIS RUN — PULLBACK/MEAN-REVERSION ONLY: select only "
@@ -433,6 +467,20 @@ STRATEGIES: dict[str, Strategy] = {
                          # value tilt: reward cheapness, discount momentum
                          w_pe_at_or_below=40, w_pe_moderate=20, w_pe_high=0,
                          w_above_200ma=0),
+    # A third AXIS, not a third weighting: fundamentals only, long-term only.
+    # It cannot intersect the two technical arms because it does not trade
+    # their pool at all. Demands profitability and a clean balance sheet rather
+    # than cheapness — `pullback` already carries the value tilt.
+    "quality":  Strategy(name="quality", trades_short_term=False,
+                         prompt_directive=(
+                             "STRATEGY FOR THIS RUN — QUALITY/LONG-TERM ONLY: select only "
+                             "durably profitable businesses with strong margins and low "
+                             "debt, held for quarters not days. Ignore short-term technical "
+                             "setups entirely. If fewer names qualify, return fewer picks."),
+                         net_margin_min=0.15, w_net_margin=35,
+                         w_low_debt=30, rev_growth_min=0.05, w_rev_growth=15,
+                         w_pe_at_or_below=15, w_pe_moderate=15, w_pe_high=5,
+                         w_above_200ma=5),
 }
 
 
@@ -1463,6 +1511,45 @@ def setup_type(m: dict) -> str:
     return "other"
 
 
+def eligible_candidates(candidates: list, strategy, is_short: bool) -> list:
+    """Drop candidates this STRATEGY is not allowed to trade. A HARD filter.
+
+    🔴 Why arms needed one. An arm used to differ only in WEIGHTS, so the same
+    name could still top two arms through the legs they share. Measured
+    2026-08-14: `breakout` shared 44% of its picks with `default`, `pullback`
+    63% — and a shared pick has an IDENTICAL outcome in both arms, so most of
+    each arm's budget bought information it already had.
+
+    `setup_type` returns exactly ONE label per candidate, so two arms requiring
+    different labels have disjoint short-term pools BY CONSTRUCTION. That is
+    the property the tournament rests on, and it is tested directly.
+
+    Production passes `requires_setup=""` with both horizons enabled, so every
+    branch here is a no-op for the live engine.
+    """
+    horizon = "short" if is_short else "long"
+    if not (strategy.trades_short_term if is_short else strategy.trades_long_term):
+        if candidates:
+            print(f"[screener] strategy '{strategy.name}' does not trade the "
+                  f"{horizon}-term pool — dropping all {len(candidates)} candidates.")
+        return []
+    if not is_short or not strategy.requires_setup:
+        return candidates
+    before = len(candidates)
+    kept = [c for c in candidates if setup_type(c) == strategy.requires_setup]
+    # LOUD either way. A starved arm and a quiet market are indistinguishable
+    # unless the code says which — that ambiguity hid a dead commodities
+    # screener for ten days behind green monitors.
+    print(f"[screener] strategy '{strategy.name}' requires setup "
+          f"'{strategy.requires_setup}': {len(kept)} of {before} short-term "
+          f"candidates eligible.")
+    if not kept and before:
+        print(f"[screener] ⚠️ NO candidate matched setup '{strategy.requires_setup}' "
+              f"out of {before} — this arm has nothing to trade today, which is a "
+              f"real market fact, not an error.")
+    return kept
+
+
 def _add_near_miss_reason(pick: dict, is_st: bool) -> dict:
     """
     Add a human-readable 'near_miss_reason' to a candidate that almost qualified.
@@ -1985,10 +2072,13 @@ def run_screener(
                         if s["ticker"] in enriched]
     short_candidates = sorted(short_candidates, key=lambda x: x["score"], reverse=True)
 
+    short_candidates = eligible_candidates(short_candidates, strategy, is_short=True)
+
     # LT top-N: from the LT pool only (ranked by fundamental score)
     long_candidates = [_flatten_long(enriched[s["ticker"]]) for s in lt_pool
                        if s["ticker"] in enriched]
     long_candidates = sorted(long_candidates, key=lambda x: x["score"], reverse=True)
+    long_candidates = eligible_candidates(long_candidates, strategy, is_short=False)
 
     # Fetch historical price data for correlation deduplication
     _all_candidate_tickers = list(dict.fromkeys(

@@ -487,6 +487,12 @@ def human_trades(trades) -> list:
 ARM_CHAT_IDS: dict[str, str] = {
     "breakout": "900000010",
     "pullback": "900000011",
+    "quality":  "900000012",
+    # The passive arm. It runs no screener and picks nothing: it buys the index
+    # once and holds, which is the alternative every other arm has to beat for
+    # the product to mean anything. The owner accepted in advance (2026-09-19)
+    # that this arm winning is a legitimate outcome.
+    "spy_hold": "900000013",
 }
 
 
