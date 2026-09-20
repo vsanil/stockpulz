@@ -22,6 +22,7 @@ on:
     inputs:
       failed_run_id:
         description: "A failed run id to diagnose (test the loop — never auto-merges)"
+        required: false
       finding_id:
         description: "Engine finding id to IMPLEMENT (approved on /admin). Mutually exclusive with failed_run_id."
         required: false
@@ -33,7 +34,6 @@ on:
         required: false
       finding_files:
         description: "Files the change should touch"
-        required: false
         required: false
 
 permissions:
