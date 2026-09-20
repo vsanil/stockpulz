@@ -10,6 +10,7 @@
 | open | **The product claim.** Measurement is now COMPLETE: all four engine stages measured, none showing a detectable edge (ST −1.6 n=510, LT −2.2 n=90, pool vs SPY −3.6, selection −4.74 n=46/41 CI [−12.89,+3.41]). Supported: *"daily picks with real entry/stop/target levels, position sizing, and alerts that fire — measured against SPY."* NOT supported: any claim about beating the market. | OWNER | choose the wording |
 | ~2026-09-21 | **Prescreener fix — does Monday now get a 03:00 dispatch?** The ET-weekday bug is FIXED (job 7727066, wdays Sun-Thu ET). Tonight's fire only proves nothing broke; **Mon 2026-09-21 03:00 UTC is the first run the old schedule could not produce**. Cutting a GitHub prescreener cron stays DEFERRED — they were Monday's only cover. | WATCH | a 03:00 dispatch on 09-21 |
 | **launch day** | **🔵 Enable BOTH keep-warm jobs — two halves of one mechanism.** `{"job":{"enabled":true}}` on **`8474212` StockPulz-wake** (6:55 AM ET daily → dispatches `keepwarm.yml`; a GitHub runner's curl ESTABLISHES warmth — measured 09-19: dispatch → gunicorn listening in 55 s against a 4-h-cold instance) and **`7746621` StockPulz-keepalive** (7am-7pm ET every 15 min → MAINTAINS it; its own client is refused by a sleeping edge in ~2 s, so alone it can never start the instance). Cost with both ~360 h/mo → account ~510 of 750 h. Alternative: $7/mo Starter on this one service. Both DISABLED now. | OWNER | both enabled on the day |
+| **owner action** | **🏁 START THE TOURNAMENT (Phase 2).** Everything is built, tested and proven on live data (0% overlap across all four arms, 2026-09-20), and nothing runs daily until ONE job exists: a cron-job.org job at **8:05 AM ET weekdays** POSTing to `ab_arms.yml`'s dispatch endpoint with `{"ref":"main","inputs":{"phase":"open"}}` — five minutes after the synthetic user (8:00) so the arms trade the same market moment without racing it for rate limit. It starts a ~3-month experiment; `manage` is already scheduled. **Not scheduled on GitHub deliberately: it fires 1.6-6 h late and an arm bought late measures lateness.** | OWNER | the job exists |
 | **Mon 2026-09-21 08:00 ET** | **🏁 Phase 1 first real run.** The synthetic user now trades a SIZED, rule-bound $10k paper book with time stops and a SPY twin (`sim_portfolio.py`). Dry-run on CI proved the path 09-20. The book was RESET on 09-20 (`--phase reset`, history kept). The first `open` writes the first snapshot; `/admin` "Synthetic trader · book vs SPY twin" goes from "No equity curve yet" to a number. **Below 30 trading days it is a direction, not a verdict — do not tune anything on it.** | WATCH | a snapshot dated 09-21 |
 | open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
 
@@ -2926,3 +2927,93 @@ Guards: `tests/test_sim_portfolio.py` (24), `tests/test_synthetic_trader.py` (37
 mutations caught — one only after a fix**: the running-tally test passed with the tally removed
 because nine $1,000 buys hit the deployed cap before the position count. *A guard that passes
 for the wrong reason is not a guard*; the picks are now small enough that the count binds.
+
+### ✅ Phase 2 BUILT (2026-09-20) — the tournament runs, and the arms finally differ
+
+**🔴 THE BUG THAT HAD TO BE FIXED FIRST, because it was armed and waiting.**
+`evaluate_picks._key` tagged every ledger row with its arm and `record_picks` wrote the tag, and
+BOTH docstrings claimed the report "segments them away from the headline exactly like controls".
+**`build_report` had ZERO arm references.** Arm picks would have entered the headline win rate,
+the CI, every slice and the picked-vs-runners-up comparison — the one number the product is
+judged on, averaged with every variant being tested against it. It was dormant only because
+`ab_arms.yml` had never been scheduled, so **scheduling the tournament would have silently
+poisoned it**. A comment asserting a property no code checks, again.
+
+**📏 THE MEASUREMENT THAT GATES THE DESIGN — measured on CI against live data 2026-09-20,
+not assumed.** The old arms overlapped the default **44% (breakout) and 63% (pullback)**. Today's
+dry run across all four arms:
+
+    breakout   ALMR  PS    IMOS  RXRX  INSP
+    pullback   KMI   MTSI  TPL   WRB   BRK-B
+    quality    META  AMZN  GEV   NFLX  NVDA
+    spy_hold   SPY
+    -> 20 picks, 20 DISTINCT names. OVERLAP 0%.
+
+**Separation is STRUCTURAL, not hoped for**, and that is the whole point — a shared pick has an
+identical outcome in both arms, so it is budget spent buying information you already have.
+- `Strategy.requires_setup` is a HARD filter on the short-term pool keyed to **`setup_type`**,
+  THE one definition of which trade a candidate represents, and one that returns **exactly one
+  label per candidate**. Two arms demanding different labels *cannot* intersect.
+- `trades_short_term` / `trades_long_term`: the technical arms are **short-term only** and
+  `quality` is **long-term only**. 🔴 The first cut of this fixed the short-term leg and left the
+  same duplication one leg over — exactly the Aug 8 finding where arms shared **4 of 5 long-term
+  picks** while short-term overlap was already 0 of 5. No two arms now share a lane.
+- `eligible_candidates()` is a pure function so a test can reach it, and it is **LOUD** when an
+  arm is starved. A starved arm and a quiet market are indistinguishable unless the code says
+  which — the ambiguity that hid a dead commodities screener for ten days behind green monitors.
+- **Production is untouched**: `requires_setup=""` with both horizons on makes every branch a
+  no-op, and `DEFAULT_STRATEGY == Strategy()` is asserted field by field.
+
+**💵 OPTION B IS STRUCTURAL TOO.** Only the LIVE arm calls Claude; arms are selected by
+`arm_selector` from the screener's own ranking, and **`ab_arms.yml` passes NO `ANTHROPIC_API_KEY`**
+— so reintroducing a model call to that path fails loudly instead of quietly tripling the bill.
+That also isolates the thing never measured: what Claude's selection adds over taking the top N.
+Arm levels are rule-based from **measured medians** (10.3% target / 5.5% ATR stop, pinned by test
+to `backtest_walkforward`, never config defaults — reading levels off config defaults once
+produced a confident, wrong headline). A long-term arm pick carries **no stop**, as production
+does; its target is **derived** (the invalidation distance × the measured reward:risk), not chosen.
+
+**🔑 ONE TRADER, and this is what makes the standings mean anything.** Every arm opens and exits
+through `synthetic_user.phase_open` / `manage_account` — same sizing, same hard book rules, same
+entry-window obedience, same time stops, same SPY twin. If an arm had its own buying code the
+standings would compare EXECUTION as much as selection. Pinned at every call site, including that
+`open_real=False` is passed (arms are paper-only; the old scan for `add_holding` would now pass
+vacuously since run_arms no longer calls it).
+
+**🅢 THE BENCHMARK IS NOT HANDICAPPED.** `spy_hold` deploys its WHOLE book into the index and is
+deliberately exempt from the diversified-book caps — capping a one-position index arm the way a
+stock book is capped would flatter every arm measured against it. No stop, no target, never
+routed through the exit rules, marked daily so its curve is comparable. The owner accepted in
+advance (2026-09-19) that this arm winning is a legitimate outcome.
+
+**Standings, in two places answering two questions.** `evaluate_picks` reports pick-level win
+rate and alpha per arm, head-to-head against live **on DISAGREEMENT ONLY** (a shared pick has an
+identical outcome by construction, so counting it manufactures "no difference"), needing n≥30 per
+side AND a 95% interval excluding zero. `/admin` → **Tournament standings** shows every arm's
+equity curve, ranked by **RETURN, not alpha** — each twin receives its own arm's cash flows, so
+alpha compares timing WITHIN an arm and is not comparable across them.
+
+**`stats_ci.py` is now the ONE definition** of Wilson and Newcombe's difference interval. There
+were THREE copies differing only in fractions vs rounded percentages, and the tournament promotes
+a strategy on this arithmetic. Verified the new helper reproduces all three exactly (max deviation
+half a ULP, `sqrt` vs `**0.5`) BEFORE routing anything. Two old tests named `test_zero_n_safe`
+pinned `(0.0, 0.0)` at n=0 — a **zero-width interval on zero observations**, the false precision
+the method is chosen to avoid; both strengthened to the intent their names state.
+
+⏳ **NOT STARTED, and deliberately.** The `open` phase is **not scheduled**: GitHub runs this repo
+1.6-6 h late, and an arm bought hours after its window was published measures lateness, not
+strategy. Starting the tournament is ONE owner action — a cron-job.org job at **8:05 AM ET
+weekdays** dispatching `ab_arms.yml` with `{"inputs":{"phase":"open"}}`, five minutes after the
+synthetic user so the arms trade the same market moment without racing it for rate limit.
+`manage` is already on GitHub's scheduler, where lateness costs precision rather than a metric.
+
+🔎 **Method notes worth keeping.** (1) A guard scanning source text for `arm_selector` tripped on
+a screener COMMENT naming it — the self-flagging trap, now ~14 occurrences; rewritten to walk the
+AST for real imports. (2) A passive-arm test PASSED against a mutant that routed the benchmark
+through the exit rules, because the state read came back empty so nothing could sell either way —
+and it hit the network for 26 s. *A test passing for the wrong reason is not a test.* Rewritten to
+assert the ROUTING; 10x faster. (3) The CI log showed `PASSIVE bought 13.1125 SPY` on a **dry
+run** — found by reading the log BODY, not its green tick. Dry runs now announce themselves.
+
+Guards: `tests/test_arm_segmentation.py` (23), `tests/test_tournament_arms.py` (57). Mutations
+**7/7**, **7/7**, **5/5**. Suite 2369.
