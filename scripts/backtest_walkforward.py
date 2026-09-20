@@ -157,13 +157,10 @@ def run(bars: dict, dates: list, top_n: int, strat) -> list[dict]:
 
 # ── reporting ────────────────────────────────────────────────────────────────
 def wilson(w: int, n: int) -> tuple[float, float]:
-    if not n:
-        return (0.0, 0.0)
-    p, z = w / n, 1.96
-    d = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    m = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
-    return (round((c - m) * 100, 1), round((c + m) * 100, 1))
+    """(lo, hi) as percentages, 1 dp — see `stats_ci`, the ONE definition.
+    `summarise` returns early on an empty bucket, so n=0 never reaches here."""
+    from stats_ci import wilson_pct
+    return wilson_pct(w, n, places=1)
 
 
 def summarise(rows: list[dict], label: str) -> None:

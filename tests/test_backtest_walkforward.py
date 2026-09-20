@@ -93,7 +93,12 @@ class TestWilson:
         assert hi - lo < 8, f"n=1000 should be tight, got [{lo}-{hi}]"
 
     def test_zero_n_is_safe(self):
-        assert bwf.wilson(0, 0) == (0.0, 0.0)
+        """Safe AND not falsely precise — see the note in test_evaluate_picks.
+        `summarise` returns early on an empty bucket, so this is unreachable in
+        a real run; the honest interval is the one worth exposing."""
+        lo, hi = bwf.wilson(0, 0)
+        assert (lo, hi) == (0.0, 100.0)
+        assert hi > lo
 
 
 class TestHoldoutDiscipline:
