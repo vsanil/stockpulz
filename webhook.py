@@ -1613,17 +1613,26 @@ function findingsCard(rows,decidedN){
              resolved_UNAPPROVED:'Built WITHOUT your approval'};
   var body=rows.map(function(x,i){
     var bad = x.status==='resolved_UNAPPROVED';
+    // An OPEN finding that now carries a concrete proposed change is
+    // approvable: the daily analysis attaches one to TECHNICAL BUGS, where a
+    // single instance is enough to act on. Without a proposal there is still
+    // nothing to consent to, so the verbs stay Acknowledge / Won't fix.
+    var hasPlan = !!x.proposed_change;
     var acts = bad
       ? '<span class="fb-meta">This was implemented without your approval. Check the commit history.</span>'
-      : (x.status==='awaiting_approval'
-          ? '<button class=\"btn-success\" onclick=\"setFinding(\\''+x.id+'\\',\\'approved\\')\">Approve</button> '
+      : ((x.status==='awaiting_approval' || (x.status==='open' && hasPlan))
+          ? '<button class=\"btn-success\" onclick=\"setFinding(\\''+x.id+'\\',\\'approved\\')\">Approve &amp; build</button> '
             +'<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'wont_fix\\')\">Decline</button>'
           : x.status==='open'
-            // NOT "Approve". Nothing has been PROPOSED for an open finding, so
-            // there is no concrete change to consent to — the endpoint returns
-            // 409 for exactly that reason. "Acknowledge" is the right verb for
-            // a HISTORICAL finding that cannot be un-made (a past fill); it
-            // leaves the worklist without claiming a change was sanctioned.
+            // NOT "Approve" — this branch is the one with NO plan attached, so
+            // there is no concrete change to consent to and the endpoint
+            // returns 409 for exactly that case. (It used to read "nothing has
+            // been proposed for an OPEN finding", which stopped being true when
+            // the daily analysis began proposing fixes for technical bugs; the
+            // rule it stood for did not change, only the proxy.) "Acknowledge"
+            // is the right verb for a HISTORICAL finding that cannot be un-made
+            // — a past fill — and it leaves the worklist without claiming a
+            // change was sanctioned.
             ? '<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'acknowledged\\')\">Acknowledge</button> '
               +'<button class=\"btn-sm\" onclick=\"setFinding(\\''+x.id+'\\',\\'wont_fix\\')\">Won&#39;t fix</button>'
             : '<span class="fb-meta">Approved '+(x.approved_on||'')+'.</span>');
@@ -1664,6 +1673,16 @@ function findingsCard(rows,decidedN){
     var plain = x.proposed_summary || x.proposed_change || x.note || x.title
               || '(no description recorded)';
     var tech  = x.proposed_summary ? (x.proposed_change||'') : '';
+    // Say who wrote the proposal. The owner must read an automatic one with
+    // the right prior: these are the finding's OWN fix text, and one of them
+    // was wrong for five days (the entry-window findings recommended widening
+    // the published window, a fix this project had investigated and rejected).
+    // A proposal is a hypothesis, which is exactly why it is proposed and not
+    // implemented.
+    var origin = (x.proposed_by === 'auto')
+      ? '<div class="fb-meta">Proposed automatically from the finding&rsquo;s own suggested fix &mdash; '
+        + 'no human reviewed it. Read the detail before approving.</div>'
+      : '';
     var det = '';
     if(tech || x.proposed_files){
       det = '<details class="fdet"><summary><span class="fchev">&#9656;</span>Technical detail</summary>'
@@ -1682,33 +1701,71 @@ function findingsCard(rows,decidedN){
       +chip
       +'<div class="fb-text" style="font-size:15px;line-height:1.5">'+plain+'</div>'
       +basis
+      +origin
       +det
       +'<div style="margin-top:8px">'+acts+'</div>'
       +'</div>';
   }).join('');
   return '<div class="card">'+head
     +'<div class="fb-meta" style="margin-bottom:10px">Changes I want to make to the app. '
-    +'Approving lets me write the code &mdash; it does <b>not</b> put anything live.</div>'
+    +'<b>Approve &amp; build</b> starts an agent that writes the fix and opens it for review on the '
+    +'self-heal card &mdash; it does <b>not</b> put anything live.</div>'
+    +'<div id="find-msg" class="fb-meta" style="margin-bottom:8px"></div>'
     +body+'</div>';
 }
+// 🔴 Results render IN THE PAGE, never through alert(). A browser can
+// suppress dialogs and Telegram's in-app browser blocks them outright, so a
+// suppressed alert is indistinguishable from a click that did nothing — the
+// exact defect that made the merge button look broken for weeks. That matters
+// more here than it used to: approving now SPENDS a model call and writes
+// code, so a silent failure would leave the owner believing a fix was on its
+// way when nothing had started.
+function _findMsg(html, bad){
+  var el=document.getElementById('find-msg');
+  if(!el){ return; }
+  el.innerHTML=html;
+  el.style.color = bad ? '#f87171' : 'var(--muted)';
+}
 async function setFinding(id,status){
+  _findMsg('Saving&hellip;');
+  var r, d;
   try{
-    var r=await fetch('/admin/findings/'+encodeURIComponent(id),
+    r=await fetch('/admin/findings/'+encodeURIComponent(id),
       {method:'POST',headers:{'Content-Type':'application/json'},
        body:JSON.stringify({status:status})});
-    if(!r.ok){alert('Failed: HTTP '+r.status);return;}
-    load();
-  }catch(e){alert('Network error');}
+  }catch(e){ _findMsg('Network error &mdash; nothing was saved.', true); return; }
+  try{ d=await r.json(); }catch(e){ d={}; }
+  if(!r.ok){
+    _findMsg('FAILED (HTTP '+r.status+'): '+esc((d&&d.error)||'no detail'), true);
+    return;
+  }
+  // The decision is saved either way; the BUILD is reported separately,
+  // because a failed dispatch must never look like a fix on its way.
+  var b=d.build;
+  if(status==='approved'){
+    if(b && b.ok){ _findMsg('Approved. A build was started &mdash; the fix will appear on the self-heal card for review.'); }
+    else if(b){ _findMsg('Approved and saved, but the build did NOT start: '+esc(b.error||'unknown'), true); }
+    else { _findMsg('Approved.'); }
+  } else {
+    _findMsg('Saved: '+esc(status)+'.');
+  }
+  load();
 }
 
+// Same reasoning as setFinding: a suppressed dialog is indistinguishable from
+// a click that did nothing. Found by the guard on setFinding, whose byte-window
+// reached into this function — worth keeping as the reason this one changed.
 async function setAudit(id,status){
+  _findMsg('Saving&hellip;');
+  var r;
   try{
-    var r=await fetch('/admin/audit/'+encodeURIComponent(id),
+    r=await fetch('/admin/audit/'+encodeURIComponent(id),
       {method:'POST',headers:{'Content-Type':'application/json'},
        body:JSON.stringify({status:status})});
-    if(!r.ok){alert('Failed: HTTP '+r.status);return;}
-    load();
-  }catch(e){alert('Network error');}
+  }catch(e){ _findMsg('Network error &mdash; nothing was saved.', true); return; }
+  if(!r.ok){ _findMsg('FAILED (HTTP '+r.status+') saving the audit decision.', true); return; }
+  _findMsg('Saved: '+esc(status)+'.');
+  load();
 }
 
 async function load(){
@@ -2113,7 +2170,14 @@ def admin_finding_disposition(finding_id):
         return jsonify({"error": "status must be approved|wont_fix|acknowledged|open"}), 400
 
     cur = (get_finding_dispositions() or {}).get(finding_id) or {}
-    if status == "approved" and cur.get("status") != "awaiting_approval":
+    # 🔴 The gate is "does a CONCRETE CHANGE exist", which is what the rule
+    # actually says — not "is the status the string awaiting_approval". Those
+    # were the same thing while only a human could propose; the daily analysis
+    # now attaches a proposed fix to open TECHNICAL BUG findings, and testing
+    # the status string would refuse approval for a finding that carries a
+    # perfectly concrete plan. Approval still cannot attach to a bare title.
+    proposed = bool(cur.get("proposed_change")) or cur.get("status") == "awaiting_approval"
+    if status == "approved" and not proposed:
         return jsonify({"error": "nothing proposed for this finding — approval "
                                  "must attach to a concrete change"}), 409
 
@@ -2121,7 +2185,60 @@ def admin_finding_disposition(finding_id):
     if status == "approved":
         extra["approved_on"] = et_today().isoformat()   # ET, per the one-clock rule
     rec = set_finding_disposition(finding_id, status, body.get("note", ""), extra=extra)
-    return jsonify({"ok": True, "status": status, "record": rec})
+
+    # ── Approval is what BUYS the work ───────────────────────────────────────
+    # Recording the decision comes FIRST and is never conditional on the
+    # dispatch: a failed dispatch must not lose the owner's ruling. The build
+    # is reported separately, and loudly — a silent failure here would leave
+    # the owner believing a fix was on its way when nothing had started, which
+    # is the exact defect the merge button had.
+    build = None
+    if status == "approved":
+        build = _dispatch_finding_fix(finding_id, rec)
+    return jsonify({"ok": True, "status": status, "record": rec, "build": build})
+
+
+def _dispatch_finding_fix(finding_id: str, rec: dict) -> dict:
+    """Ask self-heal to implement an APPROVED finding and open a PR for review.
+
+    🔴 Approval gates the SPEND, deliberately. A headless agent is this app's
+    largest discretionary Anthropic line, so no model call happens until a
+    human has said the change is worth making. Nothing merges or deploys from
+    here either — the agent pushes a branch and opens a PR, which lands on the
+    dashboard's self-heal card for a second, explicit decision.
+    """
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if not gh_token:
+        return {"ok": False, "error": "GITHUB_TOKEN not configured — approved, "
+                                      "but no build was started"}
+    try:
+        import requests as _rq
+        resp = _rq.post(
+            f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/self_heal.yml/dispatches",
+            headers={"Authorization": f"Bearer {gh_token}",
+                     "Accept": "application/vnd.github+json"},
+            # The change travels WITH the dispatch. self_heal has no storage
+            # credentials, and giving the workflow that writes code read access
+            # to production storage to fetch four strings is the wrong trade.
+            # GitHub caps an input at 1000 chars, so these are truncated rather
+            # than silently rejected — the agent re-reads the real finding text
+            # in the report anyway.
+            json={"ref": "main", "inputs": {
+                "finding_id": finding_id[:1000],
+                "finding_summary": str(rec.get("proposed_summary") or "")[:1000],
+                "finding_change": str(rec.get("proposed_change") or "")[:1000],
+                "finding_files": str(rec.get("proposed_files") or "")[:1000],
+            }},
+            timeout=10)
+        if resp.status_code == 204:
+            print(f"[finding] build dispatched for {finding_id}")
+            return {"ok": True, "dispatched": True}
+        print(f"[finding] build dispatch failed: {resp.status_code} {resp.text[:200]}")
+        return {"ok": False, "error": f"GitHub refused the build "
+                                      f"(HTTP {resp.status_code}) {resp.text[:160]}"}
+    except Exception as exc:
+        print(f"[finding] build dispatch error: {exc}")
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:160]}
 
 
 @app.route("/admin/selfheal/<path:branch>/<action>", methods=["POST"])

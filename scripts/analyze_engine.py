@@ -603,6 +603,62 @@ def _maturity(rows) -> list:
         blocked_until="the ledger reaches 30 matured picks (~Sep 10)")]
 
 
+def _propose_bug_fixes(findings: list, state: dict, today: str) -> int:
+    """Attach a concrete proposed change to open TECHNICAL BUG findings.
+
+    This is the half of the loop that was missing. A finding was detected,
+    surfaced and dispositionable, and nothing ever turned one into a change —
+    so a defect could sit on the dashboard indefinitely while the only path to
+    a pull request (self-heal) fired solely on a MONITOR FAILURE, which a
+    finding is not.
+
+    🔴 BUGS ONLY, and the split is the owner's (2026-09-20). A technical bug
+    restores intended behaviour and changes no strategy, so ONE instance is
+    enough to act on. A decision-engine change alters what real users are told
+    to buy and needs outcome evidence over time — the n>=30 gate the tournament
+    starts producing. Auto-proposing one of those would be tuning on noise,
+    which is the loop this whole program exists to end. Engine findings wait
+    for Phase 3.
+
+    🔴 IT WRITES NO CODE AND CHANGES NO STATUS. The record gains a proposal;
+    `status` stays `open`. That is deliberate and load-bearing: the
+    `resolved_UNAPPROVED` invariant fires when a finding DISAPPEARS while in
+    `awaiting_approval`, and it means "someone implemented this without
+    consent". Only a human running `findings.py propose` sets that status. If
+    an automatic proposal set it too, every bug finding whose condition cleared
+    on its own would raise a false accusation, and the one check that makes the
+    approval workflow more than an honour system would start crying wolf.
+
+    🔴 THE PROPOSED FIX IS THE FINDING'S OWN `fix` TEXT, and it is a
+    HYPOTHESIS, not an instruction. Those strings already name the file and the
+    change because the Finding contract demands it. But one of them was wrong
+    for five days — the entry_window findings recommended widening the
+    published window, a fix this project had investigated and REJECTED. That is
+    exactly why this proposes rather than implements, and why the card says the
+    proposal was written automatically.
+    """
+    fresh = [f for f in findings
+             if f.kind == "finding" and f.category == "bug" and f.tier == "ACT"
+             and f.status == "open"
+             and not (state.get(f.id) or {}).get("proposed_change")]
+    if not fresh:
+        return 0
+    for f in fresh:
+        rec = state.setdefault(f.id, {})
+        rec.update({
+            "proposed_summary": f.plain or f.title,
+            "proposed_change": f.fix,
+            "proposed_files": f.where or "",
+            "proposed_on": today,
+            # The owner must read this with the right prior. Same honesty as
+            # self-heal telling them a fix was written with no human in the loop.
+            "proposed_by": "auto",
+        })
+    print(f"[analyze] proposed a fix for {len(fresh)} open BUG finding(s): "
+          f"{[f.id for f in fresh]}")
+    return len(fresh)
+
+
 def _notify_new_act(findings: list, state: dict, today: str) -> int:
     """DM the owner about ACT findings they have never been told about.
 
@@ -678,7 +734,7 @@ def _notify_awaiting_approval(findings: list, state: dict, today: str) -> int:
     return len(fresh)
 
 
-def build(dry: bool = False, notify: bool = False) -> str:
+def build(dry: bool = False, notify: bool = False, propose: bool = False) -> str:
     d = _load()
     closed = d["log"].get("closed") or []
     items = (_integrity(d["uid"], d["log"], d["paper"])
@@ -690,6 +746,10 @@ def build(dry: bool = False, notify: bool = False) -> str:
     today = dt.date.today().isoformat()
     state = _load_state()
     state = _apply_state(items, state, today)
+    # BEFORE the report is rendered, so the card and the markdown agree about
+    # what is proposed on the very first run that proposes it.
+    if propose:
+        _propose_bug_fixes([f for f in items if f.kind == "finding"], state, today)
 
     rank = {"ACT": 0, "MEASURE": 1, "HOLD": 2}
     findings = [f for f in items if f.kind == "finding"]
@@ -789,8 +849,13 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--notify", action="store_true",
                     help="DM the owner about NEW ACT findings (CI uses this)")
+    ap.add_argument("--propose", action="store_true",
+                    help="attach a proposed fix to open TECHNICAL BUG findings "
+                         "so they can be approved on /admin (CI uses this). "
+                         "Opt-in for the same reason as --notify: running the "
+                         "script by hand must not write proposals.")
     args = ap.parse_args()
-    doc = build(dry=args.dry_run, notify=args.notify)
+    doc = build(dry=args.dry_run, notify=args.notify, propose=args.propose)
     print(doc)
     return 0
 
