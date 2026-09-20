@@ -29,9 +29,13 @@ on:
   workflow_dispatch:
     inputs:
       phase:
-        description: "open | manage"
+        description: "open | manage | reset  (reset liquidates the paper book and restarts the equity curve — by hand, once)"
         required: false
         default: "manage"
+      dry_run:
+        description: "true = drive the phase against LIVE data with NO writes and NO DM (proves a code path on CI, where prices resolve)"
+        required: false
+        default: "false"
 
 jobs:
   run:
@@ -60,7 +64,12 @@ jobs:
             echo "phase=manage" >> $GITHUB_OUTPUT
           fi
       - name: Run synthetic user
-        run: python scripts/synthetic_user.py --phase ${{ steps.p.outputs.phase }}
+        run: |
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            python scripts/synthetic_user.py --phase ${{ steps.p.outputs.phase }} --dry-run
+          else
+            python scripts/synthetic_user.py --phase ${{ steps.p.outputs.phase }}
+          fi
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}

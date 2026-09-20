@@ -531,6 +531,48 @@ def _exit_mix_by_levels_source(log, paper) -> dict:
     return seg
 
 
+def _book_vs_twin() -> list:
+    """The synthetic trader's book against its SPY twin — the Phase-1 headline
+    of the tournament, as a METRIC. Never a finding: a curve is something you
+    read, not something you rule on, and nothing here may become an ACT item
+    that summons a fix. Below 30 trading days it is a direction."""
+    try:
+        import config_manager as cm
+        import sim_portfolio as sp
+        s = sp.summary(sp.load(cm.DEFAULT_TEST_CHAT_ID))
+    except Exception as exc:
+        print(f"[analyze] book summary unavailable ({exc})")
+        return []
+    if not s.get("active"):
+        return []
+
+    def _p(v):
+        return "—" if v is None else f"{v:+.2f}%"
+
+    def _d(v):
+        return "—" if v is None else f"${v:,.2f}"
+
+    ev = (f"bot {_d(s.get('bot_equity'))} ({_p(s.get('bot_ret_pct'))}) vs SPY twin "
+          f"{_d(s.get('twin_equity'))} ({_p(s.get('twin_ret_pct'))}) on identical cash "
+          f"flows since {s.get('start_date')} · {s.get('days')} trading day(s) · alpha "
+          f"{_p(s.get('alpha_pct')).replace('%', ' pts')} · "
+          f"max drawdown bot {s.get('max_drawdown_pct')}% / twin "
+          f"{s.get('twin_max_drawdown_pct')}% · {s.get('buys')} buys, {s.get('sells')} sells"
+          + (f" · {s['sample_warning']}" if s.get("sample_warning") else ""))
+    return [Finding(
+        "metric:book_vs_twin", "MEASURE",
+        "Synthetic trader's book vs its SPY twin (identical cash flows)",
+        ev,
+        "Nothing to change from this alone. A strategy earns a change through "
+        "the tournament (Phase 2), then propose → approve on /admin — never "
+        "from one book's curve.",
+        n=s.get("days"), kind="metric",
+        where="scripts/synthetic_user.py · sim_portfolio.py",
+        plain=("The bot's simulated $10k book, traded the way a sized, rule-obeying "
+               "user would, compared with putting the same dollars into SPY on the "
+               "same days."))]
+
+
 def _maturity(rows) -> list:
     today = dt.date.today()
     matured = 0
@@ -642,6 +684,7 @@ def build(dry: bool = False, notify: bool = False) -> str:
     items = (_integrity(d["uid"], d["log"], d["paper"])
              + _reachability(d["rows"], d["log"], d["paper"])
              + _levels_geometry(closed)
+             + _book_vs_twin()
              + _maturity(d["rows"]))
 
     today = dt.date.today().isoformat()

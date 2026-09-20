@@ -320,6 +320,11 @@ def load_audit_dispositions() -> dict:
 
 
 ENGINE_FINDINGS_FILE = "engine_findings_state.json"
+# The synthetic trader's simulated book: equity curve + a cash-flow-matched SPY
+# twin, keyed by account so each future tournament arm gets its own. Whole-blob
+# document (NOT user-keyed) — written by scripts/synthetic_user.py on CI, read
+# by /admin. See sim_portfolio.py.
+SIM_PORTFOLIO_FILE = "sim_portfolio.json"
 
 
 def get_finding_dispositions() -> dict:
