@@ -361,7 +361,13 @@ def phase_open(admin: str, dry: bool, picks: dict | None = None,
         return ["no picks today — nothing to open"]
     st = _state(admin)
     opened = set(st.get("real", [])) | set(st.get("paper", []))
-    acts, new_real, new_paper, watch = [], [], [], []
+    # 🔴 Say it ONCE, at the top, and make it impossible to miss. A dry run
+    # prints lines like "📄 PAPER AAA @ $34.90 · 29 sh", which read exactly
+    # like a fill that happened — and the log IS the evidence a session reasons
+    # from. This project has repeatedly been misled by a report that described
+    # something it had not done.
+    acts = ["🧪 DRY RUN — nothing below was written: no buy, no state, no book"] if dry else []
+    new_real, new_paper, watch = [], [], []
     _skips: list[dict] = []        # entry-window breaches — observations, persisted
     _holds: list[dict] = []        # book-rule refusals — the trader said no
     _flows: list[tuple] = []       # (ticker, usd) buys for the SPY twin, ONE write at the end

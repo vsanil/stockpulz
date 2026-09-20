@@ -403,3 +403,25 @@ class TestTheAdminSurface:
         items = ae._book_vs_twin()
         assert len(items) == 1 and items[0].kind == "metric" and items[0].tier == "MEASURE"
         assert "+1.00%" in items[0].evidence
+
+
+class TestADryRunAnnouncesItself:
+    """`📄 PAPER AAA @ $34.90 · 29 sh` reads exactly like a fill that happened.
+    A dry run must say so where it cannot be missed — the log is the evidence
+    a later session reasons from, and this project has been misled by a report
+    that described work it had not done."""
+
+    def test_the_report_leads_with_the_dry_run_marker(self, monkeypatch):
+        su = _su()
+        h = _Harness(monkeypatch, su, _picks(("AAA", "stocks", "short_term", 100.0, 95.0, 120.0, 5)),
+                     _book(), {"AAA": 100.0, "SPY": 500.0})
+        acts = su.phase_open("900000001", dry=True)
+        assert acts[0].startswith("🧪 DRY RUN")
+        assert h.paper_buys == [] and h.saved == []
+
+    def test_a_real_run_carries_no_such_marker(self, monkeypatch):
+        su = _su()
+        _Harness(monkeypatch, su, _picks(("AAA", "stocks", "short_term", 100.0, 95.0, 120.0, 5)),
+                 _book(), {"AAA": 100.0, "SPY": 500.0})
+        acts = su.phase_open("900000001", dry=False)
+        assert not any("DRY RUN" in a for a in acts)
