@@ -3019,3 +3019,68 @@ run** — found by reading the log BODY, not its green tick. Dry runs now announ
 
 Guards: `tests/test_arm_segmentation.py` (23), `tests/test_tournament_arms.py` (57). Mutations
 **7/7**, **7/7**, **5/5**. Suite 2369.
+
+### ✅ A TECHNICAL BUG now proposes its own fix, and approving it BUILDS (2026-09-20)
+
+Owner: *"build the bug proposal now, leave engine for phase 3."* The loop was open at exactly
+the place it mattered: a finding could be detected, surfaced, notified and ruled on, and
+**nothing ever turned one into a change**. The only path to a pull request was self-heal, which
+fires on a MONITOR FAILURE — and a finding is not one, so a defect could sit on the dashboard
+indefinitely. Verified before building: `findings.py propose` is dispatch-only with a human
+typing the id/category/summary/files, `analyze_engine` is not among self-heal's four triggers
+and its `main()` always exits 0, and every stored finding had `proposed=False`.
+
+**🔴 BUGS ONLY, and the split is the whole design.** A technical bug restores intended behaviour
+and changes no strategy, so ONE instance is enough. A decision-engine change alters what real
+users are told to buy and needs the n≥30 outcome evidence the tournament starts producing —
+auto-proposing one would be tuning on noise, the loop this program exists to end. **Engine
+findings wait for Phase 3.**
+
+**🔴 THE AUTO-PROPOSAL SETS NO STATUS, and that is load-bearing.** It attaches
+`proposed_change` / `proposed_files` / `proposed_summary` / `proposed_by="auto"`; `status` stays
+`open`. The `resolved_UNAPPROVED` invariant fires when a finding DISAPPEARS while in
+`awaiting_approval` and means *"someone implemented this without consent"*. Had automatic
+proposals set that status, **every bug finding whose condition cleared on its own would raise a
+false accusation**, and the one check that makes the approval workflow more than an honour
+system would start crying wolf. Only a human `findings.py propose` sets it. Pinned both ways.
+
+**The approve gate now tests what the rule always SAID.** It checked `status == "awaiting_approval"`;
+it now checks whether a CONCRETE CHANGE exists. Those were the same thing while only a human
+could propose, and the status test would have refused a finding carrying a perfectly good plan.
+A bare finding is still refused with 409.
+
+**Approval buys the work, and gates the spend.** Approving dispatches self-heal with the change,
+which implements it, pushes a branch and opens a PR for review on the self-heal card. No model
+call happens until a human says the change is worth making, and **nothing merges or deploys from
+there** — the second decision stays with the owner.
+- The change travels WITH the dispatch (self-heal has no storage credentials, and giving the
+  workflow that WRITES CODE read access to production storage to fetch four strings is the wrong
+  trade). The prompt is built by **Python reading env, never shell interpolation** — the fix text
+  carries backticks and unicode arrows, and this repo has shipped a commit whose backticks the
+  shell EXECUTED.
+- **The prompt says the proposal is a HYPOTHESIS, not an instruction**, and that making no change
+  is a SUCCESS. It is the finding's own `fix` string and no human verified the engineering — one
+  of them recommended widening the published entry window for five days, a fix this project had
+  investigated and REJECTED. The card says so too: *"proposed automatically … no human reviewed it."*
+
+**🔴 THE LOOP ENDED ONE STEP SHORT AND ALMOST SHIPPED THAT WAY.** `AUTO_MERGE` is computed as
+`event_name == 'workflow_run'`, so a finding-triggered dispatch pushed its branch and then took
+the manual-test path: outcome `testfix`, **no PR**, and a DM reading *"🧪 TEST run … no PR
+(manual run)"*. The owner would have approved a change, paid for an agent, and been told it was a
+test. **Same class as the missing test runner (Aug) and the missing test dependency (Sep): the
+engine has never been the weak link, delivery has failed every time.** Found by tracing the loop
+to its end rather than trusting it. The flag now also fires for a dispatch carrying a
+`finding_id`; a bare manual dispatch still proposes nothing, which is the safety it protected.
+
+⚠️ **PROVEN UNDER TEST, NOT YET LIVE.** The CI run on 2026-09-20 proposed **0** because there are
+**0 open findings** — all seven are DECIDED. The mechanism ran and correctly found nothing. The
+first real bug finding exercises it. *Do not record this as confirmed in production.*
+🔎 Two method notes. A guard scanning `html[i:i+1800]` from `setFinding` ran past it into
+`setAudit` and failed on ITS `alert()` — the fixed-offset anchoring trap again — but it surfaced
+a REAL defect, since `setAudit` had the same suppressible-dialog flaw and was swept with it.
+And an existing test asserting *"an open finding NEVER offers Approve"* was a PROXY for
+*"approval attaches to a concrete change"*; the proxy became wrong while the rule did not, so it
+was repinned to the rule in both directions rather than relaxed.
+
+Guards: `tests/test_bug_auto_proposal.py` (35). Mutations **7/7**, plus the PR-path mutation.
+Suite 2405.
