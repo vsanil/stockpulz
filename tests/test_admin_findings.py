@@ -340,16 +340,38 @@ class TestOpenFindingsCanBeDecidedOnAdmin:
         i = src.index("_pending = (")
         assert '"open"' in src[i:i + 120], "the worklist must be visible on the card"
 
-    def test_an_open_finding_offers_acknowledge_not_approve(self):
-        """Nothing has been PROPOSED for an open finding, so there is no
-        concrete change to consent to — admin_finding_disposition returns 409
-        for approving one. Offering Approve would be a button that cannot work."""
+    def test_an_open_finding_WITHOUT_a_plan_offers_acknowledge_not_approve(self):
+        """The rule is "approval must attach to a CONCRETE CHANGE", and the
+        endpoint still returns 409 without one — offering Approve there would
+        be a button that cannot work.
+
+        ⚠️ The original form of this test asserted that an open finding NEVER
+        offers Approve. That was a proxy for the real rule, correct only while
+        nothing could be proposed for an open finding. The daily analysis now
+        attaches a proposed fix to open TECHNICAL BUGS, so the proxy became
+        wrong while the rule it stood for did not. Pin the rule.
+        """
         js = self._js()
         assert "'acknowledged'" in js.replace("\\", "")
-        i = js.index("x.status==='open'")
-        seg = js[i:i + 700].replace("\\", "")
+        # 🔴 Anchor on the NO-PLAN branch specifically. A bare search for
+        # "x.status==='open'" now lands on the `(x.status==='open' && hasPlan)`
+        # condition instead and reads the APPROVE arm, so it would fail on
+        # perfectly correct markup. The ternary's else-arm is the one prefixed
+        # by a colon.
+        i = js.index(": x.status==='open'")
+        seg = js[i:i + 900].replace("\\", "")
         assert "acknowledged" in seg and "wont_fix" in seg
-        assert "'approved'" not in seg, "an open finding must not offer Approve"
+        assert "'approved'" not in seg, "an open finding with no plan must not offer Approve"
+
+    def test_approval_is_offered_only_when_a_concrete_change_exists(self):
+        """The other half: with a proposal attached, Approve is correct and the
+        endpoint accepts it."""
+        js = self._js().replace("\\", "")
+        i = js.index("var hasPlan")
+        seg = js[i:i + 400]
+        assert "proposed_change" in seg, "the plan is what unlocks approval"
+        assert "x.status==='open' && hasPlan" in seg.replace(" ", "").replace(
+            "x.status==='open'&&hasPlan", "x.status==='open' && hasPlan")
 
     def test_an_open_finding_is_readable(self):
         """Nothing is proposed, so proposed_summary/change/note are all empty;

@@ -22,6 +22,18 @@ on:
     inputs:
       failed_run_id:
         description: "A failed run id to diagnose (test the loop — never auto-merges)"
+      finding_id:
+        description: "Engine finding id to IMPLEMENT (approved on /admin). Mutually exclusive with failed_run_id."
+        required: false
+      finding_summary:
+        description: "Plain-English summary of the approved change"
+        required: false
+      finding_change:
+        description: "The technical change to make"
+        required: false
+      finding_files:
+        description: "Files the change should touch"
+        required: false
         required: false
 
 permissions:
@@ -124,7 +136,14 @@ jobs:
         id: ctx
         run: |
           RID="${{ github.event.workflow_run.id || github.event.inputs.failed_run_id }}"
-          echo "monitor=${{ github.event.workflow_run.name || 'manual test' }}" >> "$GITHUB_OUTPUT"
+          FID="${{ github.event.inputs.finding_id }}"
+          if [ -n "$FID" ]; then
+            echo "monitor=approved finding $FID" >> "$GITHUB_OUTPUT"
+            echo "mode=finding" >> "$GITHUB_OUTPUT"
+          else
+            echo "monitor=${{ github.event.workflow_run.name || 'manual test' }}" >> "$GITHUB_OUTPUT"
+            echo "mode=monitor" >> "$GITHUB_OUTPUT"
+          fi
           echo "url=${{ github.event.workflow_run.html_url }}"                    >> "$GITHUB_OUTPUT"
           if [ -n "$RID" ]; then
             gh run view "$RID" --log > /tmp/failure.log 2>&1 || true
@@ -143,7 +162,7 @@ jobs:
           # delivery here.
           curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TG_CHAT}" \
-            --data-urlencode "text=🔧 A ${{ steps.ctx.outputs.monitor }} check failed — auto-diagnosing. If a fix passes the tests I will open it for YOUR review; nothing merges or deploys on its own." \
+            --data-urlencode "text=🔧 Working on: ${{ steps.ctx.outputs.monitor }}. If a fix passes the tests I will open it for YOUR review; nothing merges or deploys on its own." \
             >/dev/null || true
 
       - name: Branch
@@ -169,30 +188,77 @@ jobs:
       - name: Claude Code — diagnose & fix
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FINDING_ID:       ${{ github.event.inputs.finding_id }}
+          FINDING_SUMMARY:  ${{ github.event.inputs.finding_summary }}
+          FINDING_CHANGE:   ${{ github.event.inputs.finding_change }}
+          FINDING_FILES:    ${{ github.event.inputs.finding_files }}
         run: |
-          cat > /tmp/prompt.txt <<'PROMPT'
+          # 🔴 The prompt is written by PYTHON reading ENV, never by shell
+          # interpolation. The approved change carries backticks, quotes and
+          # unicode arrows straight from the finding's own fix text, and this
+          # repo has already shipped a commit whose backticks the shell
+          # EXECUTED. Nothing untrusted touches a shell word here.
+          python3 - <<'PY'
+          import os, textwrap
+
+          MONITOR = textwrap.dedent("""\
           A monitoring workflow just failed in this app's CI. Diagnose it and fix it on the CURRENT git branch (already checked out). Do NOT push, merge, or open a PR — the surrounding workflow handles that.
-
+          
           Be efficient and decisive — you have a limited turn budget. Read only what you need (the failure log + the one check/module involved), don't explore the whole repo. If the current code already handles the failure and the tests pass, STOP with no changes.
-
+          
           STEP 1 — read the evidence:
             - The failure log is at /tmp/failure.log (compact summary at /tmp/failure_summary.txt). Read it to see exactly which checks failed and for which monitor.
             - Read CLAUDE.md — it documents this app's bug patterns AND the recurring monitor/canary FALSE-ALARM classes (weekend crypto delivery; the synthetic-user bot draining paper cash / holding pre-existing positions; date-window expectations). MANY monitor failures are the CHECK being wrong, not the app.
-
+          
           STEP 2 — diagnose the ROOT cause and classify:
             - FALSE ALARM: the monitor/check assumes something no longer true (clean slate, exact date, sufficient cash). Fix = make the check robust in scripts/. NEVER weaken a guard that is correctly catching a real problem.
             - TRANSIENT INFRASTRUCTURE, NOT A BUG: if "Pick Evaluation" failed with "LEDGER SAVE FAILED", that is GitHub rate-limiting a gist PATCH (409/403). The retry/backoff already exists and the exit-1 is deliberate so a lost day is loud. Make NO code change — a speculative edit here would auto-deploy for nothing. Just stop and say it was transient. (The lost day itself is NOT recoverable in code: record_today only reads TODAY's picks.json.)
             - REAL APP BUG: fix the app code and ADD a regression test.
             If you are NOT confident it is a genuine fix, make NO changes and stop — a wrong auto-merged fix would deploy live to real users.
-
+          
           STEP 3 — apply the minimal, correct fix, matching the surrounding code style.
+          
+          STEP 4 — verify. Run BOTH and make them pass:
+              python -m pytest tests/ -q
+              python scripts/check_js.py
+          
+          STEP 5 — commit all changes (nothing left staged) with a clear message: what failed, the root cause, and the fix. Do NOT push.
+          """)
+
+          FINDING = textwrap.dedent("""\
+          The owner has APPROVED a specific change to this app. Implement it on the CURRENT git branch (already checked out). Do NOT push, merge, or open a PR — the surrounding workflow handles that.
+
+          Be efficient and decisive — you have a limited turn budget. Read only the files named below plus what they directly depend on. Do not explore the repo.
+
+          THE APPROVED CHANGE
+            id:      {fid}
+            summary: {summary}
+            change:  {change}
+            files:   {files}
+
+          STEP 1 — read CLAUDE.md, then the named files. CLAUDE.md documents this app's bug patterns and its rejected fixes.
+
+          🔴 STEP 2 — THE PROPOSAL IS A HYPOTHESIS, NOT AN INSTRUCTION. It was written automatically from the finding's own suggested fix and no human verified the ENGINEERING before approving — they approved the intent. One of these was wrong for five days: the entry-window findings recommended widening the published entry window, a fix this project had investigated and explicitly REJECTED, because the breaches were real overnight moves and widening would have legitimised a bad fill.
+            - If the described change is WRONG, or already done, or would weaken a guard that is correctly catching a real problem: make NO code change. Say so plainly and stop. That is a SUCCESS, not a failure.
+            - Only implement it if, having read the code, you judge it correct.
+
+          STEP 3 — apply the minimal, correct fix, matching the surrounding code style, and ADD a regression test that fails without it.
 
           STEP 4 — verify. Run BOTH and make them pass:
               python -m pytest tests/ -q
               python scripts/check_js.py
 
-          STEP 5 — commit all changes (nothing left staged) with a clear message: what failed, the root cause, and the fix. Do NOT push.
-          PROMPT
+          STEP 5 — commit all changes (nothing left staged) with a clear message naming the finding id, the root cause and the fix. Do NOT push.
+          """).format(fid=os.environ.get("FINDING_ID", ""),
+                      summary=os.environ.get("FINDING_SUMMARY", "(none recorded)"),
+                      change=os.environ.get("FINDING_CHANGE", "(none recorded)"),
+                      files=os.environ.get("FINDING_FILES", "(not specified)"))
+
+          text = FINDING if os.environ.get("FINDING_ID") else MONITOR
+          open("/tmp/prompt.txt", "w").write(text)
+          print(f"[self-heal] prompt mode={'finding' if os.environ.get('FINDING_ID') else 'monitor'} "
+                f"chars={len(text)}")
+          PY
           # 🔴 CUT 30 -> 15 on 2026-09-07, on cost evidence, not taste.
           # `stock-agent` spent $12.59 of a $12.83 7-day Anthropic bill and this
           # step is its largest discretionary line: 9 headless agents in 7 days.
