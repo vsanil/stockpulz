@@ -8,10 +8,8 @@
 | **2026-09-28** | **Rotate FIVE credentials** — PAT `ghp_vkMR…` (`admin:org`, widest blast radius), PAT `ghp_3MCR…`, cron-job.org key, Render key, and **`CRON_SECRET` LAST** (needs all 17 cron-job.org URLs updated, `#`→`%23`, or a morning delivery is lost to a silent 401). Owner's dated decision 09-13 — surface the date, do not re-argue it. | OWNER | rotation done |
 | ongoing | **Anthropic balance can still hit ZERO between spend alerts** — auto-reload is OFF by choice, and the $20/$35 alerts watch SPEND, not balance. Zero balance = `morning` produces no picks. Ran dry twice in two days (09-05, 09-07). | OWNER | top up, or enable auto-reload |
 | open | **The product claim.** Measurement is now COMPLETE: all four engine stages measured, none showing a detectable edge (ST −1.6 n=510, LT −2.2 n=90, pool vs SPY −3.6, selection −4.74 n=46/41 CI [−12.89,+3.41]). Supported: *"daily picks with real entry/stop/target levels, position sizing, and alerts that fire — measured against SPY."* NOT supported: any claim about beating the market. | OWNER | choose the wording |
-| ~2026-09-21 | **Prescreener fix — does Monday now get a 03:00 dispatch?** The ET-weekday bug is FIXED (job 7727066, wdays Sun-Thu ET). Tonight's fire only proves nothing broke; **Mon 2026-09-21 03:00 UTC is the first run the old schedule could not produce**. Cutting a GitHub prescreener cron stays DEFERRED — they were Monday's only cover. | WATCH | a 03:00 dispatch on 09-21 |
 | **launch day** | **🔵 Enable BOTH keep-warm jobs — two halves of one mechanism.** `{"job":{"enabled":true}}` on **`8474212` StockPulz-wake** (6:55 AM ET daily → dispatches `keepwarm.yml`; a GitHub runner's curl ESTABLISHES warmth — measured 09-19: dispatch → gunicorn listening in 55 s against a 4-h-cold instance) and **`7746621` StockPulz-keepalive** (7am-7pm ET every 15 min → MAINTAINS it; its own client is refused by a sleeping edge in ~2 s, so alone it can never start the instance). Cost with both ~360 h/mo → account ~510 of 750 h. Alternative: $7/mo Starter on this one service. Both DISABLED now. | OWNER | both enabled on the day |
-| **Mon 2026-09-21 08:05 ET** | **🏁 THE TOURNAMENT STARTS — first real arm run.** cron-job.org job **`8479070` StockPulz-arms-open** (created + verified 2026-09-20, ET-anchored, Mon-Fri, `next=2026-09-21 12:05 UTC`). Runs 5 min after the synthetic user (8:00) so the arms trade the same market moment, and 25 min before the canary (8:30). All four arm books begin their curves; `/admin` → Tournament standings stops saying "no curve yet". **Below 30 trading days it is a direction, not a verdict — do not tune anything on it.** ⚠️ The body passes `"dry_run":"false"` EXPLICITLY: the workflow input defaults to `"true"` and GitHub fills defaults for omitted inputs, so leaving it out would have made the tournament a silent no-op — nothing written, no message, empty books. | WATCH | a snapshot dated 09-21 in `sim_portfolio.json` |
-| **Mon 2026-09-21 08:00 ET** | **🏁 Phase 1 first real run.** The synthetic user now trades a SIZED, rule-bound $10k paper book with time stops and a SPY twin (`sim_portfolio.py`). Dry-run on CI proved the path 09-20. The book was RESET on 09-20 (`--phase reset`, history kept). The first `open` writes the first snapshot; `/admin` "Synthetic trader · book vs SPY twin" goes from "No equity curve yet" to a number. **Below 30 trading days it is a direction, not a verdict — do not tune anything on it.** | WATCH | a snapshot dated 09-21 |
+| **~2026-10-28** | **🏁 PHASE 2'S FIRST READ — the date the program ENDS.** Verified recording 2026-09-25: ledger carries **75 arm rows (breakout 25 · pullback 25 · quality 25)**, segmented away from the 234 production picks, and arms are exiting for real (PS at target, VNET/KMI at stop). `_MIN_N=30` matured picks per arm at 5/arm/trading day needs six sessions (09-21…09-28) to mature over a 30-day horizon. The equity-curve read (30 trading days) lands ~2026-11-02. **Until then: no UI polish, no coverage passes, no new monitors, and nothing tuned on a partial curve.** | WATCH | the evaluator reporting n≥30 per arm |
 | open | Supabase read-retry **unconfirmed**. Needs `transient on attempt` in a *passing* `full_sweep` — a clean run proves nothing (5 of 8 prior runs had a disconnect). | WATCH | any future full_sweep log |
 
 ---
@@ -3121,3 +3119,41 @@ GitHub's 10-input dispatch limit. It includes a test that the LENIENT loader sti
 the strict one rejects, so the guard cannot rot back into the thing it replaced. Mutation
 verified against the exact duplicate that caused this. **Never validate a workflow with
 `safe_load` alone.** Suite 2463.
+
+### ❌ THE `full_sweep` CONSOLIDATION IS WITHDRAWN — it costs three things and buys one (2026-09-25)
+
+The tournament's stopping-rule paragraph names one piece of in-program work during the wait:
+*"Fold `full_sweep` into the canary; retire two of the fourteen workflows."* **That was proposed
+before Phase 2 started and it is a worse trade than it looked.** Measured today rather than
+assumed, deleting `full_sweep.yml` would cost:
+
+    1. a SELF-HEAL TRIGGER.  self_heal.yml fires on workflow_run for exactly four names —
+       ["Daily Canary", "Synthetic User", "Full Sweep", "Pick Evaluation"]. Removing one
+       silently drops a quarter of the auto-fix net's coverage, by NAME, with no error
+       anywhere — the rename failure `TestMonitorNamesActuallyMatch` exists to prevent.
+    2. the ONLY evidence source for an open WATCH item.  The Supabase read-retry needs
+       `transient on attempt` in a PASSING full_sweep log; folding it removes the log.
+    3. surface coverage 3x/day -> 1x/day, on the one run whose value has repeatedly come
+       from reading its LOG BODY rather than its green tick.
+
+The benefit is "two fewer things that can rot" on a **public repo where Actions minutes are
+free**. That is not worth removing a monitor trigger in the middle of the measurement window the
+whole program exists to produce.
+🔑 **The generalisable half: a consolidation proposed before a measurement window should be
+re-costed inside it.** The reasons to shrink surface (rot, unobserved decay) are exactly the
+reasons NOT to shrink it while something is being measured. **Revisit after Phase 2's read**,
+when the monitors' job is done — that is the natural moment, and the program ends there anyway.
+
+### ✅ THE PRESCREENER'S MONDAY IS FIXED — confirmed on the first Monday it could be (2026-09-25)
+
+The ET-weekday bug (`wdays Mon-Fri` evaluated in `America/New_York`, so Sun 23:00 ET → Mon 03:00
+UTC never fired) left **eight consecutive Mondays with zero 03:00 dispatches**. Job `7727066` was
+moved to Sun-Thu ET on 09-14. Verified server-side, not from a truncated listing:
+
+    2026-09-21T03:00:12Z  workflow_dispatch  success   <- the first Monday the old schedule
+    2026-09-22T03:00:11Z  workflow_dispatch  success      could not have produced
+    2026-09-24T03:00:11Z  workflow_dispatch  success
+
+🚨 **Cutting a GitHub prescreener cron STAYS DEFERRED.** One Monday proves the fix; it does not
+establish a stable `morning.cache_hit_rate` across Mondays, and the GH crons were Monday's only
+cover for eight weeks. Nothing about the trigger set changes during the tournament.
