@@ -62,3 +62,58 @@ def strip_fences(raw: str) -> str:
             body = body[nl + 1:]
         return body.strip()
     return text
+
+
+# ── Transient-failure taxonomy ───────────────────────────────────────────────
+# 🔴 WHY THIS EXISTS: on 2026-09-30 Anthropic returned HTTP 529 "Overloaded" at
+# 11:01 UTC and BOTH real users got no picks that day. The run reported success
+# with the failure printed inside it — this repo's signature shape.
+#
+# `analyze_with_claude` already had a Haiku fallback, but it was gated on
+# `except (json.JSONDecodeError, KeyError, IndexError)` — PARSE errors only. An
+# API error never reached it and raised at once. The only retry was the SDK's
+# `max_retries=2`, whose backoff is measured in seconds and is useless against a
+# capacity event lasting minutes.
+#
+# 🔑 THE DISTINCTION THAT MATTERS, and it decides the right fix:
+#   a PARSE error  -> we got output and it was malformed -> a stricter prompt on
+#                     another model is the cure (STRICT_RETRY_SYSTEM).
+#   an API error   -> we got NO output at all            -> retry the SAME model;
+#                     the prompt was never the problem.
+# Routing a 529 into the existing parse branch would be actively wrong:
+# STRICT_RETRY_SYSTEM is only "You are a JSON generator", carrying no
+# pick-selection instructions, so the model would be handed no task.
+#
+# ⚠️ A CREDIT-BALANCE FAILURE MUST STAY LOUD AND IMMEDIATE. "Your credit balance
+# is too low" arrives as a 400 invalid_request_error, which is NOT in the
+# retryable set below — retrying a billing or auth error only turns a clear
+# failure into a slow one. Same rule as SupabaseBackend._read_with_retry, where
+# an RLS 42501 is treated as permanent on purpose.
+
+# Retryable NON-5xx statuses. 429 = rate limited, 408/409 = timeout/conflict.
+TRANSIENT_STATUS = frozenset({408, 409, 429})
+
+# Application-level backoff BETWEEN whole calls, on top of the SDK's own
+# per-call retries. Deliberately short: the morning briefing is time-sensitive
+# (7 AM ET) and the run already takes 2-12 min, so this adds at most ~60 s of
+# sleep before falling back to a different model rather than stalling delivery.
+API_RETRY_SLEEPS = (20.0, 40.0)
+
+
+def is_transient_api_error(exc: BaseException) -> bool:
+    """True when `exc` is an upstream blip that a later identical call may survive.
+
+    Structural, not message-matching: the SDK hands us real status codes, so
+    unlike the Supabase retry (which has no error taxonomy and must whitelist
+    strings) this can decide from the type and the code.
+    """
+    # APITimeoutError subclasses APIConnectionError, so this covers both.
+    if isinstance(exc, anthropic.APIConnectionError):
+        return True
+    # RateLimitError subclasses APIStatusError; the code check covers it too.
+    if isinstance(exc, anthropic.APIStatusError):
+        code = getattr(exc, "status_code", None)
+        if isinstance(code, bool) or not isinstance(code, int):
+            return False
+        return code >= 500 or code in TRANSIENT_STATUS
+    return False

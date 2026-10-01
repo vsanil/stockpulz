@@ -3158,3 +3158,82 @@ moved to Sun-Thu ET on 09-14. Verified server-side, not from a truncated listing
 🚨 **Cutting a GitHub prescreener cron STAYS DEFERRED.** One Monday proves the fix; it does not
 establish a stable `morning.cache_hit_rate` across Mondays, and the GH crons were Monday's only
 cover for eight weeks. Nothing about the trigger set changes during the tournament.
+
+### 🔴 ONE HTTP 529 COST A FULL DAY OF PICKS — the Haiku fallback covered the wrong failure (2026-09-30)
+
+Both real users got NOTHING on Wednesday 2026-09-30. The run fired on time and
+reported **success**, with the failure printed inside it — this file's signature
+defect shape, now for the fourth time on the morning path:
+
+    11:00:37Z  run 36705878106  conclusion: success
+    [agent] Claude analysis failed: Error code: 529 — overloaded_error 'Overloaded'
+    [agent] ALERT: ❌ Morning run FAILED — Claude analysis error
+    [agent] Done (morning) for 2026-09-30.
+
+🔎 **Caught by the canary, not by a workflow going red**: `picks.fresh`,
+`delivery.morning` and `delivery.picks_saved` all reported `=2026-09-29` against
+an expected `≥2026-09-30`. The previous three outages on this path were CREDIT
+exhaustion; **this one was upstream CAPACITY**, so do not reach for the balance
+first — read the error code.
+
+🚨 **THE DEFECT, and it is not the 529.** `analyze_with_claude` had a Haiku
+fallback, and this file described it as "retries with Haiku and then raises". It
+was gated on:
+
+    except (json.JSONDecodeError, KeyError, IndexError) as exc:
+
+**PARSE errors only.** Any API error — 529, 429, a dropped connection — bypassed
+it and raised at once. The sole retry was the SDK's `max_retries=2`, whose
+backoff is measured in seconds and cannot outlast a capacity event. So the
+fallback existed, was documented as covering this, and could not.
+
+🔑 **THE DISTINCTION THAT DECIDES THE FIX — a parse error and an API error are
+opposite problems:**
+
+    PARSE error -> we GOT output and it was malformed -> cure the OUTPUT:
+                   stricter prompt, different model (STRICT_RETRY_SYSTEM).
+    API error   -> we got NO output at all            -> cure the CALL:
+                   retry the SAME model; the prompt was never at fault.
+
+🔴 **THE NAIVE FIX IS ACTIVELY WRONG, and reading the code before writing it is
+what caught this.** Routing a 529 into the existing Haiku branch looks like a
+one-word change — but `STRICT_RETRY_SYSTEM` is only *"You are a JSON generator.
+Output ONLY a valid JSON object."* It carries **no pick-selection instructions
+whatsoever**, so Haiku would have been handed no task and an outage would have
+become a garbage briefing delivered as if normal. The API path therefore reuses
+`SYSTEM_PROMPT`. Pinned by `test_strict_prompt_really_has_no_task_instructions`,
+which fails if that premise ever stops holding.
+
+**What was built:**
+- `llm_client.is_transient_api_error(exc)` — the ONE definition of retryable.
+  **Structural, not message-matching**: the SDK hands over real status codes, so
+  unlike `SupabaseBackend._read_with_retry` (which has no error taxonomy and must
+  whitelist strings) this decides from type + code. `>=500` or `{408,409,429}`,
+  plus `APIConnectionError` (which `APITimeoutError` subclasses).
+- `llm_client.API_RETRY_SLEEPS = (20.0, 40.0)` — 3 Sonnet attempts, ~60 s of
+  added sleep. Deliberately short: the briefing is time-sensitive at 7 AM ET and
+  the run already takes 2-12 min, so it falls back to another model rather than
+  stalling delivery.
+- `ai_analyzer._call_claude_with_retry` — retries ONLY transient failures and
+  **lets a parse error propagate untouched**, so the pre-existing cure still owns
+  its own case. Re-calling the identical prompt that just produced malformed JSON
+  would spend the delivery window to obtain the same bad output.
+- Then Haiku, a DIFFERENT capacity pool, on the SAME task prompt.
+
+⚠️ **A CREDIT-BALANCE FAILURE MUST STAY IMMEDIATE AND LOUD.** "Your credit
+balance is too low" arrives as `BadRequestError` **400**, which is NOT retryable
+here, and the `except` re-raises a non-transient error before any Haiku attempt.
+Retrying a billing or auth error only turns a clear failure into a slow one, and
+spending a fallback call on it would delay the owner's alert. Same reasoning as
+treating an RLS `42501` as permanent. **Do not "simplify" this into a blanket
+`except Exception: retry`.**
+
+⚠️ **Production never raises a bare `APIStatusError`** — the SDK maps a status to
+a SUBCLASS, so the real 09-30 exception was `InternalServerError(529)`. A
+predicate verified only against the base class would be untested against what
+actually arrives. Both the real classes and the base are pinned.
+
+Guard: `tests/test_claude_api_retry.py` (34 tests). **7 of 7 mutations caught** —
+including reverting to the pre-fix code, treating a 400 as transient, routing the
+API path through the task-less prompt, removing the retry loop, dropping the
+transience guard, and retrying parse errors. Suite 2497.

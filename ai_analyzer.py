@@ -9,7 +9,7 @@ import json
 import time
 import requests
 import yfinance as yf
-from llm_client import _get_client
+from llm_client import _get_client, is_transient_api_error, API_RETRY_SLEEPS
 
 from options_flow import get_options_signal
 from insider_tracker import get_insider_signal
@@ -1366,6 +1366,43 @@ def _call_claude(system: str, user: str, model: str = "claude-sonnet-4-6",
     return json.loads(_strip_fences(message.content[0].text.strip()))
 
 
+def _api_detail(exc: BaseException) -> str:
+    """Short, loggable description of an API failure — code first, then type."""
+    code = getattr(exc, "status_code", None)
+    return f"HTTP {code}" if isinstance(code, int) and not isinstance(code, bool) \
+        else type(exc).__name__
+
+
+def _call_claude_with_retry(system: str, user: str, model: str = "claude-sonnet-4-6",
+                            use_caching: bool = False,
+                            sleeps: tuple[float, ...] | None = None) -> dict:
+    """`_call_claude`, retrying ONLY transient upstream failures.
+
+    🔴 A PARSE ERROR IS DELIBERATELY NOT RETRIED HERE and must propagate
+    untouched: the caller's own `except (json.JSONDecodeError, KeyError,
+    IndexError)` owns that case and cures it with a stricter prompt on another
+    model. Retrying the identical call against a model that just produced
+    malformed JSON would burn the delivery window to get the same bad output.
+
+    See llm_client.is_transient_api_error for what counts as transient and why a
+    credit-balance 400 must stay immediate.
+    """
+    naps = API_RETRY_SLEEPS if sleeps is None else sleeps
+    attempts = len(naps) + 1
+    for i in range(attempts):
+        try:
+            return _call_claude(system, user, model=model, use_caching=use_caching)
+        except Exception as exc:
+            # Last attempt, or not the kind of failure a retry can fix.
+            if i == attempts - 1 or not is_transient_api_error(exc):
+                raise
+            nap = naps[i]
+            print(f"[ai_analyzer] {model} {_api_detail(exc)} on attempt "
+                  f"{i + 1}/{attempts} — transient, retrying in {nap:.0f}s")
+            time.sleep(nap)
+    raise AssertionError("unreachable: the loop either returns or raises")
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def analyze_with_claude(
@@ -1425,15 +1462,39 @@ def analyze_with_claude(
     # reuses the cached system prompt on repeat calls (≈10× cheaper).
     print("[ai_analyzer] Calling Claude Sonnet (stocks + crypto)...")
     try:
-        picks = _call_claude(SYSTEM_PROMPT, user_prompt, model="claude-sonnet-4-6",
-                             use_caching=True)
+        picks = _call_claude_with_retry(SYSTEM_PROMPT, user_prompt,
+                                        model="claude-sonnet-4-6", use_caching=True)
         print("[ai_analyzer] Claude response parsed successfully.")
         picks = _validate_and_clean_picks(picks, valid_stock_tickers)
     except (json.JSONDecodeError, KeyError, IndexError) as exc:
+        # The model ANSWERED and the answer was malformed — cure the OUTPUT with
+        # a stricter prompt on a different model.
         print(f"[ai_analyzer] Parse error on first attempt ({exc}). Retrying with Haiku...")
         try:
             picks = _call_claude(STRICT_RETRY_SYSTEM, user_prompt, model="claude-haiku-4-5-20251001")
             print("[ai_analyzer] Haiku retry succeeded.")
+            picks = _validate_and_clean_picks(picks, valid_stock_tickers)
+        except Exception as exc2:
+            print(f"[ai_analyzer] Claude analysis failed after retry: {exc2}")
+            raise RuntimeError(f"Claude analysis failed: {exc2}") from exc2
+    except Exception as exc:
+        # 🔴 We never GOT an answer (2026-09-30: HTTP 529 Overloaded cost both
+        # real users a full day of picks). A non-transient failure — above all a
+        # credit-balance 400 — must stay immediate and loud, so re-raise it.
+        if not is_transient_api_error(exc):
+            raise
+        # Sonnet stayed unreachable across every retry. Haiku is a DIFFERENT
+        # capacity pool, so it may well answer.
+        # ⚠️ SYSTEM_PROMPT, never STRICT_RETRY_SYSTEM: the output was never the
+        # problem here, and the strict prompt is only "You are a JSON generator"
+        # with NO pick-selection instructions — it would hand Haiku no task and
+        # quietly turn an outage into a garbage briefing.
+        print(f"[ai_analyzer] Sonnet unreachable after retries ({_api_detail(exc)}) — "
+              f"falling back to Haiku on the SAME task prompt.")
+        try:
+            picks = _call_claude_with_retry(SYSTEM_PROMPT, user_prompt,
+                                            model="claude-haiku-4-5-20251001")
+            print("[ai_analyzer] Haiku fallback succeeded (Sonnet was overloaded).")
             picks = _validate_and_clean_picks(picks, valid_stock_tickers)
         except Exception as exc2:
             print(f"[ai_analyzer] Claude analysis failed after retry: {exc2}")
