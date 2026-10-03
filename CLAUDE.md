@@ -669,8 +669,20 @@ Rules:
   detection.
   ⚠️ **Absence of a failure line is only evidence when failures are logged** — that was checked
   in `telegram_api` before concluding it, not assumed.
-  🔴 **IT HAS NOW HAPPENED THREE TIMES (09-05, 09-07, and 2026-09-17), and the third cost a FULL
-  DAY OF PICKS to both real users.** Topped up 09-18; verified by a 1-token Haiku probe against
+  🔴 **IT HAS NOW HAPPENED FOUR TIMES (09-05, 09-07, 2026-09-17 and 2026-10-02), and the last
+  two each cost a FULL DAY OF PICKS to both real users.**
+  🔎 **10-02 presented EXACTLY like 09-17** — `400 invalid_request_error` / *'Your credit balance
+  is too low'* at 11:02 UTC, run green, `cron_last_morning` stamped while `last_morning_run`
+  froze a day behind, and the canary's `picks.fresh` + `delivery.*` trio were the only things
+  that said so. **Topped up by the owner the same day; verified NOT on trust but with the
+  existing 8-token Haiku probe (`input_audit.py::p_anthropic`) dispatched on CI against the
+  production secret — `Anthropic  ok  'Ok'`.** Use that workflow rather than writing a new
+  probe or handling the key locally.
+  ✅ **The 10-01 retry work behaved correctly here, and this is the proof of its careful half:**
+  a credit 400 is NOT transient, so there were ZERO `transient, retrying` lines — it failed on
+  the FIRST attempt and alerted at once instead of spending ~60 s of backoff and a Haiku call
+  on a billing error. The non-retryable branch is now proven in production; the retryable one
+  still is not. Topped up 09-18; verified by a 1-token Haiku probe against
   the same key (`HTTP 200`) rather than taken on trust.
   🔎 **How it presented, because every layer looked healthy:** cron-job.org fired `11:00 UTC
   http=204`, GitHub dispatched, the run started, hit the cache, **and exited 0** —
@@ -3238,3 +3250,40 @@ Guard: `tests/test_claude_api_retry.py` (34 tests). **7 of 7 mutations caught** 
 including reverting to the pre-fix code, treating a 400 as transient, routing the
 API path through the task-less prompt, removing the retry loop, dropping the
 transience guard, and retrying parse errors. Suite 2497.
+
+
+### 🔴 THE SUPABASE PROBE TIMEOUT IS NOT A ONE-OFF — second occurrence, and it cost a day of the tournament (2026-10-01)
+
+    [storage] SupabaseBackend init failed (Supabase unreachable or unverifiable:
+              documents: probe timed out after 4.0s; user_records: probe …)
+    [storage] Using GistBackend.
+
+The 09-13 occurrence was recorded here as "a genuine one-off, not a live fault". **It is not.**
+It recurred on 2026-10-01 in the synthetic user's 12:00 `open` run, and the consequence is worse
+than a monitor false alarm because that run WRITES.
+
+🔎 **What a Gist-fallback run actually does: it trades against the ROLLBACK COPY.** The Gist still
+holds the stale pre-reset book, so the run read **30 positions / $24,561 equity** instead of the
+real 8 / ~$10,000, refused both paper buys on `max_positions`, and wrote the day's real positions
+and an equity snapshot of $24,561 to a store production never reads. The trajectory makes it
+unmistakable — and makes clear the damage is a ONE-DAY GAP, not corruption:
+
+    09-30  $10,016.56   8 open     Supabase
+    10-01  $24,561.17  30 open     GIST  ← the anomaly
+    10-02   $9,981.50   8 open     Supabase, consistent with 09-30
+
+🔑 **The canary caught it correctly and its message was misleading.** `synthetic.opened` said *"the
+bot opened NOTHING today despite picks existing"*. The bot opened two REAL positions that minute —
+into the Gist. The check read the live store, saw nothing dated today, and was right to fail;
+**"opened nothing" and "opened into the wrong store" are different faults with one symptom.**
+🔎 Blast radius was bounded by luck, not design: the ARMS ran 13 min later (12:13) and got
+Supabase cleanly, so Phase 2's books are intact. Had the window been wider it would have hit four
+more books.
+
+🚨 **DO NOT WIDEN THE 4.0 s PROBE TIMEOUT.** A slow probe on the backend about to take every
+per-user write is information, and failing closed to the Gist is the designed, correct behaviour —
+the Aug-19/21 outages are what that guard exists to prevent. **The open question is different and
+better: should a run that fell back to the Gist REFUSE TO TRADE rather than trade against the
+rollback copy?** A read-only fallback is defensible; a WRITING fallback silently forks the record
+the whole 3-month program depends on. Raised with the owner 2026-10-02; **not built, awaiting a
+decision.** Do not implement it unprompted.
