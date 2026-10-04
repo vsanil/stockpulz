@@ -320,9 +320,22 @@ def check_live_prices() -> None:
     _bid = _SYMBOL_TO_CG_ID["BTC"]
     c1 = cg_prices([_bid]).get(_bid)
     c2 = cg_prices([_bid]).get(_bid)          # 2nd call must hit the 60s cache
-    _check("prices.cg_cache", _pos(c1) and c1 == c2,
-           f"cached BTC stable at ${c1}" if _pos(c1)
-           else f"CoinGecko returned {c1} — cache cannot be verified")
+    if not _pos(c1):
+        # This checks OUR cache on top of a raw CoinGecko call (no yfinance
+        # fallback — that's the whole point, it's testing CoinGecko's own
+        # caching). CoinGecko blocking/403ing a CI runner's IP is a known,
+        # unrelated-to-us failure mode (btc_sane/eth_sane above already prove
+        # the USER-visible path is fine via the yfinance fallback). With no
+        # upstream data at all, nothing about the cache can be verified —
+        # same treatment as every other third-party-dependent check in this
+        # file: NOT VERIFIED, never a hard FAIL that pages the owner and
+        # summons self-heal over an outage no code change can fix.
+        _check("prices.cg_cache", True,
+               f"NOT VERIFIED — CoinGecko unavailable this run ({c1})")
+    else:
+        _check("prices.cg_cache", c1 == c2,
+               f"cached BTC stable at ${c1}" if c1 == c2
+               else f"cache mismatch: first call ${c1}, second call ${c2}")
 
 
 def check_sizing() -> None:
