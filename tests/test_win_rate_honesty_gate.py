@@ -17,8 +17,28 @@ when there is some.
 import performance_tracker as pt
 
 
-def _t(ret, day="2026-09-10"):
-    return {"ticker": "X", "return_pct": ret, "closed_date": day,
+def _recent_day() -> str:
+    """A closed_date that is INSIDE the 30-day window, whenever this runs.
+
+    🔴 This was hardcoded to "2026-09-10" and the suite went red on 2026-10-11
+    with `TypeError: 'NoneType' object is not subscriptable` — 31 days later,
+    the fixtures aged out of `get_recent_stats`'s rolling window, it returned
+    None, and every test here subscripted it. CI was green on 10-04 at 24 days
+    old; nothing in the repo changed in between, the CALENDAR did.
+
+    Sixth occurrence of the clock class in this file's history, and the rule
+    was already written: a test must stamp dates on the SAME clock the code
+    reads, and must FORCE its condition rather than wait for one. Line 222 of
+    performance_tracker reads `date.today()`, so this does too — an et_today()
+    stamp here would BE the mismatch, not the fix.
+    """
+    from datetime import date, timedelta
+    return (date.today() - timedelta(days=5)).isoformat()
+
+
+def _t(ret, day=None):
+    return {"ticker": "X", "return_pct": ret,
+            "closed_date": day or _recent_day(),
             "entry_price": 100, "exit_price": 100 + ret}
 
 
@@ -105,3 +125,45 @@ class TestTheMorningBar:
         drives it, not the sample size being re-derived somewhere else."""
         assert "50.0%" not in self._render(20, False)
         assert "50.0%" in self._render(20, True)
+
+
+class TestTheFixtureCannotAgeOut:
+    """🔴 This whole file went red on 2026-10-11 with no code change.
+
+    `_t` hardcoded closed_date="2026-09-10"; `get_recent_stats` windows on
+    `date.today() - 30d`. On day 31 the fixtures aged out, the function
+    returned None, and four tests died subscripting it. A hardcoded fixture
+    date feeding a ROLLING window is a time bomb with a known fuse length.
+    """
+
+    def test_the_fixture_lands_inside_the_real_window(self):
+        """Derived from the function's OWN default, not a copied 30."""
+        import inspect
+        from datetime import date, timedelta
+        days = inspect.signature(pt.get_recent_stats).parameters["days"].default
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        assert _recent_day() > cutoff, (
+            f"fixture {_recent_day()} is outside the {days}-day window — "
+            "it will age out and take the file red with it")
+
+    def test_the_builder_carries_no_hardcoded_date(self):
+        """The time-bomb SHAPE, banned rather than the one instance fixed."""
+        import re, inspect
+        src = inspect.getsource(_t)
+        assert not re.search(r'=\s*"20\d\d-\d\d-\d\d"', src), (
+            "a literal date as the default re-arms the bomb")
+
+    def test_it_still_works_with_the_clock_far_in_the_future(self, monkeypatch):
+        """FORCE the condition rather than waiting for the calendar."""
+        import datetime as _dt
+        real = _dt.date
+
+        class _Future(_dt.date):
+            @classmethod
+            def today(cls):
+                return real(2027, 6, 1)
+
+        monkeypatch.setattr(_dt, "date", _Future)
+        s = pt.get_recent_stats(_log([_t(10)] * 3 + [_t(-5)] * 3))
+        assert s is not None, "the fixture must track the clock, not a literal"
+        assert s["total"]["wins"] == 3

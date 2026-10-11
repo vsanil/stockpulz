@@ -114,6 +114,35 @@ def _store_read(name: str):
     return b.read(name)
 
 
+def _store_read_strict(name: str):
+    """Read `name` from the table it LIVES in, and RAISE if the store is unreachable.
+
+    There are TWO ways to report a false clean here, and `check_pending_approvals`
+    walked into the second while deliberately dodging the first:
+
+        swallowing read -> an unreadable store reads as "nothing here". That is
+                           the false pass check_findings_awaiting shipped with,
+                           which is why these callers reach for read_strict.
+        WRONG TABLE     -> user-keyed files are ROWS in `user_records`;
+                           read_strict() queries `documents` and finds nothing.
+
+    🔴 The second one ran in production from 2026-09-14 to 2026-10-11:
+    `users.pending` printed "nobody waiting for approval" EVERY DAY while a real
+    person sat in the queue for 14 days — the exact failure the check was built
+    to prevent, by a check written to prevent it. Its tests could not catch it
+    because the fake backend implemented only `read_strict`, so the rows path
+    did not exist to be got wrong. A stub narrower than production certifies bugs.
+
+    The rows path is strict too: `read_all_users` goes through `_read_with_retry`,
+    which raises once attempts are exhausted rather than returning None.
+    """
+    from config_manager import USER_KEYED_FILES
+    b = _store()
+    if name in USER_KEYED_FILES and b.supports_rows():
+        return b.read_all_users(name)
+    return b.read_strict(name)
+
+
 def _snapshot() -> dict:
     """Capture the stores the mutating checks touch, from the LIVE backend."""
     snap = {}
@@ -1078,7 +1107,7 @@ def check_findings_awaiting() -> None:
         # success. Caught by running this check for real, not by its tests.
         # read_strict raises on a transport error and returns None only when
         # the file has genuinely never been written.
-        recs = get_storage_backend().read_strict(ENGINE_FINDINGS_FILE) or {}
+        recs = _store_read_strict(ENGINE_FINDINGS_FILE) or {}
     except Exception as exc:
         _check("findings.awaiting", True,
                f"NOT VERIFIED this run — store unreadable ({type(exc).__name__})")
@@ -1133,7 +1162,7 @@ def check_pending_approvals() -> None:
         # genuinely never been written.
         from config_manager import PENDING_USERS_FILE
         from storage import get_storage_backend
-        raw = get_storage_backend().read_strict(PENDING_USERS_FILE) or {}
+        raw = _store_read_strict(PENDING_USERS_FILE) or {}
     except Exception as exc:
         _check("users.pending", True,
                f"NOT VERIFIED this run — store unreadable ({type(exc).__name__})")

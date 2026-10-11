@@ -16,17 +16,49 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 CAN = ROOT / "scripts" / "canary.py"
 
 
-def _canary(monkeypatch, payload):
+def _canary(monkeypatch, payload, rows=True):
+    """Drive the check against a fake backend that models BOTH tables.
+
+    🔴 The original fake implemented ONLY `read_strict`, so the rows path did
+    not exist to be got wrong — and the check read the wrong table in
+    production for a month while every test here passed. `pending_users.json`
+    is USER-KEYED, so on a row backend it lives in `user_records` and
+    `read_strict` (which queries `documents`) finds nothing.
+
+    With `rows=True` the payload is in the ROWS table and `documents` is EMPTY,
+    which is the exact production shape. A stub narrower than production
+    certifies bugs.
+    """
     spec = importlib.util.spec_from_file_location("can_p", CAN)
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
     seen = []
     monkeypatch.setattr(m, "_check", lambda n, ok, d="", **k: seen.append((n, ok, d)))
 
     class _B:
-        def read_strict(self, _f):
+        def supports_rows(self):
+            return rows
+
+        def read_all_users(self, _f):          # the `user_records` table
+            if not rows:
+                raise AssertionError("read_all_users called on a blob backend")
             if isinstance(payload, Exception):
                 raise payload
             return payload
+
+        def read_strict(self, _f):             # the `documents` table, STRICT
+            if rows:
+                return None                    # user-keyed data is NOT here
+            if isinstance(payload, Exception):
+                raise payload
+            return payload
+
+        def read(self, _f):                    # the SWALLOWING variant
+            # Production's read() returns None on a transport error instead of
+            # raising. Modelled so a caller that drops back to it is caught:
+            # without this the swallowing mutation is unreachable in a test.
+            if isinstance(payload, Exception):
+                return None
+            return None if rows else payload
 
     import storage
     monkeypatch.setattr(storage, "get_storage_backend", lambda: _B())
@@ -143,3 +175,87 @@ class TestTheTrapsItAvoids:
         m, seen = _canary(monkeypatch, {"1": {"username": "x"}})
         m.check_pending_approvals()
         assert "1 person" in seen[0][2]
+
+
+class TestItReadsTheTableTheDataLivesIn:
+    """🔴 THE BUG THIS FILE MISSED FOR A MONTH.
+
+    `users.pending` printed "nobody waiting for approval" every day from
+    2026-09-14 while a real person sat in the queue for 14 days. The check
+    deliberately used `read_strict` to avoid a swallowing read reporting a
+    false clean — and `read_strict` queries `documents`, while
+    `pending_users.json` is user-keyed and lives as ROWS in `user_records`.
+    One false clean traded for another.
+    """
+
+    def test_a_person_waiting_in_ROWS_is_reported(self, monkeypatch):
+        m, seen = _canary(monkeypatch, {"42": _rec(14, first_name="Waiting")})
+        m.check_pending_approvals()
+        name, ok, detail = seen[-1]
+        assert name == "users.pending"
+        assert "nobody waiting" not in detail.lower(), (
+            "read the documents table and reported a clean queue while a real "
+            "person waited — the exact production failure")
+        assert "14" in detail, "the AGE is what makes it actionable"
+
+    def test_it_asks_user_records_not_documents(self, monkeypatch):
+        """Pin the ROUTING, not just the outcome."""
+        asked = []
+        spec = importlib.util.spec_from_file_location("can_r", CAN)
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        monkeypatch.setattr(m, "_check", lambda *a, **k: None)
+
+        class _B:
+            def supports_rows(self): return True
+            def read_all_users(self, f): asked.append(("rows", f)); return {}
+            def read_strict(self, f):    asked.append(("documents", f)); return None
+
+        import storage
+        monkeypatch.setattr(storage, "get_storage_backend", lambda: _B())
+        m.check_pending_approvals()
+        assert asked and asked[0][0] == "rows", f"queried {asked}"
+
+    def test_a_blob_backend_still_uses_the_documents_table(self, monkeypatch):
+        """On the Gist there are no rows — routing must not break the fallback."""
+        m, seen = _canary(monkeypatch, {"7": _rec(3, first_name="Gisty")}, rows=False)
+        m.check_pending_approvals()
+        assert "nobody waiting" not in seen[-1][2].lower()
+
+    def test_a_tombstone_still_does_not_count_as_waiting(self, monkeypatch):
+        """A removal writes an EMPTY record on a row backend, not a deletion."""
+        m, seen = _canary(monkeypatch, {"42": {}})
+        m.check_pending_approvals()
+        assert "nobody waiting" in seen[-1][2].lower()
+
+    def test_an_unreadable_store_is_still_NOT_VERIFIED(self, monkeypatch):
+        """The strictness the original was reaching for must survive the fix."""
+        m, seen = _canary(monkeypatch, RuntimeError("supabase down"))
+        m.check_pending_approvals()
+        name, ok, detail = seen[-1]
+        assert ok is True, "it must never fail — it would summon a healer"
+        assert "NOT VERIFIED" in detail, (
+            "an unreachable store must not read as a clean queue")
+
+    def test_an_unreadable_DOCUMENTS_store_is_also_NOT_VERIFIED(self, monkeypatch):
+        """The strict/swallowing distinction must hold on the blob path too.
+
+        Caught by mutation: with only a rows-mode test, swapping read_strict()
+        for the swallowing read() changed nothing observable, because the rows
+        branch never reaches it.
+        """
+        m, seen = _canary(monkeypatch, RuntimeError("gist down"), rows=False)
+        m.check_pending_approvals()
+        name, ok, detail = seen[-1]
+        assert ok is True
+        assert "NOT VERIFIED" in detail, (
+            "a swallowing read turns an unreachable store into a clean queue")
+
+    def test_the_findings_reminder_routes_the_same_way(self, monkeypatch):
+        """engine_findings_state.json is a DOCUMENT today, but the caller must
+        not hardcode that — routing by file type is what keeps it correct if it
+        ever becomes user-keyed."""
+        src = CAN.read_text()
+        i = src.index("def check_findings_awaiting")
+        body = src[i:src.index("\ndef ", i + 10)]
+        assert "_store_read_strict" in body
+        assert "get_storage_backend().read_strict" not in body
