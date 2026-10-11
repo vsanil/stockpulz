@@ -3287,3 +3287,70 @@ better: should a run that fell back to the Gist REFUSE TO TRADE rather than trad
 rollback copy?** A read-only fallback is defensible; a WRITING fallback silently forks the record
 the whole 3-month program depends on. Raised with the owner 2026-10-02; **not built, awaiting a
 decision.** Do not implement it unprompted.
+
+### 🔴 THE PENDING-APPROVAL REMINDER WAS BLIND FROM THE DAY IT SHIPPED (2026-10-11)
+
+A real person requested access and waited **14 days**. `/admin` showed them the
+whole time; `canary.check_pending_approvals` printed *"nobody waiting for
+approval"* every single day since it was added on 2026-09-14.
+
+    /admin   get_pending_users() -> _load_gist_file() -> reassembles ROWS   ✅ sees them
+    canary   get_storage_backend().read_strict()      -> `documents` table  ❌ empty
+
+**`pending_users.json` is USER-KEYED**, so on Supabase it lives as rows in
+`user_records`. `read_strict()` queries `documents` and finds nothing.
+
+🔑 **The irony is the lesson.** `read_strict` was chosen DELIBERATELY over
+`get_pending_users()` to avoid a swallowing read reporting a false clean — the
+bug `check_findings_awaiting` shipped with. **It dodged that false clean and
+walked straight into another one.** Avoiding one failure mode is not the same as
+being correct; name the failure you are avoiding AND the one you are choosing.
+This is the SECOND person to wait over a week — the check exists because of the
+first, and did not catch the second.
+
+🔴 **Its tests could not catch it, and that is the reusable half.** The fake
+backend implemented **only `read_strict`** — no `supports_rows`, no
+`read_all_users` — so the rows path *did not exist to be got wrong in a test*
+while being wrong in production for a month. *A stub narrower than production
+certifies bugs*, now for the fourth recorded time. The fake models BOTH tables
+now, and a straight revert to the production bug fails **7 tests** that
+previously all passed.
+⚠️ My own first fake then missed a mutation for the same reason — it had no
+`read()`, so the swallowing path was unreachable. **Model every method the
+caller might reach, not only the one it currently uses.**
+
+**`_store_read_strict(name)`** routes by file type like the existing
+`_store_read`, but keeps strictness: `read_all_users` goes through
+`_read_with_retry`, which RAISES once attempts are exhausted, so the rows path
+is strict too. Both strict callers route through it — `engine_findings_state.json`
+is a document today, but a caller must not hardcode that.
+🚨 **The reminder still must NEVER FAIL** (a canary failure summons a healer that
+cannot approve a user). Pinned, along with the tombstone filter: a removal on a
+row backend writes an EMPTY record, which must not read back as someone waiting.
+
+### 🔴 A HARDCODED FIXTURE DATE + A ROLLING WINDOW = A TIME BOMB WITH A KNOWN FUSE (2026-10-11)
+
+Found while running the suite before the commit above: **it was already RED on a
+clean tree**, and nothing in the repo had changed.
+
+    tests/test_win_rate_honesty_gate.py   _t(ret, day="2026-09-10")
+    performance_tracker.py:222            cutoff = date.today() - timedelta(days=30)
+
+On **day 31** the fixtures aged out of the window, `get_recent_stats` returned
+`None`, and four tests died on `TypeError: 'NoneType' object is not
+subscriptable`. CI was green on 10-04 at 24 days old. **The calendar moved; the
+code did not.**
+
+🔑 **Sixth occurrence of the clock class, and the rule was already written:**
+*stamp on the SAME clock the code reads, and FORCE the condition rather than
+waiting for the calendar to expose it.* `get_recent_stats` reads
+`date.today()`, so the fixture does too — an `et_today()` stamp here would BE
+the mismatch, not the fix.
+🚨 **Why it mattered more than a red file: this suite is self_heal's merge gate.**
+A red `main` silently downgrades every autonomous fix to "pushed to branch
+(tests red)" — the third time a dead gate has gone unnoticed (Aug 24 missing
+RUNNER, Sep 13 missing DEPENDENCY, this one a missing CALENDAR).
+🔎 **The shape to grep for, not the instance to patch**: a literal date in a test
+fixture feeding code that filters on `today - N`. Guards ban the shape, derive
+the window from the function's OWN default rather than a copied `30`, and drive
+the clock to 2027 instead of waiting for it. Verified failing against the literal.
