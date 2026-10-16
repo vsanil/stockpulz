@@ -47,6 +47,78 @@ shared directory makes them clobber each other. Keep one directory per project s
 `MEMORY.md` is the index loaded every session — keep it under ~24 KB or entries at the
 bottom are silently truncated and stop existing.
 
+## 1b. Working across BOTH machines (memory that syncs itself)
+
+§1 restores a one-time SNAPSHOT. If you intend to move back and forth, that is not
+enough — update memory on one machine and the other is stale, and **a stale index that
+contradicts the files it points at is worse than no memory at all.** That failure is
+already on this project's record.
+
+**Fix: make the in-repo copy the LIVE location**, so git syncs memory like everything else.
+One source of truth, no copy step, nothing to remember.
+
+🚨 **TWO EDITS YOU MUST MAKE BY HAND.** `.claude/settings.json` is sandbox-protected —
+anything in it executes on every tool call — so Claude cannot write it for you.
+
+**(a) Replace the whole `hooks` block in `.claude/settings.json`** and add the memory
+directory. The `permissions` block below is unchanged; keep whatever yours already has:
+
+```json
+{
+  "autoMemoryDirectory": "docs/claude-memory",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command",
+            "command": "python3 scripts/claude_hook.py || python scripts/claude_hook.py" }
+        ]
+      }
+    ]
+  },
+  "permissions": { "allow": [ "...keep yours..." ] }
+}
+```
+
+**(b) On the MAC, delete the `autoMemoryDirectory` line from
+`.claude/settings.local.json`.** Local settings OVERRIDE project settings, so if you skip
+this the Mac keeps writing to the old folder outside the repo while Windows writes
+in-repo — the exact divergence this is meant to end. Windows has no local settings file
+yet, so nothing to remove there.
+
+⚠️ **VERIFY IT TOOK, because the failure is silent.** After restarting Claude, ask it to
+save a memory, then check the file appeared under `docs/claude-memory/`. If it did not, the
+relative path was not accepted — use an absolute one (forward slashes on Windows):
+`C:/Users/<you>/dev/stock-agent/docs/claude-memory`.
+
+**The old folder** at `~/Documents/Claude/.claude-memory/stock-agent/` becomes dead once
+this works. Leave it as a backup for a week, then delete it so nobody edits the wrong copy.
+
+### The discipline that makes it reliable
+
+**Commit before you switch machines. Pull after.** That is the whole protocol. Memory is
+now part of the working tree, so an uncommitted memory change is an unsynced one.
+
+### What can never travel
+
+**Chat transcripts.** You cannot resume mid-conversation on the other machine — those live
+per-machine under `~/.claude/projects/`. What you resume is the PROJECT: `CLAUDE.md`, the
+memory files, `analysis/ENGINE_FINDINGS.md` and the open items. That apparatus exists
+precisely because a session starts with no history, which is why this works at all.
+
+**Secrets.** `.env` is moved by hand, once per machine (§2). After that it persists.
+
+### ⚠️ It publishes your working notes
+
+`docs/claude-memory/` is in a **PUBLIC** repository. All 14 files were scanned for
+credential-shaped content before the first commit — PATs, `sb_secret_`, `sk-ant-`, bearer
+literals, long hex, assigned secrets, Supabase URLs, gist ids — and matched **zero**. They
+are engineering notes of the same character as `CLAUDE.md`, which has always been public.
+If that ever stops being acceptable, the alternative is a private sync (Dropbox, OneDrive)
+pointed at by an absolute `autoMemoryDirectory` on each machine — more moving parts, same
+result.
+
 ## 2. Secrets — carry these by hand, never through git
 
 `.env` holds live credentials and is gitignored. **Copy it across directly** (AirDrop, a USB
