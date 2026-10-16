@@ -2,6 +2,11 @@
 
 > Kept per the workspace rule. `due · what · waiting on · resolves how`.
 > **Delete an item the moment it is done** — a stale list is worse than none.
+>
+> 💻 **NEW MACHINE? Read [`docs/HANDOFF.md`](docs/HANDOFF.md) FIRST.** The Claude memory
+> directory lives OUTSIDE this repo and git cannot carry it; a verbatim copy ships in
+> `docs/claude-memory/` and must be restored before the memory index means anything.
+> `.env` is gitignored and must be moved by hand — this repository is PUBLIC.
 
 | due | what | waiting on | resolves |
 |---|---|---|---|
