@@ -28,6 +28,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import warnings
 
@@ -191,7 +192,7 @@ var document = {
 function load() { __loads++; }
 function setInterval(f, ms) { __intervals.push({ fn: f, ms: ms }); }
 """
-        path = pathlib.Path(os.environ.get("TMPDIR", "/tmp"), "sp_poll_probe.js")
+        path = pathlib.Path(tempfile.gettempdir(), "sp_poll_probe.js")
         path.write_text(harness + self._snippet(client) + "\n" + script)
         out = subprocess.run(["node", str(path)], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr
@@ -298,7 +299,7 @@ function load() { __loads++; __ts.textContent = 'Updated'; }
 function setInterval(f, ms) { __intervals.push({ fn: f, ms: ms }); }
 function tick() { __intervals.forEach(function (i) { i.fn(); }); }
 """
-        path = pathlib.Path(os.environ.get("TMPDIR", "/tmp"), "sp_idle_probe.js")
+        path = pathlib.Path(tempfile.gettempdir(), "sp_idle_probe.js")
         path.write_text(harness + self._snippet(client) + "\n" + script)
         out = subprocess.run(["node", str(path)], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr

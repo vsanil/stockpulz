@@ -13,19 +13,28 @@ local caches. See *Secrets* below. **This repository is PUBLIC.**
 
 ## 1. Restore the Claude memory directory
 
+**The destination machine is WINDOWS.** Everything below is PowerShell. The code itself is
+portable — there are no POSIX-only imports anywhere in the repo, verified — so native
+Windows works. You do not need WSL, though see §3 if you want the shell helpers.
+
 The memory lives outside the repo, so git cannot carry it. Copy it into place:
 
-```bash
-mkdir -p ~/Documents/Claude/.claude-memory/stock-agent
-cp docs/claude-memory/*.md ~/Documents/Claude/.claude-memory/stock-agent/
+```powershell
+$mem = "$env:USERPROFILE\Documents\Claude\.claude-memory\stock-agent"
+New-Item -ItemType Directory -Force -Path $mem
+Copy-Item docs\claude-memory\*.md -Destination $mem
 ```
 
-Then point Claude at it in `.claude/settings.local.json` (this file is gitignored, so it
-will not exist on the new machine — create it):
+Then create `.claude\settings.local.json` in the repo — it is gitignored, so it will NOT
+exist on the new machine:
 
 ```json
-{ "autoMemoryDirectory": "/Users/<you>/Documents/Claude/.claude-memory/stock-agent" }
+{ "autoMemoryDirectory": "C:/Users/<you>/Documents/Claude/.claude-memory/stock-agent" }
 ```
+
+⚠️ **Use FORWARD slashes in that JSON value.** A Windows path with single backslashes is an
+invalid JSON escape and the file will fail to parse — silently, taking every other setting in
+it with it. Forward slashes work fine on Windows.
 
 ⚠️ One file was RENAMED for the trip: the memory directory contained a stray
 `CLAUDE.md` (an unindexed fragment, not referenced by `MEMORY.md`). Inside a repo that
@@ -65,14 +74,31 @@ empty and writing nothing.
 calls**, so approving one curl carrying a secret writes that secret to disk permanently. Do
 not commit it, and approve `-H "Authorization: Bearer $VAR"` rather than a literal token.
 
-## 3. Tooling on the new machine
+## 3. Tooling on the new machine (Windows)
 
-```bash
-pip install -r requirements.txt pytest     # pytest is NOT a runtime dep — install it explicitly
-python3 -m pytest tests/ -q                # expect ~2507 passed, 8 skipped
-python3 scripts/check_js.py                # after ANY admin-page or mini-app edit
-gh auth status                             # must show: account vsanil, Active account: true
+Install **Python 3.11**, **Node** (the JS checker shells out to it), **Git**, and the
+**GitHub CLI**. Then, from the repo root in PowerShell:
+
+```powershell
+pip install -r requirements.txt pytest   # pytest is NOT a runtime dep — install it explicitly
+python -m pytest tests/ -q               # expect ~2507 passed, 8 skipped
+python scripts\check_js.py               # after ANY admin-page or mini-app edit — needs node
+gh auth status                           # must show: account vsanil, Active account: true
 ```
+
+⚠️ **`python`, not `python3`.** The `python3` alias does not exist on a normal Windows
+install and will open the Microsoft Store instead of failing usefully.
+
+**What does NOT work natively**, and does not need to: `scripts/precheck.sh` and
+`scripts/dev.sh` are bash. Run them under **Git Bash** (ships with Git for Windows) or WSL if
+you want them. Nothing in the daily loop depends on them — the real work runs on GitHub
+Actions and Render, which are Linux regardless of your laptop.
+
+**Line endings are pinned.** `.gitattributes` forces LF for all text, because this repo is
+full of source SCANS — guards asserting on exact markup, declarations and workflow text —
+plus a node pass over the JS. Without it a Windows checkout gets CRLF and a test can fail on
+your machine while passing on CI, for an invisible reason. A fresh clone gets this right
+automatically; if you cloned BEFORE this commit, run `git add --renormalize .` once.
 
 🚫 **Never push as `vsanil_costco`** (the office account). `gh` hands git whichever account is
 ACTIVE and it has flipped on its own at least twice. Check before every push; the symptoms
@@ -80,14 +106,29 @@ never say "wrong account" — they say `Repository not found`, `denied to vsanil
 `403 admin rights`.
 
 Use this form for anything touching the network — the empty first value is load-bearing,
-because `credential.helper` is multi-valued and a bare `-c` would still try the keychain:
+because `credential.helper` is multi-valued and a bare `-c` would still try the Windows
+Credential Manager:
 
-```bash
+```powershell
 git -c credential.helper= -c credential.helper='!gh auth git-credential' push origin main
 ```
 
-⚠️ `gh` fails inside the Bash sandbox because `~/.config/gh` is denied — that reads as "gh
-unavailable". Re-run with the sandbox off.
+### Mac-only notes in CLAUDE.md that NO LONGER APPLY
+
+`CLAUDE.md` is five months of history written on a Mac. These entries are about that machine,
+not about the project — do not chase them on Windows:
+
+- **"yfinance fails TLS on this Mac (curl_cffi)"** — a TLS-intercepting proxy on the old
+  laptop. A local `DEAD` row in `input_audit` meant nothing there. On Windows, re-measure
+  before assuming either way; CI remains the authority.
+- **The macOS Seatbelt sandbox** and its deny rules (`~/.ssh`, `~/.config/gh`, `.env`) — a
+  Claude Code feature on that machine. `gh` failing "because the sandbox denies
+  `~/.config/gh`" is not a thing here; on Windows the config lives in
+  `%APPDATA%\GitHub CLI\`.
+- **`preview_start` cannot run the app under `~/Documents`** — a macOS Files-and-Folders
+  permission issue, irrelevant here.
+- **BSD vs GNU tools** — several recorded one-liners use BSD `date -j -f` and `sed -i ''`,
+  which are macOS-only syntax. Rewrite rather than copy-paste.
 
 ## 4. Where the project actually stands
 

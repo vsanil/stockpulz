@@ -1,0 +1,16 @@
+# 🔴 Windows checkouts default to core.autocrlf=true, which rewrites every text
+# file to CRLF on the way out of git. This repo is full of source SCANS — guards
+# that assert on exact markup, on declarations, and on workflow text — plus a
+# node pass over the mini-app and admin JS. Normalising to LF everywhere keeps a
+# Windows working copy byte-identical to what CI and the Linux runners see, so a
+# test cannot pass on one machine and fail on another for an invisible reason.
+* text=auto eol=lf
+
+# Binary: never touch these.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pkl   binary
+*.zip   binary
