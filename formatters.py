@@ -12,6 +12,7 @@ import os
 from datetime import date, datetime
 import pytz
 from config_manager import shows_crypto as _shows_crypto
+from datefmt import strftime_portable
 
 # How many near-misses the MORNING MESSAGE shows. Deliberately smaller than
 # screener.NEAR_MISS_CAPTURE_N: we capture more for the evaluator's control
@@ -991,7 +992,7 @@ def format_eod_full_summary(
     import os
     et     = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
-    date_str = now_et.strftime("%a %b %-d")
+    date_str = strftime_portable(now_et, "%a %b %-d")
 
     stocks = picks.get("stocks", picks)
     crypto = picks.get("crypto", {})

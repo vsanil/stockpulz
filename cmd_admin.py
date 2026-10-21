@@ -19,6 +19,7 @@ from cmd_helpers import (
 )
 from cmd_settings import _send_settings_panel, _start_onboarding_wizard, _send_onboarding_complete, _prompt_for_param
 from llm_client import strip_fences
+from datefmt import strftime_portable
 
 
 def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
@@ -715,7 +716,7 @@ def _cmd_admin(text: str, original: str, chat_id: str) -> "str | None":
 
         for i, (mins, name, emoji, dt) in enumerate(upcoming[:4]):
             day_str = dt.strftime("%a") if dt.date() != now.date() else "Today"
-            time_str = dt.strftime("%-I:%M %p ET")
+            time_str = strftime_portable(dt, "%-I:%M %p ET")
             if mins < 60:
                 eta = f"{mins}m"
             elif mins < 120:

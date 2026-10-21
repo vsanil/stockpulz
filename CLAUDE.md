@@ -3359,3 +3359,26 @@ RUNNER, Sep 13 missing DEPENDENCY, this one a missing CALENDAR).
 fixture feeding code that filters on `today - N`. Guards ban the shape, derive
 the window from the function's OWN default rather than a copied `30`, and drive
 the clock to 2027 instead of waiting for it. Verified failing against the literal.
+
+### 🪟 Windows is now the primary dev machine — two Linux-only assumptions broke the suite (2026-10-21)
+
+First full run on the Windows laptop: **2498 passed, 9 failed, plus 2 collection errors** — all
+Windows-only, production (Linux) unaffected, CI green throughout. Three causes:
+
+- **`strftime("%-d")` / `"%-I"` are glibc extensions and RAISE on Windows** (`ValueError: Invalid
+  format string`). Six sites used them — the morning market-closed line, the EOD summary date,
+  earnings warnings, the watchdog alert, an admin command and the mini-app status.
+  **`datefmt.strftime_portable(dt, fmt)` is now the ONE way to build a no-leading-zero date**: it
+  resolves `%-X` itself and hands the rest to native `strftime`, so Linux output is byte-identical.
+  Guard: `tests/test_datefmt.py` — an AST scan (not text: the tests contain prose like "a 4%-ATR
+  name") that fails on any `%-` in a `strftime` call or f-string spec; mutation-verified by putting
+  one old site back. **Rule: never write `%-d`/`%-I` — call `strftime_portable`.**
+- **Windows Python defaults to `cp1252`, not UTF-8.** `Path.read_text()` with no encoding died
+  collecting two test files, and `check_js.py` crashed printing ✅ AFTER passing. Fixed at the
+  machine: **`PYTHONUTF8=1` is set as a user environment variable.** On a fresh Windows box, set it
+  before believing any local failure.
+- **A Windows path spliced into generated Python source** (`C:\Users` → `\U` escape) — use
+  `.as_posix()` whenever a path becomes code.
+
+Local setup that works: Python 3.11 at `%LOCALAPPDATA%\Programs\Python\Python311` (CI's version),
+deps in a gitignored **`.venv`**, run as `.venv\Scripts\python.exe -m pytest tests/ -q`.

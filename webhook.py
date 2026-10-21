@@ -36,6 +36,7 @@ if _sentry_dsn:
     )
 
 from config_manager import get_config, get_allowed_users, et_today
+from datefmt import strftime_portable
 import formatters
 from telegram_notifier import handle_incoming_command, handle_callback_query, set_webhook, send_typing_action, typing_until_done, send_message
 
@@ -5049,7 +5050,7 @@ def miniapp_status():
                 mins = int((t - now).total_seconds() / 60)
                 if min_mins is None or mins < min_mins:
                     min_mins   = mins
-                    next_event = {"name": name, "time": t.strftime("%-I:%M %p ET"), "mins": mins}
+                    next_event = {"name": name, "time": strftime_portable(t, "%-I:%M %p ET"), "mins": mins}
                 break
 
     return jsonify({

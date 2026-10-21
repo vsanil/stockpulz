@@ -8,6 +8,7 @@ Returns a dict so the screener and analyzer can flag high-risk picks.
 import os
 import requests
 from datetime import date, timedelta
+from datefmt import strftime_portable
 
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 
@@ -54,7 +55,7 @@ def get_upcoming_earnings(tickers: list[str], days_ahead: int = 5) -> dict[str, 
             continue
         try:
             d = date.fromisoformat(dt)
-            result[sym] = d.strftime("%a %b %-d")   # e.g. "Thu May 1"
+            result[sym] = strftime_portable(d, "%a %b %-d")   # e.g. "Thu May 1"
         except ValueError:
             pass
 

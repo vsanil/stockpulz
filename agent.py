@@ -95,6 +95,7 @@ from formatters import (
 )
 from telegram_api import send_message, send_inline_keyboard, broadcast_all, send_photo
 from cache_layer import cache_get, cache_set, cache_delete
+from datefmt import strftime_portable
 
 ET        = pytz.timezone("America/New_York")
 DRY_RUN   = os.environ.get("DRY_RUN",   "false").lower() == "true"
@@ -713,7 +714,7 @@ def run_morning(config: dict, now_et: datetime):
 
     if is_weekend or is_holiday:
         _next_open = next_trading_day(now_et.date())
-        next_open_label = _next_open.strftime("%A, %b %-d")   # e.g. "Tuesday, May 27"
+        next_open_label = strftime_portable(_next_open, "%A, %b %-d")   # e.g. "Tuesday, May 27"
     else:
         next_open_label = ""
 
@@ -4341,7 +4342,7 @@ def run_watchdog():
         since = f"Last logged run: {last_run_et}" if last_run_et else "No run ever logged"
         print(f"[watchdog] ⚠️ Morning run NOT detected for {today}. {since}.")
         _alert(
-            f"⚠️ <b>Missed morning run</b> — picks may not have been sent today ({today.strftime('%b %-d')}).\n"
+            f"⚠️ <b>Missed morning run</b> — picks may not have been sent today ({strftime_portable(today, '%b %-d')}).\n"
             f"{since}\n\n"
             f"<i>Trigger manually: cron-job.org → StockPulz-morning → Run now\n"
             f"Or: https://stock-agent-enqx.onrender.com/trigger/morning?secret=CRON_SECRET&force=true</i>",

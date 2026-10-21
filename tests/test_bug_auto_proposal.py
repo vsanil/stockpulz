@@ -307,7 +307,9 @@ class TestSelfHealAcceptsAFinding:
     def test_both_prompt_branches_render(self, finding, tmp_path):
         import os
         import subprocess
-        py = self._py().replace("/tmp/prompt.txt", str(tmp_path / "p.txt"))
+        # as_posix(): the path is spliced into Python SOURCE, so a Windows
+        # backslash path ("C:\Users...") would parse as a \U unicode escape.
+        py = self._py().replace("/tmp/prompt.txt", (tmp_path / "p.txt").as_posix())
         env = dict(os.environ)
         for k in ("FINDING_ID", "FINDING_SUMMARY", "FINDING_CHANGE", "FINDING_FILES"):
             env.pop(k, None)

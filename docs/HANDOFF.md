@@ -96,6 +96,8 @@ gh auth status                           # must show: account vsanil, Active acc
 ⚠️ **`python`, not `python3`.** The `python3` alias does not exist on a normal Windows
 install and will open the Microsoft Store instead of failing usefully.
 
+**Two Windows gotchas, already handled (2026-10-21):** set `PYTHONUTF8=1` as a user environment variable (Windows Python defaults to cp1252 and some tests and scripts break), and never use `strftime("%-d")` — it is Linux-only; call `datefmt.strftime_portable`. See the matching CLAUDE.md entry.
+
 **What does NOT work natively**, and does not need to: `scripts/precheck.sh` and
 `scripts/dev.sh` are bash. Run them under **Git Bash** (ships with Git for Windows) or WSL if
 you want them. Nothing in the daily loop depends on them — the real work runs on GitHub
