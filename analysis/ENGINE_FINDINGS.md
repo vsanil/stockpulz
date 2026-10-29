@@ -1,6 +1,6 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-10-28 01:04 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-10-29 01:40 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 0 finding(s) needing a decision
 
@@ -28,9 +28,9 @@ _Nothing open. Every addressable finding has been resolved._
 
 ## Findings
 
-### [DECIDED] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=173)*
+### [DECIDED] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=175)*
 
-`entry_window/NVDA/2026-08-27` · **acknowledged**, open 61d
+`entry_window/NVDA/2026-08-27` · **acknowledged**, open 62d
 
 NVDA was bought 8.98% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -38,15 +38,15 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 173 observations breach (5.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NVDA filled 8.98% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 175 observations breach (5.7%).
 
 **You ruled: acknowledged.** No action is outstanding. For the record, the suggested fix was: HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
-### [DECIDED] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=173)*
+### [DECIDED] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=175)*
 
-`entry_window/AMZN/2026-08-28` · **acknowledged**, open 60d
+`entry_window/AMZN/2026-08-28` · **acknowledged**, open 61d
 
 AMZN was bought 4.0% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -54,15 +54,15 @@ AMZN was bought 4.0% above the price the morning message told people not to go p
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". AMZN filled 4.0% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 173 observations breach (5.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". AMZN filled 4.0% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 175 observations breach (5.7%).
 
 **You ruled: acknowledged.** No action is outstanding. For the record, the suggested fix was: HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
-### [DECIDED] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=173)*
+### [DECIDED] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=175)*
 
-`entry_window/NOW/2026-08-31` · **acknowledged**, open 57d
+`entry_window/NOW/2026-08-31` · **acknowledged**, open 58d
 
 NOW was bought 2.68% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -70,15 +70,15 @@ NOW was bought 2.68% above the price the morning message told people not to go p
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". NOW filled 2.68% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 173 observations breach (5.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". NOW filled 2.68% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 175 observations breach (5.7%).
 
 **You ruled: acknowledged.** No action is outstanding. For the record, the suggested fix was: HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
-### [DECIDED] [TECHNICAL BUG] MMED filled 5.74% outside the published entry window  *(n=173)*
+### [DECIDED] [TECHNICAL BUG] MMED filled 5.74% outside the published entry window  *(n=175)*
 
-`entry_window/MMED/2026-09-02` · **acknowledged**, open 56d
+`entry_window/MMED/2026-09-02` · **acknowledged**, open 57d
 
 MMED was bought 5.74% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -86,15 +86,15 @@ MMED was bought 5.74% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". MMED filled 5.74% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 173 observations breach (5.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". MMED filled 5.74% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 175 observations breach (5.7%).
 
 **You ruled: acknowledged.** No action is outstanding. For the record, the suggested fix was: HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
 </details>
 
-### [DECIDED] [TECHNICAL BUG] DOT filled 11.22% outside the published entry window  *(n=173)*
+### [DECIDED] [TECHNICAL BUG] DOT filled 11.22% outside the published entry window  *(n=175)*
 
-`entry_window/DOT/2026-09-08` · **acknowledged**, open 50d
+`entry_window/DOT/2026-09-08` · **acknowledged**, open 51d
 
 DOT was bought 11.22% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -102,7 +102,7 @@ DOT was bought 11.22% above the price the morning message told people not to go 
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** The morning message promises "enter within X% — skip if above". DOT filled 11.22% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 173 observations breach (5.8%).
+**Evidence:** The morning message promises "enter within X% — skip if above". DOT filled 11.22% above, so a user who OBEYED the instruction would have skipped a pick the bot bought. 10 of 175 observations breach (5.7%).
 
 **You ruled: acknowledged.** No action is outstanding. For the record, the suggested fix was: HISTORICAL — acknowledge it; it cannot be un-made. This fill predates 2026-09-15, when the bot began both OBEYING the window (synthetic_user._entry_breach skips an out-of-window pick, and records the skip so the metric cannot go quiet) and buying punctually at 08:00 ET. Before that it bought 4-6 h late, so this fill measured its own execution lag as much as the engine's levels. Do NOT widen formatters.entry_window_pct 'to match measured reality' — proposed, investigated and rejected 2026-09-13: it would legitimise the bad fill and weaken a published promise.
 
@@ -110,7 +110,7 @@ DOT was bought 11.22% above the price the morning message told people not to go 
 
 ### [DECIDED] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **acknowledged**, open 66d
+`integrity/638eb7bc69ed` · **acknowledged**, open 67d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -128,7 +128,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [DECIDED] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **acknowledged**, open 66d
+`integrity/425fd0b45bd0` · **acknowledged**, open 67d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -148,9 +148,9 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ## Metrics (ongoing — never 'complete')
 
-### [MEASURE] [METRIC] Stop distance distribution  *(n=199)*
+### [MEASURE] [METRIC] Stop distance distribution  *(n=201)*
 
-**Evidence:** median 5.05% across 199 positions; 0 below the 3.0% threshold.
+**Evidence:** median 5.05% across 201 positions; 0 below the 3.0% threshold.
 
 **Fix:** Context for the geometry metric — no action on its own.
 
@@ -166,20 +166,20 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 **Fix:** No action while R:R stays near 1.9:1. If it drifts materially below, the stops are tightening relative to targets and will manufacture stop-outs — route any change through scripts/backtest_compare.py first.
 
-### [MEASURE] [METRIC] Synthetic trader's book vs its SPY twin (identical cash flows)  *(n=26)*
+### [MEASURE] [METRIC] Synthetic trader's book vs its SPY twin (identical cash flows)  *(n=27)*
 
 The bot's simulated $10k book, traded the way a sized, rule-obeying user would, compared with putting the same dollars into SPY on the same days.
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** bot $9,340.03 (-6.60%) vs SPY twin $9,952.31 (-0.48%) on identical cash flows since 2026-09-20 · 26 trading day(s) · alpha -6.12 pts · max drawdown bot 10.09% / twin 1.81% · 9 buys, 1 sells · only 26 trading day(s) — directional, not conclusive
+**Evidence:** bot $9,416.37 (-5.84%) vs SPY twin $9,993.88 (-0.06%) on identical cash flows since 2026-09-20 · 27 trading day(s) · alpha -5.78 pts · max drawdown bot 10.09% / twin 1.81% · 9 buys, 1 sells · only 27 trading day(s) — directional, not conclusive
 
 **Fix:** Nothing to change from this alone. A strategy earns a change through the tournament (Phase 2), then propose → approve on /admin — never from one book's curve.
 
 </details>
 
-### [MEASURE] [METRIC] Pick ledger has cleared the honesty gate  *(n=336)*
+### [MEASURE] [METRIC] Pick ledger has cleared the honesty gate  *(n=358)*
 
-**Evidence:** 336 matured picks (gate 30).
+**Evidence:** 358 matured picks (gate 30).
 
 **Fix:** Run scripts/evaluate_picks.py and read the picked-vs-control edge — the first evidence that can speak to SELECTION quality.
