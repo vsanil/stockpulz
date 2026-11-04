@@ -129,6 +129,21 @@ class TestItDoesNotCryWolf:
         canary.check_silent_failures()
         assert _verdict(canary)[0]
 
+    def test_a_per_ticker_news_fetch_outage_is_tolerated(self, canary, monkeypatch):
+        """🔴 2026-11-04: Yahoo Finance's own API was down for a moment and
+        news_check's per-ticker loop caught it and moved on to the next
+        ticker — correct per-feature degradation, same as the earnings
+        checker's "Finnhub call failed ... Skipping earnings check". The
+        canary flagged it anyway because the log line lacked the
+        "(non-critical)" marker every other swallowed per-item failure in
+        agent.py carries. Fixed at the source, not by loosening the check."""
+        _wire(canary, monkeypatch,
+              "[agent] Running position news check...\n"
+              "[agent] news_check: news fetch failed for PPL (non-critical): "
+              "*** YAHOO! FINANCE IS CURRENTLY DOWN! ***")
+        canary.check_silent_failures()
+        assert _verdict(canary)[0]
+
     def test_a_tolerated_traceback_two_lines_up_is_honoured(self, canary, monkeypatch):
         """A Traceback's explanatory print comes BEFORE it, so the tolerance
         window has to look back, not just at the matching line."""
