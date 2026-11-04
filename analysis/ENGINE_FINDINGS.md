@@ -1,6 +1,6 @@
 # Engine findings — the standing agenda
 
-*Regenerated 2026-11-03 03:24 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
+*Regenerated 2026-11-04 02:04 UTC by `scripts/analyze_engine.py`. Read this at the START of a session and work the open findings.*
 
 ## Open: 0 finding(s) needing a decision
 
@@ -30,7 +30,7 @@ _Nothing open. Every addressable finding has been resolved._
 
 ### [DECIDED] [TECHNICAL BUG] NVDA filled 8.98% outside the published entry window  *(n=183)*
 
-`entry_window/NVDA/2026-08-27` · **acknowledged**, open 67d
+`entry_window/NVDA/2026-08-27` · **acknowledged**, open 68d
 
 NVDA was bought 8.98% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -46,7 +46,7 @@ NVDA was bought 8.98% above the price the morning message told people not to go 
 
 ### [DECIDED] [TECHNICAL BUG] AMZN filled 4.0% outside the published entry window  *(n=183)*
 
-`entry_window/AMZN/2026-08-28` · **acknowledged**, open 66d
+`entry_window/AMZN/2026-08-28` · **acknowledged**, open 67d
 
 AMZN was bought 4.0% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -62,7 +62,7 @@ AMZN was bought 4.0% above the price the morning message told people not to go p
 
 ### [DECIDED] [TECHNICAL BUG] NOW filled 2.68% outside the published entry window  *(n=183)*
 
-`entry_window/NOW/2026-08-31` · **acknowledged**, open 63d
+`entry_window/NOW/2026-08-31` · **acknowledged**, open 64d
 
 NOW was bought 2.68% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -78,7 +78,7 @@ NOW was bought 2.68% above the price the morning message told people not to go p
 
 ### [DECIDED] [TECHNICAL BUG] MMED filled 5.74% outside the published entry window  *(n=183)*
 
-`entry_window/MMED/2026-09-02` · **acknowledged**, open 62d
+`entry_window/MMED/2026-09-02` · **acknowledged**, open 63d
 
 MMED was bought 5.74% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -94,7 +94,7 @@ MMED was bought 5.74% above the price the morning message told people not to go 
 
 ### [DECIDED] [TECHNICAL BUG] DOT filled 11.22% outside the published entry window  *(n=183)*
 
-`entry_window/DOT/2026-09-08` · **acknowledged**, open 56d
+`entry_window/DOT/2026-09-08` · **acknowledged**, open 57d
 
 DOT was bought 11.22% above the price the morning message told people not to go past, so anyone who followed that instruction would have skipped a pick the bot itself took.
 
@@ -110,7 +110,7 @@ DOT was bought 11.22% above the price the morning message told people not to go 
 
 ### [DECIDED] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/638eb7bc69ed` · **acknowledged**, open 72d
+`integrity/638eb7bc69ed` · **acknowledged**, open 73d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -128,7 +128,7 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 ### [DECIDED] [TECHNICAL BUG] levels.target_below_entry on AMBA (historical)
 
-`integrity/425fd0b45bd0` · **acknowledged**, open 72d
+`integrity/425fd0b45bd0` · **acknowledged**, open 73d
 
 > Closed trades from 2026-08-03 — cannot be fixed retroactively. The GENERATOR gap is now closed: ai_analyzer._validate_and_clean_picks drops any pick whose target <= entry or stop >= entry before delivery (guard: TestUnwinnablePicksAreRejected, verified failing pre-fix). This shape can no longer ship.
 
@@ -166,20 +166,20 @@ A AMBA position has levels that cannot work: the trade is already closed, so thi
 
 **Fix:** No action while R:R stays near 1.9:1. If it drifts materially below, the stops are tightening relative to targets and will manufacture stop-outs — route any change through scripts/backtest_compare.py first.
 
-### [MEASURE] [METRIC] Synthetic trader's book vs its SPY twin (identical cash flows)  *(n=30)*
+### [MEASURE] [METRIC] Synthetic trader's book vs its SPY twin (identical cash flows)  *(n=31)*
 
 The bot's simulated $10k book, traded the way a sized, rule-obeying user would, compared with putting the same dollars into SPY on the same days.
 
 <details><summary>Technical detail</summary>
 
-**Evidence:** bot $9,259.98 (-7.40%) vs SPY twin $9,864.25 (-1.36%) on identical cash flows since 2026-09-20 · 30 trading day(s) · alpha -6.04 pts · max drawdown bot 10.09% / twin 2.2% · 9 buys, 1 sells
+**Evidence:** bot $9,114.52 (-8.85%) vs SPY twin $9,837.24 (-1.63%) on identical cash flows since 2026-09-20 · 31 trading day(s) · alpha -7.22 pts · max drawdown bot 10.65% / twin 2.47% · 9 buys, 1 sells
 
 **Fix:** Nothing to change from this alone. A strategy earns a change through the tournament (Phase 2), then propose → approve on /admin — never from one book's curve.
 
 </details>
 
-### [MEASURE] [METRIC] Pick ledger has cleared the honesty gate  *(n=409)*
+### [MEASURE] [METRIC] Pick ledger has cleared the honesty gate  *(n=424)*
 
-**Evidence:** 409 matured picks (gate 30).
+**Evidence:** 424 matured picks (gate 30).
 
 **Fix:** Run scripts/evaluate_picks.py and read the picked-vs-control edge — the first evidence that can speak to SELECTION quality.
