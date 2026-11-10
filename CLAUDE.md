@@ -3390,3 +3390,9 @@ deps in a gitignored **`.venv`**, run as `.venv\Scripts\python.exe -m pytest tes
   49 and leaves stdin unread, so the fallback still gets the payload. Merging two hooks into one script
   must not let the first match swallow the second — a commit that also greps gets BOTH notes.
   Guard: `tests/test_claude_hook.py`, both mutations (early return, dropped fallback) verified failing.
+
+- **Reading the tournament's equity curves: dispatch `show_standings.yml`** (manual, read-only, no
+  Telegram token). It prints `sim_portfolio.standings` — the same rows as the /admin card — plus the
+  synthetic user's book as the LIVE engine, from the store production writes. Do NOT run
+  `scripts/show_standings.py` locally and report it: a laptop resolves to the Gist, whose only
+  book is the 2026-10-01 Supabase-fallback anomaly ($24,561, 30 positions).

@@ -1,0 +1,31 @@
+# The tournament's equity curves, from the LIVE store.
+#
+# READ-ONLY: no sends, no writes, no Telegram. Same family as show_perf_bar.yml —
+# a manual diagnostic, not a monitor, so there is no schedule.
+#
+# It runs on CI because a laptop has no SUPABASE_* and therefore resolves to the
+# GIST, the rollback copy. The script prints the backend it resolved to.
+name: Show Tournament Standings
+
+on:
+  workflow_dispatch:
+
+jobs:
+  standings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Print the standings from the LIVE store (read-only)
+        env:
+          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
+          GH_GIST_TOKEN: ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID:       ${{ secrets.GIST_ID }}
+          # Deliberately NOT passing TELEGRAM_BOT_TOKEN: this must not be able to send.
+        run: python3 scripts/show_standings.py
