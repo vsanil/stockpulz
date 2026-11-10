@@ -3382,3 +3382,11 @@ Windows-only, production (Linux) unaffected, CI green throughout. Three causes:
 
 Local setup that works: Python 3.11 at `%LOCALAPPDATA%\Programs\Python\Python311` (CI's version),
 deps in a gitignored **`.venv`**, run as `.venv\Scripts\python.exe -m pytest tests/ -q`.
+
+- **The project's two PreToolUse hooks were DEAD on Windows until 2026-11-09** — inline bash calling
+  `python3`, which here is the Microsoft Store stub. Now ONE entry runs `scripts/claude_hook.py`
+  (`python3 … 2>/dev/null || python …`), matched on **`Bash|PowerShell`** because commits often go
+  through the PowerShell tool on this machine. Measured, not assumed: the stub prints to STDERR, exits
+  49 and leaves stdin unread, so the fallback still gets the payload. Merging two hooks into one script
+  must not let the first match swallow the second — a commit that also greps gets BOTH notes.
+  Guard: `tests/test_claude_hook.py`, both mutations (early return, dropped fallback) verified failing.

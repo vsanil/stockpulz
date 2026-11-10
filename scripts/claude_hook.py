@@ -14,10 +14,17 @@ CLAUDE.md honest.
 is sandbox-protected (anything there runs on every tool call), and `scripts/` is
 tracked by git, so this travels between machines like the rest of the project.
 
-Invoked as `python3 ... || python ...` so one of the two interpreter names
-resolves on either platform. The fallback is safe: a missing interpreter fails
-to LAUNCH and therefore consumes no stdin, so the second attempt still receives
-the payload.
+Invoked as `python3 ... 2>/dev/null || python ...` so one of the two
+interpreter names resolves on either platform. The fallback is safe, MEASURED
+on the Windows machine 2026-11-09 rather than assumed: there `python3` is the
+Microsoft Store alias stub, which DOES launch, prints "Python was not found"
+to STDERR (hence the 2>/dev/null), exits 49, and leaves stdin unread — so the
+real `python` still receives the payload. On the Mac, `python` is usually
+absent and `python3` is real, so the first attempt wins.
+
+The matcher covers PowerShell as well as Bash: on Windows a commit or a search
+often goes through the PowerShell tool, and its payload carries the same
+`tool_input.command`.
 
 Reads the hook JSON on stdin, writes at most one hookSpecificOutput to stdout.
 It must NEVER raise — a crashing hook is worse than a missing one, because it
@@ -75,18 +82,22 @@ def main():
         return
 
     root = pathlib.Path(__file__).resolve().parent.parent
+    notes = []
 
     # 1. Searching raw files when a knowledge graph is already built.
     if any(t in cmd for t in SEARCH_TOOLS):
         if (root / "graphify-out" / "graph.json").exists():
-            _emit(GRAPHIFY_NOTE)
-            return
+            notes.append(GRAPHIFY_NOTE)
 
-    # 2. Committing code without the docs that explain it.
+    # 2. Committing code without the docs that explain it. Checked even when
+    #    note 1 fired: these used to be two separate hooks, and a commit
+    #    command that also contains `grep` must not lose the docs reminder.
     if "git commit" in cmd and "CLAUDE.md" not in cmd:
         if "CLAUDE.md" not in _staged_files(root):
-            _emit(DOCS_NOTE)
-            return
+            notes.append(DOCS_NOTE)
+
+    if notes:
+        _emit("\n\n".join(notes))
 
 
 if __name__ == "__main__":
