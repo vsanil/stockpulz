@@ -53,6 +53,16 @@ OWNER_ONLY_CHECKS: frozenset[str] = frozenset({
     # fix — and self-heal's only available "fix" would be to loosen the
     # threshold, i.e. delete the signal. Same argument as cron.all_modes_firing.
     "morning.cache_hit_rate",
+
+    # The cause is organic data growth in a Gist file approaching GitHub's
+    # ~1 MB per-file API limit. Self-heal's only in-reach "fix" would be to
+    # raise the WARN threshold, i.e. delete the signal before the wall is hit
+    # — CLAUDE.md is explicit that this trip is EXPECTED and is "the signal to
+    # move the ledger to a row store", a deliberate, tested migration (like the
+    # Aug-19 Supabase migration: dry-run, verify, THEN switch), not something a
+    # single auto-merged patch should attempt against live pick data. Same
+    # argument as cron.all_modes_firing / morning.cache_hit_rate.
+    "storage.headroom",
 })
 
 
