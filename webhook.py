@@ -3713,7 +3713,12 @@ def miniapp_news(ticker: str):
                 items.append({"title": title, "url": url, "published": pub, "source": src})
         return jsonify({"ticker": ticker, "news": items})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # News is decorative and yfinance/Yahoo outages are transient (e.g. "Yahoo!
+        # Finance is currently down") — degrade to an empty list like the sparkline
+        # endpoint does, rather than a 500. The mini-app already renders this as
+        # "No recent news found." either way.
+        print(f"[miniapp_news] yfinance fetch failed for {ticker}: {e}")
+        return jsonify({"ticker": ticker, "news": [], "error": str(e)}), 200
 
 
 @app.route("/api/miniapp/add_alert", methods=["POST"])
