@@ -8,9 +8,13 @@ has never been measured: what Claude's SELECTION adds over simply taking the
 screener's top N. With the live arm on the model and the others off it, that
 difference is the experiment rather than an assumption.
 
-🔴 MEASUREMENT, NEVER INPUT. Nothing here may be imported by the pick engine.
-An arm exists to be compared against production; wiring it back into production
-is the contamination `evaluate_picks` was built to avoid.
+🔴 MEASUREMENT, NEVER INPUT — with ONE dated, owner-approved exception.
+An arm exists to be compared against production; wiring an arm back in without
+a decision is the contamination `evaluate_picks` was built to avoid.
+✅ 2026-11-12: the PULLBACK arm won the tournament (finding
+`engine/promote-pullback-st`, approved on /admin), so `agent` now imports this
+module to build the morning run's short-term stock picks. That is the ONLY
+sanctioned production import; a test pins it to `agent.py` alone.
 
 WHAT AN ARM TRADES, stated plainly so no number is read for more than it is:
   * STOCKS ONLY. Crypto, ETFs and commodities come from separate screeners that
@@ -109,6 +113,7 @@ def _pick_from(cand: dict, long_term: bool) -> dict | None:
 
     pick = {
         "ticker": ticker,
+        "company": cand.get("company") or ticker,
         "entry_price": round(entry, 4),
         "stop_loss": stop,
         "target_price": target,

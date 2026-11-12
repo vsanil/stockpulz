@@ -20,7 +20,7 @@ from datetime import datetime, date, timedelta, timezone
 import pytz
 
 from config_manager import get_config, update_config, save_screener_cache
-from screener import run_screener
+from screener import run_screener, STRATEGIES
 from crypto_screener import run_crypto_screener
 
 ET = pytz.timezone("America/New_York")
@@ -125,6 +125,25 @@ def main() -> None:
     except Exception as exc:
         print(f"[prescreener] Could not load config ({exc}) — using defaults.")
 
+    # ── Pullback screen (short-term stock picks since 2026-11-12) ─────────────
+    # 🔴 Runs BEFORE the default screen on purpose: every run_screener() call
+    # publishes data_quality.json, and the canary grades fundamentals coverage
+    # from it. The default screen is the one that scores long-term fundamentals,
+    # so it must be the LAST writer. A failure here never blocks the default
+    # cache — the morning run screens pullback live instead.
+    pullback_results = None
+    try:
+        pullback_results = run_screener(
+            watchlist=config.get("watchlist", []),
+            excluded_sectors=config.get("excluded_sectors", []),
+            strategy=STRATEGIES["pullback"],
+        )
+        print(f"[prescreener] pullback: {len(pullback_results['short_term'])} ST candidates.")
+    except Exception as exc:
+        print(f"[prescreener] Pullback screener failed: {exc} — the morning run "
+              f"will screen pullback live.")
+        pullback_results = None
+
     # ── Stock screener ────────────────────────────────────────────────────────
     stock_results = {"short_term": [], "long_term": []}
     try:
@@ -151,7 +170,7 @@ def main() -> None:
     has_stocks = bool(stock_results.get("short_term") or stock_results.get("long_term"))
     if has_stocks:
         try:
-            save_screener_cache(stock_results, crypto_results)
+            save_screener_cache(stock_results, crypto_results, pullback_results)
             print("[prescreener] Cache saved to Gist. Morning run will load from cache.")
         except Exception as exc:
             print(f"[prescreener] Cache save failed: {exc}")

@@ -773,10 +773,18 @@ SCREENER_CACHE_MAX_AGE_HOURS = 10   # midnight ET → 7 AM ET = 7h; 10h gives bu
 SCREENER_CACHE_SCHEMA_VERSION = 2   # v2: LT quality gate + dynamic sector PE + vol guard
 
 
-def save_screener_cache(stock_results: dict, crypto_results: dict) -> None:
+def save_screener_cache(stock_results: dict, crypto_results: dict,
+                        pullback_results: dict | None = None) -> None:
     """
     Save pre-scored screener candidates from the midnight run.
     Stored as screener_cache.json in the Gist.
+
+    `pullback_results` is the PULLBACK-ranked screen. Since 2026-11-12 the
+    morning run's short-term stock picks come from it, not from Claude
+    (finding `engine/promote-pullback-st`). It is a separate screen because the
+    default ranking puts pullback setups low, so they are mostly absent from
+    `stocks`. Optional and additive: a cache without it still loads, and the
+    morning run then screens pullback live instead.
     """
     from datetime import datetime, timezone
     payload = {
@@ -785,6 +793,8 @@ def save_screener_cache(stock_results: dict, crypto_results: dict) -> None:
         "stocks":         stock_results,
         "crypto":         crypto_results,
     }
+    if pullback_results is not None:
+        payload["stocks_pullback"] = pullback_results
     _write_gist_file(SCREENER_CACHE_FILE, payload)
     print("[config_manager] Screener cache saved to Gist.")
 
