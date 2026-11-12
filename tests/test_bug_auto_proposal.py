@@ -119,7 +119,11 @@ class TestTheUnapprovedInvariantSurvives:
         """The other direction — a guard that never fires both ways is not a
         guard."""
         ae = _ae()
+        # `last_seen`: the nightly job DERIVED this finding before a human
+        # proposed a fix for it. A proposal on an id the job never derived is
+        # a different case and stays waiting (test_findings_approval).
         state = {"integrity/abc": {"status": "awaiting_approval",
+                                   "last_seen": "2026-09-20",
                                    "proposed_change": "something I planned"}}
         out = ae._apply_state([], state, "2026-09-21")
         assert out["integrity/abc"]["status"] == "resolved_UNAPPROVED"

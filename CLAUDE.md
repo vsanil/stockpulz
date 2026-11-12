@@ -3396,3 +3396,12 @@ deps in a gitignored **`.venv`**, run as `.venv\Scripts\python.exe -m pytest tes
   synthetic user's book as the LIVE engine, from the store production writes. Do NOT run
   `scripts/show_standings.py` locally and report it: a laptop resolves to the Gist, whose only
   book is the 2026-10-01 Supabase-fallback anomaly ($24,561, 30 positions).
+
+- **🔴 A HAND-WRITTEN proposal was accused of being built without consent on its FIRST night
+  (2026-11-12).** `analyze_engine._apply_state` marks any `awaiting_approval` record that is not in
+  tonight's derived set as `resolved_UNAPPROVED` — correct for a finding the job derived, wrong for
+  `engine/promote-pullback-st`, which `findings.py propose` wrote on an id no check produces. The
+  flag hid Approve/Decline on /admin while nothing had been built. Fix: the disappearance rule now
+  needs `last_seen`, which only the derived loop writes; a never-derived proposal stays waiting.
+  Guard: `TestTheInvariant` (2 new tests verified failing without the fix, one driving the real
+  `propose`). **A hand proposal still needs the owner's ruling to leave the card.**

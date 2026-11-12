@@ -267,6 +267,15 @@ def _apply_state(findings: list, state: dict, today: str) -> dict:
         # checkable one. `resolved_UNAPPROVED` is deliberately never cleared
         # automatically; it stays until a human looks at it.
         if rec.get("status") == "awaiting_approval":
+            # 🔴 Only a finding THIS JOB derived can "disappear". A proposal
+            # written by hand (`findings.py propose` on an id no check
+            # produces) was never in `seen` to begin with, and on 2026-11-12
+            # the pullback promotion was flagged "built WITHOUT your approval"
+            # the first night it existed — which hides Approve/Decline on
+            # /admin. `last_seen` is written only by the derived loop above,
+            # so its absence means "never derived": leave it waiting.
+            if not rec.get("last_seen"):
+                continue
             rec["status"] = "resolved_UNAPPROVED"
         else:
             rec["status"] = "resolved"

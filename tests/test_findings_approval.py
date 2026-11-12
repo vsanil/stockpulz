@@ -102,10 +102,42 @@ class TestTheInvariant:
         return _mod("ae_ap", "analyze_engine.py", tmp_path / "s.json")
 
     def test_disappearing_while_awaiting_consent_is_flagged(self, ae):
-        state = {"x/1": {"status": "awaiting_approval"}}
+        # `last_seen` marks a finding the job DERIVED on an earlier night.
+        state = {"x/1": {"status": "awaiting_approval", "last_seen": "2026-08-22"}}
         ae._apply_state([], state, "2026-08-23")
         assert state["x/1"]["status"] == "resolved_UNAPPROVED", \
             "an unapproved implementation went unrecorded"
+
+    def test_a_HAND_WRITTEN_proposal_is_not_accused(self, ae):
+        """2026-11-12: a proposal typed with `findings.py propose` on an id no
+        check derives was flagged 'built WITHOUT your approval' on its first
+        night — nothing had been built, and the flag hid Approve/Decline."""
+        state = {"engine/promote-pullback-st": {
+            "status": "awaiting_approval", "proposed_on": "2026-11-11",
+            "proposed_change": "x", "category": "engine"}}
+        ae._apply_state([], state, "2026-11-12")
+        rec = state["engine/promote-pullback-st"]
+        assert rec["status"] == "awaiting_approval"
+        assert "resolved_on" not in rec
+
+    def test_a_hand_written_proposal_survives_through_the_real_propose(self, ae, fw):
+        """Drive the REAL writer, not a hand-built dict — the fix depends on
+        `propose` never stamping `last_seen`. Uses the `fw` fixture, which
+        patches config_manager so nothing reaches the live store."""
+        assert fw.propose("engine/hand", "change", "a.py", "summary") == 0
+        state = {k: dict(v) for k, v in fw._store.items()}
+        assert "last_seen" not in state["engine/hand"]
+        ae._apply_state([], state, "2026-11-12")
+        assert state["engine/hand"]["status"] == "awaiting_approval"
+
+    def test_a_derived_finding_still_present_keeps_its_proposal(self, ae):
+        """Non-regression: a proposal on a finding the job still derives is
+        untouched by the disappearance rule."""
+        f = ae.Finding("x/1", "ACT", "t", "evidence", "fix in a.py",
+                       category="bug", plain="p")
+        state = {"x/1": {"status": "awaiting_approval", "last_seen": "2026-11-11"}}
+        ae._apply_state([f], state, "2026-11-12")
+        assert state["x/1"]["status"] == "awaiting_approval"
 
     def test_disappearing_AFTER_approval_resolves_normally(self, ae):
         state = {"x/1": {"status": "approved"}}
