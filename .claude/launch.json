@@ -9,6 +9,15 @@
       ],
       "port": 5050,
       "autoPort": true
+    },
+    {
+      "name": "stockpulz-windows",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "dev_server.py"
+      ],
+      "port": 5050,
+      "autoPort": true
     }
   ]
 }
