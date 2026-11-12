@@ -189,6 +189,34 @@ class TestNewsCheck:
         agent.run_news_check()
         assert seen == ["u1", "u2"], "collection aborted on the first bad user"
 
+    def test_a_tickers_fetch_failure_is_marked_non_critical_and_does_not_abort(
+            self, wired, monkeypatch, capsys):
+        """2026-11-04: Yahoo Finance was briefly down for one ticker. The
+        per-ticker try/except must keep scanning other tickers, and the log
+        line must carry "(non-critical)" — the repo-wide convention that
+        tells the silent-failures canary this is a tolerated degradation,
+        not a broken feature (same class as vix_check's and digest's
+        undetected breaks)."""
+        import yfinance
+
+        monkeypatch.setattr(agent, "get_user_config",
+                            lambda uid: {"watchlist": ["PPL", "AAPL"]})
+        monkeypatch.setattr(agent, "load_user_trade_log",
+                            lambda uid: {"open": [], "watchlist": []})
+
+        def fake_ticker(sym):
+            if sym == "PPL":
+                raise RuntimeError("*** YAHOO! FINANCE IS CURRENTLY DOWN! ***")
+            class _T:
+                news = []
+            return _T()
+        monkeypatch.setattr(yfinance, "Ticker", fake_ticker)
+
+        agent.run_news_check()
+        out = capsys.readouterr().out
+        assert "news fetch failed for PPL (non-critical)" in out
+        assert "AAPL" not in out.split("PPL")[0]  # PPL's failure didn't stop AAPL from being tried
+
 
 class TestPriceAlerts:
     def _wire(self, monkeypatch, positions, prices):

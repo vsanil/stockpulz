@@ -2389,7 +2389,7 @@ def run_news_check():
             if relevant:
                 ticker_news[sym] = relevant
         except Exception as exc:
-            print(f"[agent] news_check: news fetch failed for {sym}: {exc}")
+            print(f"[agent] news_check: news fetch failed for {sym} (non-critical): {exc}")
 
     if not ticker_news:
         print("[agent] news_check: no relevant news found.")
