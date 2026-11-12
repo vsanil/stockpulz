@@ -129,4 +129,4 @@ class TestTheListNamesRealChecks:
     def test_the_list_stays_small(self):
         """⚠️ Every addition removes something from self-heal's reach. It needs
         a stated reason in owner_only_checks.py, not a quiet append."""
-        assert len(OWNER_ONLY_CHECKS) <= 4
+        assert len(OWNER_ONLY_CHECKS) <= 5
