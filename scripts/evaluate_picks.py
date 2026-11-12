@@ -414,6 +414,13 @@ ENGINE_CHANGES = [
      "crypto_screener._simple_rsi divisor corrected to the period (Wilder's "
      "standard); it previously divided by the count of gains, inflating RSI on "
      "spiky downtrends and changing which coins cleared the 42-62 band"),
+    # The date is the FIRST MORNING the new rules can produce picks, not the day
+    # the code was written. If the merge lands later, move this to that morning.
+    ("2026-11-13", "stock",
+     "short-term stock picks now come from the tournament's pullback rules "
+     "(top 5 of the pullback screen, target +10.3%, volatility stop) instead of "
+     "Claude; long-term stocks and every other section are unchanged "
+     "(finding engine/promote-pullback-st)"),
 ]
 
 

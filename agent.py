@@ -86,7 +86,8 @@ from trade_logger import check_and_close_trades
 from price_alert_manager import check_all_alerts, add_alert
 from screener import run_screener
 from crypto_screener import run_crypto_screener
-from ai_analyzer import analyze_with_claude, personalize_picks_batch, generate_trade_debrief
+from ai_analyzer import (analyze_with_claude, personalize_picks_batch, generate_trade_debrief,
+                         _backfill_allocations)
 from position_sizer import apply_portfolio_sizing, portfolio_summary
 from price_checker import get_current_prices
 from formatters import (
@@ -196,6 +197,56 @@ MOCK_DATA = os.environ.get("MOCK_DATA", "false").lower() == "true"
 DEFAULT_MIN_CONVICTION = 3
 
 
+# ── Short-term stock picks: the PULLBACK rules, not Claude (2026-11-12) ───────
+# The tournament's pullback arm beat the live engine on the picks they disagreed
+# about (+20.8 pts, 95% CI +7.1 to +34.2, n=59) and on the equity curve
+# (+4.27% vs SPY-hold -1.89% and live -9.16%, 09-21 to 11-09). Promoted by the
+# owner via finding `engine/promote-pullback-st`. ONLY the short-term STOCK
+# section changed: Claude still picks long-term stocks, crypto, ETFs and
+# commodities. Logged in scripts/evaluate_picks.ENGINE_CHANGES.
+PROMOTED_ST_STRATEGY = "pullback"
+
+
+def _rule_based_st_picks(pullback_screen) -> tuple[list, list]:
+    """The pullback screen -> (short-term stock picks, short-term near-misses).
+
+    Built by the SAME rules the tournament measured (`arm_selector.select`: the
+    screen's own top N, target +10.3%, stop from the stock's volatility), so
+    production ships what earned the promotion rather than a re-implementation.
+    Adds only what the message and mini-app need to render it, and says plainly
+    that no AI chose it. A missing or broken screen yields ([], []) — the caller
+    decides what an empty section means.
+    """
+    if not isinstance(pullback_screen, dict):
+        return [], []
+    import arm_selector
+    from screener import STRATEGIES
+    sel = arm_selector.select(pullback_screen, STRATEGIES[PROMOTED_ST_STRATEGY])
+    picks = []
+    for p in sel["stocks"]["short_term"]:
+        name = p.get("company") or p["ticker"]
+        entry, stop = p.get("entry_price"), p.get("stop_loss")
+        stop_pct = (round((entry - stop) / entry * 100, 1)
+                    if entry and stop and entry > 0 else None)
+        rsi = (p.get("_screen") or {}).get("rsi")
+        rsi_txt = f" (RSI {rsi:.0f})" if isinstance(rsi, (int, float)) else ""
+        p.update({
+            "action": "BUY",
+            "theme": "pullback in uptrend",
+            "plain_english": (f"{name} pulled back toward support inside an uptrend. "
+                              f"Picked by fixed rules, not AI."),
+            "thesis": (f"Pullback setup inside an uptrend{rsi_txt}. Top-ranked by the "
+                       f"pullback score; target +10.3%"
+                       + (f", stop {stop_pct}% below entry." if stop_pct else ".")),
+            "strategy": PROMOTED_ST_STRATEGY,
+            "_rule_based": True,
+        })
+        picks.append(p)
+    near = (pullback_screen.get("near_misses") or {}).get("short_term") or []
+    return picks, list(near)
+
+
+
 # ── Conviction gate ───────────────────────────────────────────────────────────
 
 def _filter_by_conviction(picks: dict, min_conviction: int) -> dict:
@@ -205,7 +256,12 @@ def _filter_by_conviction(picks: dict, min_conviction: int) -> dict:
     Returns the filtered picks dict.
     """
     def _clean(lst: list) -> list:
-        return [p for p in lst if int(p.get("conviction") or 0) >= min_conviction]
+        # Rule-based pullback picks are EXEMPT: their stars are a score band, not
+        # a model's judgement, and the tournament that earned their promotion
+        # never filtered them. Gating them would ship something other than what
+        # was measured.
+        return [p for p in lst
+                if p.get("_rule_based") or int(p.get("conviction") or 0) >= min_conviction]
 
     result = dict(picks)   # shallow copy — preserve macro_context, etc.
 
@@ -728,6 +784,11 @@ def run_morning(config: dict, now_et: datetime):
                "<i>Crypto runs 24/7 — picks below if any signals found.</i>")
 
 
+    # Short-term stock picks come from the PULLBACK rules (see PROMOTED_ST_STRATEGY).
+    # `stock_day` is when this run is responsible for them at all.
+    pullback_screen = None
+    stock_day = (not MOCK_DATA) and (not is_weekend) and (not is_holiday)
+
     if MOCK_DATA:
         print("[agent] Using mock data — skipping live screeners.")
         stock_candidates  = MOCK_STOCK_CANDIDATES
@@ -824,6 +885,33 @@ def run_morning(config: dict, now_et: datetime):
                     print(f"[agent] Stock screener failed: {exc}")
                     _alert(f"⚠ Stock screener error: {exc}", admin_only=True)
 
+            # ── Pullback shortlist: short-term stock picks (2026-11-12) ───────
+            # From the overnight cache; if absent, screen it live where that is
+            # allowed. If neither works there are NO short-term stock picks
+            # today, said loudly — never a quiet fallback to Claude choosing,
+            # which would mix two engines into one track record.
+            pullback_screen = (cache or {}).get("stocks_pullback")
+            if not isinstance(pullback_screen, dict):
+                if _can_run_live_screener():
+                    print("[agent] No cached pullback shortlist — running the pullback screen live...")
+                    try:
+                        from screener import STRATEGIES
+                        pullback_screen = run_screener(
+                            watchlist=config.get("watchlist", []),
+                            excluded_sectors=config.get("excluded_sectors", []),
+                            strategy=STRATEGIES[PROMOTED_ST_STRATEGY],
+                        )
+                    except Exception as exc:
+                        print(f"[agent] Pullback screener failed: {exc}")
+                        pullback_screen = None
+                if not isinstance(pullback_screen, dict):
+                    _alert(
+                        "⚠️ <b>Pullback shortlist missing</b> — no short-term stock "
+                        "picks in this morning's brief. Re-run the prescreener, then "
+                        "/trigger/morning?force=true to recover.",
+                        admin_only=True,
+                    )
+
         # ── Crypto: use midnight cache if fresh, else run live ────────────────
         crypto_candidates = {"short_term": [], "long_term": []}
         if config.get("crypto_enabled", True):
@@ -843,7 +931,15 @@ def run_morning(config: dict, now_et: datetime):
         except Exception as exc:
             print(f"[agent] ETF screener failed (non-critical): {exc}")
 
-    has_stocks = bool(stock_candidates["short_term"] or stock_candidates["long_term"])
+    promoted_st, promoted_nm = (_rule_based_st_picks(pullback_screen)
+                                if stock_day else ([], []))
+    if stock_day:
+        print(f"[agent] Short-term stocks from the pullback rules: "
+              f"{[p['ticker'] for p in promoted_st] or 'none today'}. "
+              f"Claude is given NO short-term stock candidates.")
+
+    has_stocks = bool(stock_candidates["short_term"] or stock_candidates["long_term"]
+                      or promoted_st)
     has_crypto = bool(crypto_candidates["short_term"] or crypto_candidates["long_term"])
     has_etfs   = bool(etf_candidates["short_term"] or etf_candidates["long_term"])
 
@@ -879,8 +975,12 @@ def run_morning(config: dict, now_et: datetime):
     else:
         print("[agent] Running Claude analysis...")
         try:
+            # Claude never sees a short-term stock candidate: that section is
+            # the pullback rules' now, and anything it returned there would be
+            # overwritten below anyway.
+            claude_stocks = {**stock_candidates, "short_term": []}
             picks = analyze_with_claude(
-                stock_candidates, config,
+                claude_stocks, config,
                 crypto_results=crypto_candidates if has_crypto else None,
                 recent_losers=recent_losers,
                 etf_results=etf_candidates if has_etfs else None,
@@ -894,9 +994,21 @@ def run_morning(config: dict, now_et: datetime):
         if macro_context:
             picks["macro_context"] = macro_context
 
+        # Short-term stocks are the pullback picks — set unconditionally, so a
+        # short-term stock pick from the model can never ship. Allocations are
+        # recomputed because the stock pick count just changed.
+        picks.setdefault("stocks", {})
+        picks["stocks"]["short_term"] = promoted_st
+        _backfill_allocations(picks, config)
+
         # Preserve near-misses from screener — Claude doesn't see these,
-        # attach them directly so the formatter can show "almost qualified" picks
-        _nm = stock_candidates.get("near_misses")
+        # attach them directly so the formatter can show "almost qualified" picks.
+        # On a stock day the SHORT-TERM ones are the pullback runners-up, so
+        # they are alternatives to the picks actually shown (and are what the
+        # evaluator ledgers as that section's control group).
+        _nm = dict(stock_candidates.get("near_misses") or {})
+        if stock_day:
+            _nm["short_term"] = promoted_nm
         if _nm:
             if "stocks" not in picks:
                 picks["stocks"] = {}

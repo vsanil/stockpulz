@@ -3405,3 +3405,33 @@ deps in a gitignored **`.venv`**, run as `.venv\Scripts\python.exe -m pytest tes
   needs `last_seen`, which only the derived loop writes; a never-derived proposal stays waiting.
   Guard: `TestTheInvariant` (2 new tests verified failing without the fix, one driving the real
   `propose`). **A hand proposal still needs the owner's ruling to leave the card.**
+
+### 🏁 PHASE 3: the pullback arm is PROMOTED — short-term stocks are no longer Claude's (2026-11-12)
+
+The tournament's first read: **pullback beat the live engine on disagreeing picks, +20.8 pts
+(95% CI +7.1 to +34.2, n=59)** and on the equity curve 09-21 → 11-09 (**+4.27%** vs SPY-hold
+−1.89% and live −9.16%). Owner approved finding `engine/promote-pullback-st` on /admin. The
+automatic build ran out of its 15-turn budget with nothing written, so this was built in a session.
+- **ONLY the short-term STOCK section changed.** `agent._rule_based_st_picks` builds it with the
+  SAME `arm_selector.select` rules the tournament measured (top 5 of the pullback screen, target
+  +10.3%, 1.5×ATR stop clamped 3–20%). Claude still picks long-term stocks, crypto, ETFs and
+  commodities, and is handed **NO short-term stock candidate**; anything it returns there is
+  overwritten, so a model short-term stock pick can never ship.
+- **The overnight job runs the pullback screen FIRST**, then the default one, and saves it as
+  `stocks_pullback` in `screener_cache.json`. Order matters: every `run_screener()` publishes
+  `data_quality.json`, and the canary grades the default (fundamentals) run.
+- **Missing shortlist at 7 AM → screen pullback live (GH Actions); if that fails, NO short-term
+  stocks that day + an admin alert.** Never a quiet fallback to Claude choosing — that would mix
+  two engines into one track record.
+- **Rule-based picks are EXEMPT from the 3-star gate** (`_rule_based`). Their stars are a score
+  band, and the tournament never gated them. ⚠️ Pullback scores sit mostly in the 95+ band, so
+  they render as "highest conviction" — measured as-is, not adjusted; revisit only on evidence.
+- Short-term near-misses (and therefore the evaluator's ST control group) now come from the
+  pullback screen. Logged in `ENGINE_CHANGES` dated **2026-11-13**, the first morning the rules
+  can produce picks — move it if the merge lands later.
+- `arm_selector` was "measurement, never input"; its one sanctioned production import is
+  `agent._rule_based_st_picks`, pinned by `test_the_only_production_import_is_the_promoted_one`.
+- 5 pullback picks are ~2,400 chars of the message; a busy day can exceed 4,096 and Telegram
+  then receives it in two parts (`telegram_api._safe_split`) — delivered, not truncated.
+- Guard: `tests/test_pullback_promotion.py` (21 tests, 8 of 8 mutations caught). **Dry-run
+  2026-11-12** against the live market with every write blocked: BSX, IBKR, NWS, RUM, CORZ.

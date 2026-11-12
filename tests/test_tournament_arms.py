@@ -259,7 +259,11 @@ class TestTheArmSelectorIsMeasurementOnly:
         scan trap this repo has now hit more than a dozen times. Anchor on
         structure; prose is not code.
         """
-        for f in ("screener.py", "ai_analyzer.py", "agent.py", "webhook.py",
+        # agent.py is deliberately ABSENT: on 2026-11-12 the owner promoted the
+        # pullback arm (finding engine/promote-pullback-st), so agent imports
+        # this module to build the short-term stock picks. That one import is
+        # pinned in test_the_only_production_import_is_the_promoted_one below.
+        for f in ("screener.py", "ai_analyzer.py", "webhook.py",
                   "position_sizer.py", "formatters.py"):
             imported = set()
             for n in ast.walk(ast.parse((ROOT / f).read_text())):
@@ -268,6 +272,26 @@ class TestTheArmSelectorIsMeasurementOnly:
                 elif isinstance(n, ast.ImportFrom) and n.module:
                     imported.add(n.module.split(".")[0])
             assert "arm_selector" not in imported, f"{f} imports the arm selector"
+
+    def test_the_only_production_import_is_the_promoted_one(self):
+        """agent.py may import arm_selector in exactly ONE function — the
+        promoted pullback picks — and nowhere else. A second use would be an
+        unreviewed engine change slipping in under the first one's approval."""
+        tree = ast.parse((ROOT / "agent.py").read_text(encoding="utf-8"))
+        users = set()
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            for n in ast.walk(fn):
+                if (isinstance(n, ast.Import) and any(a.name == "arm_selector" for a in n.names)) \
+                        or (isinstance(n, ast.ImportFrom) and n.module == "arm_selector"):
+                    users.add(fn.name)
+        module_level = any(
+            (isinstance(n, ast.Import) and any(a.name == "arm_selector" for a in n.names))
+            or (isinstance(n, ast.ImportFrom) and n.module == "arm_selector")
+            for n in tree.body)
+        assert not module_level, "arm_selector must not be imported at module level"
+        assert users == {"_rule_based_st_picks"}, users
 
     def test_it_calls_no_model(self):
         src = (ROOT / "arm_selector.py").read_text()
