@@ -1397,6 +1397,18 @@ Both had `timeout=25` against a **54.9 s** cold start. The instant nothing sched
 - **`traffic_tracker.py` + the admin "Traffic by hour" card answer whether the cold window costs anyone anything** — the input to a future "upgrade Render" decision. `@app.before_request` in webhook.py counts real interactions per UTC hour into `traffic_hours.json`.
 - **🔴 `/health` MUST stay excluded from the count** (`_TRAFFIC_SKIP_PREFIXES`). It is the keep-warm ping itself, firing 4×/hour around the clock — counting it would make every hour look busy and destroy the whole measurement. `/trigger/*` is excluded for the same reason (crons, not people). Guard: `TestKeepWarmPingIsNeverCounted`.
 - **🔴 The Full Sweep was 99.8% of the traffic card (found 2026-11-14).** It drives the real Flask app in-process as the admin, so `before_request` counted every request — and each run is a fresh process under 90 s old, so every one was flagged a COLD START. Measured: 42 runs × 33 requests = **1,386 of November's 1,389 "interactions"**, all under the owner's id, all cold; the real figure was 3 hits, 2 of them cold. **The tell: every hour's count was a multiple of 33.** `full_sweep._mute_traffic()` now switches `record`/`flush` off before the first request (same two lines as `dev_server.py`). **Rule: anything that drives `webhook.app` in-process — a monitor, a script, a dev server — must mute `traffic_tracker` first; `/health` being excluded does not cover it.** Counts stored before 2026-11-14 are still polluted (not cleaned); read any month up to and including 2026-11 with the owner's row subtracted. Guard: `TestTheSweepIsNotCountedAsTraffic` drives the real `main()`, with a control proving the same request IS counted without the mute; 4 of 4 mutations caught.
+- **🔴 Then the DEPLOYS turned out to be the rest of it (2026-11-15).** With the sweep cleaned out,
+  November showed 13 "cold-start interactions", all `anon`. They lined up one-for-one with
+  deploys: 03h 1 deploy/1 hit, 04h 3/5 (2 pre-existing), 05h 2/2, 06h 3/4, and the lone 14h hit
+  matched the 11-12 deploy. Every boot is probed at the ROOT address, and a probe of a just-booted
+  process is cold by definition. `webhook._is_user_traffic(path, method)` is now the ONE rule: the
+  skip prefixes, plus `/` matched EXACTLY (as a prefix it would skip everything), plus HEAD and
+  OPTIONS. **I had told the owner those hits were real users each waiting a minute for a sleeping
+  server — wrong, and it would have fed the paid-plan decision.** Honest reading of November: no
+  identified real user recorded at all. Hits stored before this fix still include one `anon` cold
+  hit per deploy; they were not cleaned. *The probe evidence is the timing match; the request
+  itself was never seen (Render logs were not readable in that session).* Guard:
+  `TestDeployProbesAreNeverCounted`; 3 of 3 mutations caught.
 - **Cleanup of the stored pollution (2026-11-15): `scripts/clean_traffic.py` via the manual
   `clean_traffic.yml`.** Attribution is by EVIDENCE: the GitHub API gives every Full Sweep run's
   start time, and a run made 33 counted requests (measured). Per UTC hour it removes at most

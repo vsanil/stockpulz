@@ -110,11 +110,30 @@ def _traffic_chat_id():
         return None
 
 
+def _is_user_traffic(path: str, method: str = "GET") -> bool:
+    """Is this request a person using the app?
+
+    🔴 The bare root address is NOT a user surface — the bot is /webhook and the
+    mini-app is /miniapp. Measured 2026-11-15: the card's hits lined up
+    one-for-one with deploys (9 deploys in four hours, 9 new hits), because
+    every boot is probed at `/`, and a probe of a just-booted process is by
+    definition a "cold start". The same goes for scanners. With that counted,
+    November read as 13 cold-start interactions when no real user had been
+    recorded at all. HEAD and OPTIONS are never a person either.
+    """
+    path = path or ""
+    if (method or "GET").upper() in ("HEAD", "OPTIONS"):
+        return False
+    if path in ("", "/"):
+        return False
+    return not any(path.startswith(p) for p in _TRAFFIC_SKIP_PREFIXES)
+
+
 @app.before_request
 def _count_traffic():
     try:
         path = request.path or ""
-        if any(path.startswith(p) for p in _TRAFFIC_SKIP_PREFIXES):
+        if not _is_user_traffic(path, request.method):
             return None
         import traffic_tracker
         traffic_tracker.record(_traffic_chat_id())

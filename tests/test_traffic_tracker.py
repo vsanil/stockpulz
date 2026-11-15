@@ -238,6 +238,43 @@ class TestKeepWarmPingIsNeverCounted:
         assert not any(path.startswith(p) for p in webhook._TRAFFIC_SKIP_PREFIXES)
 
 
+class TestDeployProbesAreNeverCounted:
+    """Found 2026-11-15: the card's hits lined up one-for-one with deploys —
+    nine deploys in four hours, nine new "cold start" interactions, and not one
+    identified user all month. Every boot is probed at the root address, and a
+    probe of a just-booted process is cold by definition."""
+
+    def _hits(self, client, monkeypatch, method, path):
+        import traffic_tracker
+        seen = []
+        monkeypatch.setattr(traffic_tracker, "record", lambda *a, **k: seen.append(a) or False)
+        client.open(path, method=method)
+        return len(seen)
+
+    @pytest.mark.parametrize("method", ["GET", "HEAD"])
+    def test_a_probe_of_the_root_address_is_not_counted(self, client, monkeypatch, method):
+        assert self._hits(client, monkeypatch, method, "/") == 0
+
+    @pytest.mark.parametrize("path", ["/api/miniapp/picks", "/miniapp"])
+    def test_a_HEAD_request_is_never_a_person(self, client, monkeypatch, path):
+        assert self._hits(client, monkeypatch, "HEAD", path) == 0
+
+    def test_a_real_page_load_is_still_counted(self, client, monkeypatch):
+        """Raising a guard must not silence the feature."""
+        assert self._hits(client, monkeypatch, "GET", "/api/miniapp/picks") == 1
+
+    def test_the_rule_itself(self):
+        import webhook
+        assert webhook._is_user_traffic("/webhook", "POST")
+        assert webhook._is_user_traffic("/api/miniapp/picks")
+        assert not webhook._is_user_traffic("/")
+        assert not webhook._is_user_traffic("")
+        assert not webhook._is_user_traffic("/webhook", "OPTIONS")
+        assert not webhook._is_user_traffic("/health")
+        # "/" must be matched EXACTLY — as a prefix it would skip everything.
+        assert webhook._is_user_traffic("/x")
+
+
 class TestColdFlushIsDebounced:
     """🔴 Found by reading a GREEN full sweep's log body (2026-08-12): six
     `409 Conflict` writes to traffic_hours.json in one run, plus collateral 409s
