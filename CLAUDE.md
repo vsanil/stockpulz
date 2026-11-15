@@ -3578,7 +3578,11 @@ were wrong with it, and together they made a clean-looking zero out of nothing:
   feeds `tight_examples`. No production pick row to compare with means it cannot be judged.
   **Rule: a number derived from the bot's fill describes the fill. Before it becomes a finding
   about the engine, re-derive it from what the engine published.**
-- Guard: `tests/test_actionability.py` (38 tests); 8 + 3 mutations caught, incl. the original bug.
+- **And the refinement recreated the trap one level down**: "0 published too tight" did not say
+  out of how many. `engine_assessed_open` now does. **Live read 2026-11-15 (`76db89b`): 228 stops,
+  173 assessable, 11 tight from the fill; 65 open positions' published stops judged, 0 too tight.**
+  No finding is raised. *Every count that can be zero needs its denominator beside it.*
+- Guard: `tests/test_actionability.py` (39 tests); 8 + 3 + 1 mutations caught, incl. the original bug.
 
 ### Automatic pick alerts expire after ONE WEEK (owner's call, 2026-11-15)
 
