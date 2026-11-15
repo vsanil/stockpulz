@@ -2534,12 +2534,17 @@ def admin_user_detail(chat_id):
     log   = load_user_trade_log(chat_id)
     owner = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+    # 🔴 This imported `PriceAlertManager`, a class that has never existed, and
+    # swallowed the ImportError — so the drawer showed "No active alerts" for
+    # every user, always (found 2026-11-15). The drawer reads `price`; the store
+    # calls it `target`.
     alerts = []
     try:
-        from price_alert_manager import PriceAlertManager
-        alerts = PriceAlertManager(chat_id).list_alerts()
-    except Exception:
-        pass
+        from price_alert_manager import _load_alerts
+        alerts = [{**a, "price": a.get("target")}
+                  for a in (_load_alerts().get(str(chat_id)) or []) if isinstance(a, dict)]
+    except Exception as exc:
+        print(f"[admin] alerts for {chat_id} unavailable: {exc}")
 
     all_fb   = load_feedback()
     user_fb  = [f for f in all_fb if str(f.get("chat_id", "")) == str(chat_id)]

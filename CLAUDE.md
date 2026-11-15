@@ -3545,6 +3545,17 @@ callers; no monitor could see it, because nothing failed.
 - ⚠️ Not yet proven live: the first real off-hours run is the confirming observation — its log
   should read `CRYPTO ONLY (stock market closed)`.
 
+### 🔴 The /admin user drawer never showed a single alert (found 2026-11-15)
+
+`admin_user_detail` imported `PriceAlertManager` — a class that has never existed in
+`price_alert_manager.py` — inside a bare `try/except: pass`, so every user's Alerts tab read
+"No active alerts" whatever was stored. Found while checking which alerts the first overnight
+crypto-only run had fired, because the drawer said there were none at all. It now reads
+`_load_alerts()` and adds `price` (the drawer renders `a.price`; the store calls it `target`), and a
+failure prints instead of passing. Same class as the two names called-but-never-imported in agent.py:
+**a swallowed ImportError is a feature that silently does nothing.** Guard:
+`tests/test_admin_user_alerts.py`, verified failing against the old import.
+
 ### 🔴🔴 THE LEDGER HAD ALREADY BROKEN THE GIST — twelve days of unmanaged positions (found 2026-11-14)
 
 The "1 MB wall around 11-26" was the wrong model. **The Gist API returns files ALPHABETICALLY and
