@@ -24,8 +24,10 @@ Now: ONE ROW PER MONTH in the primary store, under `LEDGER_FILE`.
 Every write reads back and verifies its own rows: a lost ledger day cannot be
 recovered, because the evaluator only ever reads TODAY's picks.
 
-Until the legacy Gist files are removed (`migrate_legacy(remove=True)`), reads
-also merge them, de-duplicated by key, so nothing is missing in between.
+The legacy Gist files were copied, verified row by row and removed on
+2026-11-14 (1,629 rows: 2026-08 276 · 09 427 · 10 633 · 11 293). Reads no longer
+look for them; `include_legacy=True` and `migrate_legacy` remain only so the
+move can be re-checked.
 """
 from __future__ import annotations
 
@@ -129,7 +131,7 @@ def load_legacy() -> list:
     return rows
 
 
-def load_rows(include_legacy: bool = True, backend=None) -> list:
+def load_rows(include_legacy: bool = False, backend=None) -> list:
     """Every ledger row, oldest first, de-duplicated by key. Raises
     LedgerUnreadable rather than ever returning a partial ledger as if whole."""
     months = load_months(backend)

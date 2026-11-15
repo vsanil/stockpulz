@@ -198,7 +198,7 @@ class TestReadsNeverPretend:
             raise RuntimeError("gist 502")
         monkeypatch.setattr(storage.GistBackend, "read_strict", _boom)
         with pytest.raises(pl.LedgerUnreadable):
-            pl.load_rows()
+            pl.load_rows(include_legacy=True)
 
     def test_a_silent_fallback_to_the_gist_is_refused(self, monkeypatch, legacy):
         """Supabase configured, but the backend fell back to the Gist (its
@@ -223,7 +223,7 @@ class TestLegacyBridge:
                                                      _row("2026-11-01", "BOTH")]}
         legacy["pick_ledger.json"] = {"picks": [_row("2026-08-04", "OLDEST")]}
         pl.save_rows([_row("2026-11-01", "BOTH"), _row("2026-11-02", "NEW")])
-        assert _keys(pl.load_rows()) == [("2026-08-04", "OLDEST", None),
+        assert _keys(pl.load_rows(include_legacy=True)) == [("2026-08-04", "OLDEST", None),
                                          ("2026-10-01", "OLD", None),
                                          ("2026-11-01", "BOTH", None),
                                          ("2026-11-02", "NEW", None)]
@@ -301,6 +301,17 @@ class TestGistBlobMode:
 
 
 # ── every caller goes through this module ───────────────────────────────────
+
+class TestLegacyIsNoLongerRead:
+    def test_a_default_load_never_touches_the_old_gist_files(self, db, monkeypatch):
+        """They were removed on 2026-11-14. Looking for them costs two full
+        Gist downloads per read, on /admin and on every evaluator run."""
+        def _boom(self, fn):
+            raise AssertionError(f"read the legacy file {fn}")
+        monkeypatch.setattr(storage.GistBackend, "read_strict", _boom)
+        pl.save_rows([_row("2026-11-10", "A")])
+        assert _keys(pl.load_rows()) == [("2026-11-10", "A", None)]
+
 
 class TestOneReader:
     def test_evaluate_picks_uses_this_module(self):

@@ -3575,3 +3575,15 @@ gist past it on **2026-11-02**, and from then on `synthetic_state_*`, `traffic_h
 - Guards: `tests/test_pick_ledger.py`, `tests/test_gist_truncation_readers.py`; 12 + 12 mutations
   caught. **Rule: never read `files[name]["content"]` from the Gist API — use
   `storage._gist_content`. A bare read works only until the gist grows, then fails silently.**
+- ✅ **DONE 2026-11-14 (runs 43677163008 copy, 43677979143 copy-and-remove):** 1,629 rows copied
+  and verified (2026-08 276 · 09 427 · 10 633 · 11 293), `pick_ledger.json` + `pick_ledger_2026.json`
+  deleted from the Gist. Gist now **377 KB, zero files truncated** in the API response. Reads no
+  longer look for the legacy files (`load_rows(include_legacy=False)` by default).
+- 🔴 **The tracking loss went back further than 11-02.** A dry-run `manage` on CI (run 43678080245)
+  found the test account holding **117 untracked real positions** — some opened in August, 101
+  days old — and 8 paper; each tournament arm had lost its whole book (8 · 8 · 5). The
+  swallow-to-`{}` read had been dropping tracking on every read glitch, long before the Gist grew.
+  The first real `manage` runs (Mon 2026-11-16) close what is past its level or time stop:
+  dry run says **77 real (12 target · 36 stop · 29 time) + 8 paper** on the test account, plus
+  ~10 across the arms. Expect one large owner DM, and an exit mix on /admin that jumps — those
+  exits are late, and the `stop` ones fill well past their stops.
