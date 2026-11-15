@@ -82,6 +82,75 @@ class TestStops:
         r = analyse([], [{"ticker": "T", "entry_price": 100.0, "stop_loss": 94.0}], [])
         assert r["stops"]["tight"] == 0 and r["stops"]["median_stop_pct"] == 6.0
 
+    # ── the volatility comes from the PICK's ledger row (found 2026-11-15) ────
+    # Positions never store atr_pct, so every stop was "not assessed" and the
+    # admin card's "0 tighter than 3%" had never measured anything.
+
+    def _led(self, atr, **kw):
+        return {"date": "2026-11-10", "ticker": "T", "entry": 100.0,
+                "timeframe": "short_term", "screen": {"atr_pct": atr}, **kw}
+
+    def _pos(self, stop, **kw):
+        return {"ticker": "T", "opened_date": "2026-11-10", "entry_price": 100.0,
+                "stop_loss": stop, **kw}
+
+    def test_a_position_is_assessed_from_its_picks_ledger_row(self):
+        r = analyse([self._led(4.0)], [self._pos(98.0)], [])
+        assert r["stops"]["assessed"] == 1 and r["stops"]["tight"] == 1
+
+    def test_the_join_is_by_ticker_AND_open_date(self):
+        """Volatility from a different day's pick of the same ticker is not
+        this position's — leave it unassessed rather than borrow it."""
+        r = analyse([self._led(4.0)], [self._pos(98.0, opened_date="2026-10-01")], [])
+        assert r["stops"]["assessed"] == 0 and r["stops"]["tight"] == 0
+
+    def test_control_and_arm_rows_can_supply_the_volatility(self):
+        """ATR is a fact about the ticker that day, whoever picked it."""
+        for extra in ({"control": True}, {"arm": "pullback"}):
+            r = analyse([self._led(4.0, **extra)], [self._pos(98.0)], [])
+            assert r["stops"]["assessed"] == 1, extra
+
+    def test_zero_tight_says_how_many_were_checked(self):
+        """The whole point: '0 tight' must not read the same whether every
+        stop passed or none was ever looked at."""
+        unchecked = analyse([], [self._pos(98.0)], [])["stops"]
+        checked = analyse([self._led(1.0)], [self._pos(98.0)], [])["stops"]
+        assert (unchecked["tight"], unchecked["assessed"]) == (0, 0)
+        assert (checked["tight"], checked["assessed"]) == (0, 1)
+
+    def test_only_an_open_position_with_the_engines_own_stop_is_an_example(self):
+        """`tight_examples` becomes an ACT finding in the nightly report. A
+        closed trade is history, and a stop the bot substituted (the flat
+        fallback) is not the engine's — neither can be acted on."""
+        led = [self._led(4.0)]
+        def ex(**kw):
+            return analyse(led, [self._pos(98.0, **kw)], [])["stops"]
+        assert len(ex(levels_source="pick")["tight_examples"]) == 1
+        assert len(ex(levels_source="target")["tight_examples"]) == 1
+        assert ex(levels_source="stop")["tight_examples"] == []
+        assert ex(levels_source="both")["tight_examples"] == []
+        assert ex(levels_source="invalidation")["tight_examples"] == []
+        assert ex()["tight_examples"] == [], "an unrecorded source is not known to be the engine's"
+        closed = ex(levels_source="pick", closed_date="2026-11-12")
+        assert closed["tight_examples"] == [] and closed["tight"] == 1
+        assert ex(levels_source="pick")["tight_open_engine"] == 1
+
+    def test_an_example_carries_what_the_finding_prints(self):
+        e = analyse([self._led(4.0)], [self._pos(98.0, levels_source="pick")], [])["stops"]["tight_examples"][0]
+        assert (e["ticker"], e["stop_pct"], e["atr_pct"], e["date"]) == ("T", 2.0, 4.0, "2026-11-10")
+
+    def test_an_arm_row_never_supplies_the_published_entry(self):
+        """The card reads the whole ledger now, arm rows included. An arm's
+        row carries the ARM's entry; these positions are fills of the
+        published pick."""
+        led = [{"date": "2026-11-10", "ticker": "T", "entry": 100.0, "timeframe": "short_term"},
+               {"date": "2026-11-10", "ticker": "T", "entry": 80.0, "timeframe": "short_term",
+                "arm": "breakout"}]
+        r = analyse(led, [self._pos(95.0, entry_price=101.0)], [])
+        assert r["entry"]["n"] == 1 and r["entry"]["worst_pct"] == 1.0
+        only_arm = analyse(led[1:], [self._pos(95.0, entry_price=101.0)], [])
+        assert only_arm["entry"]["n"] == 0
+
     def test_inverted_stops_are_skipped_not_counted_as_zero(self):
         """Those are an INTEGRITY problem (position_audit's job); silently
         folding them in here as 0% would drag the median toward nonsense."""
@@ -235,3 +304,21 @@ class TestStopTightnessIsPerTicker:
         assert actionability.TIGHT_STOP_ATR_MULT == 1.0
         assert self._one(2.9, atr=3.0)["tight"] is True     # under 1x
         assert self._one(3.1, atr=3.0)["tight"] is False    # over 1x
+
+
+class TestTheAdminCardSaysWhatWasChecked:
+    """The card printed "0 tighter than 3% (inside daily noise)" for months
+    while nothing was being assessed. It must say how many could be checked,
+    and must not quote the retired flat threshold."""
+
+    def test_the_served_page_reports_assessed_counts(self, client):
+        with client.session_transaction() as s:
+            s["admin"] = True
+        html = client.get("/admin").get_data(as_text=True)
+        assert "could be checked against the stock" in html
+        assert "st.assessed" in html and "st.tight_open_engine" in html
+        assert "threshold_pct" not in html
+
+    def test_the_analysis_no_longer_exports_the_flat_threshold(self):
+        r = analyse([], [{"ticker": "T", "entry_price": 100.0, "stop_loss": 94.0}], [])
+        assert "threshold_pct" not in r["stops"] and r["stops"]["atr_mult"] == 1.0

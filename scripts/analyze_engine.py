@@ -480,17 +480,23 @@ def _reachability(rows, log, paper) -> list:
         tk, pct = ex.get("ticker", "?"), ex.get("stop_pct")
         out.append(Finding(
             f"stop_tight/{tk}/{pct}", "ACT",
-            f"{tk} stop at {pct}% is inside the noise threshold",
-            f"Threshold is {stops.get('threshold_pct')}%; median across "
-            f"{stops.get('n')} positions is {stops.get('median_stop_pct')}%. A "
-            f"stop inside ordinary daily movement converts a sound thesis into "
-            f"a stop-out.",
-            "screener.suggested_stop_pct is 1.5x ATR%, which collapses for a "
-            "low-volatility name. Add a floor there (or in "
-            "ai_analyzer._ST_SECTIONS' 5% fallback) so no published stop sits "
-            "below the noise threshold.",
-            n=stops.get("n"),
-            where="screener.suggested_stop_pct (1.5x ATR%) — add a floor",
+            f"{tk} stop at {pct}% is inside its own daily range",
+            f"{tk} (opened {ex.get('date') or '?'}) has a stop {pct}% below its "
+            f"fill; its average daily range is {ex.get('atr_pct')}%. Position is "
+            f"still open and the stop is the engine's own. "
+            f"{stops.get('assessed')} of {stops.get('n')} positions could be "
+            f"assessed; median stop {stops.get('median_stop_pct')}%. A stop "
+            f"inside one ordinary day's movement turns a sound thesis into a "
+            f"stop-out.",
+            "Find which rule set THIS stop. The pullback rules use 1.5x ATR "
+            "(clamped 3-20%) and cannot produce it unless the 20% cap bound, so "
+            "a stop this tight came from the model's own stop or the flat 5% "
+            "fallback. Do NOT add a flat floor: that was rejected on 2026-08-23 "
+            "because it widens stops on exactly the low-volatility names where "
+            "a tight stop is right.",
+            n=stops.get("assessed"),
+            where=("ai_analyzer._ST_SECTIONS (model stop / 5% fallback) · "
+                   "arm_selector (1.5x ATR, clamped) — read, do not add a floor"),
             category="engine",
             plain=(f"{tk}'s sell-stop sits only {pct}% below the buy price — "
                    f"inside the range this stock moves on an ordinary day — so "
@@ -499,8 +505,10 @@ def _reachability(rows, log, paper) -> list:
         out.append(Finding(
             "metric:stop_distance", "MEASURE", "Stop distance distribution",
             f"median {stops.get('median_stop_pct')}% across {stops['n']} "
-            f"positions; {stops.get('tight', 0)} below the "
-            f"{stops.get('threshold_pct')}% threshold.",
+            f"positions; {stops.get('assessed', 0)} could be checked against "
+            f"the stock's own daily range, {stops.get('tight', 0)} sat inside "
+            f"it ({stops.get('tight_open_engine', 0)} still open with the "
+            f"engine's own stop).",
             "Context for the geometry metric — no action on its own.",
             n=stops["n"], kind="metric"))
 

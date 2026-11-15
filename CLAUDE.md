@@ -3545,6 +3545,32 @@ callers; no monitor could see it, because nothing failed.
 - ⚠️ Not yet proven live: the first real off-hours run is the confirming observation — its log
   should read `CRYPTO ONLY (stock market closed)`.
 
+### 🔴 "0 stops tighter than 3%" had never measured anything (found 2026-11-15)
+
+The /admin actionability card printed `0 tighter than 3% (inside daily noise) · n=228`. Two things
+were wrong with it, and together they made a clean-looking zero out of nothing:
+- **The 3% was retired on 2026-08-23** in favour of each stock's own ATR; the constant lingered
+  unused and the card kept quoting it.
+- **Positions never store `atr_pct`** — neither `add_holding` nor `paper_buy` writes it — so
+  `stop_distances` judged every one of the 228 "not assessed" and `tight` could only ever be 0.
+  **Green because unchecked**, the shape this file keeps finding.
+- **Fix:** the pick's own ledger row has carried the figure all along (`screen.atr_pct`).
+  `actionability.atr_by_pick(rows)` builds `{(date, TICKER): atr}` from EVERY row (ATR is a fact
+  about the ticker that day — production, control or arm), and `stop_distances(positions, atr_by)`
+  joins on ticker + OPEN date. The card and the nightly metric now say `assessed` of `n`.
+- **`tight_examples` feeds an ACT finding, so it is restricted to what can be acted on:** a
+  position still OPEN whose stop the ENGINE published (`levels_source` in `pick`/`target`). A closed
+  trade is history; a stop the bot substituted (`stop`/`both`) or the long-term `invalidation`
+  level is not the engine's; an unrecorded source is not known to be. `tight` still counts all.
+- **The finding's old fix text said "add a floor"** — advice REJECTED on 2026-08-23 (it widens
+  stops on exactly the low-volatility names where a tight stop is right). Second time a nightly
+  finding carried a rejected instruction; rewritten to say so. The pullback rules' stop is 1.5x ATR
+  clamped 3-20%, so they cannot produce a tight stop unless the 20% cap binds.
+- **Also fixed while there:** `analyse` joined positions to ANY non-control ledger row. Since the
+  card began reading the live ledger (arm rows included), a tournament arm's row for the same
+  ticker and day could supply the ARM's entry price as "the published entry". Production rows only.
+- Guard: `tests/test_actionability.py` (35 tests); 8 of 8 mutations caught, incl. the original bug.
+
 ### Automatic pick alerts expire after ONE WEEK (owner's call, 2026-11-15)
 
 `_auto_set_pick_alerts` created a stop / entry / invalidation alert for every pick, for every user

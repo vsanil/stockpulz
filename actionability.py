@@ -41,11 +41,10 @@ _DEFAULT_WINDOW = entry_window_pct()
 # names where a tight stop is right.
 #
 # Noise is per-ticker, so the test must be too: a stop is tight only when it is
-# inside the ticker's OWN recent range. The flat value is kept solely as a
-# last-resort floor for positions carrying no ATR, and such positions are
-# reported as `unknown` rather than flagged — an unmeasurable case is not a
-# violation.
-TIGHT_STOP_PCT = 3.0
+# inside the ticker's OWN recent range. A position with no ATR on record is
+# reported as not assessed rather than flagged — an unmeasurable case is not a
+# violation. (The flat 3.0 constant lingered here unused until 2026-11-15, and
+# the admin card kept printing it as if it were the test.)
 # A stop below this multiple of the ticker's ATR% is inside its own noise.
 # 1.0 x ATR is a single average day's move; the engine targets 1.5x.
 TIGHT_STOP_ATR_MULT = 1.0
@@ -156,7 +155,34 @@ def entry_slippage(ledger: dict, positions: list,
     return out, undated
 
 
-def stop_distances(positions: list) -> list[dict]:
+# A stop leg the ENGINE published. `levels_source` records which leg the bot had
+# to substitute when the pick's level no longer bracketed the fill: "pick" and
+# "target" leave the stop as published; "stop"/"both" replaced it with a flat
+# fallback, and "invalidation*" is the long-term thesis level, not a stop.
+_ENGINE_STOP_SOURCES = ("pick", "target")
+
+
+def atr_by_pick(ledger_rows: list) -> dict:
+    """{(date, TICKER): atr_pct} from every ledger row that recorded one.
+
+    🔴 Positions never store `atr_pct` — nothing in add_holding or paper_buy
+    writes it — so `stop_distances` judged every stop "not assessed" and the
+    card's "0 tighter than …" had never measured anything (found 2026-11-15).
+    The pick's own ledger row has carried the figure all along, in `screen`.
+    Volatility is a property of the ticker on that day, so ANY row for the pair
+    will do — production, control or tournament arm."""
+    out = {}
+    for r in ledger_rows or []:
+        if not isinstance(r, dict):
+            continue
+        atr = _num((r.get("screen") or {}).get("atr_pct"))
+        day, tkr = r.get("date"), (r.get("ticker") or "").upper()
+        if atr and atr > 0 and day and tkr:
+            out.setdefault((day, tkr), atr)
+    return out
+
+
+def stop_distances(positions: list, atr_by: dict | None = None) -> list[dict]:
     out, seen = [], set()
     for pos in positions or []:
         e = _fill_price(pos)
@@ -172,15 +198,20 @@ def stop_distances(positions: list) -> list[dict]:
         seen.add(key)
         d = (e - s) / e * 100.0
         tk = (pos.get("ticker") or "").upper()
-        atr = _num(pos.get("atr_pct"))
-        if atr and atr > 0:
+        atr = _num(pos.get("atr_pct")) or (atr_by or {}).get((_open_day(pos), tk))
+        assessed = bool(atr and atr > 0)
+        if assessed:
             tight = d < atr * TIGHT_STOP_ATR_MULT      # inside its OWN noise
             basis = f"{atr:.2f}% ATR"
         else:
             tight = False                               # unmeasurable != violation
             basis = "no ATR recorded — not assessed"
         out.append({"ticker": tk, "stop_pct": round(d, 2),
-                    "tight": tight, "basis": basis})
+                    "tight": tight, "basis": basis, "assessed": assessed,
+                    "atr_pct": round(atr, 2) if assessed else None,
+                    "date": _open_day(pos),
+                    "open": not (pos.get("closed_date") or pos.get("sell_price")),
+                    "engine_stop": pos.get("levels_source") in _ENGINE_STOP_SOURCES})
     return out
 
 
@@ -210,15 +241,25 @@ def outcome_mix(closed: list) -> dict:
 
 def analyse(ledger_rows: list, positions: list, closed: list,
             skipped: list | None = None) -> dict:
+    # PRODUCTION picks only. A tournament arm's row for the same ticker and day
+    # carries the ARM's entry price, and these positions are fills of the
+    # published pick — joining to an arm row would measure slippage against a
+    # price no user was shown. (This mattered from 2026-11-15, when the card
+    # began reading the live ledger, arm rows included.)
     ledger = {(r["date"], (r.get("ticker") or "").upper()): r
-              for r in (ledger_rows or []) if not r.get("control") and r.get("date")}
+              for r in (ledger_rows or [])
+              if not r.get("control") and not r.get("arm") and r.get("date")}
     slip, undated = entry_slippage(ledger, positions, skipped)
-    stops = stop_distances(positions)
+    stops = stop_distances(positions, atr_by_pick(ledger_rows))
     outs = outcome_mix(closed)
 
     slips = [s["slippage_pct"] for s in slip]
     outside = [s for s in slip if s["outside_window"]]
     tight = [s for s in stops if s["tight"]]
+    # What can still be ACTED on: a stop the engine published, on a position
+    # that is still open. A tight stop on a closed trade is history, and one
+    # the bot substituted is not the engine's.
+    actionable = [s for s in tight if s["open"] and s["engine_stop"]]
 
     return {
         "entry": {
@@ -237,9 +278,13 @@ def analyse(ledger_rows: list, positions: list, closed: list,
         "stops": {
             "n": len(stops),
             "median_stop_pct": round(statistics.median([s["stop_pct"] for s in stops]), 2) if stops else None,
+            # How many could be judged at all. Without this, "0 tight" reads the
+            # same whether every stop passed or none was ever checked.
+            "assessed": sum(1 for s in stops if s["assessed"]),
             "tight": len(tight),
-            "tight_examples": sorted(tight, key=lambda s: s["stop_pct"])[:5],
-            "threshold_pct": TIGHT_STOP_PCT,
+            "tight_open_engine": len(actionable),
+            "tight_examples": sorted(actionable, key=lambda s: s["stop_pct"])[:5],
+            "atr_mult": TIGHT_STOP_ATR_MULT,
         },
         "outcomes": outs,
         # Everything above is descriptive, but small samples still mislead when

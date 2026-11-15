@@ -1362,7 +1362,13 @@ function actionSection(a){
     +'</div>'
     +rows
     +'<div class="fb-text" style="margin-top:8px">Stops: median <b>'+st.median_stop_pct+'%</b> below entry'
-    +' · <b>'+st.tight+'</b> tighter than '+st.threshold_pct+'% (inside daily noise) · n='+st.n+'</div>'
+    +' · n='+st.n+'</div>'
+    +'<div class="fb-meta">'+(st.assessed
+        ? '<b>'+st.assessed+'</b> of '+st.n+' could be checked against the stock&#39;s own daily range'
+          +' · <b>'+st.tight+'</b> sat inside it'
+          +' · <b>'+(st.tight_open_engine||0)+'</b> of those are still open with the engine&#39;s own stop'
+        : 'none of the '+st.n+' could be checked against the stock&#39;s daily range (no volatility on record)')
+    +'</div>'
     +ocline+warn+'</div>';
 }
 
