@@ -190,7 +190,10 @@ def sweep_get_endpoints(client, admin: str) -> None:
 
 def sweep_bot_commands(admin: str) -> None:
     from bot_commands import handle_incoming_command
-    cmds = ["/help", "/today", "/positions", "/paper", "/watchlist", "/performance",
+    # "PAPER PORTFOLIO", not "/paper": there is no /paper command, so that text
+    # fell through to the natural-language handler — a Claude call on every
+    # run, which then looked up "PAPER" as a ticker (404). It tested nothing.
+    cmds = ["/help", "/today", "/positions", "PAPER PORTFOLIO", "/watchlist", "/performance",
             "/accuracy", "/review", "/settings", "/size AAPL", "/missed", "/dashboard",
             "/bestsetup", "/history", "/dividends", "/chart AAPL"]
     for c in cmds:

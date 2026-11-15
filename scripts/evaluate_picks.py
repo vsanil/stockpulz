@@ -36,6 +36,7 @@ import os
 import sys
 import json
 import math
+import html as _html
 import argparse
 import datetime as dt
 
@@ -259,6 +260,35 @@ def _bars(symbol: str, start: str, end: str):
         return df.dropna()
     except Exception:
         return None
+
+
+def _matured(row: dict) -> bool:
+    """Past its horizon, so `score_pick` returning None means it could not be
+    priced — not that it is still running."""
+    try:
+        d0 = dt.date.fromisoformat(row["date"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return d0 + dt.timedelta(days=_HORIZON_DAYS) <= dt.date.today()
+
+
+def _unpriced_note(rows: list) -> str:
+    """Say which matured picks are missing from every number above.
+
+    Found 2026-11-15: picks whose ticker has no price history any more (WBD
+    five times, KVUE, GBTG, and some coins) were dropped from the report with
+    nothing saying so. A delisted ticker is not a random omission — it is often
+    a takeover or a collapse — so the reader needs the count to judge it."""
+    if not rows:
+        return ""
+    tally: dict = {}
+    for r in rows:
+        t = str(r.get("ticker") or "?")
+        tally[t] = tally.get(t, 0) + 1
+    names = ", ".join(f"{_html.escape(t)}" + (f" ×{n}" if n > 1 else "")
+                      for t, n in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0])))
+    return (f"<i>{len(rows)} matured pick(s) could not be priced and are left out of every "
+            f"number above: {names}.</i>\n")
 
 
 def score_pick(row: dict) -> dict | None:
@@ -595,7 +625,12 @@ def build_report(scored: list[dict]) -> str:
             tag = "" if g["n"] >= _MIN_N else "  <i>(low n)</i>"
             a = f"{g['avg_alpha']:+.2f}%" if g["avg_alpha"] is not None else "n/a"
             ci = f" · CI {g['win_ci'][0]:.0f}-{g['win_ci'][1]:.0f}%" if g["n"] >= _MIN_N else ""
-            L.append(f"  {k}: n={g['n']} · win {g['win_rate']}% · α {a}{ci}{tag}")
+            # 🔴 Escape the label: it is DATA (a band, an asset, a setup name),
+            # and the report is Telegram HTML. The score band "<70" was read as
+            # an HTML tag, Telegram rejected the whole message, and every weekly
+            # report fell back to plain text showing raw <b> tags (found
+            # 2026-11-15). Any future label containing < > & would do the same.
+            L.append(f"  {_html.escape(str(k))}: n={g['n']} · win {g['win_rate']}% · α {a}{ci}{tag}")
         L.append("")
 
     # How much of the ledger predates the instrumentation — otherwise a slice
@@ -718,17 +753,21 @@ def main() -> int:
                 tally[r["arm"]] = tally.get(r["arm"], 0) + 1
         print(f"[evaluate] arms: {dict(sorted(tally.items()))}")
 
-    scored = []
+    scored, unpriced = [], []
     for r in rows:
         try:
             s = score_pick(r)
             if s:
                 scored.append(s)
+            elif _matured(r):
+                unpriced.append(r)
         except Exception as exc:
             print(f"[evaluate] score {r.get('ticker')} failed: {exc}")
-    print(f"[evaluate] matured & scored: {len(scored)}")
+            unpriced.append(r)
+    print(f"[evaluate] matured & scored: {len(scored)}"
+          + (f" · {len(unpriced)} matured but NOT priced" if unpriced else ""))
 
-    report = build_report(scored)
+    report = build_report(scored) + _unpriced_note(unpriced)
     print("\n" + report.replace("<b>", "").replace("</b>", "")
           .replace("<i>", "").replace("</i>", ""))
 

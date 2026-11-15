@@ -3608,6 +3608,33 @@ were wrong with it, and together they made a clean-looking zero out of nothing:
   No finding is raised. *Every count that can be zero needs its denominator beside it.*
 - Guard: `tests/test_actionability.py` (39 tests); 8 + 3 + 1 mutations caught, incl. the original bug.
 
+### 🔴🔴 `_download_prices` returned NOTHING for five months — five features never ran (found 2026-11-15)
+
+`agent._download_prices` called `yf.download`, but agent.py imports yfinance only INSIDE other
+functions. Every call since `f71cb88` (2026-06-08) raised NameError into `except Exception:
+return {}`. Found by **pyflakes — the only undefined name in the repo** — then confirmed at
+runtime and in 6 of 6 midday logs (`run_midday_check: price fetch returned empty`).
+- **Never worked:** the whole **midday check** (hold/fold, the portfolio drawdown alert — which
+  exists ONLY there — health digest, stale positions, cash note, correlation), **tax-loss harvest**
+  nudges, the **Friday wrap's unrealised P&L** (always $0), **"X% from your target"** nudges, and
+  **pick entry-zone alerts** (no `kind: entry` alert existed for any user). Stop-hit alerts were
+  unaffected — the 3:30 PM close check gets prices another way.
+- **Why nothing caught it:** every test STUBBED `_download_prices`. *A stub that replaces the
+  function under suspicion certifies it.* Owner chose to switch all five on (2026-11-15).
+- **Fix:** the import, plus a printed line when a fetch fails (an empty dict was invisible).
+  **Guard: `tests/test_no_undefined_names.py` runs pyflakes over every project file** and fails on
+  any undefined name (pyflakes is now in requirements.txt, so CI and self-heal have it), and
+  drives the REAL `_download_prices` with only yfinance stubbed.
+- ⏳ **First live runs:** tax-loss harvest Sun 2026-11-15 14:00 UTC (its 1st/15th Nov-Dec cron) —
+  expect a "Year-End Tax Tip" to users holding losers; midday check Mon 12:30 ET.
+
+**Same sweep, smaller fixes:** the weekly evaluator report was invalid Telegram HTML (score band
+`<70` read as a tag → whole report sent as plain text) — labels are now escaped; the evaluator
+now says how many matured picks it could not price (WBD x5, KVUE, GBTG, some coins); the Markets
+tab's dollar index used `^DXY`, which Yahoo does not have — now `DX-Y.NYB`; and the Full Sweep's
+`/paper` was not a command, so it fell through to the natural-language handler (a Claude call per
+run) — now `PAPER PORTFOLIO`. Guard: `tests/test_quiet_corner_fixes.py`. 8 of 8 mutations caught.
+
 ### Automatic pick alerts expire after ONE WEEK (owner's call, 2026-11-15)
 
 `_auto_set_pick_alerts` created a stop / entry / invalidation alert for every pick, for every user

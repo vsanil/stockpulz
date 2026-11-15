@@ -3959,7 +3959,9 @@ _MARKETS_INSTRUMENTS = [
     ("CORN",  "commodities", "CORN"),
     ("TLT",   "commodities", "TLT"),
     # ── Macro indicators ──────────────────────────────────────────
-    ("^DXY",  "macro",       "DXY"),
+    # Yahoo's symbol for the US Dollar Index is DX-Y.NYB. "^DXY" does not exist
+    # there (404 on every request), so this row never loaded — found 2026-11-15.
+    ("DX-Y.NYB", "macro",    "DXY"),
     ("^VIX",  "macro",       "VIX"),
 ]
 

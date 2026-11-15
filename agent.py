@@ -160,6 +160,12 @@ def _download_prices(tickers: list[str], **yf_kwargs) -> dict[str, float]:
     """
     if not tickers:
         return {}
+    # 🔴 agent.py imports yfinance only inside functions. This one never did, so
+    # from 2026-06-08 until 2026-11-15 every call raised NameError into the
+    # `except` below and returned {} — the midday check, tax-loss nudges, the
+    # Friday wrap's unrealised P&L, target-approach nudges and pick entry
+    # alerts all silently did nothing. Every test stubbed this function.
+    import yfinance as yf
     from price_checker import _SYMBOL_TO_CG_ID
     # Build yfinance symbol → original symbol mapping
     yf_map: dict[str, str] = {}
@@ -187,8 +193,14 @@ def _download_prices(tickers: list[str], **yf_kwargs) -> dict[str, float]:
             except Exception:
                 pass
         return prices
-    except Exception:
+    except Exception as exc:
+        # Callers treat {} as "no prices", so the failure has to be said here or
+        # it is invisible — which is exactly how this stayed broken five months.
+        print(f"[agent] _download_prices failed for {len(tickers)} ticker(s) "
+              f"(non-critical): {type(exc).__name__}: {exc}")
         return {}
+
+
 MOCK_DATA = os.environ.get("MOCK_DATA", "false").lower() == "true"
 
 # Default conviction threshold — picks below this are filtered before broadcast.

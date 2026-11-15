@@ -26,3 +26,9 @@ curl_cffi>=0.7.0
 # so a missing test-only dependency silently breaks the whole suite, including
 # self_heal.yml's merge gate.
 pyyaml>=6.0
+# Needed by tests/test_no_undefined_names.py, which runs pyflakes over every
+# project file. A name used but never defined (agent._download_prices's `yf`)
+# raised inside a swallowing `except` and silently disabled five features from
+# 2026-06-08 to 2026-11-15 — no test caught it because every test stubbed the
+# function. Pure Python, tiny.
+pyflakes>=3.0
