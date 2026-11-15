@@ -66,6 +66,37 @@ class TestHonestyGate:
         assert "Nothing to conclude" in r
 
 
+class TestCoinFlipVerdictHasThreeCases:
+    """The report called the live engine's 32.1% (CI 27.0-37.6%) "NOT
+    distinguishable from a coin flip". An interval entirely below 50% IS
+    distinguishable — it is worse. Found reading the 2026-11-14 report."""
+
+    @staticmethod
+    def _wins(n_win, n):
+        return [{**r, "ret_pct": 5.0 if i < n_win else -3.0}
+                for i, r in enumerate(_rows(n))]
+
+    def test_an_interval_wholly_below_50_says_below(self):
+        r = ev.build_report(self._wins(30, 100))
+        assert "BELOW a coin flip" in r
+        assert "NOT distinguishable" not in r
+
+    def test_below_still_points_at_the_benchmark(self):
+        """Under 50% is not a loss on its own with ~2:1 targets; the verdict
+        must not read as one."""
+        assert "judge it by the" in ev.build_report(self._wins(30, 100))
+
+    def test_an_interval_wholly_above_50_says_above(self):
+        r = ev.build_report(self._wins(70, 100))
+        assert "above a coin flip" in r
+        assert "BELOW" not in r
+
+    def test_an_interval_spanning_50_is_not_distinguishable(self):
+        r = ev.build_report(self._wins(50, 100))
+        assert "NOT distinguishable from a coin flip" in r
+        assert "BELOW" not in r and "above a coin flip" not in r
+
+
 class TestBenchmarkVerdict:
     def test_zero_alpha_reads_in_line_not_trailing(self):
         rows = _rows(40, alpha=0.0)

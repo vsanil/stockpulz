@@ -599,11 +599,22 @@ def build_report(scored: list[dict]) -> str:
               f"spans {o['win_ci'][1] - o['win_ci'][0]:.0f} points. "
               f"<b>Do not tune the engine on this.</b>", ""]
     else:
-        ci_lo = o["win_ci"][0]
-        L += [f"✅ Sample is meaningful (n={o['n']}). "
-              + (f"Win rate is above coin-flip even at the low end of the CI ({ci_lo}%)."
-                 if ci_lo > 50 else
-                 f"Win rate is NOT distinguishable from a coin flip (CI low end {ci_lo}%)."), ""]
+        # Three cases, not two. The old two-way test called a CI of 27-37.6%
+        # "not distinguishable from a coin flip" — it is distinguishably WORSE.
+        # The second sentence matters: targets sit ~2x the stop distance, so a
+        # win rate under 50% is not a loss by itself; the SPY line decides that.
+        ci_lo, ci_hi = o["win_ci"]
+        if ci_lo > 50:
+            verdict = (f"Win rate is above a coin flip even at the low end of the CI "
+                       f"({ci_lo}%).")
+        elif ci_hi < 50:
+            verdict = (f"Win rate is BELOW a coin flip even at the high end of the CI "
+                       f"({ci_hi}%). Targets sit about twice as far as stops, so that "
+                       f"alone is not a loss — judge it by the {_BENCH} line above.")
+        else:
+            verdict = (f"Win rate is NOT distinguishable from a coin flip "
+                       f"(CI {ci_lo}–{ci_hi}%).")
+        L += [f"✅ Sample is meaningful (n={o['n']}). " + verdict, ""]
 
     # Slices. `setup_type` and `score band` come from the screener features
     # recorded at pick time — they answer WHICH part of the engine is working,
