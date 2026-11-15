@@ -246,6 +246,46 @@ def _rule_based_st_picks(pullback_screen) -> tuple[list, list]:
     return picks, list(near)
 
 
+# ── Long-term quality floor ──────────────────────────────────────────────────
+LT_QUALITY_FLOOR = 15
+
+
+def _lt_candidate_score(c) -> float | None:
+    """A long-term candidate's score, or None when it carries none we can read.
+
+    🔴 The screener's flattened candidates store it as `score`
+    (`screener._flatten_long`); only the un-flattened internal record calls it
+    `lt_score`. Reading `lt_score` alone returned 0 for EVERY cached candidate,
+    so the floor below discarded the whole long-term shortlist on every
+    cache-hit morning from 2026-05-16 until 2026-11-14 (see `_apply_lt_floor`).
+    """
+    if not isinstance(c, dict):
+        return None
+    for key in ("lt_score", "score"):
+        v = c.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        if v != v or v in (float("inf"), float("-inf")):
+            continue
+        return float(v)
+    return None
+
+
+def _apply_lt_floor(candidates, floor: float = LT_QUALITY_FLOOR) -> tuple[list, int]:
+    """Drop long-term candidates scored below `floor`. Returns (kept, dropped).
+
+    A candidate with NO readable score is KEPT: unmeasurable is not the same as
+    low-quality, and treating it as such is exactly how this floor emptied the
+    section for six months while printing a routine-looking "dropped 5" line.
+    """
+    kept = []
+    for c in candidates or []:
+        s = _lt_candidate_score(c)
+        if s is None or s >= floor:
+            kept.append(c)
+    return kept, len(candidates or []) - len(kept)
+
+
 
 # ── Conviction gate ───────────────────────────────────────────────────────────
 
@@ -629,6 +669,30 @@ def run_prescreener(config: dict):
         print("[agent] Market holiday tomorrow — skipping pre-screener.")
         return
 
+    # ── Pullback screen: the short-term stock picks (since 2026-11-12) ────────
+    # 🔴 THIS function is the production overnight job (daily_run.yml runs
+    # agent.py in prescreener mode); run_prescreener.py is the laptop fallback.
+    # The promotion patched only the fallback, so the shortlist was never
+    # cached and every morning screened 600 tickers live on the delivery path.
+    # Runs BEFORE the default screen: each run_screener() call publishes
+    # data_quality.json, and the canary grades fundamentals coverage from the
+    # default (long-term) run, so that one must be the last writer. A failure
+    # here never blocks the default cache — the morning run screens live.
+    pullback_results = None
+    try:
+        from screener import STRATEGIES
+        pullback_results = run_screener(
+            watchlist=config.get("watchlist", []),
+            excluded_sectors=config.get("excluded_sectors", []),
+            strategy=STRATEGIES[PROMOTED_ST_STRATEGY],
+        )
+        print(f"[agent] Pre-screener: pullback shortlist — "
+              f"{len(pullback_results['short_term'])} ST candidates.")
+    except Exception as exc:
+        print(f"[agent] Pre-screener pullback screen failed: {exc} — the morning "
+              f"run will screen pullback live.")
+        pullback_results = None
+
     stock_results = {"short_term": [], "long_term": []}
     try:
         stock_results = run_screener(
@@ -657,8 +721,10 @@ def run_prescreener(config: dict):
     has_stocks = bool(stock_results.get("short_term") or stock_results.get("long_term"))
     if has_stocks:
         try:
-            save_screener_cache(stock_results, crypto_results)
-            print("[agent] Midnight pre-screener complete. Morning run will use cache.")
+            save_screener_cache(stock_results, crypto_results, pullback_results)
+            print("[agent] Midnight pre-screener complete. Morning run will use cache"
+                  + (" (pullback shortlist included)." if pullback_results
+                     else " (NO pullback shortlist — morning screens it live)."))
         except Exception as exc:
             print(f"[agent] Pre-screener cache save failed: {exc}")
     else:
@@ -851,16 +917,22 @@ def run_morning(config: dict, now_et: datetime):
                 # Re-apply LT quality floor — guards against cached results from
                 # before the quality gate was added (task #102) or stale midnight
                 # runs where some candidates have been scored well below threshold.
-                _LT_FLOOR = 15   # floor raised from 25→15 to keep more LT candidates for Claude
                 _before = len(stock_candidates.get("long_term", []))
-                stock_candidates["long_term"] = [
-                    c for c in stock_candidates.get("long_term", [])
-                    if c.get("lt_score", 0) >= _LT_FLOOR
-                ]
-                _after = len(stock_candidates["long_term"])
-                if _before != _after:
-                    print(f"[agent] LT quality floor: dropped {_before - _after} "
-                          f"cached candidates with lt_score < {_LT_FLOOR}.")
+                stock_candidates["long_term"], _dropped = _apply_lt_floor(
+                    stock_candidates.get("long_term", []))
+                if _dropped:
+                    print(f"[agent] LT quality floor: dropped {_dropped} of {_before} "
+                          f"cached candidates scored below {LT_QUALITY_FLOOR}.")
+                if _before and not stock_candidates["long_term"]:
+                    # Losing the WHOLE shortlist is never routine: it leaves
+                    # Claude with no long-term stock to choose from, and the
+                    # section then reads as "no setups today".
+                    _alert(
+                        f"⚠️ <b>Long-term shortlist emptied</b> — the quality floor "
+                        f"dropped all {_before} cached long-term stock candidates. "
+                        f"No long-term stock picks are possible this morning.",
+                        admin_only=True,
+                    )
             elif not _can_run_live_screener():
                 # 512MB OOM guard: degrade gracefully — users get crypto/ETF
                 # picks with the normal "no stock setups today" rendering;

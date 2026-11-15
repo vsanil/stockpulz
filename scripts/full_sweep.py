@@ -112,6 +112,24 @@ def _unmute_telegram() -> None:
     requests.post, requests.get, requests.Session.request = _orig_post, _orig_get, _orig_req
 
 
+def _mute_traffic() -> None:
+    """Stop this run from being counted as user traffic.
+
+    The sweep drives the real Flask app in-process as the admin, so webhook's
+    before_request hook counted every request it made — and because each run is
+    a brand-new process under 90 s old, every one was flagged a COLD START.
+    Measured 2026-11-14: 42 runs x 33 requests = 1,386 of the month's 1,389
+    "interactions", all under the owner's id, all cold. The traffic card is the
+    evidence for the paid-plan decision; a monitor must not write to it.
+
+    Same two lines as dev_server.py. webhook looks the functions up on the
+    module at call time, so replacing them here takes effect for every request.
+    """
+    import traffic_tracker
+    traffic_tracker.record = lambda *a, **k: False
+    traffic_tracker.flush = lambda *a, **k: False
+
+
 def _recent_weekday(days_back: int = 5) -> str:
     d = _dt.date.today() - _dt.timedelta(days=days_back)
     while d.weekday() >= 5:
@@ -256,6 +274,7 @@ def main() -> int:
         return 2
 
     from webhook import app
+    _mute_traffic()          # BEFORE the first request — a monitor is not a user
     client = app.test_client()
 
     # READ-ONLY by design: reads + informational commands + prompt-only callbacks

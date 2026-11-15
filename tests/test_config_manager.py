@@ -546,7 +546,7 @@ class TestScreenerCache:
     """
 
     STOCKS = {"short_term": [{"ticker": "RJF", "score": 80}],
-              "long_term":  [{"ticker": "UNH", "lt_score": 70}]}
+              "long_term":  [{"ticker": "UNH", "score": 70}]}   # the real cached shape
     CRYPTO = {"short_term": [], "long_term": []}
 
     def test_round_trip_returns_saved_data(self, _gist_store):

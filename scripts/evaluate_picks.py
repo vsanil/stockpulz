@@ -421,6 +421,16 @@ ENGINE_CHANGES = [
      "(top 5 of the pullback screen, target +10.3%, volatility stop) instead of "
      "Claude; long-term stocks and every other section are unchanged "
      "(finding engine/promote-pullback-st)"),
+    # Dated the first morning the corrected floor can produce picks. Before it,
+    # agent.py read `lt_score` from cached candidates that store `score`, so on
+    # every cache-hit morning since 2026-05-16 the long-term shortlist was
+    # discarded and Claude chose its "long-term" stocks from the SHORT-TERM
+    # candidates. 2026-11-13 had none at all (Claude was given no stocks).
+    ("2026-11-16", "stock",
+     "long-term stock picks are now chosen from the screener's long-term "
+     "(fundamentals-ranked) shortlist; until now a mis-keyed quality floor "
+     "discarded that shortlist every cache-hit morning, so long-term stock "
+     "picks were drawn from the short-term technical candidates"),
 ]
 
 

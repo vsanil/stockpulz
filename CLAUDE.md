@@ -1396,6 +1396,7 @@ Both had `timeout=25` against a **54.9 s** cold start. The instant nothing sched
 - **🔴 Render's 750 free instance-hours are per ACCOUNT, shared across every FREE service on it — not per service. Paid (Starter) services are excluded from the pool entirely.** The same cron-job.org account also keeps **PiQValet** (`paywise-cg8z.onrender.com`, ~496 h/mo) and **pricedrop** (~31 h/mo) alive. If those sit on the same Render account, the free budget was being asked for ~1,240 h against a 750 h cap, and StockPulz's window alone does not fix it — total after the narrowing is ~1,085 h. **Verify in the Render dashboard whether these share an account before concluding StockPulz is the cause of a bill.**
 - **`traffic_tracker.py` + the admin "Traffic by hour" card answer whether the cold window costs anyone anything** — the input to a future "upgrade Render" decision. `@app.before_request` in webhook.py counts real interactions per UTC hour into `traffic_hours.json`.
 - **🔴 `/health` MUST stay excluded from the count** (`_TRAFFIC_SKIP_PREFIXES`). It is the keep-warm ping itself, firing 4×/hour around the clock — counting it would make every hour look busy and destroy the whole measurement. `/trigger/*` is excluded for the same reason (crons, not people). Guard: `TestKeepWarmPingIsNeverCounted`.
+- **🔴 The Full Sweep was 99.8% of the traffic card (found 2026-11-14).** It drives the real Flask app in-process as the admin, so `before_request` counted every request — and each run is a fresh process under 90 s old, so every one was flagged a COLD START. Measured: 42 runs × 33 requests = **1,386 of November's 1,389 "interactions"**, all under the owner's id, all cold; the real figure was 3 hits, 2 of them cold. **The tell: every hour's count was a multiple of 33.** `full_sweep._mute_traffic()` now switches `record`/`flush` off before the first request (same two lines as `dev_server.py`). **Rule: anything that drives `webhook.app` in-process — a monitor, a script, a dev server — must mute `traffic_tracker` first; `/health` being excluded does not cover it.** Counts stored before 2026-11-14 are still polluted (not cleaned); read any month up to and including 2026-11 with the owner's row subtracted. Guard: `TestTheSweepIsNotCountedAsTraffic` drives the real `main()`, with a control proving the same request IS counted without the mute; 4 of 4 mutations caught.
 - **🔴 `mutate_gist_file`'s mutator MUST return `(new_contents, result)` — a bare dict raises "not enough values to unpack", and `flush()` SWALLOWS it.** The traffic tracker shipped with `return _merge(...)` and therefore **never wrote a single row**; it was invisible because the failure is caught by design (telemetry must not break a request) and the canary/full sweep stayed green. Found only by reading a full-sweep log line, not by any test.
 - **🔴 The test stub is what hid it: it did `self.data = mutator(self.data)`, accepting a bare return value — a CONVENIENT contract, not the real one.** This is the same class as the screener goldens stubbing `_alpaca_single_bars`. **Rule: a stub must enforce the real signature; if it is more permissive than production, it certifies bugs.** The corrected `_Store.mutate` unpacks the 2-tuple and takes `default=` — verified it FAILS 5 tests against the broken code.
 - **🔴 COLD hits flush IMMEDIATELY; warm hits batch.** The obvious design (count in memory, flush on a timer) loses exactly the data this exists to collect: a lone 3 AM tap wakes the server, increments a counter, and Render spins the process down ~15 min later — the count dies with the process. Isolated cold-window events are the MOST likely to be lost and they are the entire point. Cold hits are rare, so an immediate write is affordable. Guard: `TestColdHitsSurviveSpinDown`, incl. a simulated process death. **Never "optimise" the cold flush into the batch.**
@@ -3435,3 +3436,62 @@ automatic build ran out of its 15-turn budget with nothing written, so this was 
   then receives it in two parts (`telegram_api._safe_split`) — delivered, not truncated.
 - Guard: `tests/test_pullback_promotion.py` (21 tests, 8 of 8 mutations caught). **Dry-run
   2026-11-12** against the live market with every write blocked: BSX, IBKR, NWS, RUM, CORZ.
+
+### 🔴 The promotion's first morning lost EVERY long-term stock pick — two bugs stacked (2026-11-14)
+
+Found by reading the 2026-11-13 morning LOG BODY after a green run: `5 ST + 0 LT stocks`, against
+2 long-term every earlier day that week.
+- **Bug 1, six months old: the long-term quality floor read a key that does not exist.** `agent.py`
+  filtered the cached shortlist on `c.get("lt_score", 0) >= 15`, but `screener._flatten_long` stores
+  that value as **`score`**. So every cached long-term candidate scored 0 and was dropped — on every
+  cache-hit morning since `f9adeb7` (2026-05-16). The log said so daily, in a line that read as
+  routine: `LT quality floor: dropped 5 cached candidates`. The other tell was
+  `Bulk price pre-fetch: got 5/5 prices` — five candidates reached Claude, and they were the five
+  SHORT-TERM ones.
+- **What that means for the record: until 2026-11-13, "long-term" stock picks on cache-hit mornings
+  were Claude choosing long holds out of the short-term TECHNICAL candidates.** The fundamentals
+  shortlist never reached it. Logged in `ENGINE_CHANGES` dated **2026-11-16**; do not average
+  long-term results across that date.
+- **Bug 2, mine: the promotion removed the list that was hiding bug 1.** Handing Claude
+  `short_term: []` left it with no stock candidate at all.
+- **Fix:** `agent._lt_candidate_score` reads `lt_score` then `score`; `agent._apply_lt_floor` keeps a
+  candidate with NO readable score (unmeasurable is not low-quality) and the run **alerts the owner
+  when the floor empties the whole shortlist** — losing all of it is never routine.
+- **🔴 The tests passed because the fixture was shaped like the bug.** `_cache()` built its long-term
+  candidate with `lt_score=70`, a key no cached candidate has ever carried. *A stub more permissive
+  than production certifies bugs* — fifth recorded time. The fixture now uses the real shape, and
+  `test_the_screener_really_caches_the_score_under_score` reads `_flatten_long`'s AST so the two
+  cannot drift. With the fixture corrected, the PRE-EXISTING promotion test fails against the old code.
+- **Bug 3: the overnight job never cached the pullback shortlist.** The promotion patched
+  `run_prescreener.py`, which is the LAPTOP fallback; `daily_run.yml` runs **`agent.run_prescreener`**.
+  Every morning logged `No cached pullback shortlist — running the pullback screen live`, putting a
+  600-ticker screen on the delivery path and making the pullback run the last writer of
+  `data_quality.json`. Both entry points now run pullback FIRST and save it. **Rule: before patching
+  a job, confirm which file production actually executes — `grep` the workflows, not the filename
+  that sounds right.** Guard: `TestProductionPrescreener`, incl. that no workflow runs the laptop script.
+- 7 of 7 mutations caught, including the original bug restored verbatim.
+
+### 🔴 UTC-scheduled triggers run ONE HOUR EARLY in ET all winter (measured 2026-11-13, NOT FIXED)
+
+DST ended 2026-11-01. Thirteen cron-job.org jobs are `tz=UTC`, so against the market they all moved:
+
+    premarket    12:45 UTC -> 07:46 ET   (meant 08:45)
+    vix_check    14:00 UTC -> 09:01 ET   (before the open)
+    eod_summary  20:15 UTC -> 15:16 ET   (BEFORE the 16:00 close)
+    price_alerts 13:00-19:30 UTC -> last check 14:31 ET  (nothing 14:30-16:00)
+
+Also UTC: close_check, confirmation, digest, friday_wrap, macro_alert, midday_check, news_check,
+pre_earnings, watchdog. The ET-anchored ones (morning, prescreener, canary, synthetic_open,
+arms-open) are unaffected — which is why delivery looked fine. **The calendar gate cannot catch
+this: it checks the DAY, not the hour.** Fix is re-anchoring those jobs to `America/New_York` at
+their ET hours (owner's go-ahead needed; then re-run `scripts/audit_cron_schedules.py` for weekday
+shifts). **Rule: a market-timed job is scheduled in ET, never UTC.**
+
+### ⏳ `pick_ledger_2026.json` reaches the ~1 MB gist wall around 2026-11-26
+
+802 KB on 11-14 and growing ~15 KB/day since the tournament's arm rows started (745 → 802 KB over
+11-10..14) — far faster than the 700 KB/year estimated before arms existed. The canary has been red
+daily on `storage.headroom` alone; it is owner-only, so self-heal correctly stands down. Readers go
+through `_content(meta)`, which refetches via `raw_url` when truncated, but that path has **never
+run against a real truncated file**. Decide before the wall: move the ledger to the row store, or
+shard arm rows into their own file.

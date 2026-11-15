@@ -136,9 +136,15 @@ def _wire_morning(monkeypatch, cache, live_ok=False, live_result=None):
     return seen
 
 
-def _cache(with_pullback=True):
+def _cache(with_pullback=True, lt_scores=(80,)):
+    # 🔴 Long-term candidates are shaped as the screener REALLY caches them:
+    # the score lives under `score` (screener._flatten_long). This fixture used
+    # to add `lt_score=70`, a key no cached candidate carries — which is why a
+    # floor that read only `lt_score` (and so dropped every candidate, every
+    # morning, for six months) passed every test here.
+    lt = [_cand("LTPICK" if i == 0 else f"LT{i}", s) for i, s in enumerate(lt_scores)]
     c = {"stocks": {"short_term": [_cand("DEFAULTST", 95)],
-                    "long_term": [dict(_cand("LTPICK", 80), lt_score=70)],
+                    "long_term": lt,
                     "near_misses": {"short_term": [_cand("DEFNM", 50)],
                                     "long_term": [_cand("LTNM", 40)]}},
          "crypto": {"short_term": [_cand("BTC", 70)], "long_term": []}}
@@ -201,7 +207,118 @@ class TestMorningRun:
         assert any("Pullback shortlist missing" in a for a in seen["alerts"])
 
 
+# ── The long-term shortlist must REACH Claude ────────────────────────────────
+
+class TestLongTermShortlistSurvivesTheFloor:
+    """Found 2026-11-14 from the 11-13 morning log: `5 ST + 0 LT stocks`.
+
+    The floor read `lt_score`; cached candidates store `score`. Every cached
+    long-term candidate was therefore dropped on every cache-hit morning since
+    2026-05-16, and Claude made its "long-term" picks out of the SHORT-TERM
+    list. The promotion took that list away, and long-term stocks vanished."""
+
+    def test_the_screener_really_caches_the_score_under_score(self):
+        """Pins the fixture to production: if _flatten_long ever changes the key,
+        this fails instead of the tests silently describing a shape that no
+        longer exists."""
+        import ast
+        src = open(os.path.join(ROOT, "screener.py"), encoding="utf-8").read()
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef) and n.name == "_flatten_long")
+        keys = {k.value for d in ast.walk(fn) if isinstance(d, ast.Dict)
+                for k in d.keys if isinstance(k, ast.Constant)}
+        assert "score" in keys
+        assert "lt_score" not in keys
+
+    def test_a_cached_candidate_above_the_floor_is_kept(self):
+        kept, dropped = ag._apply_lt_floor([_cand("A", 65), _cand("B", 15)])
+        assert [c["ticker"] for c in kept] == ["A", "B"] and dropped == 0
+
+    def test_a_candidate_below_the_floor_is_still_dropped(self):
+        kept, dropped = ag._apply_lt_floor([_cand("GOOD", 40), _cand("WEAK", 14.9)])
+        assert [c["ticker"] for c in kept] == ["GOOD"] and dropped == 1
+
+    def test_the_legacy_key_is_still_honoured(self):
+        kept, _ = ag._apply_lt_floor([{"ticker": "OLD", "lt_score": 70},
+                                      {"ticker": "OLDWEAK", "lt_score": 5}])
+        assert [c["ticker"] for c in kept] == ["OLD"]
+
+    @pytest.mark.parametrize("junk", [None, "70", float("nan"), float("inf"), True])
+    def test_an_unreadable_score_is_kept_not_treated_as_zero(self, junk):
+        kept, dropped = ag._apply_lt_floor([{"ticker": "X", "score": junk}])
+        assert [c["ticker"] for c in kept] == ["X"] and dropped == 0
+
+    def test_empty_and_missing_lists_are_safe(self):
+        assert ag._apply_lt_floor([]) == ([], 0)
+        assert ag._apply_lt_floor(None) == ([], 0)
+
+    def test_the_morning_run_hands_claude_the_cached_long_term_candidates(self, monkeypatch):
+        seen = _run(monkeypatch, cache=_cache(lt_scores=(65, 40, 12)))
+        assert [c["ticker"] for c in seen["claude_stocks"]["long_term"]] == ["LTPICK", "LT1"]
+        assert not any("Long-term shortlist emptied" in a for a in seen["alerts"])
+
+    def test_losing_the_whole_shortlist_alerts_the_owner(self, monkeypatch):
+        seen = _run(monkeypatch, cache=_cache(lt_scores=(10, 5)))
+        assert seen["claude_stocks"]["long_term"] == []
+        assert any("Long-term shortlist emptied" in a for a in seen["alerts"])
+
+    def test_a_cache_with_no_long_term_candidates_is_not_an_alert(self, monkeypatch):
+        seen = _run(monkeypatch, cache=_cache(lt_scores=()))
+        assert not any("Long-term shortlist emptied" in a for a in seen["alerts"])
+
+
 # ── The overnight job ────────────────────────────────────────────────────────
+
+class TestProductionPrescreener:
+    """`agent.run_prescreener` is what daily_run.yml actually runs overnight.
+    The promotion tested only run_prescreener.py (the laptop fallback), so the
+    production job never cached the shortlist and nothing noticed."""
+
+    def _wire(self, monkeypatch, pullback_fails=False):
+        calls, saved = [], {}
+        monkeypatch.setattr(ag, "_log_cron_run", lambda *a, **k: None)
+        monkeypatch.setattr(ag, "is_market_holiday", lambda d: False)
+        monkeypatch.setattr(ag, "_run_crypto_with_retry",
+                            lambda: {"short_term": [], "long_term": []})
+
+        def _screen(**kw):
+            name = getattr(kw.get("strategy"), "name", "default")
+            calls.append(name)
+            if name == "pullback":
+                if pullback_fails:
+                    raise RuntimeError("boom")
+                return _pullback_screen(2)
+            return {"short_term": [_cand("D", 90)], "long_term": []}
+        monkeypatch.setattr(ag, "run_screener", _screen)
+
+        def _save(stocks, crypto, pullback=None):
+            saved.update(stocks=stocks, crypto=crypto, pullback=pullback)
+        monkeypatch.setattr(ag, "save_screener_cache", _save)
+        ag.run_prescreener({})
+        return calls, saved
+
+    def test_the_workflows_never_run_the_laptop_script(self):
+        """If production ever switches to run_prescreener.py, this class is
+        testing the wrong entry point again — say so."""
+        wf_dir = os.path.join(ROOT, ".github", "workflows")
+        for name in os.listdir(wf_dir):
+            text = open(os.path.join(wf_dir, name), encoding="utf-8").read()
+            assert "run_prescreener.py" not in text, name
+
+    def test_pullback_runs_first_so_the_default_screen_writes_data_quality_last(self, monkeypatch):
+        calls, _ = self._wire(monkeypatch)
+        assert calls == ["pullback", "default"]
+
+    def test_the_shortlist_is_saved_into_the_cache(self, monkeypatch):
+        _, saved = self._wire(monkeypatch)
+        assert [c["ticker"] for c in saved["pullback"]["short_term"]] == ["PB0", "PB1"]
+
+    def test_a_failing_pullback_screen_never_blocks_the_default_cache(self, monkeypatch):
+        calls, saved = self._wire(monkeypatch, pullback_fails=True)
+        assert calls == ["pullback", "default"]
+        assert saved["stocks"]["short_term"][0]["ticker"] == "D"
+        assert saved["pullback"] is None
+
 
 class TestPrescreener:
     def _wire(self, monkeypatch, pullback_fails=False):
