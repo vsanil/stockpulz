@@ -1366,7 +1366,7 @@ function actionSection(a){
     +'<div class="fb-meta">'+(st.assessed
         ? '<b>'+st.assessed+'</b> of '+st.n+' could be checked against the stock&#39;s own daily range'
           +' · <b>'+st.tight+'</b> sat inside it'
-          +' (measured from the fill) · <b>'+(st.tight_open_engine||0)+'</b> open position(s) had a stop the engine published that tight'
+          +' (measured from the fill) · of <b>'+(st.engine_assessed_open||0)+'</b> open position(s) whose published stop could be judged, <b>'+(st.tight_open_engine||0)+'</b> were published that tight'
         : 'none of the '+st.n+' could be checked against the stock&#39;s daily range (no volatility on record)')
     +'</div>'
     +ocline+warn+'</div>';

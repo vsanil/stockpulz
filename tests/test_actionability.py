@@ -158,6 +158,17 @@ class TestStops:
         st = analyse(led, [self._pos(98.0, levels_source="pick")], [])["stops"]
         assert st["assessed"] == 1 and st["tight"] == 1 and st["tight_examples"] == []
 
+    def test_zero_engine_tight_says_out_of_how_many(self):
+        """The same trap one level down: '0 published too tight' must not read
+        the same whether every published stop passed or none could be judged."""
+        led = [self._led(1.0)]
+        judged = analyse(led, [self._pos(95.0, levels_source="pick")], [])["stops"]
+        unjudged = analyse(led, [self._pos(95.0, levels_source="stop")], [])["stops"]
+        closed = analyse(led, [self._pos(95.0, levels_source="pick", closed_date="2026-11-12")], [])["stops"]
+        assert (judged["tight_open_engine"], judged["engine_assessed_open"]) == (0, 1)
+        assert (unjudged["tight_open_engine"], unjudged["engine_assessed_open"]) == (0, 0)
+        assert closed["engine_assessed_open"] == 0
+
     def test_an_example_carries_what_the_finding_prints(self):
         e = analyse([self._led(4.0)], [self._pos(98.0, levels_source="pick")], [])["stops"]["tight_examples"][0]
         assert (e["ticker"], e["stop_pct"], e["atr_pct"], e["date"]) == ("T", 2.0, 4.0, "2026-11-10")
@@ -340,6 +351,7 @@ class TestTheAdminCardSaysWhatWasChecked:
         html = client.get("/admin").get_data(as_text=True)
         assert "could be checked against the stock" in html
         assert "st.assessed" in html and "st.tight_open_engine" in html
+        assert "st.engine_assessed_open" in html
         assert "threshold_pct" not in html
 
     def test_the_analysis_no_longer_exports_the_flat_threshold(self):

@@ -509,8 +509,10 @@ def _reachability(rows, log, paper) -> list:
             f"median {stops.get('median_stop_pct')}% across {stops['n']} "
             f"positions; {stops.get('assessed', 0)} could be checked against "
             f"the stock's own daily range, {stops.get('tight', 0)} sat inside "
-            f"it ({stops.get('tight_open_engine', 0)} still open with the "
-            f"engine's own stop).",
+            f"it, measured from the fill. Of "
+            f"{stops.get('engine_assessed_open', 0)} open positions whose "
+            f"PUBLISHED stop could be judged, "
+            f"{stops.get('tight_open_engine', 0)} were published that tight.",
             "Context for the geometry metric — no action on its own.",
             n=stops["n"], kind="metric"))
 

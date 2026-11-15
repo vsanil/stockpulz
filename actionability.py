@@ -232,6 +232,8 @@ def stop_distances(positions: list, atr_by: dict | None = None,
                     "open": not (pos.get("closed_date") or pos.get("sell_price")),
                     "engine_stop": engine_stop,
                     "published_stop_pct": round(published, 2) if published is not None else None,
+                    # Could the engine's own stop be judged at all?
+                    "engine_assessed": bool(assessed and published is not None),
                     "engine_tight": bool(assessed and published is not None
                                          and published < atr * TIGHT_STOP_ATR_MULT)})
     return out
@@ -305,6 +307,8 @@ def analyse(ledger_rows: list, positions: list, closed: list,
             # same whether every stop passed or none was ever checked.
             "assessed": sum(1 for s in stops if s["assessed"]),
             "tight": len(tight),
+            # Same rule as `assessed`: a zero below must say out of how many.
+            "engine_assessed_open": sum(1 for s in stops if s["open"] and s["engine_assessed"]),
             "tight_open_engine": len(actionable),
             "tight_examples": sorted(actionable, key=lambda s: s["published_stop_pct"])[:5],
             "atr_mult": TIGHT_STOP_ATR_MULT,
