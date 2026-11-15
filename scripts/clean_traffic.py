@@ -8,11 +8,17 @@ using the app — and, because each run is a fresh process, as a COLD START.
 November alone: 1,386 of 1,389 "interactions".
 
 Each polluted hour is attributed by EVIDENCE, not by guess: the GitHub API
-says exactly when every Full Sweep run started, so for each (month, UTC hour)
-we know how many runs fell in it. The script removes the owner's hits in an
-hour only when they are a clean multiple of the runs there; anything that does
-not fit is LEFT ALONE and printed, so a real interaction is never deleted to
-make the numbers tidy.
+says exactly when every Full Sweep run started. Measured from that record, a
+run made 33 counted requests, all cold, all under the owner's id. So in each
+(month, UTC hour) the script removes at most 33 × the runs that started there
+— plus whatever capacity the PREVIOUS hour's runs did not use, because a run
+starting at :59 lands its requests in the next hour — and only the owner's
+COLD hits. Everything beyond that is LEFT ALONE and printed: warm hits, other
+users, and any owner activity the runs cannot account for.
+
+(A first, stricter version removed an hour only when the owner's hits were an
+exact multiple of its runs. It left 21 obviously-polluted hours, because of
+that spill and of runs that failed partway.)
 
 READ-ONLY by default. `--apply` writes, through the same mutate path the app
 uses, and reads back. The store must be the one production uses (Supabase) —
@@ -59,26 +65,33 @@ def sweep_runs_by_hour(repo: str, token: str) -> dict:
     return out
 
 
+PER_RUN = 33     # counted requests per sweep run, measured Sep-Nov 2026
+
+
 def plan(data: dict, runs: dict, owner: str) -> tuple[list, dict]:
-    """Rows for the report, and {(month, hour): hits_to_remove}."""
+    """Rows for the report, and {(month, hour): hits_to_remove}.
+
+    Hours are walked in order so a run's unused capacity carries ONE hour
+    forward (its requests spill past the hour it started in), then expires.
+    """
     rows, remove = [], {}
     months = sorted(set(data) | {m for m, _ in runs})
     for month in months:
         hours = data.get(month) or {}
-        for h in sorted(set(hours) | {hh for m, hh in runs if m == month}):
+        carry = 0
+        for i in range(24):
+            h = f"{i:02d}"
             rec = hours.get(h) or {}
             o = int((rec.get("users") or {}).get(owner, 0))
             n = runs.get((month, h), 0)
             cold = int(rec.get("cold", 0))
-            if not o and not n:
-                continue
-            per = (o / n) if n else None
-            # Remove only what the runs fully explain: the owner's hits are an
-            # exact multiple of the runs in that hour, every one of them cold.
-            fits = bool(n) and o > 0 and o % n == 0 and o <= cold
-            rows.append((month, h, int(rec.get("hits", 0)), o, cold, n, per, fits))
-            if fits:
-                remove[(month, h)] = o
+            capacity = PER_RUN * n + carry
+            take = min(o, cold, capacity)
+            carry = min(PER_RUN * n, capacity - take)   # only this hour's runs spill on
+            if take:
+                remove[(month, h)] = take
+            if o or n:
+                rows.append((month, h, int(rec.get("hits", 0)), o, cold, n, take))
     return rows, remove
 
 
@@ -134,21 +147,15 @@ def main() -> int:
     runs = sweep_runs_by_hour(repo, token)
     rows, remove = plan(data, runs, owner)
 
-    print(f"{'month':8} {'hr':>2} {'hits':>6} {'owner':>6} {'cold':>6} {'runs':>5} {'per run':>8}  verdict")
-    for month, h, hits, o, cold, n, per, fits in rows:
-        per_s = f"{per:.1f}" if per is not None else "-"
-        print(f"{month:8} {h:>2} {hits:6d} {o:6d} {cold:6d} {n:5d} {per_s:>8}  "
-              f"{'REMOVE ' + str(o) if fits else 'keep'}")
-    by_month: dict = {}
-    for (m, _h), n in remove.items():
-        by_month[m] = by_month.get(m, 0) + n
+    print(f"{'month':8} {'hr':>2} {'hits':>6} {'owner':>6} {'cold':>6} {'runs':>5} {'remove':>7} {'owner left':>10}")
+    for month, h, hits, o, cold, n, take in rows:
+        print(f"{month:8} {h:>2} {hits:6d} {o:6d} {cold:6d} {n:5d} {take:7d} {o - take:10d}")
     for m in sorted(data):
         tot = sum(int((r or {}).get("hits", 0)) for r in (data[m] or {}).values())
-        print(f"  {m}: {tot} hits stored, {by_month.get(m, 0)} attributable to the sweep "
-              f"-> {tot - by_month.get(m, 0)} left")
-    kept = [(m, h, o) for m, h, _x, o, _c, n, _p, fits in rows if o and not fits]
-    if kept:
-        print(f"  ⚠️ {len(kept)} owner hour(s) NOT explained by sweep runs — left as they are: {kept[:12]}")
+        own = sum(int(((r or {}).get("users") or {}).get(owner, 0)) for r in (data[m] or {}).values())
+        rm = sum(n for (mm, _h), n in remove.items() if mm == m)
+        print(f"  {m}: {tot} hits stored · owner {own} · sweep {rm} -> {tot - rm} left "
+              f"(owner {own - rm})")
 
     if not args.apply:
         print("[clean_traffic] DRY RUN — nothing written.")
