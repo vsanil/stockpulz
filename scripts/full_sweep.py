@@ -130,6 +130,19 @@ def _mute_traffic() -> None:
     traffic_tracker.flush = lambda *a, **k: False
 
 
+def _mute_activity() -> None:
+    """Stop this run from being recorded as the OWNER using the bot.
+
+    Every command the sweep drives went through the real handler, which stamps
+    `last_seen` and appends to the user's activity log — so each run made ~18
+    writes to the live store under the owner's id, the admin page read
+    "1 active today", and the owner's activity log filled with sweep commands.
+    This file's own header says READ-ONLY; that was not true until now.
+    """
+    import bot_commands
+    bot_commands._record_activity = lambda *a, **k: None
+
+
 def _recent_weekday(days_back: int = 5) -> str:
     d = _dt.date.today() - _dt.timedelta(days=days_back)
     while d.weekday() >= 5:
@@ -275,6 +288,7 @@ def main() -> int:
 
     from webhook import app
     _mute_traffic()          # BEFORE the first request — a monitor is not a user
+    _mute_activity()         # ... and must not stamp the owner as active
     client = app.test_client()
 
     # READ-ONLY by design: reads + informational commands + prompt-only callbacks

@@ -1409,6 +1409,18 @@ Both had `timeout=25` against a **54.9 s** cold start. The instant nothing sched
   hit per deploy; they were not cleaned. *The probe evidence is the timing match; the request
   itself was never seen (Render logs were not readable in that session).* Guard:
   `TestDeployProbesAreNeverCounted`; 3 of 3 mutations caught.
+- **🔴 And the sweep was also stamping the OWNER as active (2026-11-15).** /admin read
+  "1 active today" with the owner last seen at 00:01 UTC — the sweep. Each run drives 16 bot
+  commands through the real `handle_incoming_command`, which stamped `last_seen` and appended a
+  `command` event to the activity log: **~18 writes to the live store per run, three times a day,
+  from a monitor whose header says READ-ONLY**, and an owner activity log full of sweep commands.
+  The recording is now the module-level `bot_commands._record_activity(chat_id, text)`, and
+  `full_sweep._mute_activity()` replaces it before the first command. Real users are unaffected
+  (pinned). **Third thing the sweep was writing under the owner's id — traffic, cold starts,
+  activity. Rule: anything that drives the app as a real account must be checked for every
+  SIDE EFFECT of the paths it drives, not just the one that surfaced.**
+  ⚠️ `fs.main()` leaves these mutes on for the life of the process; `tests/test_full_sweep.py` has
+  an autouse fixture that restores them, or the next test inherits a silenced recorder.
 - **Cleanup of the stored pollution (2026-11-15): `scripts/clean_traffic.py` via the manual
   `clean_traffic.yml`.** Attribution is by EVIDENCE: the GitHub API gives every Full Sweep run's
   start time, and a run made 33 counted requests (measured). Per UTC hour it removes at most

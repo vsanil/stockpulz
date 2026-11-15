@@ -8,6 +8,7 @@ import os
 import datetime as dt
 import importlib.util
 
+import pytest
 import requests
 
 _PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -15,6 +16,21 @@ _PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _spec = importlib.util.spec_from_file_location("full_sweep", _PATH)
 fs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(fs)
+
+
+@pytest.fixture(autouse=True)
+def _undo_the_sweeps_mutes(monkeypatch):
+    """`fs.main()` switches traffic counting and activity recording OFF for the
+    life of the process — correct for the real script, which exits afterwards,
+    and poison for a test suite, where the next test would inherit a silenced
+    recorder (and a test that then saved "the original" would save the no-op).
+    Registering them with monkeypatch first puts the real ones back."""
+    import bot_commands
+    import traffic_tracker
+    monkeypatch.setattr(bot_commands, "_record_activity", bot_commands._record_activity)
+    monkeypatch.setattr(traffic_tracker, "record", traffic_tracker.record)
+    monkeypatch.setattr(traffic_tracker, "flush", traffic_tracker.flush)
+    yield
 
 
 class TestFullSweepHelpers:
@@ -118,6 +134,66 @@ class TestTheSweepIsNotCountedAsTraffic:
         assert traffic_tracker.record("123", cold=True) is False
         assert traffic_tracker.flush() is False
         assert traffic_tracker.pending_snapshot() == before, "a muted hit was still counted"
+
+
+class TestTheSweepIsNotRecordedAsTheOwnerBeingActive:
+    """Found 2026-11-15: the admin page said "1 active today" and showed the
+    owner last seen at 00:01 UTC — that was the sweep. Each run drove 16 bot
+    commands as the owner through the real handler, which stamps `last_seen`
+    and appends to the activity log: ~18 writes to the live store per run from
+    a monitor whose header says READ-ONLY."""
+
+    class _Now:
+        """threading.Thread stand-in that runs the target at once, so the
+        test can assert without racing a daemon thread."""
+        def __init__(self, target=None, daemon=None, **k):
+            self._t = target
+
+        def start(self):
+            self._t()
+
+    def _wire(self, monkeypatch):
+        import bot_commands as bc
+        import config_manager as cm
+        seen = {"last_seen": 0, "logged": 0}
+        monkeypatch.setattr(bc, "_record_activity", bc._record_activity)   # restored afterwards
+        monkeypatch.setattr(bc.threading, "Thread", self._Now)
+        monkeypatch.setattr(bc, "_parse_and_execute", lambda *a, **k: "")
+        monkeypatch.setattr(bc, "update_user_config",
+                            lambda cid, key, val: seen.__setitem__(
+                                "last_seen", seen["last_seen"] + (key == "last_seen")))
+        monkeypatch.setattr(cm, "log_user_event",
+                            lambda *a, **k: seen.__setitem__("logged", seen["logged"] + 1))
+        return bc, seen
+
+    def test_a_real_persons_command_still_records_activity(self, monkeypatch):
+        """Non-regression: the fix must not stop real users being recorded."""
+        from tests.conftest import TEST_CHAT_ID
+        bc, seen = self._wire(monkeypatch)
+        bc.handle_incoming_command("/help", chat_id=TEST_CHAT_ID)
+        assert seen == {"last_seen": 1, "logged": 1}
+
+    def test_a_command_driven_by_the_sweep_records_nothing(self, monkeypatch):
+        import sys
+        bc, seen = self._wire(monkeypatch)
+        ran = []
+
+        def _commands(admin):
+            bc.handle_incoming_command("/help", chat_id=admin)
+            ran.append(admin)
+        monkeypatch.setattr(fs, "sweep_get_endpoints", lambda client, admin: None)
+        monkeypatch.setattr(fs, "sweep_bot_commands", _commands)
+        monkeypatch.setattr(fs, "sweep_callbacks", lambda admin: None)
+        monkeypatch.setattr(fs, "sweep_llm", lambda client, admin: None)
+        monkeypatch.setattr(sys, "argv", ["full_sweep.py", "--dry-run"])
+        import traffic_tracker
+        monkeypatch.setattr(traffic_tracker, "record", traffic_tracker.record)
+        monkeypatch.setattr(traffic_tracker, "flush", traffic_tracker.flush)
+        fs.RESULTS.clear()
+        fs.main()
+        fs.RESULTS.clear()
+        assert len(ran) == 1, "the sweep drove no command — nothing was tested"
+        assert seen == {"last_seen": 0, "logged": 0}
 
 
 class TestReport:

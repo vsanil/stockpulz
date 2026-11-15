@@ -76,6 +76,29 @@ from cmd_trades import _cmd_trades
 
 # ── Command handler ───────────────────────────────────────────────────────────
 
+def _record_activity(chat_id: str, text: str) -> None:
+    """Stamp `last_seen` and log the command for the admin page. Never raises.
+
+    A module-level function so that anything driving the bot WITHOUT a person
+    behind it can replace it. Until 2026-11-15 this lived inside the handler,
+    and the Full Sweep — which runs 16 commands as the owner, three times a
+    day — therefore wrote the owner's `last_seen` and activity log on every
+    run: ~18 writes to the live store from a monitor documented as read-only,
+    and an admin page that showed "1 active today" for a robot.
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        update_user_config(chat_id, "last_seen", _dt.now(_tz.utc).isoformat())
+    except Exception:
+        pass
+    try:
+        from config_manager import log_user_event
+        cmd_label = text.split()[0][:40] if text else "(empty)"
+        log_user_event(chat_id, "command", cmd_label)
+    except Exception:
+        pass
+
+
 def handle_incoming_command(message_text: str, chat_id: str | None = None) -> str:
     """Parse and execute a Telegram command. Sends reply and returns reply text."""
     chat_id = chat_id or _chat_id()
@@ -114,20 +137,10 @@ def handle_incoming_command(message_text: str, chat_id: str | None = None) -> st
                 )
             return ""
 
-    # Record last-seen + log the command (background — non-blocking)
-    def _record_seen():
-        try:
-            from datetime import datetime as _dt, timezone as _tz
-            update_user_config(chat_id, "last_seen", _dt.now(_tz.utc).isoformat())
-        except Exception:
-            pass
-        try:
-            from config_manager import log_user_event
-            cmd_label = text.split()[0][:40] if text else "(empty)"
-            log_user_event(chat_id, "command", cmd_label)
-        except Exception:
-            pass
-    threading.Thread(target=_record_seen, daemon=True).start()
+    # Record last-seen + log the command (background — non-blocking).
+    # Looked up on the module at call time, so a monitor that drives this
+    # handler can switch the recording off (see _record_activity).
+    threading.Thread(target=lambda: _record_activity(chat_id, text), daemon=True).start()
 
     reply = _parse_and_execute(text.upper(), original=text, chat_id=chat_id)
     if reply:
