@@ -168,12 +168,27 @@ def main() -> int:
     if not args.apply:
         print("[clean_traffic] DRY RUN — nothing written.")
         return 0
+    # A copy of exactly what is about to change, checked before anything is
+    # touched — this store keeps no history of its own.
+    backup = f"traffic_hours.before_cleanup_{dt.date.today().isoformat()}.json"
+    be.write(backup, data)
+    if (be.read_strict(backup) or {}) != data:
+        print(f"[clean_traffic] backup {backup} did not read back — nothing changed.")
+        return 1
+    print(f"[clean_traffic] backup saved: {backup}")
+    planned = sum(remove.values())
     taken = apply_plan(remove, owner)
     after = be.read_strict(TRAFFIC_FILE) or {}
-    left = sum(int((after.get(m) or {}).get(h, {}).get("users", {}).get(owner, 0))
-               for (m, h) in remove)
-    print(f"[clean_traffic] removed {taken} hit(s); owner hits left in those hours: {left}")
-    return 0 if left == 0 else 1
+
+    def _owner_total(d):
+        return sum(int(((r or {}).get("users") or {}).get(owner, 0))
+                   for m in d for r in (d.get(m) or {}).values())
+    before_o, after_o = _owner_total(data), _owner_total(after)
+    print(f"[clean_traffic] planned {planned}, removed {taken}; owner hits "
+          f"{before_o} -> {after_o} (read back)")
+    # After >= before - removed: a real owner tap may land during the run.
+    ok = taken == planned and before_o - taken <= after_o <= before_o
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
