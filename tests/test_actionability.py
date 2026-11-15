@@ -135,6 +135,29 @@ class TestStops:
         assert closed["tight_examples"] == [] and closed["tight"] == 1
         assert ex(levels_source="pick")["tight_open_engine"] == 1
 
+    def test_a_late_fill_near_the_stop_is_not_the_engines_fault(self):
+        """Measured live on 2026-11-15: ETR's stop was 1.12% below the bot's
+        fill against a 1.63% daily range — but the bot had bought after the
+        price fell toward the stop. Against the entry the engine PUBLISHED the
+        stop was a normal distance away. Tight for the holder; not a finding."""
+        led = [self._led(2.0)]                          # entry 100, daily range 2%
+        st = analyse(led, [self._pos(95.0, entry_price=96.0, levels_source="pick")], [])["stops"]
+        assert st["tight"] == 1, "1.04% from the fill is inside a 2% range"
+        assert st["tight_examples"] == [] and st["tight_open_engine"] == 0
+
+    def test_a_stop_published_too_tight_IS_an_example_whatever_the_fill(self):
+        led = [self._led(4.0)]                          # entry 100, daily range 4%
+        st = analyse(led, [self._pos(98.0, entry_price=103.0, levels_source="pick")], [])["stops"]
+        assert st["tight"] == 0, "4.85% from the fill is outside a 4% range"
+        assert [e["published_stop_pct"] for e in st["tight_examples"]] == [2.0]
+
+    def test_without_the_published_pick_the_engines_stop_cannot_be_judged(self):
+        """An arm or control row can supply the volatility, but not the
+        published entry — so there is nothing to judge the stop against."""
+        led = [self._led(4.0, arm="pullback")]
+        st = analyse(led, [self._pos(98.0, levels_source="pick")], [])["stops"]
+        assert st["assessed"] == 1 and st["tight"] == 1 and st["tight_examples"] == []
+
     def test_an_example_carries_what_the_finding_prints(self):
         e = analyse([self._led(4.0)], [self._pos(98.0, levels_source="pick")], [])["stops"]["tight_examples"][0]
         assert (e["ticker"], e["stop_pct"], e["atr_pct"], e["date"]) == ("T", 2.0, 4.0, "2026-11-10")

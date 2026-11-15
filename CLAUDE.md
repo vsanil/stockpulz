@@ -3569,7 +3569,16 @@ were wrong with it, and together they made a clean-looking zero out of nothing:
 - **Also fixed while there:** `analyse` joined positions to ANY non-control ledger row. Since the
   card began reading the live ledger (arm rows included), a tournament arm's row for the same
   ticker and day could supply the ARM's entry price as "the published entry". Production rows only.
-- Guard: `tests/test_actionability.py` (35 tests); 8 of 8 mutations caught, incl. the original bug.
+- **🔴 The first live read then nearly manufactured five false engine findings.** 173 of 228
+  were assessable and 11 were tight — but the five "open, engine's own stop" examples (ETR 1.12%
+  vs a 1.63% daily range, CMPS, BWXT, ASND, MTSI) were tight only measured from the bot's FILL,
+  which had landed near the stop after the price fell. The engine's stop was a normal distance
+  below the entry it PUBLISHED. Two questions, now kept apart: `tight` = what the holder actually
+  risked (from the fill); `engine_tight` = the published stop vs the published entry, and ONLY that
+  feeds `tight_examples`. No production pick row to compare with means it cannot be judged.
+  **Rule: a number derived from the bot's fill describes the fill. Before it becomes a finding
+  about the engine, re-derive it from what the engine published.**
+- Guard: `tests/test_actionability.py` (38 tests); 8 + 3 mutations caught, incl. the original bug.
 
 ### Automatic pick alerts expire after ONE WEEK (owner's call, 2026-11-15)
 

@@ -182,7 +182,18 @@ def atr_by_pick(ledger_rows: list) -> dict:
     return out
 
 
-def stop_distances(positions: list, atr_by: dict | None = None) -> list[dict]:
+def stop_distances(positions: list, atr_by: dict | None = None,
+                   ledger: dict | None = None) -> list[dict]:
+    """How far each stop sits below the FILL, and — separately — whether the
+    stop the ENGINE published was itself too tight.
+
+    Two different questions, and the first run against live data (2026-11-15)
+    showed why they must not be merged: ETR's stop was 1.12% below the bot's
+    fill against a 1.63% daily range, but only because the bot bought after the
+    price had already fallen toward the stop. The engine's stop was a normal
+    distance below the entry it PUBLISHED. `tight` answers "what did the holder
+    actually risk"; `engine_tight` answers "did the engine publish a bad stop",
+    and only that one is the engine's to fix."""
     out, seen = [], set()
     for pos in positions or []:
         e = _fill_price(pos)
@@ -206,12 +217,23 @@ def stop_distances(positions: list, atr_by: dict | None = None) -> list[dict]:
         else:
             tight = False                               # unmeasurable != violation
             basis = "no ATR recorded — not assessed"
+        engine_stop = pos.get("levels_source") in _ENGINE_STOP_SOURCES
+        # The engine's own geometry: its stop against the entry it published.
+        # None when there is no production pick to compare with — unmeasurable.
+        published = None
+        pick = (ledger or {}).get((_open_day(pos), tk)) if engine_stop else None
+        want = _num((pick or {}).get("entry"))
+        if want and want > 0 and s < want:
+            published = (want - s) / want * 100.0
         out.append({"ticker": tk, "stop_pct": round(d, 2),
                     "tight": tight, "basis": basis, "assessed": assessed,
                     "atr_pct": round(atr, 2) if assessed else None,
                     "date": _open_day(pos),
                     "open": not (pos.get("closed_date") or pos.get("sell_price")),
-                    "engine_stop": pos.get("levels_source") in _ENGINE_STOP_SOURCES})
+                    "engine_stop": engine_stop,
+                    "published_stop_pct": round(published, 2) if published is not None else None,
+                    "engine_tight": bool(assessed and published is not None
+                                         and published < atr * TIGHT_STOP_ATR_MULT)})
     return out
 
 
@@ -250,16 +272,17 @@ def analyse(ledger_rows: list, positions: list, closed: list,
               for r in (ledger_rows or [])
               if not r.get("control") and not r.get("arm") and r.get("date")}
     slip, undated = entry_slippage(ledger, positions, skipped)
-    stops = stop_distances(positions, atr_by_pick(ledger_rows))
+    stops = stop_distances(positions, atr_by_pick(ledger_rows), ledger)
     outs = outcome_mix(closed)
 
     slips = [s["slippage_pct"] for s in slip]
     outside = [s for s in slip if s["outside_window"]]
     tight = [s for s in stops if s["tight"]]
-    # What can still be ACTED on: a stop the engine published, on a position
-    # that is still open. A tight stop on a closed trade is history, and one
-    # the bot substituted is not the engine's.
-    actionable = [s for s in tight if s["open"] and s["engine_stop"]]
+    # What can still be ACTED on: a stop the engine published TOO TIGHT against
+    # its own entry, on a position that is still open. A tight stop on a closed
+    # trade is history; one the bot substituted is not the engine's; and one
+    # that is tight only from a late fill is the fill's doing, not the stop's.
+    actionable = [s for s in stops if s["open"] and s["engine_tight"]]
 
     return {
         "entry": {
@@ -283,7 +306,7 @@ def analyse(ledger_rows: list, positions: list, closed: list,
             "assessed": sum(1 for s in stops if s["assessed"]),
             "tight": len(tight),
             "tight_open_engine": len(actionable),
-            "tight_examples": sorted(actionable, key=lambda s: s["stop_pct"])[:5],
+            "tight_examples": sorted(actionable, key=lambda s: s["published_stop_pct"])[:5],
             "atr_mult": TIGHT_STOP_ATR_MULT,
         },
         "outcomes": outs,

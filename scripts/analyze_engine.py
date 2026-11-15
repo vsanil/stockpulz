@@ -477,13 +477,15 @@ def _reachability(rows, log, paper) -> list:
 
     stops = (res or {}).get("stops") or {}
     for ex in (stops.get("tight_examples") or []):
-        tk, pct = ex.get("ticker", "?"), ex.get("stop_pct")
+        tk, pct = ex.get("ticker", "?"), ex.get("published_stop_pct")
         out.append(Finding(
             f"stop_tight/{tk}/{pct}", "ACT",
             f"{tk} stop at {pct}% is inside its own daily range",
-            f"{tk} (opened {ex.get('date') or '?'}) has a stop {pct}% below its "
-            f"fill; its average daily range is {ex.get('atr_pct')}%. Position is "
-            f"still open and the stop is the engine's own. "
+            f"{tk} (picked {ex.get('date') or '?'}) was published with a stop "
+            f"{pct}% below its published entry; its average daily range is "
+            f"{ex.get('atr_pct')}%. The position is still open. (Measured "
+            f"against the PUBLISHED entry, not the bot's fill — a late fill "
+            f"near the stop is not counted.) "
             f"{stops.get('assessed')} of {stops.get('n')} positions could be "
             f"assessed; median stop {stops.get('median_stop_pct')}%. A stop "
             f"inside one ordinary day's movement turns a sound thesis into a "
