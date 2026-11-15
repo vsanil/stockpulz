@@ -3629,6 +3629,14 @@ send a Telegram alert months later.
   automatic stop alert after a week.
 - Guard: `tests/test_alert_expiry.py` (16 tests); 9 of 10 mutations caught, the tenth (dropping the
   `_history_` skip) is behaviour-preserving because history entries are never marked `auto`.
+- **Legacy alerts the rule cannot see (2026-11-15).** Alerts the morning run created in May 2026
+  predate the `auto` marker, so they read as hand-set and never expire. One real user had 15
+  (same-second pairs, five near-identical CVX levels), holding no positions. Removed once by
+  `scripts/remove_legacy_alerts.py` (run 43690727921): exactly 15 matched and were deleted, 97
+  remain, backup in Supabase `price_alerts.<uid>.before_cleanup_2026-11-15.json`. Three round-number
+  alerts from the same days were left as probably hand-set. The one-off workflow was deleted after
+  the run; **the list in that script is specific to that review — do not re-point it at another
+  user.** If more unmarked system alerts turn up, review them by hand the same way.
 - ⏳ First real run is Mon 2026-11-16 07:00 ET; its log line reads
   `_prune_stale_pick_alerts: expired N automatic alert(s)`. Expect roughly 119→43, 112→37, 76→19.
 
