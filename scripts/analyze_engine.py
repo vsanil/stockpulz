@@ -296,11 +296,10 @@ def _load():
         out["paper"] = cm.load_user_paper(uid) or {}
     except Exception:
         out["paper"] = {}
-    # 🔴 The ledger is YEAR-SHARDED (pick_ledger_2026.json) and lives on the
-    # Gist regardless of the storage backend — evaluate_picks manages its own
-    # store. Reading "pick_ledger.json" alone sees only the legacy shard and
-    # reports zero picks. Reuse the evaluator's loader rather than reimplement
-    # it: a forked reader would silently diverge from what the report scores.
+    # 🔴 The ledger is stored one row per MONTH (pick_ledger.py), not as a
+    # single file. Reading any one file name alone sees part of it and reports
+    # too few picks. Reuse the evaluator's loader rather than reimplement it: a
+    # forked reader would silently diverge from what the report scores.
     out["rows"] = []
     try:
         import importlib.util

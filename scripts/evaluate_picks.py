@@ -42,9 +42,10 @@ import datetime as dt
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 
+import pick_ledger
+
 _GID = os.environ.get("GIST_ID")
 _TOK = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN")
-_LEDGER_FILE = "pick_ledger.json"
 
 _HORIZON_DAYS = 30      # calendar days a short-term pick gets to work
 _MIN_N        = 30      # below this, NOTHING is called conclusive
@@ -79,67 +80,31 @@ def _gist_file(name: str) -> dict:
         return {}
 
 
-# ── Year-sharded ledger ───────────────────────────────────────────────────────
-# The ledger is append-only and kept forever, and a Gist file is unreadable past
-# ~1 MB. Picks (~700 KB/yr) plus controls (~370 KB/yr) cross that inside ONE
-# year, so a single file would silently truncate. Shard by year: reads merge
-# every shard, writes touch only the current year, and the legacy
-# `pick_ledger.json` is read-only history that is never rewritten (so it can
-# never be clobbered).
-def _shard_name(year: int) -> str:
-    return f"pick_ledger_{year}.json"
+# ── The ledger lives in pick_ledger.py ────────────────────────────────────────
+# One row per month in the primary store (see that module for why it left the
+# Gist). These two functions keep the shape every caller already uses:
+#   rows, buffer, name = _load_ledger()   # buffer: an EMPTY append buffer
+#   record_today(buffer, known=...)       # appends new rows to it
+#   _save_ledger(buffer, name)            # merges them into their months
+# The buffer holds only NEW rows; saving merges by key on a fresh read, so it
+# can never overwrite what is already stored.
+def _shard_name(when=None) -> str:
+    """The current month's label (informational — rows route by their OWN date)."""
+    return pick_ledger.LEDGER_FILE + "#" + (when or dt.date.today()).strftime("%Y-%m")
 
 
 def _load_ledger() -> tuple[list, dict, str]:
-    """Return (all rows across shards, current-year shard, its filename)."""
-    name = _shard_name(dt.date.today().year)
-    try:
-        files = requests.get(f"https://api.github.com/gists/{_GID}",
-                             headers=_headers(), timeout=20).json().get("files", {})
-    except Exception as exc:
-        print(f"[evaluate] ledger read failed: {exc}")
-        return [], {"picks": []}, name
-
-    rows, shard = [], {"picks": []}
-    for fname, meta in sorted(files.items()):
-        if fname != _LEDGER_FILE and not fname.startswith("pick_ledger_"):
-            continue
-        try:
-            data = json.loads(_content(meta))
-        except Exception as exc:
-            print(f"[evaluate] shard {fname} unreadable ({exc}) — skipped")
-            continue
-        rows.extend(data.get("picks", []) or [])
-        if fname == name:
-            shard = data
-    shard.setdefault("picks", [])
-    return rows, shard, name
+    """Return (every row, an empty append buffer, the current month label).
+    RAISES pick_ledger.LedgerUnreadable rather than returning a partial ledger."""
+    return pick_ledger.load_rows(), {"picks": []}, _shard_name()
 
 
-def _save_ledger(led: dict, name: str = _LEDGER_FILE) -> bool:
-    """Persist the shard, VERIFYING the write. This was fire-and-forget, which is
-    worse here than anywhere else in the project: `record_today` only ever reads
-    TODAY's picks.json, so a silently throttled PATCH (GitHub 409/403 on rapid
-    successive writes) loses that day's picks PERMANENTLY — there is no next run
-    that can recover them. And a lost day isn't random: it correlates with the
-    busy morning-run window, which would quietly bias the sample the launch
-    decision rests on. Retries with backoff and reports loudly."""
-    import time
-    body = {"files": {name: {"content": json.dumps(led, indent=2)}}}
-    last = ""
-    for attempt in range(1, 6):
-        try:
-            r = requests.patch(f"https://api.github.com/gists/{_GID}",
-                               headers=_headers(), json=body, timeout=25)
-            if r.status_code < 400:
-                return True
-            last = f"{r.status_code} {r.text[:80]}"
-        except Exception as exc:
-            last = str(exc)
-        time.sleep(1.5 * attempt)
-    print(f"[evaluate] 🚨 LEDGER SAVE FAILED ({name}): {last} — "
-          f"today's picks are NOT recorded and cannot be recovered.")
-    return False
+def _save_ledger(led: dict, name: str = "") -> bool:
+    """Persist the buffer's rows, VERIFIED by read-back. A silently dropped write
+    is unrecoverable here: `record_today` only ever reads TODAY's picks.json,
+    and a lost day correlates with the busy morning window, quietly biasing the
+    sample. Never raises; False means the rows are NOT stored."""
+    return pick_ledger.save_rows((led or {}).get("picks") or [])
 
 
 def _pos(x) -> bool:
@@ -150,11 +115,9 @@ def _pos(x) -> bool:
 
 
 def _key(r: dict) -> tuple:
-    """Ledger identity. Includes the ARM so the same ticker picked on the same
-    day by two different arms is two independent observations, not a duplicate —
-    without this the second arm's pick would be silently dropped and the
-    comparison would quietly measure nothing."""
-    return (r["date"], r["ticker"], r.get("arm"))
+    """Ledger identity — ONE definition, in pick_ledger. Includes the ARM so the
+    same ticker picked on the same day by two arms is two observations."""
+    return pick_ledger.row_key(r)
 
 
 def record_picks(led: dict, picks: dict, day: str, arm: str | None = None,
@@ -690,9 +653,35 @@ def main() -> int:
                     help="record + score but do NOT DM — the daily cadence. "
                          "Evidence accumulates every day; the verdict is only "
                          "sent weekly, so nobody is tempted to react to noise.")
+    ap.add_argument("--migrate-ledger", action="store_true",
+                    help="one-time: copy the legacy Gist ledger files into the "
+                         "monthly store and verify every row. Sends nothing.")
+    ap.add_argument("--remove-legacy-ledger", action="store_true",
+                    help="with --migrate-ledger: then delete the legacy Gist files, "
+                         "but ONLY if every row is verified in the store.")
     args = ap.parse_args()
 
-    all_rows, shard, shard_name = _load_ledger()
+    if args.migrate_ledger:
+        rep = pick_ledger.migrate_legacy(remove=args.remove_legacy_ledger)
+        print(f"[evaluate] ledger migration: {json.dumps(rep, indent=1)}")
+        done = rep["copied_ok"] and rep["missing"] == 0 and (
+            not args.remove_legacy_ledger or not rep.get("refused"))
+        return 0 if done else 1
+
+    try:
+        all_rows, shard, shard_name = _load_ledger()
+    except pick_ledger.LedgerUnreadable as exc:
+        # Still record today's picks: the save merges by key on a fresh read,
+        # so it is safe without knowing the rest of the ledger, and skipping it
+        # would lose the day for good. Then fail, so the workflow goes red.
+        print(f"[evaluate] 🚨 LEDGER UNREADABLE — {exc}")
+        if not args.report_only and not args.dry_run:
+            buf = {"picks": []}
+            n = record_today(buf, known=set())
+            ok = _save_ledger(buf)
+            print(f"[evaluate] recorded today's {n} pick(s) anyway: "
+                  f"{'saved' if ok else 'SAVE FAILED'}. No report this run.")
+        return 1
     added = 0
     if not args.report_only:
         other = {_key(r) for r in all_rows}

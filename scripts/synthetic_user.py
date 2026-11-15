@@ -239,14 +239,61 @@ def _state_file(chat_id: str) -> str:
     return _LEGACY_STATE_FILE if chat_id == _OWNER_ID else f"synthetic_state_{chat_id}.json"
 
 
+class StateUnreadable(RuntimeError):
+    """The state file may exist but could not be read. NEVER treat as empty."""
+
+
+def _gist_headers() -> dict:
+    return {"Authorization": f"token {_TOK}"}
+
+
+def _gist_files() -> dict:
+    r = requests.get(f"https://api.github.com/gists/{_GID}",
+                     headers=_gist_headers(), timeout=20)
+    r.raise_for_status()
+    return r.json().get("files", {}) or {}
+
+
+def _gist_text(meta: dict) -> str:
+    """One file's FULL text. The Gist API returns files alphabetically and stops
+    sending content once the response passes ~900 KB in total: everything after
+    that point comes back `truncated: true` with EMPTY content, however small
+    the file is. The one guard for that lives in storage._gist_content."""
+    from storage import _gist_content
+    return _gist_content(meta or {}, _gist_headers())
+
+
 def _state(chat_id: str) -> dict:
-    try:
-        files = requests.get(f"https://api.github.com/gists/{_GID}",
-                             headers={"Authorization": f"token {_TOK}"}, timeout=20
-                             ).json().get("files", {})
-        return json.loads(files.get(_state_file(chat_id), {}).get("content") or "{}")
-    except Exception:
-        return {}
+    """This account's state. `{}` ONLY when the file genuinely does not exist.
+
+    🔴 2026-11-02 → 11-14: this read `files[name]["content"]` and swallowed
+    every error into `{}`. Once the pick ledger pushed the gist past the API's
+    response limit, `synthetic_state_*` came back truncated-and-empty on every
+    read, so each run saw NO tracked positions — and `manage` then SAVED that
+    emptiness back. 38 real positions and every arm's paper book went
+    unmanaged for twelve days while each run reported success.
+
+    Two rules, both load-bearing:
+      * truncated content is refetched in full (`_gist_text`);
+      * an unreadable state RAISES. A run that cannot read its state must not
+        proceed, because every phase ends by writing state back.
+    """
+    import time
+    name, last = _state_file(chat_id), None
+    for attempt in range(1, 4):
+        try:
+            meta = _gist_files().get(name)
+            if meta is None:
+                return {}                      # never written: a genuinely new account
+            raw = _gist_text(meta)
+            data = json.loads(raw) if raw.strip() else {}
+            if not isinstance(data, dict):
+                raise ValueError(f"state is a {type(data).__name__}, not an object")
+            return data
+        except Exception as exc:
+            last = exc
+            time.sleep(1.5 * attempt)
+    raise StateUnreadable(f"{name}: {last}")
 
 
 def _save_state(chat_id: str, st: dict) -> bool:
@@ -275,12 +322,15 @@ def _save_state(chat_id: str, st: dict) -> bool:
 
 
 def _raw_picks() -> dict:
+    """Today's picks, straight from the Gist (the store save_picks writes).
+    Truncation-safe — picks.json sorts just after the pick ledger, so it is the
+    next file the API's response limit would have emptied."""
     try:
-        files = requests.get(f"https://api.github.com/gists/{_GID}",
-                             headers={"Authorization": f"token {_TOK}"}, timeout=20
-                             ).json().get("files", {})
-        return json.loads(files.get("picks.json", {}).get("content") or "{}")
-    except Exception:
+        raw = _gist_text(_gist_files().get("picks.json") or {})
+        data = json.loads(raw) if raw.strip() else {}
+        return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        print(f"[synthetic_user] could not read picks.json ({exc}) — treating as no picks")
         return {}
 
 
@@ -580,6 +630,27 @@ def phase_manage(dry: bool) -> list[str]:
     return acts
 
 
+def _is_bot_only(chat_id: str) -> bool:
+    """True for an account only the bot ever trades (the test account, the
+    tournament arms). Never true for the owner's id, whatever else is set."""
+    from config_manager import is_test_user
+    cid = str(chat_id or "").strip()
+    return bool(cid) and cid != _OWNER_ID and is_test_user(cid)
+
+
+def _paper_is_long_term(pos: dict, meta: dict | None) -> bool:
+    """Which time stop a paper position gets: 180 days (long-term) or 30.
+
+    The state's book entry says so directly. When that entry is gone, the
+    position still knows: a long-term pick carries no published stop, so its
+    stop is the invalidation level and `levels_source` records that. Falling
+    back to "short-term" instead would expire a long-term holding 150 days
+    early the moment the state file was lost."""
+    if isinstance(meta, dict) and "lt" in meta:
+        return bool(meta.get("lt"))
+    return str((pos or {}).get("levels_source") or "").startswith("invalidation")
+
+
 def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
     """Sell at target, cut at stop, or EXPIRE at the time stop.
 
@@ -601,10 +672,23 @@ def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
     acts = []
     sold: list[tuple] = []           # (ticker, proceeds, outcome) for the twin
 
+    # 🔴 On a BOT-ONLY account the ACCOUNT is the record of what to manage, and
+    # the state file is only metadata. Tracking from state alone meant a lost or
+    # unreadable state silently orphaned every open position (12 days, found
+    # 2026-11-14). On a real person's account (the legacy owner wind-down) the
+    # bot still touches ONLY what its state names — never a human's position.
+    adopt = _is_bot_only(admin)
+
     # Only manage the bot's OWN real tickers (never the owner's real positions).
     real_open = {x["ticker"]: x for x in load_user_trade_log(admin).get("open", [])}
+    tracked_real = list(st.get("real", []))
+    if adopt:
+        tracked_real += [t for t, x in real_open.items()
+                         if x.get("source") == SYNTHETIC_SOURCE]
+    tracked_real = list(dict.fromkeys(tracked_real))
+    adopted_real = len(set(tracked_real) - set(st.get("real", [])))
     still_real = []
-    for t in st.get("real", []):
+    for t in tracked_real:
         pos = real_open.get(t)
         if not pos:
             continue                      # already closed / gone — drop from state
@@ -636,8 +720,20 @@ def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
             acts.append(f"⚠️ manage REAL {t} errored: {e}")
 
     paper_open = {x["ticker"]: x for x in load_user_paper(admin).get("positions", [])}
+    tracked_paper = list(st.get("paper", []))
+    if adopt:
+        tracked_paper += list(paper_open)
+    tracked_paper = list(dict.fromkeys(tracked_paper))
+    adopted_paper = len(set(tracked_paper) - set(st.get("paper", [])))
+    if adopted_real or adopted_paper:
+        # Loud on purpose: after a healthy `open` this is zero, so a non-zero
+        # count means the state file did not know about positions the account
+        # holds — the exact condition that used to orphan them.
+        print(f"[synthetic_user] ⚠️ {admin}: state was missing {adopted_real} real + "
+              f"{adopted_paper} paper position(s) the account holds — managing them "
+              f"from the account.")
     still_paper = []
-    for t in st.get("paper", []):
+    for t in tracked_paper:
         pos = paper_open.get(t)
         if not pos:
             book_meta.pop(t, None)
@@ -647,7 +743,7 @@ def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
             if not _pos(px):
                 still_paper.append(t); continue
             tgt, stop = pos.get("target_price"), pos.get("stop_loss")
-            lt = bool((book_meta.get(t) or {}).get("lt"))
+            lt = _paper_is_long_term(pos, book_meta.get(t))
             age = _age_days(pos.get("bought_date"), today)
             outcome = None
             if _pos(tgt) and px >= float(tgt):
@@ -774,20 +870,36 @@ def main() -> int:
         print("no trade account resolved (SYNTHETIC_CHAT_ID)"); return 2
 
     # TRADES on the virtual test account; REPORTS to the real owner.
-    if args.phase == "open":
-        acts = phase_open(_TRADE_ID, args.dry_run)
-    elif args.phase == "reset":
-        acts = phase_reset(_TRADE_ID, args.dry_run)
-    else:
-        acts = phase_manage(args.dry_run)
-
-    # manage runs hourly during market hours — only DM when it actually did
-    # something (sold/cut/error), else stay silent so the reports don't become
-    # noise. open and reset always report.
-    actionable = bool(acts)
-    if not acts:  # manage with nothing to do — log a held summary to stdout only
-        st = _state(_TRADE_ID)
-        acts = [f"held all (real: {st.get('real')}, paper: {st.get('paper')})"]
+    try:
+        if args.phase == "open":
+            acts = phase_open(_TRADE_ID, args.dry_run)
+        elif args.phase == "reset":
+            acts = phase_reset(_TRADE_ID, args.dry_run)
+        else:
+            acts = phase_manage(args.dry_run)
+        # manage runs hourly during market hours — only DM when it actually did
+        # something (sold/cut/error), else stay silent so the reports don't
+        # become noise. open and reset always report.
+        actionable = bool(acts)
+        if not acts:  # manage with nothing to do — a held summary to stdout only
+            st = _state(_TRADE_ID)
+            acts = [f"held all (real: {st.get('real')}, paper: {st.get('paper')})"]
+    except StateUnreadable as exc:
+        # Stop BEFORE anything is written. Exit non-zero so the workflow goes
+        # red: a run that cannot read its state has done nothing, and saying
+        # "success" is how twelve days of unmanaged positions went unnoticed.
+        print(f"[synthetic_user] 🚨 STATE UNREADABLE — phase={args.phase} aborted, "
+              f"nothing written: {exc}")
+        if _OWNER_ID and not args.dry_run:
+            try:
+                from telegram_api import send_message
+                send_message(f"🚨 <b>Synthetic user — {args.phase} ABORTED</b>\n"
+                             f"Could not read the bot's state file, so nothing was "
+                             f"bought, sold or saved.\n<code>{str(exc)[:200]}</code>",
+                             chat_id=_OWNER_ID)
+            except Exception as e:
+                print(f"[synthetic_user] abort alert send failed: {e}")
+        return 1
     body = "\n".join(f"  {a}" for a in acts)
     print(f"[synthetic_user] phase={args.phase} dry={args.dry_run} "
           f"trade_account={_TRADE_ID}\n{body}")

@@ -116,7 +116,8 @@ def compare() -> int:
         "picks.json", "traffic_hours.json", "usage_counts.json", "weekly_picks.json",
         # data_quality.json was missing from this list, so a store that stopped
         # receiving it was invisible here — exactly what happened after Aug 19.
-        "data_quality.json", "screener_cache.json", "pick_ledger.json"})
+        "data_quality.json", "screener_cache.json"})
+    # (the pick ledger is rows now, pick_ledger.LEDGER_FILE, not a document)
     print(f"\n  {'file':<26}{'gist':>10}{'supabase':>11}   verdict")
     print("  " + "─" * 62)
     drift, _last_verdict = [], {}

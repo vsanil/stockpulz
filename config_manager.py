@@ -193,7 +193,8 @@ def get_config() -> dict:
         resp = requests.get(url, headers=_gist_headers(), timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        raw    = data["files"][GIST_FILENAME]["content"]
+        from storage import _gist_content   # truncation-safe (see load_picks)
+        raw    = _gist_content(data["files"][GIST_FILENAME], _gist_headers())
         config = json.loads(raw)
         _cache_set(GIST_FILENAME, config)
         return {**DEFAULT_CONFIG, **config}
@@ -607,7 +608,13 @@ def load_picks() -> dict | None:
         files = data.get("files", {})
         if PICKS_FILENAME not in files:
             return None
-        raw   = files[PICKS_FILENAME]["content"]
+        # 🔴 Truncation-safe. The Gist API stops sending file content once the
+        # response passes ~900 KB in total, in alphabetical order — and
+        # picks.json sorts right after the pick ledger. Reading `content`
+        # blindly would parse an empty string, fail, and report "no picks" to
+        # every consumer (found 2026-11-14, days before it would have bitten).
+        from storage import _gist_content
+        raw   = _gist_content(files[PICKS_FILENAME], _gist_headers())
         picks = json.loads(raw)
         # Only return picks saved today (ET date)
         if picks.get("_saved_date") != today_et:

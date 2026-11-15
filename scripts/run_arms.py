@@ -215,9 +215,16 @@ def open_arm(name: str, dry: bool) -> dict:
         return out
     try:
         ev = _ev()
-        all_rows, shard, shard_name = ev._load_ledger()
+        try:
+            all_rows, shard, shard_name = ev._load_ledger()
+            known = {ev._key(r) for r in all_rows}
+        except Exception as exc:
+            # Record anyway — the save merges by key on a fresh read, so it
+            # cannot duplicate or overwrite — but say so.
+            out["errors"].append(f"ledger read failed ({exc}); recorded without it")
+            shard, shard_name, known = {"picks": []}, "", set()
         n = ev.record_picks(shard, picks, et_today().isoformat(), arm=name,
-                            known={ev._key(r) for r in all_rows})
+                            known=known)
         if n and not ev._save_ledger(shard, shard_name):
             out["errors"].append("LEDGER SAVE FAILED — this arm's picks are not recorded")
         out["ledgered"] = n

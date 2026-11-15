@@ -22,6 +22,12 @@ on:
         description: "send the report now (true/false)"
         required: false
         default: "true"
+      ledger_migration:
+        description: "ONE-TIME ledger move off the Gist (see pick_ledger.py). none = normal run"
+        required: false
+        default: "none"
+        type: choice
+        options: [none, copy, copy-and-remove]
 
 jobs:
   evaluate:
@@ -43,7 +49,12 @@ jobs:
       - name: Decide mode (weekly = report, daily = silent record)
         id: m
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          MIG="${{ github.event.inputs.ledger_migration }}"
+          if [[ "$MIG" == "copy" ]]; then
+            echo "flag=--migrate-ledger" >> $GITHUB_OUTPUT
+          elif [[ "$MIG" == "copy-and-remove" ]]; then
+            echo "flag=--migrate-ledger --remove-legacy-ledger" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             [[ "${{ github.event.inputs.report }}" == "false" ]] && echo "flag=--quiet" >> $GITHUB_OUTPUT || echo "flag=" >> $GITHUB_OUTPUT
           elif [[ "${{ github.event.schedule }}" == "30 13 * * 6" ]]; then
             echo "flag=" >> $GITHUB_OUTPUT

@@ -3530,11 +3530,48 @@ callers; no monitor could see it, because nothing failed.
 - ⚠️ Not yet proven live: the first real off-hours run is the confirming observation — its log
   should read `CRYPTO ONLY (stock market closed)`.
 
-### ⏳ `pick_ledger_2026.json` reaches the ~1 MB gist wall around 2026-11-26
+### 🔴🔴 THE LEDGER HAD ALREADY BROKEN THE GIST — twelve days of unmanaged positions (found 2026-11-14)
 
-802 KB on 11-14 and growing ~15 KB/day since the tournament's arm rows started (745 → 802 KB over
-11-10..14) — far faster than the 700 KB/year estimated before arms existed. The canary has been red
-daily on `storage.headroom` alone; it is owner-only, so self-heal correctly stands down. Readers go
-through `_content(meta)`, which refetches via `raw_url` when truncated, but that path has **never
-run against a real truncated file**. Decide before the wall: move the ledger to the row store, or
-shard arm rows into their own file.
+The "1 MB wall around 11-26" was the wrong model. **The Gist API returns files ALPHABETICALLY and
+stops sending content once the whole RESPONSE passes ~900 KB**: every file after that point comes
+back `truncated: true` with EMPTY content, however small. `pick_ledger_2026.json` (803 KB) pushed the
+gist past it on **2026-11-02**, and from then on `synthetic_state_*`, `traffic_hours`, `user_*`,
+`weekly_picks`... all came back empty from a bare `files[name]["content"]` read.
+- **What it cost:** `synthetic_user._state` read its state that way and swallowed errors into `{}`,
+  so every run saw NO tracked positions — and `manage` then SAVED the emptiness back. Measured from
+  gist revisions: **38 tracked positions on 11-02 22:13 UTC → 0 at 22:37.** Twelve days of runs
+  reported success while nothing was sold at target, stop or time stop. Every tournament arm's
+  paper book froze at its 8-position cap (`HOLD — max_positions (8 open)` daily), so **the Phase 2
+  equity curves after 11-02 measure a frozen book, not the strategies.**
+- **Why no test caught it:** every bot test STUBBED `_state`. *A stub more permissive than
+  production certifies bugs* — the real reader never met a truncated response until now.
+- **Fixes (all in one change):**
+  1. **The ledger left the Gist.** `pick_ledger.py` is now its ONE storage layer: one row per MONTH
+     under `pick_ledger_monthly.json` — on Supabase rows in `user_records` (chat_id = `YYYY-MM`) with
+     the table's compare-and-swap, so the evaluator and the arms can append concurrently. Every save
+     merges by key on a fresh read and is only reported done after a READ-BACK. Rows route by their
+     own ET date, not the clock. A load that cannot read RAISES `LedgerUnreadable`; a silent
+     fallback to the Gist while SUPABASE_* is set is REFUSED. `evaluate_picks._load_ledger`/
+     `_save_ledger` keep their shapes (the shard is now an append buffer), so run_arms and
+     analyze_engine are unchanged callers.
+  2. **Every direct Gist reader is truncation-safe**: `synthetic_user._state`/`_raw_picks`,
+     `config_manager.load_picks`/`get_config` all go through `storage._gist_content`. Guard:
+     `test_no_reader_takes_gist_content_on_trust` (AST).
+  3. **An unreadable bot state STOPS the run** (`StateUnreadable`, exit 1, owner DM) — every phase
+     ends by writing state back, which is what turned a read glitch into lost tracking.
+  4. **On a bot-only account the ACCOUNT is the record of what to manage**, not the state file:
+     `_manage_account` adopts the account's own positions (real only if `source == synthetic`), and
+     logs loudly when it had to. Never on a real person's account (`_is_bot_only` excludes the
+     owner). An adopted paper position's horizon comes from its `levels_source`
+     (`invalidation*` = long-term), so losing the state cannot expire a long-term hold at 30 days.
+  5. **`/admin` actionability was grading a three-month-old ledger**: it read `pick_ledger*.json`
+     by name through the backend, which on Render is Supabase's frozen Aug-19 copy. It now reads
+     through `pick_ledger.load_rows()`. Its numbers will change — that is the fix showing.
+- **The move is one-time and verified:** `evaluate_picks.yml` dispatch input `ledger_migration`
+  = `copy` (copy + verify every legacy row) then `copy-and-remove` (deletes `pick_ledger.json` +
+  `pick_ledger_2026.json` from the Gist ONLY after every row is read back; refused on a Gist-only
+  store). Deleting is recoverable from the Gist's revision history. Until removal, reads merge the
+  legacy files, de-duplicated by key.
+- Guards: `tests/test_pick_ledger.py`, `tests/test_gist_truncation_readers.py`; 12 + 12 mutations
+  caught. **Rule: never read `files[name]["content"]` from the Gist API — use
+  `storage._gist_content`. A bare read works only until the gist grows, then fails silently.**

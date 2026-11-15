@@ -2065,9 +2065,13 @@ def _build_actionability() -> dict:
                                 load_user_paper, DEFAULT_TEST_CHAT_ID)
     from actionability import analyse
     try:
-        rows = []
-        for fn in ("pick_ledger.json", "pick_ledger_2026.json"):
-            rows += (_load_gist_file(fn) or {}).get("picks", []) or []
+        # 🔴 Through pick_ledger, never by file name. This used to read
+        # pick_ledger*.json through the storage backend — which on Render is
+        # Supabase, holding only the frozen copy from the 2026-08-19 migration,
+        # while the evaluator kept writing the Gist. The card was grading
+        # three-month-old picks. Read the store the WRITER uses.
+        import pick_ledger
+        rows = pick_ledger.load_rows()
         log   = load_user_trade_log(DEFAULT_TEST_CHAT_ID)
         paper = load_user_paper(DEFAULT_TEST_CHAT_ID)
         # Closed PAPER trades must be in here too. Real closes always were —
@@ -2319,7 +2323,8 @@ from config_manager import DEFAULT_TEST_CHAT_ID as _TEST_CHAT_ID, SIM_PORTFOLIO_
 # test instead of silently reintroducing a serial round trip.
 _ADMIN_PREFETCH = (
     "user_trades.json", "user_paper.json", "user_configs.json", "feedback.json",
-    "audit_dispositions.json", "pick_ledger.json", "pick_ledger_2026.json",
+    "audit_dispositions.json",
+    # (the pick ledger is read through pick_ledger.load_rows, not this funnel)
     "pending_users.json", "engine_findings_state.json", "traffic_hours.json",
     # Derived, never hardcoded — the account id has ONE definition. Carries the
     # bot's recorded entry-window SKIPS, which actionability counts as
