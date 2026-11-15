@@ -73,14 +73,21 @@ def plan(data: dict, runs: dict, owner: str) -> tuple[list, dict]:
 
     Hours are walked in order so a run's unused capacity carries ONE hour
     forward (its requests spill past the hour it started in), then expires.
+    A month's buckets sum every day, so 23:00 is followed by 00:00 — the walk
+    is CIRCULAR, starting at the first quiet hour so no spill is lost.
     """
     rows, remove = [], {}
     months = sorted(set(data) | {m for m, _ in runs})
     for month in months:
         hours = data.get(month) or {}
-        carry = 0
-        for i in range(24):
+
+        def _quiet(i):
             h = f"{i:02d}"
+            return not runs.get((month, h)) and not ((hours.get(h) or {}).get("users") or {}).get(owner)
+        start = next((i for i in range(24) if _quiet(i)), 0)
+        carry = 0
+        for step in range(24):
+            h = f"{(start + step) % 24:02d}"
             rec = hours.get(h) or {}
             o = int((rec.get("users") or {}).get(owner, 0))
             n = runs.get((month, h), 0)
@@ -92,6 +99,7 @@ def plan(data: dict, runs: dict, owner: str) -> tuple[list, dict]:
                 remove[(month, h)] = take
             if o or n:
                 rows.append((month, h, int(rec.get("hits", 0)), o, cold, n, take))
+    rows.sort(key=lambda r: (r[0], r[1]))
     return rows, remove
 
 

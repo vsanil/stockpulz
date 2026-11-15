@@ -41,6 +41,16 @@ class TestPlan:
         """Started 20:59, counted at 21:00."""
         assert _plan({"21": _h(33, 33, **{OWNER: 33})}, {"20": 1}) == {(M, "21"): 33}
 
+    def test_a_run_at_2359_spills_into_midnight(self):
+        """The month's buckets sum every day, so 00:00 follows 23:00. Measured:
+        November's 01:00 hour kept 33 hits until the walk wrapped."""
+        # The 23:59 run lands at 00:xx; a 00:59 run lands at 01:xx.
+        hours = {"00": _h(33, 33, **{OWNER: 33}), "01": _h(33, 33, **{OWNER: 33})}
+        assert _plan(hours, {"23": 1, "00": 1}) == {(M, "00"): 33, (M, "01"): 33}
+        # and without the wrap, 23's run could only spill into an hour that
+        # never comes, so 01 would keep its 33:
+        assert _plan(hours, {"00": 1}) == {(M, "00"): 33}
+
     def test_spill_lasts_one_hour_only(self):
         assert _plan({"22": _h(33, 33, **{OWNER: 33})}, {"20": 1}) == {}
 
