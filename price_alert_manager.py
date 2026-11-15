@@ -85,6 +85,79 @@ def _current_price(ticker: str) -> float | None:
 
 DEFAULT_AUTO_KIND = "stop"      # what an auto alert without a `kind` has always been
 
+# An automatic pick alert protects a decision that can still be made. Once the
+# pick has left the morning brief that decision is over (owner's call,
+# 2026-11-15: one week, for every kind). Manual alerts never expire.
+AUTO_ALERT_MAX_AGE_DAYS = 7
+
+
+def _set_at(a: dict) -> datetime | None:
+    """When the alert was set, in UTC. Old alerts carry a naive timestamp, which
+    was always written as UTC. None when missing or unparseable."""
+    raw = a.get("set_at") if isinstance(a, dict) else None
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        t = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def is_stale_auto_alert(a: dict, held: set, now: datetime,
+                        max_age_days: int = AUTO_ALERT_MAX_AGE_DAYS) -> bool:
+    """True only for an AUTOMATIC alert, on a ticker the user does not hold, set
+    more than `max_age_days` ago. Anything that cannot be dated is kept:
+    unmeasurable is not the same as stale."""
+    if not isinstance(a, dict) or not a.get("auto"):
+        return False
+    if str(a.get("ticker", "")).upper() in held:
+        return False
+    t = _set_at(a)
+    if t is None:
+        return False
+    return (now - t).total_seconds() > max_age_days * 86400
+
+
+def prune_stale_auto_alerts(held_for, now: datetime | None = None,
+                            max_age_days: int = AUTO_ALERT_MAX_AGE_DAYS) -> tuple[int, int]:
+    """Remove stale automatic alerts for every user. Returns (removed, users).
+
+    `held_for(chat_id) -> set[str]` gives the tickers that user currently holds.
+    One atomic read-modify-write; a user whose holdings cannot be read is left
+    untouched, and nothing is written when nothing is stale. History keys
+    (`_history_*`) are never touched."""
+    now = now or datetime.now(timezone.utc)
+    removed, users = 0, 0
+
+    def _mut(alerts):
+        nonlocal removed, users
+        changed = False
+        for uid, lst in list((alerts or {}).items()):
+            if str(uid).startswith("_") or not isinstance(lst, list):
+                continue
+            if not any(isinstance(a, dict) and a.get("auto") for a in lst):
+                continue
+            try:
+                held = {str(t).upper() for t in (held_for(uid) or set())}
+            except Exception as exc:
+                print(f"[alerts] holdings unreadable for {uid} — its alerts kept: {exc}")
+                continue
+            kept = [a for a in lst if not is_stale_auto_alert(a, held, now, max_age_days)]
+            if len(kept) != len(lst):
+                removed += len(lst) - len(kept)
+                users += 1
+                alerts[uid] = kept
+                changed = True
+        if not changed:
+            from config_manager import NO_WRITE
+            return NO_WRITE, None
+        return alerts, None
+
+    from config_manager import mutate_gist_file
+    mutate_gist_file(ALERTS_FILENAME, _mut, default={})
+    return removed, users
+
 
 def add_alert(chat_id: str, ticker: str, target_price: float,
               direction: str = "auto", recurring: bool = False,

@@ -1154,6 +1154,9 @@ def run_morning(config: dict, now_et: datetime):
                                         next_open_label=next_open_label)
 
     # ── Auto-set entry + stop alerts for all picks ────────────────────────────
+    # Expire the stale ones FIRST, so a ticker picked again today is re-armed at
+    # today's levels rather than kept at an old one.
+    _prune_stale_pick_alerts()
     _auto_set_pick_alerts(picks, _all_recipients())
 
     # ── Monday "Week Ahead" block ─────────────────────────────────────────────
@@ -4905,6 +4908,35 @@ def _lt_rearm_picks(today_picks: dict) -> list[dict]:
     except Exception as exc:
         print(f"[agent] _lt_rearm_picks failed (non-critical): {exc}")
         return []
+
+
+def _prune_stale_pick_alerts() -> int:
+    """Expire automatic pick alerts more than a week old. Silent — never raises.
+
+    Owner's call, 2026-11-15. Automatic alerts were created every morning for
+    every pick and never removed, so each user carried one per ticker ever
+    picked — 76 to 119 each, the oldest from May, and two of the three real
+    users hold no positions at all. Any of them could still send a Telegram
+    alert months later about a pick nobody acted on.
+
+    Kept: every MANUAL alert, and any automatic alert on a ticker the user
+    currently holds (the trade log's open positions). See
+    price_alert_manager.prune_stale_auto_alerts for the rule itself.
+    """
+    try:
+        from price_alert_manager import prune_stale_auto_alerts
+
+        def _held(uid):
+            log = load_user_trade_log(uid) or {}
+            return {str(t.get("ticker", "")).upper() for t in log.get("open", []) or []}
+
+        n, users = prune_stale_auto_alerts(_held)
+        print(f"[agent] _prune_stale_pick_alerts: expired {n} automatic alert(s) "
+              f"older than a week across {users} user(s).")
+        return n
+    except Exception as exc:
+        print(f"[agent] _prune_stale_pick_alerts failed (non-critical): {exc}")
+        return 0
 
 
 def _auto_set_pick_alerts(picks: dict, recipients: list[str]) -> None:

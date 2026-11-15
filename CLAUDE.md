@@ -3545,6 +3545,30 @@ callers; no monitor could see it, because nothing failed.
 - ⚠️ Not yet proven live: the first real off-hours run is the confirming observation — its log
   should read `CRYPTO ONLY (stock market closed)`.
 
+### Automatic pick alerts expire after ONE WEEK (owner's call, 2026-11-15)
+
+`_auto_set_pick_alerts` created a stop / entry / invalidation alert for every pick, for every user
+who did not hold the ticker, every morning — and nothing ever removed them. Measured on the fixed
+drawer: **76 to 119 alerts per real user, the oldest from May**, and two of the three real users
+hold no positions at all, so every one of theirs was for a pick they never bought. Any could still
+send a Telegram alert months later.
+- **Rule: `price_alert_manager.AUTO_ALERT_MAX_AGE_DAYS = 7`, for every kind.** An automatic alert
+  protects a decision that can still be made; once the pick has left the morning brief, it is over.
+  A 30-day / 180-day "pick's own horizon" rule was offered and declined — it left 61-93 per user.
+- **Never expired:** a MANUAL alert; an automatic alert on a ticker the user HOLDS (trade log open
+  positions); an alert whose `set_at` cannot be read (unmeasurable is not stale). A user whose
+  holdings cannot be read is skipped whole. `_history_*` keys are never touched.
+- Old alerts carry a NAIVE `set_at`, always written as UTC — `_set_at` reads it that way.
+- Runs in `run_morning` as `agent._prune_stale_pick_alerts()`, **before** `_auto_set_pick_alerts`,
+  so a ticker picked again today is re-armed at today's levels. One atomic mutate; nothing written
+  when nothing is stale; never raises.
+- ⚠️ Accepted trade-off: someone who bought a pick WITHOUT logging it in the app loses its
+  automatic stop alert after a week.
+- Guard: `tests/test_alert_expiry.py` (16 tests); 9 of 10 mutations caught, the tenth (dropping the
+  `_history_` skip) is behaviour-preserving because history entries are never marked `auto`.
+- ⏳ First real run is Mon 2026-11-16 07:00 ET; its log line reads
+  `_prune_stale_pick_alerts: expired N automatic alert(s)`. Expect roughly 119→43, 112→37, 76→19.
+
 ### 🔴 The /admin user drawer never showed a single alert (found 2026-11-15)
 
 `admin_user_detail` imported `PriceAlertManager` — a class that has never existed in
