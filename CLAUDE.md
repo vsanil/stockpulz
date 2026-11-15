@@ -1404,6 +1404,14 @@ Both had `timeout=25` against a **54.9 s** cold start. The instant nothing sched
   over), and only the owner's COLD hits. Warm hits, other users and any owner activity beyond that
   stay. (An exact-multiple rule was tried first and left 21 polluted hours.) Dry run by default;
   refuses any store but Supabase. Guard: `tests/test_clean_traffic.py`.
+- ✅ **APPLIED 2026-11-15 (run 43679862624): 10,251 sweep hits removed** (Aug 2,825 · Sep 2,971 ·
+  Oct 3,069 · Nov 1,386); owner hits 10,460 → 209. November is now 8 hits, none from the owner.
+  What remains for the owner in Aug-Oct (170 / 13 / 26) is activity the runs cannot account for —
+  real use, or Aug sweep runs that made more than 33 requests — and is deliberately kept. Backup:
+  Supabase document `traffic_hours.before_cleanup_2026-11-15.json`.
+- **The workflow was DELETED after the run, on purpose.** Re-running it would attribute later,
+  genuine owner cold hits in those hours to sweep runs that ran before the fix. The script stays
+  for the record; do not wire it to a trigger again.
 - **🔴 `mutate_gist_file`'s mutator MUST return `(new_contents, result)` — a bare dict raises "not enough values to unpack", and `flush()` SWALLOWS it.** The traffic tracker shipped with `return _merge(...)` and therefore **never wrote a single row**; it was invisible because the failure is caught by design (telemetry must not break a request) and the canary/full sweep stayed green. Found only by reading a full-sweep log line, not by any test.
 - **🔴 The test stub is what hid it: it did `self.data = mutator(self.data)`, accepting a bare return value — a CONVENIENT contract, not the real one.** This is the same class as the screener goldens stubbing `_alpaca_single_bars`. **Rule: a stub must enforce the real signature; if it is more permissive than production, it certifies bugs.** The corrected `_Store.mutate` unpacks the 2-tuple and takes `default=` — verified it FAILS 5 tests against the broken code.
 - **🔴 COLD hits flush IMMEDIATELY; warm hits batch.** The obvious design (count in memory, flush on a timer) loses exactly the data this exists to collect: a lone 3 AM tap wakes the server, increments a counter, and Render spins the process down ~15 min later — the count dies with the process. Isolated cold-window events are the MOST likely to be lost and they are the entire point. Cold hits are rare, so an immediate write is affordable. Guard: `TestColdHitsSurviveSpinDown`, incl. a simulated process death. **Never "optimise" the cold flush into the batch.**
