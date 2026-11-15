@@ -1320,6 +1320,13 @@ _SILENT_FAILURE_MARKERS = (
 # The author's own "(non-critical)" suffix is honoured as a tolerated failure.
 _TOLERATED = ("non-critical", "(expected")
 
+# How many of the newest successful runs to read. Was 20, when a weekday had
+# ~29 runs. Since 2026-11-14 price_alerts also fires hourly through evenings,
+# nights and weekends (~16 more a day), so the newest 20 would be almost all
+# overnight alert checks and the DAYTIME modes — the ones this check was built
+# for — would fall out of the window unread. 60 covers a full 26 h (~50 runs).
+_SILENT_SCAN_CAP = 60
+
 
 def check_silent_failures() -> None:
     """🔴 Did any run SUCCEED while doing nothing, or while quietly failing?
@@ -1339,7 +1346,8 @@ def check_silent_failures() -> None:
     code is what the job claims; the log is what happened.
 
     ⚠️ Bounded on purpose: successful `daily_run.yml` runs from the last 26 h,
-    capped at 20, ~58 KB of log each. canary.yml allows 15 min for everything.
+    capped at `_SILENT_SCAN_CAP`, ~58 KB of log each. canary.yml allows 15 min
+    for everything.
     """
     import datetime as _d
 
@@ -1359,11 +1367,11 @@ def check_silent_failures() -> None:
     try:
         r = requests.get(
             f"https://api.github.com/repos/{repo}/actions/workflows/daily_run.yml/runs"
-            f"?status=success&created=>={since}&per_page=20",
+            f"?status=success&created=>={since}&per_page=100",
             headers=hdr, timeout=30)
         if r.status_code != 200:
             raise RuntimeError(f"HTTP {r.status_code}")
-        runs = (r.json().get("workflow_runs") or [])[:20]
+        runs = (r.json().get("workflow_runs") or [])[:_SILENT_SCAN_CAP]
     except Exception as exc:
         _check("runs.silent_failures", False, "",
                fail_detail=f"CANNOT VERIFY — could not list runs ({type(exc).__name__}: {exc}). "

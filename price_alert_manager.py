@@ -245,16 +245,24 @@ def list_alerts(chat_id: str) -> str:
     return "\n".join(lines)
 
 
-def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]:
+def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None,
+                 ticker_filter=None) -> list[str]:
     """
     Evaluate all alerts for a chat against current prices.
     Triggered alerts are removed and returned as formatted Telegram strings.
 
     send_fn(msg, chat_id)                   — plain notification
     send_keyboard_fn(msg, keyboard, chat_id) — notification with re-arm button
+    ticker_filter(ticker) -> bool           — evaluate ONLY alerts it accepts.
+        Used off-hours to check crypto alone. An alert it rejects is not
+        priced, cannot fire and is never removed: the write below drops only
+        the alerts that actually triggered.
     """
     alerts      = _load_alerts()
     chat_alerts = alerts.get(str(chat_id), [])
+    if ticker_filter is not None:
+        chat_alerts = [a for a in chat_alerts
+                       if isinstance(a, dict) and ticker_filter(a.get("ticker", ""))]
     if not chat_alerts:
         return []
 
@@ -364,17 +372,19 @@ def check_alerts(chat_id: str, send_fn=None, send_keyboard_fn=None) -> list[str]
     return triggered
 
 
-def check_all_alerts(send_fn=None, send_keyboard_fn=None) -> int:
+def check_all_alerts(send_fn=None, send_keyboard_fn=None, ticker_filter=None) -> int:
     """
     Check alerts for ALL chat IDs (called from cron runs).
     Returns total number of alerts triggered.
+    `ticker_filter` is passed straight to check_alerts (see there).
     """
     alerts  = _load_alerts()
     total   = 0
     for chat_id in list(alerts.keys()):
         if str(chat_id).startswith('_'):  # skip metadata keys like _history_*
             continue
-        fired = check_alerts(chat_id, send_fn=send_fn, send_keyboard_fn=send_keyboard_fn)
+        fired = check_alerts(chat_id, send_fn=send_fn, send_keyboard_fn=send_keyboard_fn,
+                             ticker_filter=ticker_filter)
         total += len(fired)
     return total
 

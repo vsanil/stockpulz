@@ -155,6 +155,62 @@ class TestItDoesNotCryWolf:
         assert _verdict(canary)[0]
 
 
+class TestTheScanWindowCoversAFullDay:
+    """Since 2026-11-14 price_alerts also fires hourly through evenings, nights
+    and weekends. With the old cap of 20, the newest 20 successful runs would be
+    almost all overnight alert checks, and the daytime modes this check was
+    built for would fall out of the window unread — a fix quietly blinding the
+    monitor."""
+
+    def _wire_many(self, canary, monkeypatch, total, bad_index):
+        asked = {}
+
+        class _R:
+            def __init__(s, status, payload=None, text=""):
+                s.status_code, s._p, s.text = status, payload or {}, text
+
+            def json(s):
+                return s._p
+
+        def _get(url, **k):
+            if "workflows/daily_run.yml/runs" in url:
+                asked["list_url"] = url
+                return _R(200, {"workflow_runs": [{"id": 1000 + i} for i in range(total)]})
+            if url.endswith("/jobs"):
+                run_id = int(url.split("/runs/")[1].split("/")[0])
+                return _R(200, {"jobs": [{"id": run_id}]})       # job id == run id
+            if url.endswith("/logs"):
+                job_id = int(url.split("/jobs/")[1].split("/")[0])
+                bad = job_id == 1000 + bad_index
+                return _R(200, text="[agent] vix_check: VIX fetch failed: boom" if bad
+                          else "[agent] No price alerts triggered.")
+            return _R(404)
+
+        monkeypatch.setattr(canary.requests, "get", _get)
+        return asked
+
+    def test_a_failure_45_runs_back_is_still_read(self, canary, monkeypatch):
+        """45 runs is one ordinary weekday now. The failing one is the OLDEST."""
+        self._wire_many(canary, monkeypatch, total=45, bad_index=44)
+        canary.check_silent_failures()
+        ok, note = _verdict(canary)
+        assert not ok and "EXITED 0 WHILE FAILING" in note
+
+    def test_the_listing_asks_for_more_than_one_small_page(self, canary, monkeypatch):
+        """Raising the cap is useless if the API call still asks for 20."""
+        asked = self._wire_many(canary, monkeypatch, total=3, bad_index=99)
+        canary.check_silent_failures()
+        per_page = int(asked["list_url"].split("per_page=")[1].split("&")[0])
+        assert per_page >= canary._SILENT_SCAN_CAP >= 50
+
+    def test_it_is_still_bounded(self, canary, monkeypatch):
+        """Unbounded would read every run GitHub returns inside a 15-minute job."""
+        self._wire_many(canary, monkeypatch, total=100, bad_index=99)
+        canary.check_silent_failures()
+        ok, note = _verdict(canary)
+        assert ok and f"{canary._SILENT_SCAN_CAP} successful run(s) scanned" in note
+
+
 class TestUnverifiableIsNotAPass:
     """The lesson from storage.surfaces, applied to the check that generalises it."""
 

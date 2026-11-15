@@ -224,6 +224,10 @@ class TestPriceAlerts:
                             lambda uid: {"open": positions, "watchlist": []})
         monkeypatch.setattr(agent, "_download_prices", lambda *a, **k: prices)
         monkeypatch.setattr(agent, "check_alerts", lambda *a, **k: [], raising=False)
+        # Pin the session OPEN. Since 2026-11-14 the job is crypto-only outside
+        # the stock session, so these stock cases would otherwise pass or fail
+        # by the hour the suite ran. Off-hours is tests/test_offhours_alerts.py.
+        monkeypatch.setattr(agent, "_stock_session_open", lambda now_et: True)
 
     def test_target_approach_fires_inside_5_percent(self, wired, monkeypatch):
         self._wire(monkeypatch,

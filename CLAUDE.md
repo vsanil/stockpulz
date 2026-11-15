@@ -3471,9 +3471,9 @@ Found by reading the 2026-11-13 morning LOG BODY after a green run: `5 ST + 0 LT
   that sounds right.** Guard: `TestProductionPrescreener`, incl. that no workflow runs the laptop script.
 - 7 of 7 mutations caught, including the original bug restored verbatim.
 
-### 🔴 UTC-scheduled triggers run ONE HOUR EARLY in ET all winter (measured 2026-11-13, NOT FIXED)
+### ✅ UTC-scheduled triggers ran ONE HOUR EARLY in ET — re-anchored 2026-11-14
 
-DST ended 2026-11-01. Thirteen cron-job.org jobs are `tz=UTC`, so against the market they all moved:
+DST ended 2026-11-01. Fifteen cron-job.org jobs were `tz=UTC`, so against the market they all moved:
 
     premarket    12:45 UTC -> 07:46 ET   (meant 08:45)
     vix_check    14:00 UTC -> 09:01 ET   (before the open)
@@ -3481,11 +3481,54 @@ DST ended 2026-11-01. Thirteen cron-job.org jobs are `tz=UTC`, so against the ma
     price_alerts 13:00-19:30 UTC -> last check 14:31 ET  (nothing 14:30-16:00)
 
 Also UTC: close_check, confirmation, digest, friday_wrap, macro_alert, midday_check, news_check,
-pre_earnings, watchdog. The ET-anchored ones (morning, prescreener, canary, synthetic_open,
-arms-open) are unaffected — which is why delivery looked fine. **The calendar gate cannot catch
-this: it checks the DAY, not the hour.** Fix is re-anchoring those jobs to `America/New_York` at
-their ET hours (owner's go-ahead needed; then re-run `scripts/audit_cron_schedules.py` for weekday
-shifts). **Rule: a market-timed job is scheduled in ET, never UTC.**
+pre_earnings, watchdog, weekly, week_ahead. The ET-anchored ones (morning, prescreener, canary,
+synthetic_open, arms-open) were unaffected — which is why delivery looked fine. **The calendar gate
+cannot catch this: it checks the DAY, not the hour.**
+- **Fixed (owner's go-ahead):** all 15 are now `America/New_York` at `UTC hour − 4` (they were set
+  under EDT), every one verified by READ-BACK, and `scripts/audit_cron_schedules.py` reports no
+  unacknowledged weekday shift. **Every enabled StockPulz trigger is now ET-anchored.** Current ET
+  times: watchdog 9:00 · premarket 8:45 · vix_check 10:00 · confirmation 10:30 · digest 11:00 ·
+  news_check 12:00 · midday_check 12:30 · close_check 15:30 · pre_earnings 16:00 · eod_summary
+  16:15 · macro_alert 17:00 (Mon-Thu) · friday_wrap 19:00 · weekly Sat 8:00 · week_ahead Sun 8:00.
+- `price_alerts` went from 9:00-15:30 to **9:00-16:30 ET** (hours 9-16, :00/:30) so a check lands on
+  the 16:00 close and one after it.
+- ⚠️ `friday_wrap` at 19:00 ET is 00:00 UTC SATURDAY in winter. Harmless: cron-job.org evaluates the
+  weekday in the job's own zone, and `run_friday_wrap` and the canary both read the ET date.
+- **Rule: a market-timed job is scheduled in ET, never UTC.** A new cron-job.org job gets
+  `America/New_York` unless there is a written reason otherwise.
+
+### 🔴 Price alerts were only CHECKED on weekdays in the trading day — now around the clock for crypto (2026-11-14)
+
+`check_all_alerts` is called by exactly three jobs — `run_confirmation`, `run_close_check`,
+`run_price_alerts` — and all three were Monday-Friday, inside the session. Crypto trades 24/7 and
+picks go out on Saturdays, so **a weekend crypto pick carried a stop alert that nothing looked at
+until Monday morning.** Found by asking "are the jobs enough?" and reading the schedule next to the
+callers; no monitor could see it, because nothing failed.
+- **One mode, two behaviours, decided by the clock.** `agent._stock_session_open(now_et)` is True on
+  a trading day 08:30-17:00 ET. Inside it `run_price_alerts` checks everything, as before. Outside
+  it (evenings, nights, weekends, holidays) the run is **CRYPTO ONLY**: `check_all_alerts(...,
+  ticker_filter=agent._is_crypto_ticker)`, the target-approach nudge and the watchlist move check
+  filter to coins, and the equity pick-stop check is skipped.
+- **Why crypto-only rather than "just run it all night":** the watchlist "moving X% today" check
+  keys its dedup on the DATE, so on a Saturday it would re-announce Friday's stock move as today's.
+- **A filtered check must never touch what it skipped.** `check_alerts` only prices and evaluates
+  the accepted alerts; the write removes only alerts that fired, so a stock alert skipped on
+  Saturday is still armed on Monday. Pinned by `test_a_skipped_alert_stays_armed`.
+- **Triggers:** two new cron-job.org jobs dispatch `run_mode=price_alerts`, both ET-anchored:
+  `StockPulz-alerts_nights` (every day, hours 17-23 and 0-8, at :15) and
+  `StockPulz-alerts_weekend_days` (Sat+Sun, hours 9-16, at :15). No new MODE — `run_modes.py`, the
+  canary's `_MODE_SCHEDULE` and the workflow resolver are untouched. `_is_crypto_ticker` reads the
+  ONE canonical `CRYPTO_SYMBOLS`; a coin outside that map is treated as a stock off-hours.
+- **🔴 The fix would have blinded a monitor.** `canary.check_silent_failures` read only the newest
+  20 successful runs. With ~16 extra night runs a day those 20 would be nearly all alert checks and
+  the daytime modes would go unread. Now `per_page=100`, capped at `_SILENT_SCAN_CAP = 60`.
+  *A fix that adds runs can crowd a monitor's window just as one that removes observations can.*
+- **🔴 Every `run_price_alerts` test must PIN the clock now** — it takes `now_et`, and the older
+  stock cases force `_stock_session_open` True. An unpinned test would pass or fail by the hour the
+  suite ran. Guard: `tests/test_offhours_alerts.py` (38 tests) + `TestTheScanWindowCoversAFullDay`;
+  15 of 15 mutations caught.
+- ⚠️ Not yet proven live: the first real off-hours run is the confirming observation — its log
+  should read `CRYPTO ONLY (stock market closed)`.
 
 ### ⏳ `pick_ledger_2026.json` reaches the ~1 MB gist wall around 2026-11-26
 

@@ -4365,18 +4365,67 @@ def _move_band(pct_chg: float) -> str:
     return f"{'+' if pct_chg > 0 else '-'}{int(abs(pct_chg) // 3)}"
 
 
-def run_price_alerts():
+# ── Price alerts: everything during the stock session, crypto alone outside it ─
+# 🔴 Until 2026-11-14 alerts were only ever CHECKED on weekdays between the first
+# and last price_alerts trigger. Crypto trades around the clock and picks go out
+# on Saturdays, so a weekend crypto pick carried a stop alert that nothing looked
+# at until Monday morning. The trigger now also fires hourly through evenings,
+# nights and weekends — and outside the window below the run restricts itself to
+# crypto, because a stock quote is not live then:
+#   * the watchlist "moving X% today" check keys its dedup on the DATE, so on a
+#     Saturday it would re-announce Friday's stock move as today's;
+#   * a stock alert priced off a stale close can only repeat what the session
+#     already said, or fire on a bad off-hours tick.
+ALERT_SESSION_START_ET = (8, 30)    # pre-market quotes are live from here
+ALERT_SESSION_END_ET   = (17, 0)    # the 16:30 run still sees the closing print
+
+
+def _stock_session_open(now_et: datetime) -> bool:
+    """Is this a moment when stock prices are live enough to alert on?
+
+    A trading day (not a weekend, not a US market holiday) between
+    ALERT_SESSION_START_ET and ALERT_SESSION_END_ET. Takes the time as an
+    argument so a test can pin it — a clock read inside would make every
+    price-alert test pass or fail by the hour the suite happened to run.
+    """
+    if _force_calendar_run():
+        return True
+    d = now_et.date()
+    if d.weekday() >= 5 or is_market_holiday(d):
+        return False
+    return ALERT_SESSION_START_ET <= (now_et.hour, now_et.minute) < ALERT_SESSION_END_ET
+
+
+def _is_crypto_ticker(ticker) -> bool:
+    """True for a coin in the ONE canonical crypto set (`BTC` or `BTC-USD`)."""
+    from price_checker import CRYPTO_SYMBOLS as _CRYPTO
+    t = str(ticker or "").upper().strip()
+    if t.endswith("-USD"):
+        t = t[:-4]
+    return t in _CRYPTO
+
+
+def run_price_alerts(now_et: datetime | None = None):
     """
     Lightweight run: check price alerts + trailing stops only.
-    No Claude call, no screener — just yfinance price fetch.
-    Designed to run every 30 minutes during market hours.
+    No Claude call, no screener — just a price fetch.
+
+    Runs every 30 minutes through the stock session with EVERYTHING in scope,
+    and hourly outside it (evenings, nights, weekends, holidays) with ONLY
+    crypto in scope — see `_stock_session_open`.
     """
     _log_cron_run("price_alerts")
-    print("[agent] Running intraday price alerts check...")
+    now_et = now_et or datetime.now(ET)
+    crypto_only = not _stock_session_open(now_et)
+    _scope = _is_crypto_ticker if crypto_only else None
+    print("[agent] Running price alerts check — "
+          + ("CRYPTO ONLY (stock market closed)." if crypto_only
+             else "all tickers (stock session open)."))
 
     # Check user-set price alerts (above/below thresholds)
     try:
-        fired = check_all_alerts(send_fn=_alert, send_keyboard_fn=send_inline_keyboard)
+        fired = check_all_alerts(send_fn=_alert, send_keyboard_fn=send_inline_keyboard,
+                                 ticker_filter=_scope)
         if fired:
             print(f"[agent] {fired} price alert(s) triggered.")
         else:
@@ -4389,7 +4438,8 @@ def run_price_alerts():
     def _target_approach_msgs(uid):
             out = []
             log = load_user_trade_log(uid)
-            open_trades = log.get("open", [])
+            open_trades = [t for t in log.get("open", [])
+                           if _scope is None or _scope(t.get("ticker"))]
             if not open_trades:
                 return None
 
@@ -4400,7 +4450,7 @@ def run_price_alerts():
             # user closes the position manually via the portfolio tab.
 
                 # Target-approach alert: warn when within 5% of target (not yet hit)
-            for trade in log.get("open", []):
+            for trade in open_trades:
                 ticker  = trade["ticker"]
                 current = current_prices.get(ticker)
                 target  = trade.get("target_price")
@@ -4432,7 +4482,8 @@ def run_price_alerts():
         def _watch_move_msgs(uid):
                 out = []
                 log = load_user_trade_log(uid)
-                watch_tickers = log.get("watchlist", [])
+                watch_tickers = [t for t in log.get("watchlist", [])
+                                 if _scope is None or _scope(t)]
                 if not watch_tickers:
                     return None
                 # Live price vs true previous close (same method as the positions
@@ -4477,7 +4528,10 @@ def run_price_alerts():
         print(f"[agent] Watchlist move alerts failed (non-critical): {exc}")
 
     # ── Auto-stop alerts for today's AI picks ────────────────────────────────
-    picks = load_picks()
+    # Stocks, ETFs and commodities only (see _check_picks_stop_loss), so there is
+    # nothing for it to do while the stock market is shut. A crypto pick's stop
+    # is an auto price alert, which the check at the top already covered.
+    picks = None if crypto_only else load_picks()
     if picks:
         try:
             picks_prices = get_current_prices(picks)
