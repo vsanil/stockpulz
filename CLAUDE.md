@@ -3779,3 +3779,14 @@ bot must not take over a human's positions), so nothing managed them again; from
 - **Rule: "not in the read" is not "closed".** Before deleting tracking on an absence,
   require evidence the read could have seen it — the same standard as any negative
   claim in this file.
+
+### A coin stored as a stock — BNB retyped once (2026-11-15)
+
+The owner's BNB position (logged 2026-05-26) carried `asset_type: "stock"` — it predates
+the 2026-06-26 rule that types a position from `CRYPTO_SYMBOLS`. Price was unaffected
+(lookups recognise BNB by name); grouping by type was not. `scripts/fix_asset_type.py`
+(run 43783177053) found exactly that one trade across every real user's open and
+closed trades, retyped it and read it back; confirmed through `/admin`. The workflow was
+deleted after the run. **Deliberately NOT a reader-side rule** ("a known coin ticker is
+always crypto"): real stocks share coin tickers (NYSE `SOL` is Emeren), so the stored
+type stays authoritative and new positions are typed correctly at write time.
