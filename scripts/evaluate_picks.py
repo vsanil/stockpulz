@@ -238,15 +238,12 @@ def record_today(led: dict, known: set | None = None) -> int:
 # ── scoring ───────────────────────────────────────────────────────────────────
 
 def _yf_symbol(ticker: str, asset: str) -> str:
-    if asset == "crypto":
-        try:
-            from price_checker import CRYPTO_SYMBOLS
-            if ticker in CRYPTO_SYMBOLS:
-                return f"{ticker}-USD"
-        except Exception:
-            pass
-        return f"{ticker}-USD"
-    return ticker
+    """Through the ONE mapping. It used to append `-USD` itself, so SUI, UNI and
+    HYPE were never priced (Yahoo lists them as SUI20947-USD etc.), and ARB/TON
+    were replayed against DIFFERENT coins that share the `-USD` symbol — those
+    picks were scored on another asset's price path."""
+    from price_checker import yf_symbol
+    return yf_symbol(ticker, crypto=(asset == "crypto"))
 
 
 def _bars(symbol: str, start: str, end: str):

@@ -28,6 +28,7 @@ from cmd_helpers import (
     _CRYPTO_SYMBOLS,
     _get_client,
 )
+from price_checker import yf_symbol
 from cmd_trade_exec import _execute_bought, _execute_sold, _execute_update_level, _execute_add, _execute_trim, _send_chart, _offer_setstop_if_needed
 from cmd_settings import _prompt_for_param, _send_settings_panel
 from cmd_nlp import _nl_parse_trade, _nl_extract_tickers_list
@@ -942,7 +943,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
                     except Exception:
                         _sum_sector_map[ticker] = "Unknown"
                 else:
-                    _yf_sym = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
+                    _yf_sym = yf_symbol(ticker)
                     try:
                         _fi  = yf.Ticker(_yf_sym).fast_info
                         _pr  = getattr(_fi, "last_price", None) or getattr(_fi, "regular_market_price", None)
@@ -1140,7 +1141,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             entry  = t.get("entry_price")
             stop   = t.get("stop_loss")
             target = t.get("target_price")
-            yf_sym = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
+            yf_sym = yf_symbol(ticker)
 
             current_r = None
             prev_r    = None
@@ -1272,9 +1273,9 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
 
         for t in crypto_trades:
             ticker    = t["ticker"]
-            yf_symbol = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
+            yf_sym_c = yf_symbol(ticker)
             try:
-                fi    = yf.Ticker(yf_symbol).fast_info
+                fi    = yf.Ticker(yf_sym_c).fast_info
                 price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
                 if price:
                     prices[ticker] = round(float(price), 2)
@@ -1282,7 +1283,7 @@ def _cmd_trades(text: str, original: str, chat_id: str) -> "str | None":
             except Exception:
                 pass
             try:
-                hist = yf.Ticker(yf_symbol).history(period="1d", interval="1m")
+                hist = yf.Ticker(yf_sym_c).history(period="1d", interval="1m")
                 if not hist.empty:
                     prices[ticker] = round(float(hist["Close"].iloc[-1]), 2)
             except Exception:

@@ -25,6 +25,7 @@ ALERTS_FILENAME = "price_alerts.json"
 # (re-exported so webhook's `from price_alert_manager import _CRYPTO_SYMBOLS`
 # keeps working). Single source of truth lives in price_checker.
 from price_checker import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
+from price_checker import yf_symbol as _yf_symbol
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
@@ -51,9 +52,9 @@ def _alert_key(a: dict) -> tuple:
 def _current_price(ticker: str) -> float | None:
     """Fetch current price. Crypto tickers use TICKER-USD format for yfinance."""
     ticker = ticker.upper()
-    yf_symbol = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
+    yf_sym = _yf_symbol(ticker)
     try:
-        price = yf.Ticker(yf_symbol).fast_info.last_price
+        price = yf.Ticker(yf_sym).fast_info.last_price
         if price and price > 0:   # reject 0 / nan / negative (failed fetch)
             return float(price)
     except Exception:
@@ -61,7 +62,7 @@ def _current_price(ticker: str) -> float | None:
     # For unknown tickers, try TICKER-USD anyway — catches any crypto not in _CRYPTO_SYMBOLS
     if ticker not in _CRYPTO_SYMBOLS:
         try:
-            price = yf.Ticker(f"{ticker}-USD").fast_info.last_price
+            price = yf.Ticker(_yf_symbol(ticker, crypto=True)).fast_info.last_price
             if price and price > 0:   # reject 0 / nan / negative (failed fetch)
                 return float(price)
         except Exception:

@@ -116,6 +116,40 @@ _SYMBOL_TO_CG_ID = {
 # screener picks can't work in one feature and break in another.
 CRYPTO_SYMBOLS = frozenset(_SYMBOL_TO_CG_ID)
 
+# Coins Yahoo lists under a NUMBERED symbol. Measured 2026-11-15, every coin in
+# the map above checked against CoinGecko: for these seven, `<SYM>-USD` either
+# returns nothing (UNI, HYPE, SUI, APT, PEPE) or — worse — a DIFFERENT, unrelated
+# coin (ARB-USD $0.0006 vs Arbitrum's $0.13; TON-USD $0.002 vs Toncoin's $1.07),
+# the same class as bare "BTC" pricing at $28. Each symbol below was within 1% of
+# CoinGecko. MATIC is deliberately absent: it was renamed POL and Yahoo carries
+# only POL, which is not the token CoinGecko's `matic-network` prices.
+YF_CRYPTO_SYMBOLS = {
+    "UNI":  "UNI7083-USD",
+    "HYPE": "HYPE32196-USD",
+    "SUI":  "SUI20947-USD",
+    "APT":  "APT21794-USD",
+    "ARB":  "ARB11841-USD",
+    "TON":  "TON11419-USD",
+    "PEPE": "PEPE24478-USD",
+}
+
+
+def yf_symbol(ticker: str, crypto: bool = False) -> str:
+    """The symbol yfinance knows a ticker by — the ONE place that decides it.
+
+    A coin in the canonical map gets its Yahoo symbol (`BTC` → `BTC-USD`,
+    `SUI` → `SUI20947-USD`). `crypto=True` forces the `-USD` form for a coin
+    outside the map (a caller that knows the asset type). Anything else — a
+    stock, an ETF, a future — is returned unchanged. Never build `f"{t}-USD"`
+    by hand: `tests/test_yf_symbol.py` fails if anyone does.
+    """
+    t = str(ticker or "").strip().upper()
+    if t in YF_CRYPTO_SYMBOLS:
+        return YF_CRYPTO_SYMBOLS[t]
+    if t in CRYPTO_SYMBOLS or crypto:
+        return t if t.endswith("-USD") else f"{t}-USD"
+    return ticker
+
 
 def get_current_prices(picks: dict) -> dict:
     """
@@ -215,7 +249,7 @@ def get_current_prices(picks: dict) -> dict:
     still_missing = [s for s in crypto_symbols if s not in prices]
     for sym in still_missing:
         try:
-            yf_ticker = f"{sym}-USD"
+            yf_ticker = yf_symbol(sym, crypto=True)
             data  = yf.Ticker(yf_ticker).fast_info
             price = getattr(data, "last_price", None) or getattr(data, "regular_market_price", None)
             if price and price > 0:   # reject 0 / nan / negative (nan is truthy)

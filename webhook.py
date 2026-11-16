@@ -3735,8 +3735,8 @@ def miniapp_news(ticker: str):
     if not ticker: return jsonify({"error": "ticker required"}), 400
     try:
         import yfinance as _yf
-        from price_alert_manager import _CRYPTO_SYMBOLS as _ALERT_CRYPTO
-        yf_sym = f"{ticker}-USD" if ticker in _ALERT_CRYPTO else ticker
+        from price_checker import yf_symbol
+        yf_sym = yf_symbol(ticker)
         raw    = _yf.Ticker(yf_sym).news or []
         items  = []
         for n in raw[:5]:
@@ -4326,11 +4326,12 @@ def miniapp_volume_spikes():
 
     import yfinance as _yf
     import concurrent.futures as _cf
+    from price_checker import yf_symbol
 
     def _check_volume(sym):
         try:
-            # Crypto needs the -USD suffix or yfinance returns a wrong instrument.
-            yf_sym = f"{sym}-USD" if sym in _CHART_CRYPTO else sym
+            # Crypto needs its Yahoo symbol or yfinance returns a wrong instrument.
+            yf_sym = yf_symbol(sym)
             hist = _yf.Ticker(yf_sym).history(period="1mo", interval="1d", auto_adjust=True)
             if hist.empty or len(hist) < 5:
                 return None
@@ -4996,8 +4997,8 @@ def miniapp_sparkline(ticker: str):
     max_bars = {"7d": 7, "1mo": 30, "3mo": 90}.get(period, 7)
     try:
         import yfinance as _yf
-        from price_checker import _SYMBOL_TO_CG_ID as _ALERT_CRYPTO
-        yf_sym = f"{ticker}-USD" if ticker in {s.upper() for s in _ALERT_CRYPTO} else ticker
+        from price_checker import yf_symbol
+        yf_sym = yf_symbol(ticker)
         hist = _yf.Ticker(yf_sym).history(period=period, interval="1d", auto_adjust=True)
         closes = [round(float(v), 4) for v in hist["Close"].dropna().tolist()[-max_bars:]]
         return jsonify({"ticker": ticker, "closes": closes, "period": period})
@@ -5394,9 +5395,17 @@ def _backtest_fetch_prices(ticker: str) -> tuple[list, list]:
     import yfinance as yf
 
     # ── Try yfinance (stocks + major crypto like BTC-USD) ─────────────────────
-    for suffix in ("", "-USD"):
+    # 🔴 This used to try the BARE symbol first. Bare "BTC" IS a Yahoo symbol —
+    # an unrelated instrument at ~$30 (measured 2026-11-15) — so it "succeeded",
+    # and the past-date Log Position path (close_on_date) priced a BTC buy about
+    # 2,000x too low, as did the crypto pick backtest. A known coin now asks for
+    # its own Yahoo symbol ONLY; anything else keeps bare-then-`-USD`.
+    from price_checker import CRYPTO_SYMBOLS as _CRYPTO, yf_symbol
+    syms = ([yf_symbol(ticker)] if ticker.upper() in _CRYPTO
+            else [ticker, yf_symbol(ticker, crypto=True)])
+    for sym in syms:
         try:
-            hist = yf.Ticker(ticker + suffix).history(period="1y")
+            hist = yf.Ticker(sym).history(period="1y")
             if not hist.empty:
                 prices = hist["Close"].dropna()
                 dates  = [d.strftime("%Y-%m-%d") for d in prices.index]

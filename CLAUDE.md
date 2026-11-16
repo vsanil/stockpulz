@@ -3735,3 +3735,26 @@ gist past it on **2026-11-02**, and from then on `synthetic_state_*`, `traffic_h
   dry run says **77 real (12 target · 36 stop · 29 time) + 8 paper** on the test account, plus
   ~10 across the arms. Expect one large owner DM, and an exit mix on /admin that jumps — those
   exits are late, and the `stop` ones fill well past their stops.
+
+### 🔴 `<SYM>-USD` is the wrong Yahoo symbol for seven coins — `price_checker.yf_symbol()` (2026-11-15)
+
+Checked every coin in `_SYMBOL_TO_CG_ID` against CoinGecko. `<SYM>-USD` returned
+NOTHING for UNI, HYPE, SUI, APT, PEPE, and a DIFFERENT coin for **ARB** ($0.0006 vs
+$0.13) and **TON** ($0.002 vs $1.07) — the bare-"BTC"-is-$28 class again. Yahoo lists
+them as numbered symbols (`SUI20947-USD`, `TON11419-USD`, …), now in
+`price_checker.YF_CRYPTO_SYMBOLS`, each verified within 1% of CoinGecko.
+- **`price_checker.yf_symbol(ticker, crypto=False)` is the ONE mapping.** Twenty sites
+  built `f"{t}-USD"` by hand; all route through it now. `tests/test_yf_symbol.py`
+  AST-scans every project file and fails on a hand-built `-USD` symbol.
+- **Worst site: `webhook._backtest_fetch_prices` tried the BARE symbol first.** Bare
+  `BTC` is a real ~$30 Yahoo instrument, so `/api/miniapp/close_on_date` priced a
+  past-dated crypto buy (Log Position → Total invested → a past date) ~2,000x too low,
+  and the crypto pick backtest read the same wrong series. A known coin now asks for
+  its own symbol only.
+- **The evaluator re-scores every report**, so the next weekly report includes SUI/UNI/HYPE
+  picks for the first time and re-scores any ARB/TON picks on the right coin — its
+  numbers move for that reason, not because anything about the picks changed.
+- **MATIC is deliberately unmapped**: renamed POL; Yahoo carries only POL, which is not
+  the token CoinGecko's `matic-network` prices.
+- Live prices were mostly unaffected — CoinGecko is the primary source and Yahoo the
+  fallback — but `_download_prices` (midday check, tax harvest) is Yahoo-only.

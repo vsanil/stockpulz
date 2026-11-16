@@ -92,7 +92,8 @@ def generate_chart(
     ticker = ticker.upper()
 
     # Crypto uses TICKER-USD on yfinance
-    yf_ticker = f"{ticker}-USD" if asset_type == "crypto" or is_crypto(ticker) else ticker
+    from price_checker import yf_symbol
+    yf_ticker = yf_symbol(ticker, crypto=(asset_type == "crypto"))
 
     # ── Fetch OHLCV ───────────────────────────────────────────────────────────
     try:

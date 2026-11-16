@@ -697,7 +697,9 @@ class TestYfSymbolMap:
 
     def test_lowercase_crypto_still_suffixed(self):
         m = ag._yf_symbol_map(["btc"])
-        assert m == {"btc-USD": "btc"}   # original case preserved, suffix applied
+        # The Yahoo symbol is canonical (upper case, via price_checker.yf_symbol);
+        # the ORIGINAL ticker is preserved as the value, which is what callers map back to.
+        assert m == {"BTC-USD": "btc"}
 
 
 class TestIsPos:

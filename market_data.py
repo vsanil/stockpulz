@@ -29,6 +29,7 @@ _ALPACA_HEADERS = {
 
 # Canonical crypto set — single source of truth (was a local hardcoded list).
 from price_checker import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
+from price_checker import yf_symbol
 
 _TIMEOUT = 6  # seconds for all external HTTP calls
 
@@ -86,8 +87,7 @@ def _yf_price(ticker: str) -> float | None:
     """Last-resort price via yfinance."""
     try:
         import yfinance as _yf
-        is_crypto = ticker.upper() in _CRYPTO_SYMBOLS
-        yf_sym    = f"{ticker}-USD" if is_crypto else ticker
+        yf_sym    = yf_symbol(ticker)
         fi        = _yf.Ticker(yf_sym).fast_info
         p         = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
         return float(p) if (p and p > 0) else None   # reject 0 / nan / negative
@@ -99,8 +99,7 @@ def _yf_ohlcv(ticker: str, days: int = 92) -> list | None:
     """Last-resort OHLCV bars via yfinance."""
     try:
         import yfinance as _yf
-        is_crypto = ticker.upper() in _CRYPTO_SYMBOLS
-        yf_sym    = f"{ticker}-USD" if is_crypto else ticker
+        yf_sym    = yf_symbol(ticker)
         hist      = _yf.Ticker(yf_sym).history(period="3mo", interval="1d")
         if hist.empty:
             return None
@@ -289,8 +288,7 @@ def _fetch_one_name(ticker: str) -> tuple[str, str]:
     """yfinance shortName lookup for a single ticker. Returns (ticker, name)."""
     try:
         import yfinance as _yf
-        is_crypto = ticker in _CRYPTO_SYMBOLS
-        yf_sym    = f"{ticker}-USD" if is_crypto else ticker
+        yf_sym    = yf_symbol(ticker)
         info      = _yf.Ticker(yf_sym).info
         name      = info.get("shortName") or info.get("longName") or ""
         return ticker, _short_name(name)
@@ -398,8 +396,7 @@ def _yf_sym(ticker: str) -> str:
     """Ticker as yfinance knows it. Crypto needs the -USD suffix: a bare
     `yf.download("BTC")` resolves to an unrelated ~$28 instrument, NOT
     BTC-USD (~$63k). Verified live 2026-08-12."""
-    t = ticker.upper()
-    return f"{t}-USD" if t in _CRYPTO_SYMBOLS else t
+    return yf_symbol(ticker.upper())
 
 
 def get_quotes_with_change(tickers: list) -> dict:

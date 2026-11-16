@@ -148,8 +148,8 @@ def _yf_symbol_map(tickers: list[str]) -> dict[str, str]:
     Crypto symbols get the -USD suffix (BTC → BTC-USD); without it yfinance
     resolves a bare "BTC" to an unrelated instrument (the ~$28 BTC bug).
     """
-    from price_checker import _SYMBOL_TO_CG_ID
-    return {(f"{t}-USD" if t.upper() in _SYMBOL_TO_CG_ID else t): t for t in tickers}
+    from price_checker import yf_symbol
+    return {yf_symbol(t): t for t in tickers}
 
 
 def _download_prices(tickers: list[str], **yf_kwargs) -> dict[str, float]:
@@ -166,11 +166,11 @@ def _download_prices(tickers: list[str], **yf_kwargs) -> dict[str, float]:
     # Friday wrap's unrealised P&L, target-approach nudges and pick entry
     # alerts all silently did nothing. Every test stubbed this function.
     import yfinance as yf
-    from price_checker import _SYMBOL_TO_CG_ID
+    from price_checker import yf_symbol
     # Build yfinance symbol → original symbol mapping
     yf_map: dict[str, str] = {}
     for t in tickers:
-        yf_t = f"{t}-USD" if t.upper() in _SYMBOL_TO_CG_ID else t
+        yf_t = yf_symbol(t)
         yf_map[yf_t] = t
     yf_tickers = list(yf_map.keys())
     try:
@@ -1461,8 +1461,8 @@ def run_confirmation():
                 scan = [t for t in watchlist if t and t not in pick_symbols]
                 if not scan:
                     return None
-                from price_checker import _SYMBOL_TO_CG_ID as _CG_IDS_WL
-                yf_scan_map = {(f"{t}-USD" if t.upper() in _CG_IDS_WL else t): t for t in scan}
+                from price_checker import yf_symbol
+                yf_scan_map = {yf_symbol(t): t for t in scan}
                 hist = yf.download(" ".join(yf_scan_map.keys()), period="60d", interval="1d",
                                    progress=False, auto_adjust=True)
                 _close_raw = hist["Close"]
@@ -3376,8 +3376,8 @@ def _check_portfolio_drawdown(uid: str, current_prices: dict) -> None:
             return
 
         # Fetch 2 days of data to get prev close + current (handles crypto via _download_prices)
-        from price_checker import _SYMBOL_TO_CG_ID as _CG_IDS
-        yf_map = {(f"{t}-USD" if t.upper() in _CG_IDS else t): t for t in tickers}
+        from price_checker import yf_symbol
+        yf_map = {yf_symbol(t): t for t in tickers}
         yf_tickers = list(yf_map.keys())
         raw = yf.download(" ".join(yf_tickers), period="2d", interval="1d",
                           progress=False, auto_adjust=True)
@@ -3882,10 +3882,10 @@ def _get_rsi(ticker: str, period: int = 14) -> float | None:
         return cached[0]
     try:
         import yfinance as yf
-        from price_checker import _SYMBOL_TO_CG_ID
-        # Crypto needs the -USD suffix or yf resolves to an unrelated instrument
+        from price_checker import yf_symbol
+        # Crypto needs its Yahoo symbol or yf resolves to an unrelated instrument
         # (e.g. bare "BTC" ≠ BTC-USD) → garbage RSI in the take-profit nudge.
-        yf_t = f"{ticker}-USD" if ticker.upper() in _SYMBOL_TO_CG_ID else ticker
+        yf_t = yf_symbol(ticker)
         hist = yf.Ticker(yf_t).history(period=f"{period + 6}d", interval="1d", auto_adjust=True)
         if len(hist) < period + 1:
             return None
@@ -5241,8 +5241,8 @@ def _send_morning_personalised(picks: dict, global_config: dict, label: str = ""
 
             def _fetch_wl_price(ticker: str):
                 try:
-                    from price_checker import _SYMBOL_TO_CG_ID as _CG_IDS
-                    yf_sym = f"{ticker}-USD" if ticker in _CG_IDS else ticker
+                    from price_checker import yf_symbol
+                    yf_sym = yf_symbol(ticker)
                     info  = _yf.Ticker(yf_sym).fast_info
                     price = getattr(info, "last_price", None) or getattr(info, "regular_market_price", None)
                     prev  = getattr(info, "previous_close", None)

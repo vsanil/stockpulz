@@ -52,6 +52,7 @@ def parse_money(raw) -> float | None:
 # Canonical crypto set — single source of truth (was a 20-coin local list that
 # mispriced any crypto outside it in /size and /digest).
 from price_checker import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
+from price_checker import yf_symbol
 from llm_client import strip_fences
 
 def _is_admin(chat_id: str | None = None) -> bool:
@@ -115,10 +116,10 @@ def _fetch_live_price(ticker: str) -> float | None:
     """Fetch the latest price for a ticker via yfinance. Handles crypto via TICKER-USD."""
     import yfinance as _yf
     ticker    = ticker.upper()
-    yf_symbol = f"{ticker}-USD" if ticker in _CRYPTO_SYMBOLS else ticker
+    yf_sym = yf_symbol(ticker)
     # Try fast_info first (faster, no download overhead)
     try:
-        fi    = _yf.Ticker(yf_symbol).fast_info
+        fi    = _yf.Ticker(yf_sym).fast_info
         price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
         if price:
             return float(price)
@@ -127,7 +128,7 @@ def _fetch_live_price(ticker: str) -> float | None:
     # Fallback: 1-min history
     try:
         from yf_utils import latest_close
-        data = _yf.download(yf_symbol, period="1d", interval="1m",
+        data = _yf.download(yf_sym, period="1d", interval="1m",
                             progress=False, auto_adjust=True)
         return latest_close(data)
     except Exception:
