@@ -24,13 +24,16 @@ name: Tournament Arms
 #     same market moment without three screeners racing it for rate limit.
 #     Until that job exists, arms run only when dispatched by hand.
 #
-# `manage` is on GitHub's scheduler deliberately: it sells at target, stop or
-# the time stop, where lateness costs a little precision rather than corrupting
-# a measurement. Same reasoning that left the synthetic user's manage phase here.
+# `manage` USED to be on GitHub's scheduler, on the argument that lateness
+# costs only a little precision. Measured, it cost more: GitHub fired one of the
+# seven requested runs a weekday, at 4-6 PM ET, so stops and targets crossed
+# during the day were mostly missed. Moved 2026-11-16 to cron-job.org job
+# "StockPulz-arms_manage", hourly 10:15 AM-4:15 PM ET weekdays, with
+# {"phase":"manage","dry_run":"false"} — dry_run MUST be passed, because this
+# workflow's dispatch default is "true". Same cadence as the synthetic user's
+# manage job, so every book in the tournament is managed the same way.
 
 on:
-  schedule:
-    - cron: "15 14-20 * * 1-5"   # 10:15 AM-4:15 PM ET hourly — manage only
   workflow_dispatch:
     inputs:
       phase:
@@ -45,6 +48,12 @@ on:
         description: "true = screen, select and price against LIVE data but write nothing"
         required: false
         default: "true"
+
+# An open (up to an hour of screening) and a manage must not overlap: both read
+# each arm's state, trade and write it back.
+concurrency:
+  group: tournament-arms
+  cancel-in-progress: false
 
 jobs:
   run:

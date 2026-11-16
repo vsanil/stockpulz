@@ -23,9 +23,17 @@ name: Synthetic User
 # ⚠️ DO NOT re-add a `0 12` cron here. Both would fire and the bot would open
 # TWICE — the same double-send reasoning that keeps the morning relay off
 # GitHub's scheduler. Pinned by tests/test_synthetic_open_is_not_double_scheduled.py
+#
+# 🔴 The MANAGE phase is not scheduled here either (moved 2026-11-16). Its
+# GitHub cron asked for 7 runs a weekday (10 AM-4 PM ET); measured over
+# 2026-10-14 to 11-13 GitHub fired 1-2 of them, and from November only ONE, at
+# 4-6 PM ET — sometimes after the close. So a stop or target crossed during the
+# day was acted on only if the price was still there that evening. It is now
+# dispatched by cron-job.org job "StockPulz-synthetic_manage", hourly 10 AM-4 PM
+# ET on weekdays, with {"phase":"manage","dry_run":"false"}. Keeping the GitHub
+# cron as well would run manage twice in some hours; the concurrency group below
+# would serialise them, but there is no reason to pay for it.
 on:
-  schedule:
-    - cron: "0 14-20 * * 1-5"     # 10 AM–4 PM ET hourly — manage (market hours)
   workflow_dispatch:
     inputs:
       phase:
@@ -36,6 +44,12 @@ on:
         description: "true = drive the phase against LIVE data with NO writes and NO DM (proves a code path on CI, where prices resolve)"
         required: false
         default: "false"
+
+# Two phases must never run at once: both read the bot's state, trade, and write
+# the state back, so an overlap could sell a position twice or lose a record.
+concurrency:
+  group: synthetic-user
+  cancel-in-progress: false
 
 jobs:
   run:

@@ -547,11 +547,23 @@ class TestTheWorkflowCannotSpendOnAModel:
         """GitHub runs this repo 1.6-6 h late. An arm bought hours after the
         entry window was published measures lateness, not strategy."""
         wf = self._wf()
-        crons = [c["cron"] for c in wf[True]["schedule"]]
-        assert crons and all(c.startswith("15 14-20") for c in crons), crons
+        assert "schedule" not in (wf[True] or {}), wf[True]
         body = (ROOT / ".github/workflows/ab_arms.yml").read_text()
         i = body.index("Pick phase")
         assert "manage" in body[i:i + 400]
+
+    def test_manage_is_dispatched_and_must_say_dry_run_false(self):
+        """2026-11-16: manage moved off GitHub's scheduler (it fired once a day,
+        at 4-6 PM ET). cron-job.org now dispatches it, and the dispatch default
+        for dry_run is "true" — so the job MUST pass dry_run=false or every
+        manage run writes nothing. The input has to exist for that to work."""
+        inputs = self._wf()[True]["workflow_dispatch"]["inputs"]
+        assert {"phase", "dry_run"} <= set(inputs), sorted(inputs)
+        assert inputs["dry_run"]["default"] == "true"
+
+    def test_an_open_and_a_manage_cannot_overlap(self):
+        conc = self._wf().get("concurrency") or {}
+        assert conc.get("group") and conc.get("cancel-in-progress") is False, conc
 
     def test_it_carries_the_storage_secrets_so_it_cannot_split_brain(self):
         env = self._wf()["jobs"]["run"]["steps"][-1]["env"]

@@ -3790,3 +3790,25 @@ closed trades, retyped it and read it back; confirmed through `/admin`. The work
 deleted after the run. **Deliberately NOT a reader-side rule** ("a known coin ticker is
 always crypto"): real stocks share coin tickers (NYSE `SOL` is Emeren), so the stored
 type stays authoritative and new positions are typed correctly at write time.
+
+### The sell checks moved to cron-job.org — GitHub fired one of seven a day (2026-11-16)
+
+`synthetic_user.yml` (`0 14-20 * * 1-5`) and `ab_arms.yml` (`15 14-20 * * 1-5`) each asked GitHub
+for seven `manage` runs a weekday. Measured 10-14 → 11-13: GitHub ran one or two, and from
+November only ONE, at 4-6 PM ET — sometimes after the close. A stop or target crossed during the day
+was acted on only if the price was still there that evening.
+- **Now cron-job.org, ET-anchored, weekdays:** `8873760` **StockPulz-synthetic_manage** at
+  `0 10-16` and `8873751` **StockPulz-arms_manage** at `15 10-16`, both POSTing
+  `{"ref":"main","inputs":{"phase":"manage","dry_run":"false"}}`. **`dry_run` must be passed for the
+  arms** — that workflow's dispatch default is `"true"`, so a bare `phase` writes nothing.
+- Both jobs were CLONED from the existing open jobs in the console, so the stored token was reused
+  and never handled. Verified by read-back after reload, and the list showed no stray copies.
+- **The GitHub crons were removed** (both on and beside the cron-job.org jobs would run manage twice
+  in some hours), and each workflow now has a `concurrency` group with `cancel-in-progress: false`:
+  open and manage both read state, trade and write it back, so two at once could sell a position
+  twice or lose a record. Guards in `test_synthetic_open_is_not_double_scheduled.py` and
+  `test_tournament_arms.py`.
+- ⚠️ Nothing watches these two triggers. If either job is deleted, positions stop being sold and no
+  check notices — the same residual as the canary's own trigger.
+- ⚠️ Console trap hit while doing it: dumping every `input[type=text]` value on a job's edit page
+  prints the stored Authorization header. Read fields by NAME and report only the token's length.

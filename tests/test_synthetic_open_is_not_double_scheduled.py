@@ -47,10 +47,21 @@ class TestOpenHasExactlyOneTrigger:
             f"denominator of every fill-derived metric. crons found: {crons}"
         )
 
-    def test_the_manage_cron_is_still_scheduled(self):
-        """Removing the wrong one would stop the bot ever selling at target."""
+    def test_no_phase_is_on_githubs_late_scheduler(self):
+        """2026-11-16: manage moved to cron-job.org too. GitHub fired one of its
+        seven requested manage runs a weekday, at 4-6 PM ET, so stops and
+        targets crossed during the day were mostly missed. A GitHub cron left
+        beside the cron-job.org job would run manage twice in some hours."""
         crons = _schedule_block(WF.read_text())
-        assert "0 14-20 * * 1-5" in crons, f"manage lost its schedule: {crons}"
+        assert crons == [], f"a phase is scheduled on GitHub again: {crons}"
+
+    def test_overlapping_runs_are_serialised(self):
+        """Both phases read the state, trade and write it back; two at once
+        could sell a position twice or lose a record."""
+        import yaml
+        doc = yaml.safe_load(WF.read_text())
+        conc = doc.get("concurrency") or {}
+        assert conc.get("group") and conc.get("cancel-in-progress") is False, conc
 
     def test_workflow_dispatch_still_accepts_a_phase_input(self):
         """cron-job.org drives it through workflow_dispatch with phase=open.
@@ -83,6 +94,6 @@ class TestOpenHasExactlyOneTrigger:
     def test_the_scan_can_detect_a_restored_cron(self):
         """A guard that cannot fail is not a guard."""
         faked = WF.read_text().replace(
-            '    - cron: "0 14-20 * * 1-5"',
-            '    - cron: "0 12 * * 1-5"\n    - cron: "0 14-20 * * 1-5"', 1)
+            "on:\n  workflow_dispatch:",
+            'on:\n  schedule:\n    - cron: "0 12 * * 1-5"\n  workflow_dispatch:', 1)
         assert "0 12 * * 1-5" in _schedule_block(faked)
