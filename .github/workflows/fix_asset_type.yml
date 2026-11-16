@@ -1,0 +1,34 @@
+name: Fix Asset Type
+
+# ONE-TIME. Retypes coins stored as something other than "crypto" on real users'
+# trades (a BNB position logged 2026-05-26 reads as a stock). Manual only, dry run
+# by default; see scripts/fix_asset_type.py. Delete this workflow after the run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "true = correct (default: dry run, prints only)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Retype mistyped coins
+        run: python scripts/fix_asset_type.py ${{ github.event.inputs.apply == 'true' && '--apply' || '' }}
+        env:
+          GH_GIST_TOKEN: ${{ secrets.GH_GIST_TOKEN }}
+          GIST_ID:       ${{ secrets.GIST_ID }}
+          SUPABASE_URL:  ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:  ${{ secrets.SUPABASE_KEY }}
