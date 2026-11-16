@@ -680,7 +680,15 @@ def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
     adopt = _is_bot_only(admin)
 
     # Only manage the bot's OWN real tickers (never the owner's real positions).
-    real_open = {x["ticker"]: x for x in load_user_trade_log(admin).get("open", [])}
+    real_log = load_user_trade_log(admin)
+    real_open = {x["ticker"]: x for x in real_log.get("open", [])}
+    # 🔴 A BLANK read is not evidence that anything closed. `load_user_trade_log`
+    # swallows a failed read into an empty account, and on 2026-08-19 (the first
+    # run against Supabase, reads blocked) that made this loop "drop" all eight
+    # bot positions on the owner's account from state — permanently, because the
+    # owner's account is never re-adopted. They sat unmanaged for three months.
+    # So a tracked position is only dropped when the account read has rows.
+    real_blank = not real_log.get("open") and not real_log.get("closed")
     tracked_real = list(st.get("real", []))
     if adopt:
         tracked_real += [t for t, x in real_open.items()
@@ -688,10 +696,17 @@ def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
     tracked_real = list(dict.fromkeys(tracked_real))
     adopted_real = len(set(tracked_real) - set(st.get("real", [])))
     still_real = []
+    if real_blank and tracked_real:
+        print(f"[synthetic_user] ⚠️ {admin}: the account read came back EMPTY while "
+              f"state tracks {len(tracked_real)} real position(s) — keeping them; a "
+              f"blank read is not evidence they closed.")
+        acts.append(f"⚠️ {admin}: account read empty — kept {len(tracked_real)} "
+                    f"tracked real position(s) instead of dropping them")
+        still_real, tracked_real = list(tracked_real), []
     for t in tracked_real:
         pos = real_open.get(t)
         if not pos:
-            continue                      # already closed / gone — drop from state
+            continue                      # closed / gone (the read had rows) — drop
         try:
             px = get_live_price(t)
             if not _pos(px):
@@ -719,7 +734,9 @@ def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
             still_real.append(t)          # keep tracking; surface the error
             acts.append(f"⚠️ manage REAL {t} errored: {e}")
 
-    paper_open = {x["ticker"]: x for x in load_user_paper(admin).get("positions", [])}
+    paper_book = load_user_paper(admin)
+    paper_open = {x["ticker"]: x for x in paper_book.get("positions", [])}
+    paper_blank = not paper_book.get("positions") and not paper_book.get("history")
     tracked_paper = list(st.get("paper", []))
     if adopt:
         tracked_paper += list(paper_open)
@@ -733,6 +750,12 @@ def _manage_account(admin: str, dry: bool, sim: bool = True) -> list[str]:
               f"{adopted_paper} paper position(s) the account holds — managing them "
               f"from the account.")
     still_paper = []
+    if paper_blank and tracked_paper:
+        print(f"[synthetic_user] ⚠️ {admin}: the paper read came back EMPTY while "
+              f"state tracks {len(tracked_paper)} paper position(s) — keeping them.")
+        acts.append(f"⚠️ {admin}: paper read empty — kept {len(tracked_paper)} "
+                    f"tracked paper position(s) instead of dropping them")
+        still_paper, tracked_paper = list(tracked_paper), []
     for t in tracked_paper:
         pos = paper_open.get(t)
         if not pos:

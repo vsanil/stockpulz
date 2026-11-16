@@ -3758,3 +3758,24 @@ them as numbered symbols (`SUI20947-USD`, `TON11419-USD`, …), now in
   the token CoinGecko's `matic-network` prices.
 - Live prices were mostly unaffected — CoinGecko is the primary source and Yahoo the
   fallback — but `_download_prices` (midday check, tax harvest) is Yahoo-only.
+
+### 🔴 A blank account read emptied the bot's record — 8 positions orphaned for 3 months (found 2026-11-15)
+
+On **2026-08-19 16:32 UTC**, the synthetic user's first `manage` run against Supabase
+(reads blocked that day, `[storage] Using SupabaseBackend.` in run 32276433897) read the
+OWNER's account as empty — `load_user_trade_log` swallows a failed read into
+`{"open": []}` — so `_manage_account` treated all eight legacy bot positions (AVTR,
+MTB, IRM, GD, PKG, RTX, KO, PPL, opened 07-15…07-29 before the test-account split)
+as "already closed" and saved an empty `synthetic_state.json`. Gist revision history
+shows the list → `[]` two seconds apart. The owner's account is never re-adopted (the
+bot must not take over a human's positions), so nothing managed them again; from
+2026-11-15 they would also have fed the newly working midday check.
+- **Fix: a tracked position is dropped only when the account read HAS ROWS** (open or
+  closed, or paper positions or history). An entirely blank read keeps the record and
+  says so in the run's events. Guard: `tests/test_blank_read_keeps_tracking.py`, 4 of 4
+  mutations caught, including that a genuine close is still dropped.
+- **The eight were restored to `synthetic_state.json` on 2026-11-15** so the normal
+  time stop closes them as `expired` (no timeframe = short-term, 30 days; all 109+ days).
+- **Rule: "not in the read" is not "closed".** Before deleting tracking on an absence,
+  require evidence the read could have seen it — the same standard as any negative
+  claim in this file.
