@@ -1707,7 +1707,16 @@ def check_mutations(admin: str) -> None:
             t2 = round(float(px) * 0.85, 2)
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
+            # `admin` is the OWNER's real account, not a clean test fixture — it can
+            # (and did, 2026-11-18: a pre-existing alert at a different target sat
+            # alongside the one just added, e.g. a real auto invalidation/stop alert
+            # from an actual MSFT pick) already carry alerts on this ticker. A plain
+            # manual add_alert() only rejects an EXACT duplicate target+direction and
+            # otherwise appends — coexisting at a different level is correct, by
+            # design (see price_alert_manager.add_alert). Assert the alert we just
+            # added landed; don't assume a clean slate. Same class as the
+            # synthetic-bot-state tolerance already applied to the paper/log checks.
+            _check("alert.add", any(abs(a["target"] - t1) < 0.01 for a in got1),
                    f"{[a['target'] for a in got1]}")
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
