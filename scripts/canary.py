@@ -1707,8 +1707,14 @@ def check_mutations(admin: str) -> None:
             t2 = round(float(px) * 0.85, 2)
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
-                   f"{[a['target'] for a in got1]}")
+            # The admin may already carry an unrelated MSFT alert (a real pick's
+            # auto stop, or a manual watch) — add_alert only collapses an EXACT
+            # duplicate target, so a pre-existing alert at a different price
+            # legitimately coexists. Assert ours landed, not that it's the only
+            # one; `alert.replace_atomic` below is what proves exclusivity.
+            mine1 = [a for a in got1 if abs(a["target"] - t1) < 0.01]
+            _check("alert.add", len(mine1) == 1,
+                   f"added ${t1}, ticker now has {[a['target'] for a in got1]}")
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
             _check("alert.replace_atomic", len(got2) == 1 and abs(got2[0]["target"] - t2) < 0.01,
