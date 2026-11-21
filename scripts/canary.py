@@ -1705,9 +1705,18 @@ def check_mutations(admin: str) -> None:
             px = get_live_price("MSFT") or 400.0
             t1 = round(float(px) * 0.90, 2)   # 10% below → 'below'
             t2 = round(float(px) * 0.85, 2)
+            # The admin is a real user, and an auto pick alert (stop/entry/
+            # invalidation) for MSFT can legitimately already exist on their
+            # account — a manual, non-replace add_alert() only rejects an
+            # EXACT-price duplicate, it does not clear other MSFT alerts. So
+            # assert the DELTA (our target got added), never an absolute
+            # count of 1 — the same "don't assume a clean slate" rule this
+            # file already applies to the synthetic bot's positions/cash.
+            pre_n = len([a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"])
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
+            _check("alert.add",
+                   len(got1) == pre_n + 1 and any(abs(a["target"] - t1) < 0.01 for a in got1),
                    f"{[a['target'] for a in got1]}")
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
