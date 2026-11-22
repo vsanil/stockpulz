@@ -1705,6 +1705,13 @@ def check_mutations(admin: str) -> None:
             px = get_live_price("MSFT") or 400.0
             t1 = round(float(px) * 0.90, 2)   # 10% below → 'below'
             t2 = round(float(px) * 0.85, 2)
+            # Admin is a real user and may already carry an MSFT alert of their
+            # own (e.g. an auto stop/entry alert from a recent pick, live for up
+            # to AUTO_ALERT_MAX_AGE_DAYS) — this manual add doesn't collide with
+            # it, so it would coexist and make the exact-count assertion below a
+            # false alarm. Clear any pre-existing MSFT alerts first; the outer
+            # snapshot/restore puts them back regardless of what happens here.
+            remove_alert(admin, "MSFT")
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
             _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
