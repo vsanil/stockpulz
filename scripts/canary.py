@@ -1707,7 +1707,14 @@ def check_mutations(admin: str) -> None:
             t2 = round(float(px) * 0.85, 2)
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
+            # MSFT is often one of today's picks, so the admin may already hold
+            # an auto stop/entry alert for it before this check ever adds one —
+            # a clean-slate assumption here is the same false-alarm class as the
+            # synthetic-bot pre-existing-position checks elsewhere in this file.
+            # This manual add() doesn't replace anything (only replace=True /
+            # auto=True do), so assert the alert we just set is PRESENT, not
+            # that the list contains nothing else.
+            _check("alert.add", any(abs(a["target"] - t1) < 0.01 for a in got1),
                    f"{[a['target'] for a in got1]}")
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
