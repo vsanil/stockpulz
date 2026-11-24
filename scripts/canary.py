@@ -1705,10 +1705,19 @@ def check_mutations(admin: str) -> None:
             px = get_live_price("MSFT") or 400.0
             t1 = round(float(px) * 0.90, 2)   # 10% below → 'below'
             t2 = round(float(px) * 0.85, 2)
+            # The admin is a real account and may already hold a genuine MSFT
+            # alert (manual, or auto-set from a pick) — a manual add only
+            # rejects an EXACT-price duplicate, so a pre-existing alert at a
+            # DIFFERENT target survives alongside ours. Asserting an absolute
+            # count of 1 breaks the moment that happens; assert the DELTA
+            # instead (mirrors paper.entry_is_price's "delta of this action,
+            # not ==" rule for an account that isn't guaranteed to start clean).
+            pre = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
-                   f"{[a['target'] for a in got1]}")
+            ours = [a for a in got1 if abs(a["target"] - t1) < 0.01]
+            _check("alert.add", len(got1) == len(pre) + 1 and len(ours) == 1,
+                   f"before={[a['target'] for a in pre]} after={[a['target'] for a in got1]}")
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
             _check("alert.replace_atomic", len(got2) == 1 and abs(got2[0]["target"] - t2) < 0.01,
