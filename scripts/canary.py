@@ -1707,7 +1707,12 @@ def check_mutations(admin: str) -> None:
             t2 = round(float(px) * 0.85, 2)
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
+            # Don't assume admin starts with a clean slate on MSFT — a real auto
+            # stop/entry alert can legitimately already exist for this ticker.
+            # Assert OUR alert landed (delta of this action), not that it's the
+            # only one, same reasoning as the paper-buy/crypto checks above.
+            added1 = [a for a in got1 if abs(a["target"] - t1) < 0.01]
+            _check("alert.add", len(added1) == 1,
                    f"{[a['target'] for a in got1]}")
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
