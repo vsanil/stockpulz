@@ -1707,8 +1707,19 @@ def check_mutations(admin: str) -> None:
             t2 = round(float(px) * 0.85, 2)
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
-                   f"{[a['target'] for a in got1]}")
+            # NOT a clean-slate assertion: the admin can legitimately already hold
+            # an auto alert for MSFT (a stop/entry/invalidation level from a real
+            # pick or position) at a DIFFERENT target. A plain add() only rejects
+            # an EXACT duplicate (ticker+direction+target) — it never touches other
+            # alerts on the same ticker. So after adding t1, MSFT may carry more
+            # than one alert; what must hold is that OUR alert landed, not that
+            # it's the only one. (replace=True below wipes the ticker clean, which
+            # is why alert.replace_atomic can assert exactly 1.)
+            added1 = [a for a in got1 if abs(a["target"] - t1) < 0.01]
+            _check("alert.add", len(added1) == 1,
+                   f"{[a['target'] for a in got1]}",
+                   fail_detail=(f"added alert at {t1} not found among MSFT alerts: "
+                                f"{[a['target'] for a in got1]}"))
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
             _check("alert.replace_atomic", len(got2) == 1 and abs(got2[0]["target"] - t2) < 0.01,
