@@ -69,6 +69,18 @@ def _pos(x) -> bool:
     return _fin(x) and float(x) > 0
 
 
+def _alerts_matching(alerts, ticker: str, target: float, tol: float = 0.01) -> list:
+    """Alerts in `alerts` for `ticker` at (about) `target`.
+
+    🔴 The alert round-trip check used to match by TICKER alone, which
+    double-counted a pre-existing alert the admin already carried for that
+    ticker — a real auto stop/invalidation alert from a published pick, which
+    `add_alert` (no `replace=True`) does not touch — and false-failed
+    (measured 2026-11-27: [419.01 pre-existing, 449.17 ours]). Matching on the
+    TARGET too scopes the count to the alert THIS call just added."""
+    return [a for a in alerts if a["ticker"] == ticker and abs(a["target"] - target) < tol]
+
+
 # ── raw Gist snapshot / restore (guarantees zero residue) ─────────────────────
 _GID = os.environ.get("GIST_ID")
 _TOK = os.environ.get("GH_GIST_TOKEN") or os.environ.get("GITHUB_TOKEN")
@@ -1706,9 +1718,10 @@ def check_mutations(admin: str) -> None:
             t1 = round(float(px) * 0.90, 2)   # 10% below → 'below'
             t2 = round(float(px) * 0.85, 2)
             add_alert(admin, "MSFT", t1)
-            got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
-                   f"{[a['target'] for a in got1]}")
+            all1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
+            got1 = _alerts_matching(all1, "MSFT", t1)
+            _check("alert.add", len(got1) == 1,
+                   f"{[a['target'] for a in all1]}")
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
             _check("alert.replace_atomic", len(got2) == 1 and abs(got2[0]["target"] - t2) < 0.01,
