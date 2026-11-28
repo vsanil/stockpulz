@@ -1707,7 +1707,13 @@ def check_mutations(admin: str) -> None:
             t2 = round(float(px) * 0.85, 2)
             add_alert(admin, "MSFT", t1)
             got1 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
-            _check("alert.add", len(got1) == 1 and abs(got1[0]["target"] - t1) < 0.01,
+            # A manual add (auto=False, replace=False) only rejects an exact-price
+            # duplicate — it APPENDS alongside any pre-existing MSFT alert on the
+            # admin account (e.g. a real auto stop alert from a past pick), it does
+            # not require the list to start empty. Assert the new alert landed,
+            # not that it is the only one — the same "tolerate real account state"
+            # rule already applied to the synthetic bot's positions/cash.
+            _check("alert.add", any(abs(a["target"] - t1) < 0.01 for a in got1),
                    f"{[a['target'] for a in got1]}")
             add_alert(admin, "MSFT", t2, replace=True)   # atomic replace
             got2 = [a for a in _load_alerts().get(admin, []) if a["ticker"] == "MSFT"]
